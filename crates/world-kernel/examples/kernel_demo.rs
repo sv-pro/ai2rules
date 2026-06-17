@@ -12,12 +12,15 @@
 //! construction, with no LLM on the enforcement path.
 
 use compiler::compile_default;
+use executor::{CommandHandler, ExecOutput, Executor, PatchHandler, ReadHandler};
 use harness_types::{
-    ActionName, CallId, ContentHash, Decision, ExecutionMode, Provenance, Provider, SessionId,
-    SourceChannel, Taint, TaintContext, ToolCall,
+    ActionName, CallId, CompiledWorld, ContentHash, Decision, EffectMode, ExecutionMode,
+    Provenance, Provider, SessionId, SourceChannel, Taint, TaintContext, ToolCall, TraceId,
 };
 use serde_json::{json, Value};
-use world_kernel::{decide, BudgetUsage, EvalContext, KernelOutcome};
+use world_kernel::{
+    build_execution_spec, decide, BudgetUsage, EvalContext, ExecEnv, KernelOutcome,
+};
 
 struct Scenario {
     title: &'static str,
@@ -103,6 +106,9 @@ fn main() {
         },
     ];
 
+    let executor = build_executor(&world);
+    let env = ExecEnv::default();
+
     for s in &scenarios {
         let call = ToolCall {
             action_name: ActionName::new(s.action),
@@ -134,7 +140,69 @@ fn main() {
             taint_tag(s.taint),
         );
         println!("    verdict  : {}", render(&outcome));
+
+        // For an ALLOW, lower the intent to an ExecutionSpec and run it through
+        // the executor in SIMULATE — the end-to-end round-trip, no side effects.
+        if let KernelOutcome::Evaluated {
+            intent,
+            disposition,
+        } = &outcome
+        {
+            if disposition.decision == Decision::Allow {
+                match build_execution_spec(
+                    &world,
+                    intent,
+                    EffectMode::Simulate,
+                    &env,
+                    TraceId::new("demo"),
+                ) {
+                    Ok(spec) => match executor.run(&spec) {
+                        Ok(tv) => println!("    sim run  : {}", describe(&tv.value)),
+                        Err(e) => println!("    sim run  : <error: {e}>"),
+                    },
+                    Err(e) => println!("    sim run  : <spec error: {e}>"),
+                }
+            }
+        }
+
         println!("    why      : {}\n", s.why);
+    }
+}
+
+/// An executor wired with the default world's local handlers and the descriptor
+/// hashes they must match.
+fn build_executor(world: &CompiledWorld) -> Executor {
+    let hash = |a: &str| {
+        world
+            .descriptor_hash(&ActionName::new(a))
+            .cloned()
+            .unwrap_or_default()
+    };
+    Executor::builder()
+        .register(
+            ActionName::new("read_workspace"),
+            hash("read_workspace"),
+            Box::new(ReadHandler),
+        )
+        .register(
+            ActionName::new("apply_patch"),
+            hash("apply_patch"),
+            Box::new(PatchHandler),
+        )
+        .register(
+            ActionName::new("run_command"),
+            hash("run_command"),
+            Box::new(CommandHandler),
+        )
+        .build()
+}
+
+fn describe(output: &ExecOutput) -> String {
+    match output {
+        ExecOutput::Simulated(note) => format!("(simulated) {note}"),
+        ExecOutput::FileContents(c) => format!("read {} bytes", c.len()),
+        ExecOutput::CommandResult { exit_code, .. } => format!("exit {exit_code}"),
+        ExecOutput::PatchApplied { path } => format!("wrote {}", path.display()),
     }
 }
 
@@ -150,14 +218,18 @@ fn render(outcome: &KernelOutcome) -> String {
         KernelOutcome::NotRepresentable { decision, rule, .. } => {
             format!("{}  (rule: {rule})", decision_label(*decision))
         }
-        KernelOutcome::Evaluated(d) => match d.effect_mode {
+        KernelOutcome::Evaluated { disposition, .. } => match disposition.effect_mode {
             Some(mode) => format!(
                 "{} + {:?}  (rule: {})",
-                decision_label(d.decision),
+                decision_label(disposition.decision),
                 mode,
-                d.rule
+                disposition.rule
             ),
-            None => format!("{}  (rule: {})", decision_label(d.decision), d.rule),
+            None => format!(
+                "{}  (rule: {})",
+                decision_label(disposition.decision),
+                disposition.rule
+            ),
         },
     }
 }

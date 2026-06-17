@@ -42,7 +42,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 
 | Milestone | Theme | State |
 |---|---|---|
-| **M1** Deterministic Core | kernel works in simulation | in progress |
+| **M1** Deterministic Core | kernel works in simulation | in progress (E0–E3 done; E4 remains) |
 | M2 Live Agent | a real model drives the loop | planned |
 | M3 Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | planned |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks | planned |
@@ -63,8 +63,14 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   built intent; and `decide()` is the single pure entry point returning a
   `KernelOutcome`. Honors acceptance invariants 1, 2, 3, 6 (and the invariant-7
   taint floor).
+- **E3 — Execution Boundary:** the kernel lowers an `ALLOW` to an `ExecutionSpec`
+  (`build_execution_spec` + `ExecEnv`), and the `executor` runs it behind a
+  closed registry — refusing unregistered actions and descriptor drift, applying
+  `Execute` / `Simulate` / `Truncate`, constraining writes to writable roots, and
+  returning a `TaintedValue`. Read / patch / command handlers run in both real
+  and simulated modes. Honors invariants 4, 5, 8, 11, 13, 16.
 
-Builds clean offline with `clippy -D warnings`; **43 unit tests** green.
+Builds clean offline with `clippy -D warnings`; **54 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -115,10 +121,11 @@ CI runs all four checks on every push and PR
 
 ### See the kernel decide
 
-Until the executor and interactive CLI land (E3/E9), the runnable demo is the
-deterministic kernel itself. This compiles the default world and feeds it a
-handful of proposed tool calls — printing `ALLOW` / `ASK` / `DENY` / `ABSENT` /
-`REPLAN` for each, with **no real side effects**:
+Until the interactive CLI lands (E9), the runnable demo is the kernel plus the
+execution boundary. It compiles the default world, feeds it a handful of
+proposed tool calls — printing `ALLOW` / `ASK` / `DENY` / `ABSENT` / `REPLAN`
+for each — and, for an `ALLOW`, lowers the intent to an `ExecutionSpec` and runs
+it through the executor in **simulation** (no real side effects):
 
 ```bash
 cargo run -p world-kernel --example kernel_demo
@@ -127,7 +134,8 @@ cargo run -p world-kernel --example kernel_demo
 It shows the core idea in action: an undefined action is `UNKNOWN_TO_ONTOLOGY`,
 an untrusted writer is `ABSENT` by capability, tainted data into the network is
 `DENY` by a hard invariant, a PTY is `ASK`, and an over-budget command is
-`REPLAN` — all decided by a pure function, no LLM on the path.
+`REPLAN` — all decided by a pure function, no LLM on the path — while the allowed
+read completes an end-to-end round-trip through the boundary.
 
 ---
 

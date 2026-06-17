@@ -9,8 +9,13 @@ repository.workspace = true
 [dependencies]
 harness-types = { workspace = true }
 serde_json = { workspace = true }
+# Pure string-splitting for assembling command argv; no I/O.
+shell-words = { workspace = true }
 
 [dev-dependencies]
-# Tests exercise the kernel against the real default CLI world. `compiler`
-# depends only on `harness-types`, so this introduces no dependency cycle.
+# Tests/examples exercise the kernel against the real default CLI world and run
+# the full decide -> build_execution_spec -> executor round-trip. Both crates
+# depend only on `harness-types`, so this introduces no dependency cycle.
 compiler = { workspace = true }
+executor = { workspace = true }
+tempfile = { workspace = true }

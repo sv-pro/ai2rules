@@ -17,10 +17,12 @@ pub mod disposition;
 pub mod intent;
 pub mod invariants;
 pub mod schema;
+pub mod spec;
 pub mod taint;
 
 pub use disposition::{evaluate, BudgetUsage, EvalContext};
 pub use intent::{IRBuilder, IntentIR};
+pub use spec::{build_execution_spec, ExecEnv, SpecError};
 
 use harness_types::{
     ActionName, BuildError, CompiledWorld, Decision, Disposition, Provenance, ToolCall,
@@ -41,8 +43,13 @@ pub enum KernelOutcome {
         rule: String,
         error: BuildError,
     },
-    /// The intent was built and evaluated; carries the full disposition.
-    Evaluated(Disposition),
+    /// The intent was built and evaluated. Carries the sealed `IntentIR` (so an
+    /// `ALLOW` can be lowered to an `ExecutionSpec` via [`build_execution_spec`])
+    /// alongside the disposition.
+    Evaluated {
+        intent: IntentIR,
+        disposition: Disposition,
+    },
 }
 
 impl KernelOutcome {
@@ -52,7 +59,7 @@ impl KernelOutcome {
         match self {
             KernelOutcome::UnknownToOntology { .. } => Decision::Absent,
             KernelOutcome::NotRepresentable { decision, .. } => *decision,
-            KernelOutcome::Evaluated(d) => d.decision,
+            KernelOutcome::Evaluated { disposition, .. } => disposition.decision,
         }
     }
 }
@@ -67,7 +74,13 @@ pub fn decide(
 ) -> KernelOutcome {
     let builder = IRBuilder::new(world);
     match builder.build(call, provenance, &ctx.taint) {
-        Ok(intent) => KernelOutcome::Evaluated(evaluate(world, &intent, ctx)),
+        Ok(intent) => {
+            let disposition = evaluate(world, &intent, ctx);
+            KernelOutcome::Evaluated {
+                intent,
+                disposition,
+            }
+        }
         Err(BuildError::UnknownToOntology { action }) => {
             KernelOutcome::UnknownToOntology { action }
         }
@@ -256,9 +269,9 @@ mod tests {
             &EvalContext::interactive_clean(),
         );
         match outcome {
-            KernelOutcome::Evaluated(d) => {
-                assert_eq!(d.decision, Decision::Allow);
-                assert_eq!(d.effect_mode, Some(EffectMode::Execute));
+            KernelOutcome::Evaluated { disposition, .. } => {
+                assert_eq!(disposition.decision, Decision::Allow);
+                assert_eq!(disposition.effect_mode, Some(EffectMode::Execute));
             }
             other => panic!("expected Allow + Execute, got {other:?}"),
         }
@@ -414,5 +427,120 @@ mod tests {
                 }
             }
         }
+    }
+
+    // --- End-to-end: decide -> build_execution_spec -> executor.run ------------
+
+    /// An executor wired with the default world's local handlers and their
+    /// descriptor hashes, so specs built from the same world never drift.
+    fn executor_for(world: &CompiledWorld) -> executor::Executor {
+        use executor::{CommandHandler, Executor, PatchHandler, ReadHandler};
+        let hash = |a: &str| {
+            world
+                .descriptor_hash(&ActionName::new(a))
+                .cloned()
+                .unwrap_or_default()
+        };
+        Executor::builder()
+            .register(
+                ActionName::new("read_workspace"),
+                hash("read_workspace"),
+                Box::new(ReadHandler),
+            )
+            .register(
+                ActionName::new("apply_patch"),
+                hash("apply_patch"),
+                Box::new(PatchHandler),
+            )
+            .register(
+                ActionName::new("run_command"),
+                hash("run_command"),
+                Box::new(CommandHandler),
+            )
+            .build()
+    }
+
+    #[test]
+    fn end_to_end_execute_reads_a_real_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("hello.txt");
+        std::fs::write(&file, "round-trip").unwrap();
+
+        let world = compile_default();
+        let call = default_call("read_workspace", json!({ "path": file.to_str().unwrap() }));
+        let outcome = decide(
+            &world,
+            &call,
+            from_channel(SourceChannel::UserPrompt),
+            &EvalContext::interactive_clean(),
+        );
+        let KernelOutcome::Evaluated {
+            intent,
+            disposition,
+        } = outcome
+        else {
+            panic!("expected Evaluated");
+        };
+        assert_eq!(disposition.decision, Decision::Allow);
+
+        let env = ExecEnv {
+            readable_roots: vec![dir.path().to_path_buf()],
+            ..Default::default()
+        };
+        let spec = build_execution_spec(
+            &world,
+            &intent,
+            EffectMode::Execute,
+            &env,
+            TraceId::new("rt"),
+        )
+        .expect("spec");
+        let result = executor_for(&world).run(&spec).expect("execute");
+        assert_eq!(
+            result.value,
+            executor::ExecOutput::FileContents("round-trip".to_string())
+        );
+    }
+
+    #[test]
+    fn end_to_end_simulate_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("out.txt");
+
+        let world = compile_default();
+        let call = default_call(
+            "apply_patch",
+            json!({ "path": target.to_str().unwrap(), "contents": "x" }),
+        );
+        let outcome = decide(
+            &world,
+            &call,
+            from_channel(SourceChannel::UserPrompt),
+            &EvalContext::interactive_clean(),
+        );
+        let KernelOutcome::Evaluated {
+            intent,
+            disposition,
+        } = outcome
+        else {
+            panic!("expected Evaluated");
+        };
+        assert_eq!(disposition.decision, Decision::Allow);
+
+        let env = ExecEnv {
+            writable_roots: vec![dir.path().to_path_buf()],
+            ..Default::default()
+        };
+        let spec = build_execution_spec(
+            &world,
+            &intent,
+            EffectMode::Simulate,
+            &env,
+            TraceId::new("rt"),
+        )
+        .expect("spec");
+        let result = executor_for(&world).run(&spec).expect("simulate");
+        assert!(matches!(result.value, executor::ExecOutput::Simulated(_)));
+        assert!(!target.exists(), "simulate must not write to disk");
     }
 }

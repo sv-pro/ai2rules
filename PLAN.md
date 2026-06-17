@@ -186,22 +186,33 @@ invariant-7 taint floor). **Met** — 21 new kernel tests; full workspace at 43,
 
 ### E3 — Execution Boundary
 **Goal:** run validated specs behind a hard process boundary. **Depends on:**
-E0 (integrates with E2).
+E0 (integrates with E2). **Status:** done.
 
-- [ ] **E3.1** Executor with a hard process boundary (handlers isolated from
-  policy state).
-- [ ] **E3.2** Accept only `ExecutionSpec`; a local closed registry refuses any
-  action not registered.
-- [ ] **E3.3** Core handlers: read file, apply patch, run command (timeout +
-  kill-tree).
-- [ ] **E3.4** Effect-mode application: `EXECUTE` / `SIMULATE` / `PROXY` /
-  `SANITIZE` / `TRUNCATE` / `DEFER`.
-- [ ] **E3.5** Simulation executor for tests/demos (no real side effects).
-- [ ] **E3.6** Return results as `TaintedValue` with provenance.
+- [x] **E3.1** `Executor` (closed registry) with handlers isolated from policy
+  state; the `Handler` trait holds no policy and never decides.
+- [x] **E3.2** `run()` accepts only `ExecutionSpec`; an unregistered action is
+  refused (`ExecError::Unregistered`), and descriptor drift is caught before any
+  handler (`ExecError::DescriptorDrift`).
+- [x] **E3.3** Core handlers: `ReadHandler`, `PatchHandler` (structured full-file
+  write — real unified-diff parsing deferred, no offline diff crate),
+  `CommandHandler` (real subprocess, thread-drained output, deadline + direct
+  child kill; process-group kill-tree deferred to E8).
+- [x] **E3.4** Effect-mode application: `Execute` / `Simulate` / `Truncate` real;
+  `Proxy` / `Sanitize` / `Defer` return `UnsupportedEffectMode` (later epics;
+  Sanitize needs E4 redaction).
+- [x] **E3.5** Simulation = an `Executor` driven with `Simulate` specs (no
+  separate type); no real side effects.
+- [x] **E3.6** `run()` returns `TaintedValue<ExecOutput>` (execution results are
+  tainted by default).
+- [x] **E3.A** Kernel-side spec assembly: `world-kernel::build_execution_spec` +
+  `ExecEnv`; `KernelOutcome::Evaluated` now carries the sealed `IntentIR` so an
+  `ALLOW` lowers to an `ExecutionSpec`.
 
 **Exit:** core handlers run in sim and real modes; executor rejects non-spec and
 unregistered actions; writes constrained to writable roots. Satisfies invariants
-**4, 5, 8, 13, 16**.
+**4, 5, 8, 13, 16** (and **11** at the boundary). **Met** — 9 executor tests + 2
+kernel round-trip tests; full workspace at 54, `clippy -D warnings` + fmt clean
+offline; `kernel_demo` shows the end-to-end round-trip.
 
 ---
 
