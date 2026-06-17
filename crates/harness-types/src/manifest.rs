@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::action::{ActionType, ActorKind, DataClass};
 use crate::decision::Decision;
-use crate::descriptor::SideEffectClass;
+use crate::descriptor::{BackingIdentity, SideEffectClass};
 use crate::ids::{ActionName, WorldId};
 use crate::provenance::{Taint, TrustLevel};
 
@@ -18,6 +18,16 @@ use crate::provenance::{Taint, TrustLevel};
 pub struct Actor {
     pub name: String,
     pub kind: ActorKind,
+}
+
+/// One row of the capability matrix: which action types a trust level may
+/// perform. Modeled as a list (not a map keyed by enum) so manifests stay
+/// straightforward to author and parse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityGrant {
+    pub trust: TrustLevel,
+    #[serde(default)]
+    pub actions: Vec<ActionType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,8 +43,16 @@ pub struct BaseActionDef {
     pub name: ActionName,
     pub action_type: ActionType,
     pub side_effect: SideEffectClass,
+    /// Model-facing JSON schema for the action's arguments.
     #[serde(default)]
     pub schema: Value,
+    /// Additional argument constraints (regex, enums, …).
+    #[serde(default)]
+    pub arg_constraints: Value,
+    /// What backs the action. Defaults to a local handler named after the
+    /// action when omitted.
+    #[serde(default)]
+    pub backing: Option<BackingIdentity>,
     #[serde(default)]
     pub approval_required: bool,
 }
@@ -96,6 +114,9 @@ pub struct WorldManifest {
     pub channels: Vec<ChannelDef>,
     #[serde(default)]
     pub data_classes: Vec<DataClass>,
+    /// Capability matrix: which action types each trust level may perform.
+    #[serde(default)]
+    pub capabilities: Vec<CapabilityGrant>,
     #[serde(default)]
     pub base_actions: Vec<BaseActionDef>,
     #[serde(default)]

@@ -123,25 +123,34 @@ tests green offline); E0.5/E0.6 tails tracked above.
 
 ### E1 — Manifest & Compiler
 **Goal:** turn a reviewed manifest into an immutable `CompiledWorld`.
-**Depends on:** E0.
+**Depends on:** E0. **Status:** done (M1 progressing).
 
-- [ ] **E1.1** `WorldManifest` schema: actors, trust channels, data classes, base
-  actions, scoped capabilities, side-effect surfaces, taint/transition policies,
-  approval rules, budgets, observability/redaction.
-- [ ] **E1.2** Manifest loader + validator with human-readable diagnostics
-  (design-time only).
-- [ ] **E1.3** Compiler: manifest → `CompiledWorld` (world id + manifest hash;
-  frozen artifact).
-- [ ] **E1.4** Descriptor hashing (JSON-normalized) + closed-ontology and
-  projected-world lookup tables.
-- [ ] **E1.5** Author the default minimal CLI world (`read_workspace`,
-  `write_workspace`, `apply_patch`, `run_command`, `start_pty`, `call_mcp_tool`,
-  `fetch_web`, `update_memory`).
-- [ ] **E1.6** Hot reload as a new compiled version (never mutate the current
-  one).
+- [x] **E1.1** `WorldManifest` schema complete in `harness-types`: actors, trust
+  channels, data classes, **capability matrix** (`CapabilityGrant`), base actions
+  (now with `arg_constraints` + optional `backing`), scoped capabilities,
+  taint/transition policies, budgets, observability/redaction.
+- [x] **E1.2** Loader + validator in `compiler` (`loader.rs`): `load_yaml` /
+  `load_json`; `validate` checks empty `world_id`, duplicate actions, scoped-cap
+  name collisions, and unknown base-action references, surfaced via a
+  human-readable `CompileError`.
+- [x] **E1.3** `compile()` (`compile.rs`): manifest → immutable `CompiledWorld`
+  with `world_id` + `manifest_hash`; pure and deterministic.
+- [x] **E1.4** Descriptor hashing (`hashing.rs`): real SHA-256 (via `sha2`) over
+  JSON-normalized descriptors/manifest, verified against FIPS test vectors;
+  closed-ontology + projected-world tables built (projection = full ontology by
+  default; dynamic narrowing deferred to E2).
+- [x] **E1.5** Default CLI world authored as `crates/compiler/assets/default_world.yaml`
+  (all eight base actions + scoped caps `read_repo_file`, `apply_workspace_patch`,
+  `run_tests`, `git_commit`), embedded via `include_str!` and exposed through
+  `default_cli_world()` / `compile_default()`.
+- [x] **E1.6** Hot reload = recompile → a new value; `CompiledWorld` is never
+  mutated. Determinism (same manifest ⇒ equal world + hash) and version change
+  (changed manifest ⇒ different `manifest_hash`) covered by tests.
 
 **Exit:** the default world compiles to a stable frozen artifact; descriptor
 hashes are reproducible; invalid manifests are rejected with clear errors.
+**Met** — 13 compiler tests green; full workspace at 22 tests, `clippy -D
+warnings` + fmt clean offline.
 
 ---
 

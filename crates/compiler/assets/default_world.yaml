@@ -1,0 +1,97 @@
+# Default CLI world for the harness (PLAN.md E1.5).
+#
+# Authored at design time, compiled once into an immutable CompiledWorld. This
+# is the single source of truth for the default world; `default_cli_world()`
+# embeds it via include_str!.
+world_id: dev-harness-default
+
+actors:
+  - { name: developer, kind: User }
+  - { name: agent, kind: Model }
+  - { name: shell, kind: ShellWorker }
+  - { name: mcp, kind: McpServer }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: workspace_files, trust: Untrusted, taint: true }
+  - { name: shell_output, trust: SemiTrusted, taint: true }
+  - { name: mcp_output, trust: Untrusted, taint: true }
+  - { name: web_fetch, trust: Untrusted, taint: true }
+  - { name: memory, trust: Derived, taint: false }
+
+# Capability matrix: which action types each trust level may perform.
+capabilities:
+  - trust: Trusted
+    actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory]
+  - trust: SemiTrusted
+    actions: [Read, Write, Patch, Command]
+  - trust: Untrusted
+    actions: [Read]
+  - trust: Derived
+    actions: [Read]
+
+base_actions:
+  - name: read_workspace
+    action_type: Read
+    side_effect: Read
+  - name: write_workspace
+    action_type: Write
+    side_effect: FilesystemWrite
+  - name: apply_patch
+    action_type: Patch
+    side_effect: FilesystemWrite
+  - name: run_command
+    action_type: Command
+    side_effect: Process
+  - name: start_pty
+    action_type: Pty
+    side_effect: Process
+    approval_required: true
+  - name: call_mcp_tool
+    action_type: Mcp
+    side_effect: External
+  - name: fetch_web
+    action_type: Web
+    side_effect: Network
+  - name: update_memory
+    action_type: Memory
+    side_effect: Memory
+
+scoped_capabilities:
+  - name: read_repo_file
+    base_action: read_workspace
+    args:
+      path: ActorInput
+  - name: apply_workspace_patch
+    base_action: apply_patch
+    args:
+      patch: ActorInput
+  - name: run_tests
+    base_action: run_command
+    args:
+      command: !Literal pytest
+  - name: git_commit
+    base_action: run_command
+    args:
+      command: !Literal git
+
+# Taint containment: tainted data cannot reach externally-effectful surfaces.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 50
+  command_timeout_ms: 60000
+
+observability:
+  redact:
+    - "env.*_TOKEN"
+    - "env.*_KEY"
+    - "**/.env"
