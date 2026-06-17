@@ -79,6 +79,7 @@ crates/               the harness implementation
   cli-harness/        terminal entrypoint (binary `harness`) (E9)
 docs/                 architecture (harness-architecture.md is canonical)
 PLAN.md               epic-level execution plan
+CLAUDE.md             repo conventions for Claude Code / contributors
 agent-hypervisor/     reference project (separate repo, not a workspace member)
 safe-mcp-proxy/       reference project (separate repo, not a workspace member)
 ```
