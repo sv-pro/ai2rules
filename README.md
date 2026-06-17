@@ -11,7 +11,7 @@ execution. The model never touches raw reality: it sees a virtualized world
 defined by a compiled manifest and can only *propose* typed intents into it.
 
 This repository is **early-stage**. The architecture is fully specified; the
-implementation is just beginning (foundations landed — see [Status](#status)).
+foundations and the manifest compiler are in place — see [Status](#status).
 
 ---
 
@@ -47,10 +47,17 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | M3 Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | planned |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks | planned |
 
-**Done:** Epic E0 (Foundations & Core Contracts) — the Cargo workspace, the
-language-neutral contracts in `harness-types`, the sealed `IntentIR` / `IRBuilder`
-in `world-kernel`, the `BuildError` taxonomy, and CI. Builds clean offline with
-`clippy -D warnings`; 9 unit tests green.
+**Done so far:**
+
+- **E0 — Foundations & Core Contracts:** the Cargo workspace, the language-neutral
+  contracts in `harness-types`, the sealed `IntentIR` / `IRBuilder` in
+  `world-kernel`, the `BuildError` taxonomy, and CI.
+- **E1 — Manifest & Compiler:** a `WorldManifest` compiles into an immutable,
+  hash-addressed `CompiledWorld` (`compiler`) — YAML/JSON loader + validator, real
+  SHA-256 descriptor/manifest hashing, and a default CLI world
+  (`crates/compiler/assets/default_world.yaml`).
+
+Builds clean offline with `clippy -D warnings`; **22 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
