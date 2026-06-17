@@ -113,6 +113,22 @@ cargo run --bin harness        # prints the E0 skeleton banner
 CI runs all four checks on every push and PR
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
+### See the kernel decide
+
+Until the executor and interactive CLI land (E3/E9), the runnable demo is the
+deterministic kernel itself. This compiles the default world and feeds it a
+handful of proposed tool calls — printing `ALLOW` / `ASK` / `DENY` / `ABSENT` /
+`REPLAN` for each, with **no real side effects**:
+
+```bash
+cargo run -p world-kernel --example kernel_demo
+```
+
+It shows the core idea in action: an undefined action is `UNKNOWN_TO_ONTOLOGY`,
+an untrusted writer is `ABSENT` by capability, tainted data into the network is
+`DENY` by a hard invariant, a PTY is `ASK`, and an over-budget command is
+`REPLAN` — all decided by a pure function, no LLM on the path.
+
 ---
 
 ## Reference projects
