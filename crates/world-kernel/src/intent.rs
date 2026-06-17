@@ -10,6 +10,8 @@ use harness_types::{
 };
 use serde_json::Value;
 
+use crate::{invariants, schema};
+
 /// A sealed, validated execution intent. Cannot be constructed outside this
 /// crate — see [`IRBuilder::build`].
 #[derive(Debug, Clone, PartialEq)]
@@ -49,10 +51,10 @@ impl IntentIR {
 
 /// Builds `IntentIR` from a neutral `ToolCall` against a `CompiledWorld`.
 ///
-/// NOTE (E0): only the representability *existence* checks are implemented —
-/// ontology and projection. Capability, schema, descriptor-drift, taint-rule,
-/// approval, and budget checks are added in E2; their order is fixed in
-/// `docs/harness-architecture.md` §6.
+/// Representability stage (§6): ontology → projection → capability → schema →
+/// descriptor → hard taint invariant. A built `IntentIR` is representable by
+/// construction; the contextual rules (taint policy, approval, budgets) are the
+/// *disposition* stage in [`crate::disposition`].
 pub struct IRBuilder<'w> {
     world: &'w CompiledWorld,
 }
@@ -92,17 +94,44 @@ impl<'w> IRBuilder<'w> {
             .world
             .side_effect(&action)
             .unwrap_or(SideEffectClass::None);
+
+        // 3. Capability — the actor's channel trust must grant this action type.
+        //    A capability gap is ABSENT-class (§7); it surfaces as
+        //    `CapabilityViolation` and maps to `Decision::Absent` in `decide`.
+        if !self.world.can_perform(source.trust_level, action_type) {
+            return Err(BuildError::CapabilityViolation {
+                trust: source.trust_level,
+                action_type,
+            });
+        }
+
+        // 4. Schema — validate arguments against the frozen descriptor.
+        if let Some(descriptor) = self.world.descriptor(&action) {
+            schema::validate(
+                &action,
+                &call.arguments,
+                &descriptor.schema,
+                &descriptor.arg_constraints,
+            )?;
+        }
+
+        // 5. Descriptor hash recorded for forward drift checks. Within one world
+        //    this equals the world's current hash by construction; the cross-world
+        //    drift gate (`invariants::check_descriptor_drift`) fires in E3/E6/E7.
         let expected_descriptor_hash = self
             .world
             .descriptor_hash(&action)
             .cloned()
             .unwrap_or_default();
 
-        // Taint is read structurally from the context; callers cannot drop it.
+        // Taint is read structurally from the context; callers cannot drop it,
+        // and `build` never lowers it (monotonicity).
         let taint = taint_context.taint();
 
-        // TODO(E2): capability, schema, descriptor-drift, taint-rule, approval,
-        // and budget checks must run here, before sealing.
+        // 6. Hard taint invariant — physics floor, before any manifest policy and
+        //    non-overridable. A tainted value cannot drive an externally
+        //    effectful action; such an intent is not representable at all.
+        invariants::check_taint(&action, taint, side_effect)?;
 
         Ok(IntentIR {
             action,

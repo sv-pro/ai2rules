@@ -56,8 +56,15 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   hash-addressed `CompiledWorld` (`compiler`) — YAML/JSON loader + validator, real
   SHA-256 descriptor/manifest hashing, and a default CLI world
   (`crates/compiler/assets/default_world.yaml`).
+- **E2 — World Kernel:** the deterministic heart. `IRBuilder::build` runs the
+  representability checks (ontology → projection → capability → schema →
+  descriptor → hard taint invariant) to seal an `IntentIR`; `disposition::evaluate`
+  applies the contextual rules (manifest taint policy, approval, budgets) to a
+  built intent; and `decide()` is the single pure entry point returning a
+  `KernelOutcome`. Honors acceptance invariants 1, 2, 3, 6 (and the invariant-7
+  taint floor).
 
-Builds clean offline with `clippy -D warnings`; **22 unit tests** green.
+Builds clean offline with `clippy -D warnings`; **43 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

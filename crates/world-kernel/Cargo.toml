@@ -9,3 +9,8 @@ repository.workspace = true
 [dependencies]
 harness-types = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# Tests exercise the kernel against the real default CLI world. `compiler`
+# depends only on `harness-types`, so this introduces no dependency cycle.
+compiler = { workspace = true }

@@ -156,25 +156,31 @@ warnings` + fmt clean offline.
 
 ### E2 — World Kernel
 **Goal:** the deterministic heart — representability + disposition.
-**Depends on:** E0, E1. **The most security-critical epic.**
+**Depends on:** E0, E1. **The most security-critical epic. Status:** done.
 
-- [ ] **E2.1** `IRBuilder`: representability checks (ontology, projection,
+- [x] **E2.1** `IRBuilder`: representability checks (ontology, projection,
   capability, schema, descriptor, hard taint invariant) → sealed `IntentIR` or
-  typed failure.
-- [ ] **E2.2** Provenance + monotonic taint engine (join, cross-session
-  preservation, `TaintedValue`).
-- [ ] **E2.3** Invariants engine (physics): evaluated before manifest policy and
+  typed failure. (`intent.rs`; `schema.rs` for minimal arg validation.)
+- [x] **E2.2** Provenance + monotonic taint engine: primitives stay in
+  `harness-types`; the kernel adds `taint::externally_effectful` and reads taint
+  structurally at the build seam so it can only increase (incl. cross-session).
+- [x] **E2.3** Invariants engine (`invariants.rs`): code-level hard floor (taint
+  × side-effect; descriptor-drift gate), run before manifest policy and
   non-overridable by manifest or human approval.
-- [ ] **E2.4** Disposition evaluation: ordered deterministic rules →
-  `Decision` + `EffectMode` (first match wins).
-- [ ] **E2.5** Budget accounting (commands, wall-time, tokens, cost, network,
-  writes) → `REPLAN`.
-- [ ] **E2.6** Determinism guarantee: pure functions of `(intent, context,
-  world)`; property tests for stability.
+- [x] **E2.4** Disposition evaluation (`disposition.rs`): ordered deterministic
+  rules (manifest taint policy → approval → budget → default allow + effect
+  mode) → `Decision` + `EffectMode`, first match wins.
+- [x] **E2.5** Budget accounting: caller-supplied `BudgetUsage` in `EvalContext`
+  (commands, tokens, network, writes) compared against `world.budget()` →
+  `REPLAN`. The kernel reads usage; it never accumulates state.
+- [x] **E2.6** Determinism guarantee: `build`/`evaluate`/`decide` are pure fns of
+  `(intent, context, world)`; a matrix test asserts repeated `decide` is stable.
 
 **Exit:** kernel returns a deterministic outcome for any
-`CompiledWorld` + `ToolCall` + context; representability/disposition split is
-enforced. Satisfies invariants **1, 2, 3, 6**.
+`CompiledWorld` + `ToolCall` + context via `decide()`; representability/
+disposition split is enforced. Satisfies invariants **1, 2, 3, 6** (and the
+invariant-7 taint floor). **Met** — 21 new kernel tests; full workspace at 43,
+`clippy -D warnings` + fmt clean offline.
 
 ---
 
