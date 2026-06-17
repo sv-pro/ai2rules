@@ -46,7 +46,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | Milestone | Theme | State |
 |---|---|---|
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
-| M2 Live Agent | a real model drives the loop | planned |
+| **M2** Live Agent | a real model drives the loop | in progress (E5 done; E6 next) |
 | M3 Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | planned |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks | planned |
 
@@ -77,8 +77,16 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   decisions against the same world (determinism), `drift_report` diffs them
   against a changed manifest, and a `Bundle` packages a trace with its manifest
   for offline replay. Honors invariants 14, 15 — **completing Milestone 1.**
+- **E5 — Provider Adapters & Orchestrator:** a model now drives the loop. The
+  `provider-adapters` Anthropic adapter normalizes `tool_use`/`tool_result`/tool
+  defs ↔ the neutral `ToolCall`; `agent-core` exposes only the projected tool
+  surface, then runs propose → adapt → `decide` → execute (simulated) → perceive
+  (tainted) → repeat, recording every decision to the trace. A `ModelClient`
+  trait + deterministic `ScriptedModel` keep it fully offline (a live HTTP client
+  is a later, feature-gated add). Reinforces invariants 3 and 4 — starting
+  Milestone 2.
 
-Builds clean offline with `clippy -D warnings`; **63 unit tests** green.
+Builds clean offline with `clippy -D warnings`; **74 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -166,6 +174,18 @@ cargo run -p trace-store --example trace_demo
 It records a handful of decisions to an append-only trace (secrets redacted
 before disk), replays them against the same world to prove they reproduce
 exactly, then replays against a changed manifest to show the drifted verdict.
+
+For a **model driving the loop** (a deterministic scripted stand-in for an LLM —
+no network), run:
+
+```bash
+cargo run -p agent-core --example agent_loop
+```
+
+The model proposes Anthropic tool calls; the harness governs each through the one
+gate — a read is `ALLOW`ed and its tainted result feeds back, which then makes a
+web fetch `DENY` by taint, an undefined action `UNKNOWN_TO_ONTOLOGY`, and a PTY
+`ASK` — every step recorded to the trace, with no LLM on the gate.
 
 ---
 

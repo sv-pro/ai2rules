@@ -245,22 +245,32 @@ record → redact → replay → drift. **Milestone M1 complete (E0–E4).**
 
 ### E5 — Provider Adapters & Orchestrator
 **Goal:** a real model drives the loop, seeing only the projected surface.
-**Depends on:** E0, E2.
+**Depends on:** E0, E2. **Status:** done (offline; live HTTP deferred).
 
-- [ ] **E5.1** Neutral `ToolCall` normalization contract.
-- [ ] **E5.2** First provider adapter (Anthropic `tool_use` → `ToolCall`, plus
-  response formatting).
-- [ ] **E5.3** `IntentMapper` consulting the full ontology
-  (`UNKNOWN_TO_ONTOLOGY` vs `ABSENT`).
-- [ ] **E5.4** `agent-core`: context packing from typed `Perception`s; expose the
-  projected tool surface only.
-- [ ] **E5.5** Model loop wiring: propose → adapt → kernel → execute → perceive
-  result.
-- [ ] **E5.6** Additional adapters (OpenAI, Gemini) sharing the single gate.
+- [x] **E5.1** Neutral result contract: `ToolOutcome` (`provider-adapters`) the
+  orchestrator fills and an adapter formats; `ToolCall` (the inbound contract)
+  already lived in `harness-types`.
+- [x] **E5.2** Anthropic adapter (`anthropic.rs`): `tool_use` → `ToolCall`,
+  `tool_definitions` from the projected surface, `format_tool_result`. Pure
+  format; no policy.
+- [x] **E5.3** Intent mapper (`agent-core/intent.rs`): ontology pre-check
+  (`UNKNOWN_TO_ONTOLOGY` vs known); the kernel's `decide` stays authoritative.
+- [x] **E5.4** `agent-core` context packing + projected tool surface
+  (`context.rs`, via the new `CompiledWorld::projected_actions()`); only projected
+  actions are exposed.
+- [x] **E5.5** Model loop (`orchestrator.rs`): propose → adapt → `decide` →
+  record (E4) → on ALLOW build spec + execute (SIMULATE) → perceive tainted
+  result → feed back; a `ModelClient` trait + deterministic `ScriptedModel`
+  stand in for an LLM.
+- [ ] **E5.6** Additional adapters (OpenAI, Gemini) — deferred. A real Anthropic
+  HTTP client is also deferred (feature-gated, out of the offline core).
 
-**Exit:** a real model completes a task through projected tools only; one policy
-gate regardless of provider; adapters enforce no policy. Reinforces invariant
-**3**.
+**Exit:** a model completes a task through projected tools only; one policy gate
+regardless of provider; adapters enforce no policy. Reinforces invariants **3**
+and **4** (the model only proposes; the kernel alone mints an `ExecutionSpec`).
+**Met** — 5 adapter + 6 agent-core tests; full workspace at 74, `clippy -D
+warnings` + fmt clean offline; `agent_loop` demo runs a scripted session end to
+end.
 
 ---
 

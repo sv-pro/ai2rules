@@ -13,3 +13,7 @@ compiler = { workspace = true }
 executor = { workspace = true }
 trace-store = { workspace = true }
 provider-adapters = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

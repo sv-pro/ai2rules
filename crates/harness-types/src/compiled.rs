@@ -76,6 +76,11 @@ impl CompiledWorld {
     pub fn is_projected(&self, action: &ActionName) -> bool {
         self.parts.projected.contains(action)
     }
+    /// Iterate the projected actions (the model-facing tool surface). Read-only;
+    /// the world stays immutable.
+    pub fn projected_actions(&self) -> impl Iterator<Item = &ActionName> {
+        self.parts.projected.iter()
+    }
     pub fn descriptor(&self, action: &ActionName) -> Option<&Descriptor> {
         self.parts.descriptors.get(action)
     }

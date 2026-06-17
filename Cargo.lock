@@ -10,6 +10,8 @@ dependencies = [
  "executor",
  "harness-types",
  "provider-adapters",
+ "serde_json",
+ "tempfile",
  "trace-store",
  "world-kernel",
 ]
@@ -203,6 +205,7 @@ name = "provider-adapters"
 version = "0.0.1"
 dependencies = [
  "harness-types",
+ "serde_json",
 ]
 
 [[package]]
