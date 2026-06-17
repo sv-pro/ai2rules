@@ -10,8 +10,10 @@ what actions it can represent, and what validated specs may cross into real
 execution. The model never touches raw reality: it sees a virtualized world
 defined by a compiled manifest and can only *propose* typed intents into it.
 
-This repository is **early-stage**. The architecture is fully specified; the
-foundations and the manifest compiler are in place — see [Status](#status).
+This repository is **early-stage**. The architecture is fully specified, and the
+deterministic core is taking shape: the manifest compiler, the governance kernel,
+and the execution boundary are in place — a proposed tool call now flows all the
+way to a real or simulated result. See [Status](#status).
 
 ---
 
@@ -136,6 +138,17 @@ an untrusted writer is `ABSENT` by capability, tainted data into the network is
 `DENY` by a hard invariant, a PTY is `ASK`, and an over-budget command is
 `REPLAN` — all decided by a pure function, no LLM on the path — while the allowed
 read completes an end-to-end round-trip through the boundary.
+
+For the boundary doing **real** work (confined to a throwaway sandbox), run:
+
+```bash
+cargo run -p world-kernel --example execution_demo
+```
+
+It actually reads a file, writes one, and runs a command — then has the executor
+*refuse* a write that escapes the sandbox, a stale (drifted) descriptor, and a
+command that overruns its timeout. (Writes are pinned to a temp dir; network
+disable is declared in the spec but not yet OS-enforced — that backstop is E8.)
 
 ---
 
