@@ -1,0 +1,10 @@
+[package]
+name = "provider-adapters"
+description = "Stateless provider tool-call normalization into the neutral ToolCall (E5)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+harness-types = { workspace = true }

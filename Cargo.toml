@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sv-pro/cli-agent"
+
+# Shared dependency versions. Concrete versions are pinned to what is available
+# offline; bump deliberately. See PLAN.md E0.
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Internal crates (path deps), referenced as `{ workspace = true }`.
+harness-types = { path = "crates/harness-types" }
+world-kernel = { path = "crates/world-kernel" }
+compiler = { path = "crates/compiler" }
+executor = { path = "crates/executor" }
+trace-store = { path = "crates/trace-store" }
+provider-adapters = { path = "crates/provider-adapters" }
+agent-core = { path = "crates/agent-core" }

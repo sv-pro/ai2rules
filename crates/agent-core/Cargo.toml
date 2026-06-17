@@ -1,0 +1,15 @@
+[package]
+name = "agent-core"
+description = "Orchestration: context packing, projected tool surface, the model loop (E5)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+harness-types = { workspace = true }
+world-kernel = { workspace = true }
+compiler = { workspace = true }
+executor = { workspace = true }
+trace-store = { workspace = true }
+provider-adapters = { workspace = true }

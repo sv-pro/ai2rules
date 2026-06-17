@@ -1,0 +1,32 @@
+name: CI
+
+# CI for the Rust harness workspace (PLAN.md E0.6). The Python reference
+# projects (agent-hypervisor/, safe-mcp-proxy/) have their own workflows and are
+# not Cargo workspace members, so cargo commands here ignore them.
+#
+# GitLab equivalent (.gitlab-ci.yml) can mirror these four steps if needed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build
+        run: cargo build --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace

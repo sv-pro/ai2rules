@@ -1,0 +1,15 @@
+[package]
+name = "cli-harness"
+description = "Terminal entrypoint for the CLI agent harness (E9)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "harness"
+path = "src/main.rs"
+
+[dependencies]
+harness-types = { workspace = true }
+agent-core = { workspace = true }

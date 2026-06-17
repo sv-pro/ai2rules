@@ -1,0 +1,10 @@
+[package]
+name = "executor"
+description = "Execution boundary: consumes ExecutionSpec; subprocess/PTY/fs/patch/MCP/web (E3)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+harness-types = { workspace = true }

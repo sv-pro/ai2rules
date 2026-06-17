@@ -1,0 +1,366 @@
+# CLI Agent Harness — Execution Plan
+
+High-level execution plan for building the harness specified in
+[`docs/harness-architecture.md`](docs/harness-architecture.md): a deterministic
+governance kernel that sits underneath a local CLI developer agent (Claude Code,
+Codex CLI, Gemini CLI, Aider, …) and controls what the agent can perceive, what
+actions it can represent, and what validated specs may cross into real execution.
+
+This document is the **epic-level roadmap only**. Each epic lists its goal,
+dependencies, constituent tasks, and exit criteria. Detailed task breakdown
+(issues, estimates, owners, acceptance tests per task) is deliberately deferred —
+see [Next step](#next-step).
+
+---
+
+## North star
+
+A developer can run the harness against the default world and have it drive a
+real model through file edits, commands, patches, MCP tools, and web fetches —
+where every dangerous action is *absent or denied by construction*, every
+decision is *deterministic and replayable*, and no LLM sits on the enforcement
+path. Success is measured by the [16 acceptance invariants](#acceptance-invariant-coverage)
+passing deterministically in CI, with bounded attack-success-rate and high task
+utility on a benchmark suite.
+
+## Guiding principles (carried from the architecture)
+
+1. **Kernel, not wrapper** — define the world the agent perceives; don't inspect
+   calls after the fact.
+2. **Validity by construction** — only a sealed `IntentIR` reaches the kernel;
+   only an `ExecutionSpec` reaches the executor.
+3. **Deterministic runtime** — no LLM, no I/O, no mutable shared state in the
+   kernel; same inputs ⇒ same decision.
+4. **Absence over denial** — absent actions don't exist; `ABSENT` ≠ `DENY` ≠
+   `UNKNOWN_TO_ONTOLOGY`.
+5. **Monotonic taint + provenance** — taint only increases, survives sessions.
+6. **Effect ⟂ decision** — `SIMULATE`/`PROXY`/… are effect modes, never verdicts.
+7. **Design-time stochastic, runtime deterministic** — LLMs draft manifests;
+   humans review; the compiler freezes them.
+8. **Fail closed** — `ASK` collapses to `DENY` in `BACKGROUND`; the executor
+   refuses anything not in its local closed registry.
+9. **Everything is traced and replayable** — append-only, redacted, reproducible.
+
+## How this plan is organized
+
+- Work is grouped into **epics** (`E0`–`E10`); each epic holds **tasks**
+  (`E2.3`, …).
+- Epics are ordered by dependency / build order and grouped into four
+  **milestones** (`M1`–`M4`).
+- Status legend: `[ ]` not started · `[~]` in progress · `[x]` done.
+
+---
+
+## Milestones
+
+| Milestone | Theme | Epics | Outcome |
+|---|---|---|---|
+| **M1 — Deterministic Core** | Kernel works in simulation | E0, E1, E2, E3, E4 | Vertical slice: `read_file` → kernel → sim executor → trace → replay, all deterministic |
+| **M2 — Live Agent** | A real model drives the loop | E5, E6 | One provider proposes through the projected surface; interactive approvals work; background fails closed |
+| **M3 — Full Tool Surface** | Real-world capabilities | E7, E9 | MCP + web + scoped capabilities behind one gate; usable interactive CLI/TUI |
+| **M4 — Isolation & Hardening** | Production posture | E8, E10 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green |
+
+### Dependency sketch
+
+```
+E0 ─┬─> E1 ─┬─> E2 ─┬─> E3 ─┬─> E4 ──(M1)
+    │       │       │       │
+    │       │       │       └─> E6 ──┐
+    │       │       └─────> E5 ──────┴─(M2)
+    │       └─────────────> E7 ──┐
+    └─────────────────────> E9 ──┴─(M3)
+                            E8 ──┐
+                            E10 ─┴─(M4, depends on all)
+```
+
+---
+
+## Epics
+
+### E0 — Foundations & Core Contracts
+**Goal:** a buildable workspace and the typed contracts every other epic depends
+on. **Depends on:** nothing. **Status:** core done; serialization + contributor
+docs in progress.
+
+- [x] **E0.1** Rust workspace (`Cargo.toml`, `resolver = "2"`) scaffolded with the
+  crate skeleton: `cli-harness`, `agent-core`, `provider-adapters`,
+  `world-kernel`, `executor`, `trace-store`, `compiler`, plus a foundational
+  **`harness-types`** crate (see note below). Builds clean offline.
+- [x] **E0.2** Core contract types defined in `harness-types`: `Perception`,
+  `Provenance`, `Taint`/`TaintedValue`/`TaintContext`, `ToolCall`, `Descriptor`,
+  `Decision`, `EffectMode`, `ExecutionMode`, `Disposition`, `ExecutionSpec`,
+  `ApprovalToken`, `CompiledWorld`, `WorldManifest`. `IntentIR` lives in
+  `world-kernel` (it is sealed — see E0.4).
+- [x] **E0.3** Failure/outcome taxonomy defined as `BuildError`
+  (`UnknownToOntology`, `Absent`, `SchemaViolation`, `CapabilityViolation`,
+  `InvariantViolation`, `DescriptorDrift`, `TaintViolation`, `ApprovalRequired`,
+  `BudgetExceeded`).
+- [x] **E0.4** Structural invariants enforced by the type system: `IntentIR` has
+  private fields and no public constructor (only `IRBuilder::build` in
+  `world-kernel` can mint one); `CompiledWorld` exposes getters only and is built
+  once from `CompiledWorldParts`. Covered by unit tests (absence levels, taint
+  carry-through, approval transitions).
+- [~] **E0.5** Serialization wired via `serde`/`serde_json` derives on all
+  contracts; formats chosen (manifest YAML, trace JSONL). Remaining: the SHA-256
+  descriptor/manifest **hashing + versioning scheme** (lands with E1.4).
+- [~] **E0.6** CI added (`.github/workflows/ci.yml`: fmt-check, `clippy -D
+  warnings`, build, test). Module-boundary rules captured in crate doc comments;
+  a dedicated `CONTRIBUTING.md` is still to write.
+
+> **Note — added crate `harness-types`.** A deliberate refinement to E0.1's
+> seven-crate list. The shared contracts live in `harness-types` so `executor`,
+> `trace-store`, and the adapters can depend on the types **without** depending
+> on `world-kernel`. `IntentIR` is the one exception: it stays in `world-kernel`
+> so Rust's privacy can *seal* it (only `IRBuilder` constructs it). This keeps
+> the dependency graph flowing inward to `harness-types` and satisfies the
+> architecture's "keep core contracts language-neutral" rule.
+
+**Exit:** types compile; sealing/immutability enforced and tested; kernel crate
+has no I/O or LLM dependencies. **Met** (build + `clippy -D warnings` + 9 unit
+tests green offline); E0.5/E0.6 tails tracked above.
+
+---
+
+### E1 — Manifest & Compiler
+**Goal:** turn a reviewed manifest into an immutable `CompiledWorld`.
+**Depends on:** E0.
+
+- [ ] **E1.1** `WorldManifest` schema: actors, trust channels, data classes, base
+  actions, scoped capabilities, side-effect surfaces, taint/transition policies,
+  approval rules, budgets, observability/redaction.
+- [ ] **E1.2** Manifest loader + validator with human-readable diagnostics
+  (design-time only).
+- [ ] **E1.3** Compiler: manifest → `CompiledWorld` (world id + manifest hash;
+  frozen artifact).
+- [ ] **E1.4** Descriptor hashing (JSON-normalized) + closed-ontology and
+  projected-world lookup tables.
+- [ ] **E1.5** Author the default minimal CLI world (`read_workspace`,
+  `write_workspace`, `apply_patch`, `run_command`, `start_pty`, `call_mcp_tool`,
+  `fetch_web`, `update_memory`).
+- [ ] **E1.6** Hot reload as a new compiled version (never mutate the current
+  one).
+
+**Exit:** the default world compiles to a stable frozen artifact; descriptor
+hashes are reproducible; invalid manifests are rejected with clear errors.
+
+---
+
+### E2 — World Kernel
+**Goal:** the deterministic heart — representability + disposition.
+**Depends on:** E0, E1. **The most security-critical epic.**
+
+- [ ] **E2.1** `IRBuilder`: representability checks (ontology, projection,
+  capability, schema, descriptor, hard taint invariant) → sealed `IntentIR` or
+  typed failure.
+- [ ] **E2.2** Provenance + monotonic taint engine (join, cross-session
+  preservation, `TaintedValue`).
+- [ ] **E2.3** Invariants engine (physics): evaluated before manifest policy and
+  non-overridable by manifest or human approval.
+- [ ] **E2.4** Disposition evaluation: ordered deterministic rules →
+  `Decision` + `EffectMode` (first match wins).
+- [ ] **E2.5** Budget accounting (commands, wall-time, tokens, cost, network,
+  writes) → `REPLAN`.
+- [ ] **E2.6** Determinism guarantee: pure functions of `(intent, context,
+  world)`; property tests for stability.
+
+**Exit:** kernel returns a deterministic outcome for any
+`CompiledWorld` + `ToolCall` + context; representability/disposition split is
+enforced. Satisfies invariants **1, 2, 3, 6**.
+
+---
+
+### E3 — Execution Boundary
+**Goal:** run validated specs behind a hard process boundary. **Depends on:**
+E0 (integrates with E2).
+
+- [ ] **E3.1** Executor with a hard process boundary (handlers isolated from
+  policy state).
+- [ ] **E3.2** Accept only `ExecutionSpec`; a local closed registry refuses any
+  action not registered.
+- [ ] **E3.3** Core handlers: read file, apply patch, run command (timeout +
+  kill-tree).
+- [ ] **E3.4** Effect-mode application: `EXECUTE` / `SIMULATE` / `PROXY` /
+  `SANITIZE` / `TRUNCATE` / `DEFER`.
+- [ ] **E3.5** Simulation executor for tests/demos (no real side effects).
+- [ ] **E3.6** Return results as `TaintedValue` with provenance.
+
+**Exit:** core handlers run in sim and real modes; executor rejects non-spec and
+unregistered actions; writes constrained to writable roots. Satisfies invariants
+**4, 5, 8, 13, 16**.
+
+---
+
+### E4 — Trace, Audit & Replay
+**Goal:** every decision reproducible; secrets never leaked. **Depends on:** E0,
+E2, E3. **Completes M1.**
+
+- [ ] **E4.1** Append-only trace store recording every stage (perception →
+  projection → proposal → build → decision → approval → execution → result).
+- [ ] **E4.2** Redaction applied before disk write.
+- [ ] **E4.3** Deterministic replay: same trace + same compiled world ⇒ same
+  decision.
+- [ ] **E4.4** Policy-drift report: old trace + new compiled world ⇒ explicit
+  diff.
+- [ ] **E4.5** Bundle export/import for offline replay.
+- [ ] **E4.6** (Optional) cross-implementation parity harness (e.g. Rego mirror)
+  for decision parity.
+
+**Exit:** replay reproduces decisions; redaction holds; the M1 vertical slice
+(`read_file` → kernel → sim executor → trace → replay) passes end to end.
+Satisfies invariants **14, 15**.
+
+---
+
+### E5 — Provider Adapters & Orchestrator
+**Goal:** a real model drives the loop, seeing only the projected surface.
+**Depends on:** E0, E2.
+
+- [ ] **E5.1** Neutral `ToolCall` normalization contract.
+- [ ] **E5.2** First provider adapter (Anthropic `tool_use` → `ToolCall`, plus
+  response formatting).
+- [ ] **E5.3** `IntentMapper` consulting the full ontology
+  (`UNKNOWN_TO_ONTOLOGY` vs `ABSENT`).
+- [ ] **E5.4** `agent-core`: context packing from typed `Perception`s; expose the
+  projected tool surface only.
+- [ ] **E5.5** Model loop wiring: propose → adapt → kernel → execute → perceive
+  result.
+- [ ] **E5.6** Additional adapters (OpenAI, Gemini) sharing the single gate.
+
+**Exit:** a real model completes a task through projected tools only; one policy
+gate regardless of provider; adapters enforce no policy. Reinforces invariant
+**3**.
+
+---
+
+### E6 — Approvals & Execution Modes
+**Goal:** human-in-the-loop as durable state; autonomous runs fail closed.
+**Depends on:** E2, E3, E4. **Completes M2.**
+
+- [ ] **E6.1** Thread `ExecutionMode` (`INTERACTIVE` / `BACKGROUND`) through
+  evaluation.
+- [ ] **E6.2** Durable `ApprovalStore` (`pending → approved/rejected →
+  executed`); persisted, not in-memory.
+- [ ] **E6.3** `ASK` lifecycle: mint token, pause, resume on approve; reject
+  path.
+- [ ] **E6.4** Bind approvals to action + params + world version + descriptor
+  hash + provenance + effect mode (no reuse after drift).
+- [ ] **E6.5** `BACKGROUND` fails closed (`ASK` → `DENY`).
+
+**Exit:** interactive approvals resume execution; background denies; tokens
+invalidated by drift. Satisfies invariants **9, 10**.
+
+---
+
+### E7 — MCP, Web & Scoped Capabilities
+**Goal:** external tools and the web flow through the same gate; broad tools are
+narrowed. **Depends on:** E1, E2, E3.
+
+- [ ] **E7.1** MCP dispatch behind the same `IntentIR` / descriptor / provenance
+  path.
+- [ ] **E7.2** MCP descriptor registration + drift detection for upstream tools.
+- [ ] **E7.3** Web fetch as an untrusted, always-tainted channel.
+- [ ] **E7.4** Scoped-capability machinery: expose actor-input args only, strip
+  locked/unknown args, inject literals after stripping.
+- [ ] **E7.5** Ship scoped capabilities: `run_tests`, `git_status`/`git_diff`/
+  `git_commit`, `read_repo_file`, `apply_workspace_patch`, `call_known_mcp_tool`.
+
+**Exit:** MCP/web run through one gate; tainted MCP/web cannot drive external
+effects; scoped-cap stripping verified. Satisfies invariants **7, 11, 12**.
+
+---
+
+### E8 — Execution Physics (Layer 0 Sandbox)
+**Goal:** an OS-level backstop independent of policy. **Depends on:** E3.
+
+- [ ] **E8.1** Isolated working dir + explicit writable roots (writes can't
+  escape, enforced at the OS level too).
+- [ ] **E8.2** Isolated `HOME`; no ambient host SSH/cloud credentials; env
+  allowlist.
+- [ ] **E8.3** Network disabled by default + manifest-defined egress exceptions.
+- [ ] **E8.4** Subprocess timeout/kill-tree; PTY session ownership +
+  cancellation.
+- [ ] **E8.5** Pluggable container / gVisor / namespace backend for higher
+  isolation.
+
+**Exit:** the sandbox enforces physics even if policy is imperfect; the two are
+independent backstops. Hardens invariant **8**.
+
+---
+
+### E9 — CLI / TUI
+**Goal:** the user-facing harness. **Depends on:** E5, E6. **Completes M3.**
+
+- [ ] **E9.1** Terminal UX: prompt input, streaming output, status.
+- [ ] **E9.2** Approval UX surfacing action / reasoning / provenance, with
+  one-shot vs manifest-extension paths kept separate.
+- [ ] **E9.3** Structured rendering of `ABSENT` / `DENY` / `ASK` / `REPLAN`
+  feedback (not vague prose).
+- [ ] **E9.4** Session management, world selection, mode toggle.
+- [ ] **E9.5** `--simulate` flag to run against the simulation executor for safe
+  demos/tests.
+
+**Exit:** a developer can run the harness interactively against the default world
+end to end.
+
+---
+
+### E10 — Acceptance, Security Scenarios & Benchmarks
+**Goal:** prove the invariants and measure security/utility. **Depends on:** all.
+**Completes M4.**
+
+- [ ] **E10.1** Encode all 16 acceptance invariants (architecture §14) as a
+  deterministic CI test suite.
+- [ ] **E10.2** Security scenarios: prompt injection, cross-session zombie taint,
+  descriptor drift / rug-pull, exfiltration attempt, dependency poisoning.
+- [ ] **E10.3** Determinism + replay regression suite gated in CI.
+- [ ] **E10.4** Utility/benchmark harness (AgentDojo-style task × attack pairs)
+  reporting attack-success-rate and task utility.
+- [ ] **E10.5** Design-time loop tooling: manifest-drafting assistant +
+  trace-failure explainer (LLM at design time only).
+
+**Exit:** all invariants green in CI; ASR/utility tracked over time; drift and
+regression gates enforced.
+
+---
+
+## Acceptance invariant coverage
+
+Traceability from the architecture's 16 acceptance invariants to the epic that
+delivers each (and the epic that hardens it).
+
+| # | Invariant (abbreviated) | Primary | Hardened by |
+|---|---|---|---|
+| 1 | Unknown actions cannot form `IntentIR` | E2 | E10 |
+| 2 | Known-but-non-projected → `ABSENT`, not `DENY` | E2 | E10 |
+| 3 | `UNKNOWN_TO_ONTOLOGY` distinct from `ABSENT` | E2 | E5 |
+| 4 | Model cannot invoke an executor directly | E3 | E10 |
+| 5 | Only `ExecutionSpec` crosses into execution | E3 | E10 |
+| 6 | Taint never decreases (incl. across sessions) | E2 | E10 |
+| 7 | Tainted file/web/MCP/shell can't drive egress/cred/memory/external | E2 | E7 |
+| 8 | Writes can't escape writable roots | E3 | E8 |
+| 9 | Destructive commands require approval | E6 | E10 |
+| 10 | Approval-required in background denies | E6 | E10 |
+| 11 | Descriptor drift blocks before handler | E1 | E7 |
+| 12 | Scoped caps strip locked args before injecting literals | E7 | E10 |
+| 13 | `ALLOW + SIMULATE` has no real side effect | E3 | E10 |
+| 14 | Replay with same world reproduces the decision | E4 | E10 |
+| 15 | Redaction keeps secrets out of audit logs | E4 | E10 |
+| 16 | Executor refuses actions absent from its local registry | E3 | E10 |
+
+---
+
+## Out of scope (for now)
+
+- Multi-agent / sub-agent orchestration beyond a single agent loop.
+- Hosted/remote control plane, multi-tenant deployment, web dashboards.
+- Resolving semantic ambiguity ("forward this to Alex") — an acknowledged open
+  problem, not a deliverable.
+- Non-CLI surfaces (IDE/browser extensions).
+
+## Next step
+
+This plan stops at the epic level by design. The immediate follow-up is to
+**decompose E0 into concrete tasks** (issues with acceptance tests, estimates,
+and sequencing) and stand up the workspace + CI, since every other epic depends
+on it. Subsequent epics are decomposed just-in-time as their milestone
+approaches.
