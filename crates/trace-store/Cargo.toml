@@ -8,3 +8,12 @@ repository.workspace = true
 
 [dependencies]
 harness-types = { workspace = true }
+# Replay re-runs the kernel; bundles recompile a world. Both depend only on
+# harness-types, so neither closes a cycle back onto trace-store.
+world-kernel = { workspace = true }
+compiler = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

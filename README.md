@@ -10,10 +10,11 @@ what actions it can represent, and what validated specs may cross into real
 execution. The model never touches raw reality: it sees a virtualized world
 defined by a compiled manifest and can only *propose* typed intents into it.
 
-This repository is **early-stage**. The architecture is fully specified, and the
-deterministic core is taking shape: the manifest compiler, the governance kernel,
-and the execution boundary are in place — a proposed tool call now flows all the
-way to a real or simulated result. See [Status](#status).
+This repository is **early-stage**, but the **deterministic core (Milestone 1) is
+complete**: the manifest compiler, the governance kernel, the execution boundary,
+and the audit/replay layer are all in place — a proposed tool call flows all the
+way to a real or simulated result, and every decision is logged, redacted, and
+replayable. See [Status](#status).
 
 ---
 
@@ -44,7 +45,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 
 | Milestone | Theme | State |
 |---|---|---|
-| **M1** Deterministic Core | kernel works in simulation | in progress (E0–E3 done; E4 remains) |
+| **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | M2 Live Agent | a real model drives the loop | planned |
 | M3 Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | planned |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks | planned |
@@ -71,8 +72,13 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   `Execute` / `Simulate` / `Truncate`, constraining writes to writable roots, and
   returning a `TaintedValue`. Read / patch / command handlers run in both real
   and simulated modes. Honors invariants 4, 5, 8, 11, 13, 16.
+- **E4 — Trace, Audit & Replay:** an append-only JSONL trace (`trace-store`)
+  records every decision with secrets redacted *before* disk; `replay` reproduces
+  decisions against the same world (determinism), `drift_report` diffs them
+  against a changed manifest, and a `Bundle` packages a trace with its manifest
+  for offline replay. Honors invariants 14, 15 — **completing Milestone 1.**
 
-Builds clean offline with `clippy -D warnings`; **54 unit tests** green.
+Builds clean offline with `clippy -D warnings`; **63 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -149,6 +155,17 @@ It actually reads a file, writes one, and runs a command — then has the execut
 *refuse* a write that escapes the sandbox, a stale (drifted) descriptor, and a
 command that overruns its timeout. (Writes are pinned to a temp dir; network
 disable is declared in the spec but not yet OS-enforced — that backstop is E8.)
+
+For the audit trail — every decision logged, redacted, replayed, and drift
+detected — run:
+
+```bash
+cargo run -p trace-store --example trace_demo
+```
+
+It records a handful of decisions to an append-only trace (secrets redacted
+before disk), replays them against the same world to prove they reproduce
+exactly, then replays against a changed manifest to show the drifted verdict.
 
 ---
 

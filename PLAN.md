@@ -218,22 +218,28 @@ offline; `kernel_demo` shows the end-to-end round-trip.
 
 ### E4 — Trace, Audit & Replay
 **Goal:** every decision reproducible; secrets never leaked. **Depends on:** E0,
-E2, E3. **Completes M1.**
+E2, E3. **Completes M1. Status:** done.
 
-- [ ] **E4.1** Append-only trace store recording every stage (perception →
-  projection → proposal → build → decision → approval → execution → result).
-- [ ] **E4.2** Redaction applied before disk write.
-- [ ] **E4.3** Deterministic replay: same trace + same compiled world ⇒ same
-  decision.
-- [ ] **E4.4** Policy-drift report: old trace + new compiled world ⇒ explicit
-  diff.
-- [ ] **E4.5** Bundle export/import for offline replay.
+- [x] **E4.1** Append-only JSONL trace store (`TraceStore`) with `TraceRecord`s
+  (`record.rs`/`store.rs`); Decision + Execution payloads, with enum room for
+  perception/projection/proposal/approval stages as E5/E6 wire them.
+- [x] **E4.2** Redaction before disk write (`redact.rs`): masks values whose
+  key/dotted-path matches a manifest pattern (`*`-glob); reuses
+  `world.redaction_patterns()`. Full glob/value semantics deferred.
+- [x] **E4.3** Deterministic replay (`replay.rs`): reconstruct inputs, re-run
+  `decide`, compare — same world ⇒ `matched == total`.
+- [x] **E4.4** Policy-drift report: `drift_report` = replay vs a different world;
+  mismatches are the explicit diff.
+- [x] **E4.5** Bundle export/import (`bundle.rs`): `Bundle { manifest, records }`
+  → JSON; `replay_bundle` recompiles the world and replays offline.
 - [ ] **E4.6** (Optional) cross-implementation parity harness (e.g. Rego mirror)
-  for decision parity.
+  — deferred.
 
 **Exit:** replay reproduces decisions; redaction holds; the M1 vertical slice
 (`read_file` → kernel → sim executor → trace → replay) passes end to end.
-Satisfies invariants **14, 15**.
+Satisfies invariants **14, 15**. **Met** — 9 trace-store tests; full workspace at
+63, `clippy -D warnings` + fmt clean offline; `trace_demo` shows
+record → redact → replay → drift. **Milestone M1 complete (E0–E4).**
 
 ---
 
