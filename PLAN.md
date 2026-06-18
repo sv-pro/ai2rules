@@ -303,19 +303,29 @@ shows both paths. **Milestone M2 complete (E5–E6).** Decisions logged in
 
 ### E7 — MCP, Web & Scoped Capabilities
 **Goal:** external tools and the web flow through the same gate; broad tools are
-narrowed. **Depends on:** E1, E2, E3.
+narrowed. **Depends on:** E1, E2, E3. **Status:** done (offline mock transports).
 
-- [ ] **E7.1** MCP dispatch behind the same `IntentIR` / descriptor / provenance
-  path.
-- [ ] **E7.2** MCP descriptor registration + drift detection for upstream tools.
-- [ ] **E7.3** Web fetch as an untrusted, always-tainted channel.
-- [ ] **E7.4** Scoped-capability machinery: expose actor-input args only, strip
-  locked/unknown args, inject literals after stripping.
-- [ ] **E7.5** Ship scoped capabilities: `run_tests`, `git_status`/`git_diff`/
-  `git_commit`, `read_repo_file`, `apply_workspace_patch`, `call_known_mcp_tool`.
+- [x] **E7.1** MCP dispatch via `BackingIdentity::McpServer` → `build_execution_spec`
+  lowers to a structured `{server,tool,input}` op; the executor's `McpHandler`
+  dispatches through a pluggable `McpTransport` (mock; real stdio/HTTP deferred).
+- [x] **E7.2** MCP descriptor drift: handlers register under the action's
+  descriptor hash; the executor's existing pre-dispatch hash check blocks a stale
+  upstream tool (invariant 11).
+- [x] **E7.3** Web fetch (`WebHandler` + `WebFetcher`); results are tainted by the
+  executor's default, so tainted web can never drive egress (floored at build).
+- [x] **E7.4** Scoped-capability machinery in `build_execution_spec`: keep only
+  declared `ActorInput` args (strip locked/unknown), inject `Literal`s, resolve
+  `ContextRef` from `ExecEnv.context`. `CompiledWorld::scoped_capability` exposes
+  the spec.
+- [x] **E7.5** Default world ships `read_repo_file`, `apply_workspace_patch`,
+  `run_tests`, `git_status`/`git_diff`/`git_commit`, and `call_known_mcp_tool`.
 
 **Exit:** MCP/web run through one gate; tainted MCP/web cannot drive external
 effects; scoped-cap stripping verified. Satisfies invariants **7, 11, 12**.
+**Met** — spec stripping tests + executor MCP/web/drift tests + loop test; full
+workspace at 89, `clippy -D warnings` + fmt clean offline; `tools_demo` shows
+all three. **Milestone 3 in progress (E9 — CLI/TUI — remains).** Decisions
+D14–D16 logged.
 
 ---
 

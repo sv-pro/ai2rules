@@ -143,3 +143,33 @@ commit, or the code. Status is `Accepted` unless later `Superseded by D<n>`.
 - **Alternatives:** Kernel + store only, deferring loop wiring/demo.
 - **Why:** End-to-end wiring is what actually demonstrates invariants 9 and 10,
   and completes Milestone 2.
+
+## D14 — MCP/web via offline mock transports
+- **Epic:** E7 · **Status:** Accepted
+- **Decision:** MCP and web go through pluggable `McpTransport` / `WebFetcher`
+  traits with deterministic mock impls; MCP dispatch and web fetch flow through
+  the same IntentIR/descriptor/provenance gate and the executor's drift check,
+  with no network or async.
+- **Alternatives:** Real stdio/HTTP MCP transport + real web client (reqwest) now.
+- **Why:** Keeps CI offline and deterministic, matching the kernel and the E5
+  model client (D9). Real transports are a later, feature-gated add.
+
+## D15 — Full E7 in one pass
+- **Epic:** E7 · **Status:** Accepted
+- **Decision:** Ship scoped-capability machinery (E7.4/E7.5, invariant 12) + MCP
+  dispatch (E7.1) + MCP descriptor drift (E7.2) + web channel (E7.3) together,
+  via the mock transports; plus `git_status`/`git_diff` and `call_known_mcp_tool`.
+- **Alternatives:** Scoped caps + drift only, deferring live MCP/web handlers.
+- **Why:** With mock transports the whole epic is deterministic and offline, so
+  there's no reason to split; satisfies invariants 7, 11, 12 in one move.
+
+## D16 — Scoped-cap spec keys on the scoped action name
+- **Epic:** E7 · **Status:** Accepted
+- **Decision:** `build_execution_spec` keeps the spec's `action` = the scoped
+  capability's name (e.g. `run_tests`) and carries the scoped cap's descriptor
+  hash; the executor registers each scoped cap under its own name mapped to the
+  base action's handler kind.
+- **Alternatives:** Rewrite the spec's action to the base action (`run_command`).
+- **Why:** The descriptor hash that drift-checks (invariant 11) is the scoped
+  cap's; keying on the scoped name keeps the spec, the registered hash, and the
+  audit trail consistent — rewriting to the base would mismatch the hash.

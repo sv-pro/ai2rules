@@ -47,7 +47,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 |---|---|---|
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
-| M3 Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | planned |
+| **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | in progress (E7 done; E9 next) |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks | planned |
 
 **Done so far:**
@@ -92,8 +92,15 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   executed`) bound to the exact call, so drift voids reuse; the orchestrator
   resumes an approved `ASK` to `ALLOW`. Honors invariants 9, 10 — **completing
   Milestone 2.**
+- **E7 — MCP, Web & Scoped Capabilities:** broader reach through the one gate.
+  Scoped capabilities narrow a base action — `build_execution_spec` strips
+  locked/unknown args and injects literals (so `run_tests` always runs `pytest`,
+  invariant 12); MCP calls dispatch via a pluggable `McpTransport` through the
+  same descriptor/drift path (invariant 11); web fetch is an always-tainted
+  channel (invariant 7). MCP/web use deterministic **mock** transports (real
+  stdio/HTTP deferred). Starts Milestone 3.
 
-Builds clean offline with `clippy -D warnings`; **82 unit tests** green.
+Builds clean offline with `clippy -D warnings`; **89 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -203,6 +210,17 @@ cargo run -p agent-core --example approvals_demo
 A `start_pty` (approval-required) action: interactive + auto-approve resumes it
 `ASK → APPROVED → ALLOW` (a durable token minted → approved → executed); in
 background it fails closed to `DENY` with no token minted.
+
+For **scoped capabilities + MCP + web**, run:
+
+```bash
+cargo run -p agent-core --example tools_demo
+```
+
+`run_tests` proposed with `command: "rm -rf /"` lowers to argv `["pytest"]`
+(locked args stripped, literal injected — invariant 12); an MCP call returns a
+tainted result, after which a web fetch is `DENY`ed because the context is now
+tainted (invariant 7). MCP/web use deterministic mock transports.
 
 > Architectural decisions and the alternatives weighed are logged in
 > [`DECISIONS.md`](DECISIONS.md).

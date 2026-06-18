@@ -1,12 +1,16 @@
 //! The three core handlers (E3.3) plus shared operation-parsing helpers.
 
 mod command;
+mod mcp;
 mod patch;
 mod read;
+mod web;
 
 pub use command::CommandHandler;
+pub use mcp::McpHandler;
 pub use patch::PatchHandler;
 pub use read::ReadHandler;
+pub use web::WebHandler;
 
 use harness_types::{ExecutionSpec, Operation};
 use serde_json::Value;

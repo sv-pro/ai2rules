@@ -372,6 +372,7 @@ fn describe_output(output: &ExecOutput) -> String {
         ExecOutput::FileContents(c) => format!("read {} bytes", c.len()),
         ExecOutput::CommandResult { exit_code, .. } => format!("exit {exit_code}"),
         ExecOutput::PatchApplied { path } => format!("wrote {}", path.display()),
+        ExecOutput::External { source, content } => format!("{source}: {} bytes", content.len()),
     }
 }
 

@@ -19,22 +19,65 @@ pub use intent::{classify, Mapping};
 pub use model::{ModelClient, ModelTurn, ScriptedModel};
 pub use orchestrator::{run, ApprovalPolicy, SessionConfig, SessionOutcome, TranscriptEntry};
 
-use executor::{CommandHandler, Executor, PatchHandler, ReadHandler};
+use executor::{
+    CommandHandler, Executor, ExecutorBuilder, McpHandler, McpTransport, PatchHandler, ReadHandler,
+    WebFetcher, WebHandler,
+};
 use harness_types::{ActionName, CompiledWorld};
 
 /// An executor wired with the default world's local handlers and the descriptor
-/// hashes they must match — the executable surface for the loop.
+/// hashes they must match — the executable surface for the loop. A scoped
+/// capability's spec carries the *scoped* action name + hash, so each is
+/// registered alongside its base.
 pub fn default_executor(world: &CompiledWorld) -> Executor {
+    register_local(Executor::builder(), world).build()
+}
+
+/// Like [`default_executor`], but also wires the external channels (MCP, web)
+/// through the given transports (E7). Mock transports keep this offline.
+pub fn executor_with_transports(
+    world: &CompiledWorld,
+    mcp: Box<dyn McpTransport>,
+    web: Box<dyn WebFetcher>,
+) -> Executor {
     let hash = |a: &str| {
         world
             .descriptor_hash(&ActionName::new(a))
             .cloned()
             .unwrap_or_default()
     };
-    Executor::builder()
+    register_local(Executor::builder(), world)
+        .register(
+            ActionName::new("call_known_mcp_tool"),
+            hash("call_known_mcp_tool"),
+            Box::new(McpHandler::new(mcp)),
+        )
+        .register(
+            ActionName::new("fetch_web"),
+            hash("fetch_web"),
+            Box::new(WebHandler::new(web)),
+        )
+        .build()
+}
+
+/// Register every locally-backed action (base + its scoped capabilities) under
+/// its own descriptor hash, mapping to the base action's handler kind.
+fn register_local(builder: ExecutorBuilder, world: &CompiledWorld) -> ExecutorBuilder {
+    let hash = |a: &str| {
+        world
+            .descriptor_hash(&ActionName::new(a))
+            .cloned()
+            .unwrap_or_default()
+    };
+    let mut b = builder
         .register(
             ActionName::new("read_workspace"),
             hash("read_workspace"),
+            Box::new(ReadHandler),
+        )
+        .register(
+            ActionName::new("read_repo_file"),
+            hash("read_repo_file"),
             Box::new(ReadHandler),
         )
         .register(
@@ -43,18 +86,28 @@ pub fn default_executor(world: &CompiledWorld) -> Executor {
             Box::new(PatchHandler),
         )
         .register(
-            ActionName::new("run_command"),
-            hash("run_command"),
-            Box::new(CommandHandler),
-        )
-        .build()
+            ActionName::new("apply_workspace_patch"),
+            hash("apply_workspace_patch"),
+            Box::new(PatchHandler),
+        );
+    for cmd in [
+        "run_command",
+        "run_tests",
+        "git_status",
+        "git_diff",
+        "git_commit",
+    ] {
+        b = b.register(ActionName::new(cmd), hash(cmd), Box::new(CommandHandler));
+    }
+    b
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use compiler::compile_default;
-    use harness_types::{Decision, ExecutionMode, Taint};
+    use executor::{MockMcpTransport, MockWebFetcher};
+    use harness_types::{Decision, EffectMode, ExecutionMode, Taint};
     use provider_adapters::anthropic::tool_use_block;
     use serde_json::json;
     use trace_store::{ApprovalStore, TraceStore};
@@ -196,5 +249,47 @@ mod tests {
         assert!(outcome.transcript[0].verdict.starts_with("Deny"));
         assert_eq!(outcome.records, 1);
         let _ = Decision::Deny;
+    }
+
+    #[test]
+    fn mcp_result_taints_then_web_is_denied() {
+        // E7 end-to-end: a clean MCP call is allowed and its result is tainted,
+        // which then makes a web fetch DENY by the taint floor (invariant 7).
+        let world = compile_default();
+        let dir = tempfile::tempdir().unwrap();
+        let trace = TraceStore::open(dir.path().join("t.jsonl"));
+        let mut store = ApprovalStore::open(dir.path().join("a.jsonl")).unwrap();
+        let mcp = MockMcpTransport::new().with("docs", "search", json!({ "answer": "x" }));
+        let web = MockWebFetcher::new().with("https://x", "body");
+        let executor = executor_with_transports(&world, Box::new(mcp), Box::new(web));
+        let mut model = ScriptedModel::new([
+            ModelTurn::ToolUse(tool_use_block(
+                "t1",
+                "call_known_mcp_tool",
+                json!({ "query": "q" }),
+            )),
+            ModelTurn::ToolUse(tool_use_block(
+                "t2",
+                "fetch_web",
+                json!({ "url": "https://x" }),
+            )),
+            ModelTurn::Final("done".into()),
+        ]);
+        let config = SessionConfig {
+            effect_mode: EffectMode::Execute,
+            ..SessionConfig::default()
+        };
+        let outcome = run(
+            &world,
+            &ExecEnv::default(),
+            &executor,
+            &trace,
+            &mut store,
+            &mut model,
+            &config,
+        );
+        assert_eq!(outcome.transcript[0].verdict, "ALLOW");
+        assert_eq!(outcome.transcript[0].taint, Taint::Tainted);
+        assert!(outcome.transcript[1].verdict.starts_with("Deny"));
     }
 }

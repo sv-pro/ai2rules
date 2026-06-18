@@ -22,6 +22,12 @@ pub enum ExecOutput {
     PatchApplied {
         path: PathBuf,
     },
+    /// A result from an external channel (MCP tool / web fetch). `source` is a
+    /// short origin tag like `mcp:<server>/<tool>` or `web:<url>`.
+    External {
+        source: String,
+        content: String,
+    },
     /// A synthetic result produced under `EffectMode::Simulate` — no real side
     /// effect happened.
     Simulated(String),

@@ -13,9 +13,11 @@
 mod fs_guard;
 mod handler;
 mod handlers;
+mod transport;
 
 pub use handler::{ExecError, ExecOutput, Handler};
-pub use handlers::{CommandHandler, PatchHandler, ReadHandler};
+pub use handlers::{CommandHandler, McpHandler, PatchHandler, ReadHandler, WebHandler};
+pub use transport::{McpTransport, MockMcpTransport, MockWebFetcher, WebFetcher};
 
 use std::collections::BTreeMap;
 
@@ -118,6 +120,10 @@ fn truncate(output: ExecOutput) -> ExecOutput {
             exit_code,
             stdout: cap(stdout),
             stderr: cap(stderr),
+        },
+        ExecOutput::External { source, content } => ExecOutput::External {
+            source,
+            content: cap(content),
         },
         other => other,
     }
@@ -394,5 +400,95 @@ mod tests {
             ExecOutput::FileContents(s) => assert_eq!(s.chars().count(), TRUNCATE_CAP),
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn mcp_handler_dispatches_via_transport() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = MockMcpTransport::new().with("docs", "search", json!({ "hits": 2 }));
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("call_known_mcp_tool"),
+                DescriptorHash::new(HASH),
+                Box::new(McpHandler::new(Box::new(transport))),
+            )
+            .build();
+        let s = spec(
+            "call_known_mcp_tool",
+            Operation::Structured(
+                json!({"server": "docs", "tool": "search", "input": {"query": "x"}}),
+            ),
+            dir.path(),
+            vec![],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            1_000,
+        );
+        match exec.run(&s).unwrap().value {
+            ExecOutput::External { source, content } => {
+                assert_eq!(source, "mcp:docs/search");
+                assert!(content.contains("hits"));
+            }
+            other => panic!("expected External, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn web_handler_returns_tainted_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let fetcher = MockWebFetcher::new().with("https://x", "hello web");
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("fetch_web"),
+                DescriptorHash::new(HASH),
+                Box::new(WebHandler::new(Box::new(fetcher))),
+            )
+            .build();
+        let s = spec(
+            "fetch_web",
+            Operation::Structured(json!({"url": "https://x"})),
+            dir.path(),
+            vec![],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            1_000,
+        );
+        let out = exec.run(&s).unwrap();
+        assert!(out.taint.is_tainted());
+        match out.value {
+            ExecOutput::External { content, .. } => assert_eq!(content, "hello web"),
+            other => panic!("expected External, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mcp_drift_blocks_before_dispatch() {
+        // Invariant 11 for MCP: a stale registered descriptor hash blocks the
+        // call before the transport is touched.
+        let dir = tempfile::tempdir().unwrap();
+        let transport = MockMcpTransport::new().with("docs", "search", json!({}));
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("call_known_mcp_tool"),
+                DescriptorHash::new("registered-hash"),
+                Box::new(McpHandler::new(Box::new(transport))),
+            )
+            .build();
+        let s = spec(
+            "call_known_mcp_tool",
+            Operation::Structured(json!({"server": "docs", "tool": "search", "input": {}})),
+            dir.path(),
+            vec![],
+            vec![],
+            "stale-hash",
+            EffectMode::Execute,
+            1_000,
+        );
+        assert!(matches!(
+            exec.run(&s),
+            Err(ExecError::DescriptorDrift { .. })
+        ));
     }
 }

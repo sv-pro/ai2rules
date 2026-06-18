@@ -45,6 +45,7 @@ fn main() {
         env_allowlist: vec!["PATH".to_string()],
         network: NetworkPolicy::Disabled,
         default_timeout_ms: 5_000,
+        ..Default::default()
     };
 
     println!();
@@ -267,6 +268,7 @@ fn describe(output: &ExecOutput) -> String {
         } => format!("exit {exit_code}, stdout {:?}", stdout.trim()),
         ExecOutput::PatchApplied { path } => format!("wrote {}", path.display()),
         ExecOutput::Simulated(note) => format!("(simulated) {note}"),
+        ExecOutput::External { source, content } => format!("{source}: {} bytes", content.len()),
     }
 }
 

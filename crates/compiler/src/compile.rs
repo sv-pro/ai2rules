@@ -97,6 +97,12 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
             .descriptor_hashes
             .insert(cap.name.clone(), hash_descriptor(&descriptor));
         parts.descriptors.insert(cap.name.clone(), descriptor);
+
+        // Record the scoping so the kernel can strip locked args and inject
+        // literals at spec-assembly time (E7).
+        parts
+            .scoped_capabilities
+            .insert(cap.name.clone(), cap.clone());
     }
 
     // Default projection exposes the whole ontology. Dynamic narrowing by taint

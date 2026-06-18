@@ -52,6 +52,7 @@ base_actions:
   - name: call_mcp_tool
     action_type: Mcp
     side_effect: External
+    backing: !McpServer { server: docs, tool: search }
   - name: fetch_web
     action_type: Web
     side_effect: Network
@@ -72,10 +73,24 @@ scoped_capabilities:
     base_action: run_command
     args:
       command: !Literal pytest
+  - name: git_status
+    base_action: run_command
+    args:
+      command: !Literal "git status"
+  - name: git_diff
+    base_action: run_command
+    args:
+      command: !Literal "git diff"
   - name: git_commit
     base_action: run_command
     args:
-      command: !Literal git
+      command: !Literal "git commit"
+  # MCP call pinned to the docs/search server+tool (via call_mcp_tool's backing);
+  # the actor may only supply the query.
+  - name: call_known_mcp_tool
+    base_action: call_mcp_tool
+    args:
+      query: ActorInput
 
 # Taint containment: tainted data cannot reach externally-effectful surfaces.
 transition_policies:

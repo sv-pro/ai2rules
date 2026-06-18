@@ -8,7 +8,7 @@ use crate::action::ActionType;
 use crate::decision::{Decision, EffectMode};
 use crate::descriptor::{Descriptor, SideEffectClass};
 use crate::ids::{ActionName, DescriptorHash, ManifestHash, WorldId};
-use crate::manifest::Budget;
+use crate::manifest::{Budget, ScopedCapabilityDef};
 use crate::provenance::{Taint, TrustLevel};
 
 /// A compiled taint-flow rule.
@@ -47,6 +47,9 @@ pub struct CompiledWorldParts {
     pub budget: Budget,
     pub effect_rules: Vec<EffectRule>,
     pub redaction: Vec<String>,
+    /// Scoped capabilities by name: how each narrows its base action's args
+    /// (E7). Drives stripping locked/unknown args and injecting literals.
+    pub scoped_capabilities: BTreeMap<ActionName, ScopedCapabilityDef>,
 }
 
 /// Immutable, hash-addressed runtime artifact. No setters; read-only after
@@ -103,6 +106,10 @@ impl CompiledWorld {
     }
     pub fn requires_approval(&self, action: &ActionName) -> bool {
         self.parts.approval_required.contains(action)
+    }
+    /// The scoped-capability definition for an action, if it is one.
+    pub fn scoped_capability(&self, action: &ActionName) -> Option<&ScopedCapabilityDef> {
+        self.parts.scoped_capabilities.get(action)
     }
     pub fn taint_rules(&self) -> &[TaintRule] {
         &self.parts.taint_rules

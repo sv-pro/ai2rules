@@ -9,13 +9,14 @@
 //! It stays pure: everything environmental arrives in [`ExecEnv`]; nothing here
 //! reads the filesystem, the process environment, or the clock.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use harness_types::{
-    ActionName, ActionType, BackingIdentity, CompiledWorld, EffectMode, EnvPolicy, ExecutionSpec,
-    FilesystemPolicy, NetworkPolicy, Operation, TraceId,
+    ActionName, ActionType, ArgSource, BackingIdentity, CompiledWorld, EffectMode, EnvPolicy,
+    ExecutionSpec, FilesystemPolicy, NetworkPolicy, Operation, TraceId,
 };
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 use crate::intent::IntentIR;
 
@@ -30,6 +31,8 @@ pub struct ExecEnv {
     pub env_allowlist: Vec<String>,
     pub network: NetworkPolicy,
     pub default_timeout_ms: u64,
+    /// Runtime values a scoped capability's `ContextRef` args resolve against.
+    pub context: BTreeMap<String, String>,
 }
 
 impl Default for ExecEnv {
@@ -41,6 +44,7 @@ impl Default for ExecEnv {
             env_allowlist: Vec::new(),
             network: NetworkPolicy::Disabled,
             default_timeout_ms: 30_000,
+            context: BTreeMap::new(),
         }
     }
 }
@@ -90,14 +94,18 @@ pub fn build_execution_spec(
             detail: format!("no descriptor for {action}"),
         })?;
 
+    // Scoped capabilities narrow the actor's args: strip anything not declared
+    // actor-input, inject literals, resolve context refs (invariant 12). A base
+    // action passes its params through unchanged.
+    let params = effective_params(world, &action, intent.params(), env)?;
+
     let operation = match &backing {
-        BackingIdentity::LocalHandler(handler) => operation_for(&action, handler, intent.params())?,
-        BackingIdentity::McpServer { server, tool } => {
-            return Err(SpecError::UnsupportedBacking {
-                action,
-                backing: format!("mcp:{server}/{tool}"),
-            })
-        }
+        BackingIdentity::LocalHandler(handler) => operation_for(&action, handler, &params)?,
+        BackingIdentity::McpServer { server, tool } => Operation::Structured(json!({
+            "server": server,
+            "tool": tool,
+            "input": params,
+        })),
     };
 
     // Command-class actions honor the world's command timeout; everything else
@@ -145,11 +153,55 @@ fn operation_for(
             "contents": str_param(params, "contents")?,
         }))),
         "run_command" => Ok(Operation::Argv(argv_from(params)?)),
+        "fetch_web" => Ok(Operation::Structured(
+            serde_json::json!({ "url": str_param(params, "url")? }),
+        )),
         other => Err(SpecError::UnsupportedBacking {
             action: action.clone(),
             backing: format!("local:{other}"),
         }),
     }
+}
+
+/// Resolve the effective params a scoped capability runs with: keep only
+/// declared actor-input args (stripping locked/unknown ones), inject literals,
+/// and resolve context refs. A non-scoped action passes its params through.
+fn effective_params(
+    world: &CompiledWorld,
+    action: &ActionName,
+    actor_params: &Value,
+    env: &ExecEnv,
+) -> Result<Value, SpecError> {
+    let cap = match world.scoped_capability(action) {
+        None => return Ok(actor_params.clone()),
+        Some(cap) => cap,
+    };
+    let actor = actor_params.as_object();
+    let mut out = Map::new();
+    for (name, source) in &cap.args {
+        match source {
+            // Copy only what the actor is allowed to set; anything else they
+            // sent is never read here, so it is stripped.
+            ArgSource::ActorInput => {
+                if let Some(value) = actor.and_then(|o| o.get(name)) {
+                    out.insert(name.clone(), value.clone());
+                }
+            }
+            ArgSource::Literal(value) => {
+                out.insert(name.clone(), Value::String(value.clone()));
+            }
+            ArgSource::ContextRef(key) => {
+                let value = env
+                    .context
+                    .get(key)
+                    .ok_or_else(|| SpecError::MissingArgument {
+                        argument: format!("context:{key}"),
+                    })?;
+                out.insert(name.clone(), Value::String(value.clone()));
+            }
+        }
+    }
+    Ok(Value::Object(out))
 }
 
 fn str_param(params: &Value, key: &str) -> Result<String, SpecError> {
@@ -195,4 +247,76 @@ fn string_array(values: &[Value]) -> Vec<String> {
         .iter()
         .filter_map(|v| v.as_str().map(str::to_string))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::IRBuilder;
+    use compiler::compile_default;
+    use harness_types::{
+        CallId, ContentHash, Provenance, Provider, SessionId, SourceChannel, TaintContext, ToolCall,
+    };
+    use serde_json::json;
+
+    fn spec(action: &str, args: Value) -> ExecutionSpec {
+        let world = compile_default();
+        let call = ToolCall {
+            action_name: ActionName::new(action),
+            arguments: args,
+            provider: Provider::CliNative,
+            call_id: CallId::new("c"),
+            source_perceptions: vec![],
+            session_id: SessionId::new("s"),
+        };
+        let prov = Provenance::from_channel(
+            SourceChannel::UserPrompt,
+            SessionId::new("s"),
+            ContentHash::new("h"),
+        );
+        let ir = IRBuilder::new(&world)
+            .build(&call, prov, &TaintContext::clean())
+            .expect("intent builds");
+        build_execution_spec(
+            &world,
+            &ir,
+            EffectMode::Simulate,
+            &ExecEnv::default(),
+            TraceId::new("t"),
+        )
+        .expect("spec assembles")
+    }
+
+    #[test]
+    fn run_tests_strips_locked_args_and_injects_literal() {
+        // Invariant 12: the actor's `command` is locked (literal `pytest`); a
+        // malicious override and an undeclared `path` are both stripped.
+        let s = spec("run_tests", json!({ "command": "rm -rf /", "path": "x" }));
+        match s.operation() {
+            Operation::Argv(argv) => assert_eq!(argv, &vec!["pytest".to_string()]),
+            other => panic!("expected argv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_repo_file_keeps_only_actor_input() {
+        let s = spec(
+            "read_repo_file",
+            json!({ "path": "src/lib.rs", "evil": "drop tables" }),
+        );
+        match s.operation() {
+            Operation::Structured(v) => {
+                assert_eq!(v["path"], json!("src/lib.rs"));
+                assert!(v.get("evil").is_none(), "undeclared arg must be stripped");
+            }
+            other => panic!("expected structured, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn base_action_params_pass_through() {
+        let s = spec("read_workspace", json!({ "path": "a", "extra": 1 }));
+        // Not a scoped cap → params pass through to the read op as-is.
+        assert!(matches!(s.operation(), Operation::Structured(_)));
+    }
 }
