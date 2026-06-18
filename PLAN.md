@@ -326,8 +326,8 @@ narrowed. **Depends on:** E1, E2, E3. **Status:** done (offline mock transports)
 effects; scoped-cap stripping verified. Satisfies invariants **7, 11, 12**.
 **Met** — spec stripping tests + executor MCP/web/drift tests + loop test; full
 workspace at 89, `clippy -D warnings` + fmt clean offline; `tools_demo` shows
-all three. **Milestone 3 in progress (E9 — CLI/TUI — remains).** Decisions
-D14–D16 logged.
+all three. E9 adds the interactive CLI and structured decision feedback,
+completing **Milestone 3**. Decisions D14–D16 logged.
 
 ---
 
@@ -355,14 +355,17 @@ independent backstops. Hardens invariant **8**.
 - [x] **E9.1** Terminal UX: prompt input, streaming output, status. (Basic REPL loop using `inquire`).
 - [x] **E9.2** Approval UX surfacing action / reasoning / provenance, with
   one-shot vs manifest-extension paths kept separate. (Using `ApprovalPolicy::Interactive` callback).
-- [~] **E9.3** Structured rendering of `ABSENT` / `DENY` / `ASK` / `REPLAN`
-  feedback (not vague prose).
+- [x] **E9.3** Structured rendering of `ABSENT` / `DENY` / `ASK` / `REPLAN`
+  feedback with explicit decision, rule, effect, and operator-facing guidance.
 - [x] **E9.4** Session management, world selection, mode toggle. (Via `--world`, `--background` CLI args).
 - [x] **E9.5** `--simulate` flag to run against the simulation executor for safe
   demos/tests.
 
 **Exit:** a developer can run the harness interactively against the default world
 end to end.
+**Met** — `TranscriptEntry` carries structured decision/rule/effect metadata and
+`harness` renders governed steps as explicit `Decision`, `Rule`, `Effect`, and
+`Feedback` fields. **Milestone 3 complete.**
 
 ---
 

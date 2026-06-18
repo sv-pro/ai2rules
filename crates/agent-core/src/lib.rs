@@ -170,14 +170,29 @@ mod tests {
         // The read tainted the context, so the later web fetch is denied.
         assert_eq!(outcome.transcript[1].action, "fetch_web");
         assert!(outcome.transcript[1].verdict.starts_with("Deny"));
+        assert_eq!(outcome.transcript[1].decision, Some(Decision::Deny));
+        assert_eq!(
+            outcome.transcript[1].rule.as_deref(),
+            Some("taint_invariant")
+        );
 
         // Unknown action is distinct (invariant 3).
         assert!(outcome.transcript[2]
             .verdict
             .contains("UNKNOWN_TO_ONTOLOGY"));
+        assert_eq!(outcome.transcript[2].decision, Some(Decision::Absent));
+        assert_eq!(
+            outcome.transcript[2].rule.as_deref(),
+            Some("unknown_to_ontology")
+        );
 
         // Approval-required action asks (default policy is Manual → pending).
         assert!(outcome.transcript[3].verdict.starts_with("ASK"));
+        assert_eq!(outcome.transcript[3].decision, Some(Decision::Ask));
+        assert_eq!(
+            outcome.transcript[3].rule.as_deref(),
+            Some("approval_required")
+        );
     }
 
     #[test]
@@ -224,6 +239,11 @@ mod tests {
         );
         assert_eq!(outcome.transcript[0].verdict, "ALLOW");
         assert_eq!(outcome.transcript[0].taint, Taint::Tainted);
+        assert_eq!(outcome.transcript[0].decision, Some(Decision::Allow));
+        assert_eq!(
+            outcome.transcript[0].effect_mode,
+            Some(EffectMode::Simulate)
+        );
     }
 
     #[test]
@@ -235,6 +255,11 @@ mod tests {
         };
         let outcome = run_one("start_pty", json!({}), &config);
         assert_eq!(outcome.transcript[0].verdict, "ASK → APPROVED → ALLOW");
+        assert_eq!(outcome.transcript[0].decision, Some(Decision::Allow));
+        assert_eq!(
+            outcome.transcript[0].effect_mode,
+            Some(EffectMode::Simulate)
+        );
         // Two decisions recorded: the initial ASK and the resumed ALLOW.
         assert_eq!(outcome.records, 2);
     }
@@ -249,6 +274,11 @@ mod tests {
         };
         let outcome = run_one("start_pty", json!({}), &config);
         assert!(outcome.transcript[0].verdict.starts_with("Deny"));
+        assert_eq!(outcome.transcript[0].decision, Some(Decision::Deny));
+        assert_eq!(
+            outcome.transcript[0].rule.as_deref(),
+            Some("background_denies_ask")
+        );
         assert_eq!(outcome.records, 1);
         let _ = Decision::Deny;
     }

@@ -1,9 +1,10 @@
 use agent_core::{
-    default_executor, run, ApprovalPolicy, ModelClient, ModelTurn, SessionConfig, TurnContext,
+    default_executor, run, ApprovalPolicy, ModelClient, ModelTurn, SessionConfig, TranscriptEntry,
+    TurnContext,
 };
 use clap::Parser;
 use compiler::{compile, compile_default, loader::load_yaml};
-use harness_types::{CompiledWorld, EffectMode, ExecutionMode, Provenance, ToolCall};
+use harness_types::{CompiledWorld, Decision, EffectMode, ExecutionMode, Provenance, ToolCall};
 use provider_adapters::anthropic::tool_use_block;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -142,12 +143,74 @@ fn main() {
         &mut model,
         &config,
         Some(&mut |entry| {
-            println!("\n▶ Action: {}", entry.action);
-            println!("  Verdict: {}", entry.verdict);
-            println!("  Result:  {} [taint: {:?}]", entry.result, entry.taint);
+            render_entry(entry);
         }),
     );
 
     println!("\nSession ended. Final text: {:?}", outcome.final_text);
     println!("{} records appended to trace.", outcome.records);
+}
+
+fn render_entry(entry: &TranscriptEntry) {
+    println!("\n▶ Action: {}", entry.action);
+    if let Some(decision) = entry.decision {
+        println!("  Decision: {}", decision_label(decision));
+        if let Some(rule) = entry.rule.as_deref() {
+            println!("  Rule:     {rule}");
+        }
+        if let Some(effect) = entry.effect_mode {
+            println!("  Effect:   {effect:?}");
+        }
+        if entry.verdict != decision_name(decision) {
+            println!("  Flow:     {}", entry.verdict);
+        }
+        println!("  Feedback: {}", feedback(decision, entry.rule.as_deref()));
+    } else {
+        println!("  Verdict:  {}", entry.verdict);
+    }
+    println!("  Result:   {} [taint: {:?}]", entry.result, entry.taint);
+}
+
+fn decision_name(decision: Decision) -> &'static str {
+    match decision {
+        Decision::Absent => "ABSENT",
+        Decision::Allow => "ALLOW",
+        Decision::Deny => "DENY",
+        Decision::Ask => "ASK",
+        Decision::Replan => "REPLAN",
+    }
+}
+
+fn decision_label(decision: Decision) -> String {
+    let code = match decision {
+        Decision::Allow => "32;1",
+        Decision::Deny => "31;1",
+        Decision::Ask => "33;1",
+        Decision::Absent => "35;1",
+        Decision::Replan => "36;1",
+    };
+    format!("\x1b[{code}m{}\x1b[0m", decision_name(decision))
+}
+
+fn feedback(decision: Decision, rule: Option<&str>) -> &'static str {
+    match (decision, rule.unwrap_or("")) {
+        (Decision::Absent, "unknown_to_ontology") => {
+            "action is not in the ontology; no intent or executor path exists"
+        }
+        (Decision::Absent, "absent") => "action exists but is not projected into this world",
+        (Decision::Absent, "capability") => {
+            "current trust/capability context cannot see this action"
+        }
+        (Decision::Absent, _) => "action is unavailable in this world/context",
+        (Decision::Deny, "background_denies_ask") => {
+            "approval-required action failed closed in background mode"
+        }
+        (Decision::Deny, "taint_invariant") => "tainted input cannot cross this effect boundary",
+        (Decision::Deny, _) => "policy blocked a visible action",
+        (Decision::Ask, "approval_required") => "human approval is required before execution",
+        (Decision::Ask, "approval_rejected") => "approval was rejected; action did not execute",
+        (Decision::Ask, _) => "approval flow paused execution",
+        (Decision::Replan, _) => "budget or scope exceeded; propose a smaller step",
+        (Decision::Allow, _) => "execution spec crossed the boundary",
+    }
 }

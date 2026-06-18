@@ -46,6 +46,9 @@ pub enum ApprovalPolicy {
 pub struct TranscriptEntry {
     pub action: String,
     pub verdict: String,
+    pub decision: Option<Decision>,
+    pub rule: Option<String>,
+    pub effect_mode: Option<EffectMode>,
     pub result: String,
     pub taint: Taint,
 }
@@ -127,6 +130,9 @@ pub fn run(
                 transcript.push(TranscriptEntry {
                     action: "<malformed>".to_string(),
                     verdict: format!("adapter error: {e}"),
+                    decision: None,
+                    rule: None,
+                    effect_mode: None,
                     result: String::new(),
                     taint: Taint::Clean,
                 });
@@ -168,6 +174,8 @@ pub fn run(
                 &mut taint,
                 &session,
                 "ALLOW",
+                Decision::Allow,
+                disposition.rule,
             ),
 
             // Needs approval (interactive) → mint, resolve, maybe resume.
@@ -195,6 +203,7 @@ pub fn run(
             // Everything else is feedback the model would receive as an error.
             other => {
                 let verdict = verdict_label(&other);
+                let (decision, rule, effect_mode) = verdict_metadata(&other);
                 let _feedback = anthropic::format_tool_result(&ToolOutcome {
                     call_id: call.call_id.clone(),
                     content: verdict.clone(),
@@ -203,6 +212,9 @@ pub fn run(
                 TranscriptEntry {
                     action,
                     verdict,
+                    decision: Some(decision),
+                    rule: Some(rule),
+                    effect_mode,
                     result: "(not executed)".to_string(),
                     taint: Taint::Clean,
                 }
@@ -254,15 +266,33 @@ fn resolve_approval(
     let id = match store.mint(token) {
         Ok(id) => id,
         Err(e) => {
-            return entry(action, format!("ASK (store error: {e})"));
+            return entry_with(
+                action,
+                format!("ASK (store error: {e})"),
+                Decision::Ask,
+                "approval_store_error",
+                None,
+            );
         }
     };
 
     match config.approval {
-        ApprovalPolicy::Manual => entry(action, "ASK (pending approval)".to_string()),
+        ApprovalPolicy::Manual => entry_with(
+            action,
+            "ASK (pending approval)".to_string(),
+            Decision::Ask,
+            "approval_required",
+            None,
+        ),
         ApprovalPolicy::AutoReject => {
             let _ = store.reject(&id);
-            entry(action, "ASK → REJECTED".to_string())
+            entry_with(
+                action,
+                "ASK → REJECTED".to_string(),
+                Decision::Ask,
+                "approval_rejected",
+                None,
+            )
         }
         ApprovalPolicy::AutoApprove | ApprovalPolicy::Interactive(_) => {
             let approved = match config.approval {
@@ -272,7 +302,13 @@ fn resolve_approval(
 
             if !approved {
                 let _ = store.reject(&id);
-                return entry(action, "ASK → REJECTED (interactive)".to_string());
+                return entry_with(
+                    action,
+                    "ASK → REJECTED (interactive)".to_string(),
+                    Decision::Ask,
+                    "approval_rejected",
+                    None,
+                );
             }
 
             let _ = store.approve(&id);
@@ -312,15 +348,23 @@ fn resolve_approval(
                         taint,
                         session,
                         "ASK → APPROVED → ALLOW",
+                        Decision::Allow,
+                        disposition.rule,
                     );
                     let _ = store.mark_executed(&id);
                     e.verdict = "ASK → APPROVED → ALLOW".to_string();
                     e
                 }
-                other => entry(
-                    action,
-                    format!("ASK → APPROVED but {}", verdict_label(&other)),
-                ),
+                other => {
+                    let (decision, rule, effect_mode) = verdict_metadata(&other);
+                    entry_with(
+                        action,
+                        format!("ASK → APPROVED but {}", verdict_label(&other)),
+                        decision,
+                        rule,
+                        effect_mode,
+                    )
+                }
             }
         }
     }
@@ -360,6 +404,8 @@ fn run_allowed(
     taint: &mut Taint,
     session: &SessionId,
     verdict: &str,
+    decision: Decision,
+    rule: String,
 ) -> TranscriptEntry {
     match build_execution_spec(world, intent, effect_mode, env, TraceId::new("agent")) {
         Ok(spec) => match executor.run(&spec) {
@@ -370,20 +416,44 @@ fn run_allowed(
                 TranscriptEntry {
                     action,
                     verdict: verdict.to_string(),
+                    decision: Some(decision),
+                    rule: Some(rule),
+                    effect_mode: Some(effect_mode),
                     result: content,
                     taint: tv.taint,
                 }
             }
-            Err(e) => entry(action, format!("{verdict}: exec error: {e}")),
+            Err(e) => entry_with(
+                action,
+                format!("{verdict}: exec error: {e}"),
+                decision,
+                "executor_error",
+                Some(effect_mode),
+            ),
         },
-        Err(e) => entry(action, format!("{verdict}: spec error: {e}")),
+        Err(e) => entry_with(
+            action,
+            format!("{verdict}: spec error: {e}"),
+            decision,
+            "spec_error",
+            Some(effect_mode),
+        ),
     }
 }
 
-fn entry(action: String, verdict: String) -> TranscriptEntry {
+fn entry_with(
+    action: String,
+    verdict: String,
+    decision: Decision,
+    rule: impl Into<String>,
+    effect_mode: Option<EffectMode>,
+) -> TranscriptEntry {
     TranscriptEntry {
         action,
         verdict,
+        decision: Some(decision),
+        rule: Some(rule.into()),
+        effect_mode,
         result: "(not executed)".to_string(),
         taint: Taint::Clean,
     }
@@ -408,6 +478,20 @@ fn verdict_label(outcome: &KernelOutcome) -> String {
         KernelOutcome::Evaluated { disposition, .. } => {
             format!("{:?} ({})", disposition.decision, disposition.rule)
         }
+    }
+}
+
+fn verdict_metadata(outcome: &KernelOutcome) -> (Decision, String, Option<EffectMode>) {
+    match outcome {
+        KernelOutcome::UnknownToOntology { .. } => {
+            (Decision::Absent, "unknown_to_ontology".to_string(), None)
+        }
+        KernelOutcome::NotRepresentable { decision, rule, .. } => (*decision, rule.clone(), None),
+        KernelOutcome::Evaluated { disposition, .. } => (
+            disposition.decision,
+            disposition.rule.clone(),
+            disposition.effect_mode,
+        ),
     }
 }
 

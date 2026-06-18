@@ -47,7 +47,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 |---|---|---|
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
-| **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | in progress (E7 done; E9 interactive CLI in place) |
+| **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI | planned (E8, E10, E11) |
 
 **Done so far:**
@@ -98,13 +98,14 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   invariant 12); MCP calls dispatch via a pluggable `McpTransport` through the
   same descriptor/drift path (invariant 11); web fetch is an always-tainted
   channel (invariant 7). MCP/web use deterministic **mock** transports (real
-  stdio/HTTP deferred). Starts Milestone 3.
-- **E9 — CLI / TUI (in progress):** `cargo run --bin harness` is now an
+  stdio/HTTP deferred). Part of Milestone 3.
+- **E9 — CLI / TUI:** `cargo run --bin harness` is now an
   interactive session — `clap` flags (`--world`/`--simulate`/`--background`), a
   human-driven `ModelClient` that proposes from the projected tool surface via
   `inquire`, and approval prompts through an `ApprovalPolicy::Interactive`
-  callback; each step streams through the loop's observer. Structured
-  ABSENT/DENY/ASK/REPLAN rendering (E9.3) is still being polished.
+  callback; each step streams through the loop's observer with structured
+  `Decision`, `Rule`, `Effect`, and `Feedback` fields for
+  `ABSENT`/`DENY`/`ASK`/`REPLAN` outcomes — **completing Milestone 3.**
 
 Builds clean offline with `clippy -D warnings`; **89 unit tests** green.
 
@@ -159,8 +160,8 @@ CI runs all four checks on every push and PR
 
 ### See the kernel decide
 
-Until the interactive CLI lands (E9), the runnable demo is the kernel plus the
-execution boundary. It compiles the default world, feeds it a handful of
+For a quick noninteractive demo, run the kernel plus the execution boundary. It
+compiles the default world, feeds it a handful of
 proposed tool calls — printing `ALLOW` / `ASK` / `DENY` / `ABSENT` / `REPLAN`
 for each — and, for an `ALLOW`, lowers the intent to an `ExecutionSpec` and runs
 it through the executor in **simulation** (no real side effects):
