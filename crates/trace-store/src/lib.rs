@@ -10,12 +10,14 @@
 //! `decide`) and `compiler` (to recompile a bundled world), but the kernel is
 //! pure and depends on nothing here.
 
+mod approval;
 mod bundle;
 mod record;
 mod redact;
 mod replay;
 mod store;
 
+pub use approval::{params_hash, ApprovalEvent, ApprovalStore};
 pub use bundle::{export_bundle, import_bundle, replay_bundle, Bundle};
 pub use record::{
     ContextSnapshot, DecisionRecord, ExecSummary, ExecutionRecord, OutcomeKind, OutcomeSummary,
@@ -50,6 +52,7 @@ pub fn record_decision(
         tokens_used: ctx.usage.tokens_used,
         file_writes: ctx.usage.file_writes,
         network_calls: ctx.usage.network_calls,
+        approval_granted: ctx.approval_granted,
     };
     TraceRecord {
         trace_id,

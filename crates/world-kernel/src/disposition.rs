@@ -31,32 +31,41 @@ pub struct BudgetUsage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvalContext {
     pub taint: TaintContext,
-    /// Carried now; the `BACKGROUND` → `DENY` collapse for `ASK` is wired in E6
-    /// (E6.5). E2 evaluation is mode-agnostic.
     pub mode: ExecutionMode,
     pub usage: BudgetUsage,
+    /// True when a prior, still-valid approval covers this exact call. The
+    /// orchestrator sets it from a durable approval store (E6); the kernel only
+    /// reads it — it never touches the store, staying pure.
+    pub approval_granted: bool,
 }
 
 impl EvalContext {
-    /// An interactive context with a clean taint and no budget used — the common
-    /// pipeline entry point.
+    /// An interactive context with a clean taint, no budget used, and no prior
+    /// approval — the common pipeline entry point.
     pub fn interactive_clean() -> Self {
         Self {
             taint: TaintContext::clean(),
             mode: ExecutionMode::Interactive,
             usage: BudgetUsage::default(),
+            approval_granted: false,
         }
     }
 
-    /// Replace the taint context (keeping mode and usage).
+    /// Replace the taint context (keeping mode, usage, approval).
     pub fn with_taint(mut self, taint: TaintContext) -> Self {
         self.taint = taint;
         self
     }
 
-    /// Replace the budget usage (keeping mode and taint).
+    /// Replace the budget usage (keeping mode, taint, approval).
     pub fn with_usage(mut self, usage: BudgetUsage) -> Self {
         self.usage = usage;
+        self
+    }
+
+    /// Mark a prior approval as covering this call (keeping the rest).
+    pub fn with_approval(mut self, granted: bool) -> Self {
+        self.approval_granted = granted;
         self
     }
 }
@@ -79,11 +88,14 @@ pub fn evaluate(world: &CompiledWorld, intent: &IntentIR, ctx: &EvalContext) -> 
         }
     }
 
-    // 2. Destructiveness / approval. Reversibility (§6.6) and approval state
-    //    (§6.7) are both signalled by the manifest's `approval_required` flag in
-    //    E2; the durable token lifecycle and `BACKGROUND` collapse are E6.
-    if world.requires_approval(intent.action()) {
-        return Disposition::of(Decision::Ask, "approval_required");
+    // 2. Destructiveness / approval (§6.6–6.7). A still-valid approval lets the
+    //    call proceed; otherwise `ASK` interactively, but **fail closed** in
+    //    `BACKGROUND` (no human to ask → deny). Invariants 9 and 10.
+    if world.requires_approval(intent.action()) && !ctx.approval_granted {
+        return match ctx.mode {
+            ExecutionMode::Background => Disposition::of(Decision::Deny, "background_denies_ask"),
+            ExecutionMode::Interactive => Disposition::of(Decision::Ask, "approval_required"),
+        };
     }
 
     // 3. Budgets.

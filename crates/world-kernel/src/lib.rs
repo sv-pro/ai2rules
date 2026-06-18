@@ -338,6 +338,39 @@ mod tests {
     }
 
     #[test]
+    fn approval_required_in_background_denies() {
+        // Invariant 10: nobody to ask in BACKGROUND → fail closed.
+        let world = compile_default();
+        let ctx = EvalContext {
+            taint: TaintContext::clean(),
+            mode: ExecutionMode::Background,
+            usage: BudgetUsage::default(),
+            approval_granted: false,
+        };
+        let outcome = decide(
+            &world,
+            &default_call("start_pty", json!({})),
+            from_channel(SourceChannel::UserPrompt),
+            &ctx,
+        );
+        assert_eq!(outcome.decision(), Decision::Deny);
+    }
+
+    #[test]
+    fn granted_approval_allows() {
+        // Invariant 9 (resume): a prior approval lets the action through.
+        let world = compile_default();
+        let ctx = EvalContext::interactive_clean().with_approval(true);
+        let outcome = decide(
+            &world,
+            &default_call("start_pty", json!({})),
+            from_channel(SourceChannel::UserPrompt),
+            &ctx,
+        );
+        assert_eq!(outcome.decision(), Decision::Allow);
+    }
+
+    #[test]
     fn over_command_budget_replans() {
         let world = compile_default();
         let max = world
@@ -415,6 +448,7 @@ mod tests {
                             taint: TaintContext::from_taint(taint),
                             mode: ExecutionMode::Interactive,
                             usage,
+                            approval_granted: false,
                         };
                         let tc = default_call(action, json!({}));
                         let first = decide(&world, &tc, from_channel(ch), &ctx);

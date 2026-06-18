@@ -255,6 +255,7 @@ fn clean_ctx() -> EvalContext {
         taint: TaintContext::from_taint(Taint::Clean),
         mode: ExecutionMode::Interactive,
         usage: BudgetUsage::default(),
+        approval_granted: false,
     }
 }
 

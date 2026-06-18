@@ -17,7 +17,7 @@ pub mod orchestrator;
 pub use context::{pack, tool_surface, TurnContext};
 pub use intent::{classify, Mapping};
 pub use model::{ModelClient, ModelTurn, ScriptedModel};
-pub use orchestrator::{run, SessionConfig, SessionOutcome, TranscriptEntry};
+pub use orchestrator::{run, ApprovalPolicy, SessionConfig, SessionOutcome, TranscriptEntry};
 
 use executor::{CommandHandler, Executor, PatchHandler, ReadHandler};
 use harness_types::{ActionName, CompiledWorld};
@@ -54,10 +54,10 @@ pub fn default_executor(world: &CompiledWorld) -> Executor {
 mod tests {
     use super::*;
     use compiler::compile_default;
-    use harness_types::Taint;
+    use harness_types::{Decision, ExecutionMode, Taint};
     use provider_adapters::anthropic::tool_use_block;
     use serde_json::json;
-    use trace_store::TraceStore;
+    use trace_store::{ApprovalStore, TraceStore};
     use world_kernel::ExecEnv;
 
     /// A scripted session: read (allow → taints), fetch_web (denied by the now
@@ -82,17 +82,19 @@ mod tests {
 
     fn run_session() -> SessionOutcome {
         // The tempdir drops at the end of this fn — fine, we assert on the
-        // in-memory outcome, not the trace file on disk.
+        // in-memory outcome, not the files on disk.
         let dir = tempfile::tempdir().unwrap();
         let world = compile_default();
         let executor = default_executor(&world);
         let trace = TraceStore::open(dir.path().join("trace.jsonl"));
+        let mut store = ApprovalStore::open(dir.path().join("approvals.jsonl")).unwrap();
         let mut model = scripted();
         run(
             &world,
             &ExecEnv::default(),
             &executor,
             &trace,
+            &mut store,
             &mut model,
             &SessionConfig::default(),
         )
@@ -120,8 +122,8 @@ mod tests {
             .verdict
             .contains("UNKNOWN_TO_ONTOLOGY"));
 
-        // Approval-required action asks.
-        assert!(outcome.transcript[3].verdict.starts_with("Ask"));
+        // Approval-required action asks (default policy is Manual → pending).
+        assert!(outcome.transcript[3].verdict.starts_with("ASK"));
     }
 
     #[test]
@@ -138,26 +140,61 @@ mod tests {
         assert_eq!(a.final_text, b.final_text);
     }
 
-    #[test]
-    fn clean_read_alone_is_allowed() {
-        let world = compile_default();
+    /// Run a single proposed action under a given config and return the outcome.
+    fn run_one(action: &str, args: serde_json::Value, config: &SessionConfig) -> SessionOutcome {
         let dir = tempfile::tempdir().unwrap();
-        let trace = TraceStore::open(dir.path().join("t.jsonl"));
+        let world = compile_default();
         let executor = default_executor(&world);
-        let mut model = ScriptedModel::new([ModelTurn::ToolUse(tool_use_block(
-            "t1",
-            "read_workspace",
-            json!({ "path": "x" }),
-        ))]);
-        let outcome = run(
+        let trace = TraceStore::open(dir.path().join("t.jsonl"));
+        let mut store = ApprovalStore::open(dir.path().join("a.jsonl")).unwrap();
+        let mut model =
+            ScriptedModel::new([ModelTurn::ToolUse(tool_use_block("t1", action, args))]);
+        run(
             &world,
             &ExecEnv::default(),
             &executor,
             &trace,
+            &mut store,
             &mut model,
+            config,
+        )
+    }
+
+    #[test]
+    fn clean_read_alone_is_allowed() {
+        let outcome = run_one(
+            "read_workspace",
+            json!({ "path": "x" }),
             &SessionConfig::default(),
         );
         assert_eq!(outcome.transcript[0].verdict, "ALLOW");
         assert_eq!(outcome.transcript[0].taint, Taint::Tainted);
+    }
+
+    #[test]
+    fn auto_approve_resumes_pty_to_allow() {
+        // Invariant 9: ASK → approve → resume → ALLOW.
+        let config = SessionConfig {
+            approval: ApprovalPolicy::AutoApprove,
+            ..SessionConfig::default()
+        };
+        let outcome = run_one("start_pty", json!({}), &config);
+        assert_eq!(outcome.transcript[0].verdict, "ASK → APPROVED → ALLOW");
+        // Two decisions recorded: the initial ASK and the resumed ALLOW.
+        assert_eq!(outcome.records, 2);
+    }
+
+    #[test]
+    fn background_denies_pty() {
+        // Invariant 10: no human in BACKGROUND → fail closed, no token minted.
+        let config = SessionConfig {
+            mode: ExecutionMode::Background,
+            approval: ApprovalPolicy::AutoApprove, // irrelevant — ASK never reached
+            ..SessionConfig::default()
+        };
+        let outcome = run_one("start_pty", json!({}), &config);
+        assert!(outcome.transcript[0].verdict.starts_with("Deny"));
+        assert_eq!(outcome.records, 1);
+        let _ = Decision::Deny;
     }
 }

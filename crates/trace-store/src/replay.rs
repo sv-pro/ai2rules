@@ -81,6 +81,7 @@ fn recompute(world: &CompiledWorld, record: &DecisionRecord) -> OutcomeSummary {
             file_writes: record.context.file_writes,
             network_calls: record.context.network_calls,
         },
+        approval_granted: record.context.approval_granted,
     };
     summarize(&decide(world, &call, record.provenance.clone(), &ctx))
 }

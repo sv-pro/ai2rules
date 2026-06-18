@@ -127,6 +127,7 @@ fn main() {
             taint: TaintContext::from_taint(s.taint),
             mode: ExecutionMode::Interactive,
             usage: s.usage,
+            approval_granted: false,
         };
 
         let outcome = decide(&world, &call, provenance, &ctx);

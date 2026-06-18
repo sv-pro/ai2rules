@@ -276,20 +276,28 @@ end.
 
 ### E6 — Approvals & Execution Modes
 **Goal:** human-in-the-loop as durable state; autonomous runs fail closed.
-**Depends on:** E2, E3, E4. **Completes M2.**
+**Depends on:** E2, E3, E4. **Completes M2. Status:** done.
 
-- [ ] **E6.1** Thread `ExecutionMode` (`INTERACTIVE` / `BACKGROUND`) through
-  evaluation.
-- [ ] **E6.2** Durable `ApprovalStore` (`pending → approved/rejected →
-  executed`); persisted, not in-memory.
-- [ ] **E6.3** `ASK` lifecycle: mint token, pause, resume on approve; reject
-  path.
-- [ ] **E6.4** Bind approvals to action + params + world version + descriptor
-  hash + provenance + effect mode (no reuse after drift).
-- [ ] **E6.5** `BACKGROUND` fails closed (`ASK` → `DENY`).
+- [x] **E6.1** `ExecutionMode` threaded into `evaluate` (`EvalContext.mode`); an
+  approval-required action branches on it.
+- [x] **E6.2** Durable `ApprovalStore` (`trace-store/approval.rs`): append-only
+  JSONL of lifecycle transitions folded on load; `pending → approved/rejected →
+  executed`. Persisted, not in-memory.
+- [x] **E6.3** `ASK` lifecycle in the orchestrator: mint a pending token →
+  resolve via `ApprovalPolicy` → on approve, re-decide with the grant → `ALLOW`
+  → execute → `mark_executed`; reject path surfaces a refusal.
+- [x] **E6.4** Binding: `is_granted` matches an Approved token on action +
+  params hash + world id + descriptor hash + provenance + effect mode; any drift
+  voids reuse.
+- [x] **E6.5** `BACKGROUND` fails closed — an approval-required action collapses
+  `ASK → DENY` ("background_denies_ask"); no token minted.
 
 **Exit:** interactive approvals resume execution; background denies; tokens
-invalidated by drift. Satisfies invariants **9, 10**.
+invalidated by drift. Satisfies invariants **9, 10**. **Met** — kernel mode tests
++ 4 store tests (mint/approve/drift/reopen) + orchestrator resume/deny tests;
+full workspace at 82, `clippy -D warnings` + fmt clean offline; `approvals_demo`
+shows both paths. **Milestone M2 complete (E5–E6).** Decisions logged in
+`DECISIONS.md`.
 
 ---
 

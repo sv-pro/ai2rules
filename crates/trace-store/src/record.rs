@@ -52,6 +52,10 @@ pub struct ContextSnapshot {
     pub tokens_used: u64,
     pub file_writes: u64,
     pub network_calls: u64,
+    /// Whether a prior approval covered this call — captured so replay
+    /// reproduces an approved (resumed) decision rather than re-asking.
+    #[serde(default)]
+    pub approval_granted: bool,
 }
 
 /// Which kind of `KernelOutcome` produced this summary.

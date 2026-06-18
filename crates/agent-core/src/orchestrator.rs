@@ -1,27 +1,37 @@
-//! The model loop (E5.5): propose → adapt → decide → execute → perceive.
+//! The model loop (E5.5) with approvals (E6): propose → adapt → decide →
+//! (approve?) → execute → perceive.
 //!
-//! One deterministic pass per step. The model proposes an Anthropic `tool_use`
-//! block; the adapter normalizes it to a neutral `ToolCall`; the kernel decides;
-//! the decision is recorded to the trace; on `ALLOW` the spec is built and run
-//! through the executor (in the configured effect mode), its tainted result
-//! perceived and fed back; any non-allow verdict is fed back as a structured,
-//! erroring `ToolOutcome`. The loop never builds an `ExecutionSpec` from anything
+//! The model proposes an Anthropic `tool_use` block; the adapter normalizes it;
+//! the kernel decides under the session's `ExecutionMode`. An `ALLOW` runs; an
+//! `ASK` (interactive only — `BACKGROUND` already collapses to `DENY`) mints a
+//! durable approval token, resolves it via the session's `ApprovalPolicy`, and on
+//! approval **re-decides** with the grant → `ALLOW` → execute. Every decision is
+//! recorded to the trace. The loop never builds an `ExecutionSpec` from anything
 //! but a sealed, allowed intent (invariant 4).
 
 use executor::{ExecOutput, Executor};
 use harness_types::{
-    ContentHash, Decision, EffectMode, ExecutionMode, PayloadRef, Perception, PerceptionId,
-    PerceptionKind, Provenance, RedactionPolicy, SessionId, SourceChannel, Taint, TaintContext,
-    TraceId, TrustLevel,
+    ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision, EffectMode,
+    ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, Provenance,
+    RedactionPolicy, SessionId, SourceChannel, Taint, TaintContext, TraceId, TrustLevel,
 };
 use provider_adapters::{anthropic, ToolOutcome};
-use trace_store::{record_decision, TraceStore};
+use trace_store::{params_hash, record_decision, ApprovalStore, TraceStore};
 use world_kernel::{
-    build_execution_spec, decide, BudgetUsage, EvalContext, ExecEnv, KernelOutcome,
+    build_execution_spec, decide, BudgetUsage, EvalContext, ExecEnv, IntentIR, KernelOutcome,
 };
 
 use crate::context;
 use crate::model::{ModelClient, ModelTurn};
+
+/// How an interactive `ASK` is resolved when the loop has no live human.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalPolicy {
+    /// Leave the token pending and surface `ASK` (a real CLI would block here).
+    Manual,
+    AutoApprove,
+    AutoReject,
+}
 
 /// One recorded step of the session, for display/inspection.
 #[derive(Debug, Clone)]
@@ -36,6 +46,10 @@ pub struct TranscriptEntry {
 pub struct SessionConfig {
     /// Effect mode for allowed actions — `Simulate` for safe demos.
     pub effect_mode: EffectMode,
+    /// Whether a human is available to approve (`ASK` fails closed in background).
+    pub mode: ExecutionMode,
+    /// How an interactive `ASK` is resolved.
+    pub approval: ApprovalPolicy,
     pub max_steps: u64,
 }
 
@@ -43,6 +57,8 @@ impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             effect_mode: EffectMode::Simulate,
+            mode: ExecutionMode::Interactive,
+            approval: ApprovalPolicy::Manual,
             max_steps: 16,
         }
     }
@@ -57,12 +73,14 @@ pub struct SessionOutcome {
 }
 
 /// Drive a model through the projected surface until it answers or runs out of
-/// steps. Pure of policy — every verdict comes from the kernel.
+/// steps. Pure of policy — every verdict comes from the kernel; approvals are
+/// durable state in `store`.
 pub fn run(
-    world: &harness_types::CompiledWorld,
+    world: &CompiledWorld,
     env: &ExecEnv,
     executor: &Executor,
     trace: &TraceStore,
+    store: &mut ApprovalStore,
     model: &mut dyn ModelClient,
     config: &SessionConfig,
 ) -> SessionOutcome {
@@ -80,115 +98,271 @@ pub fn run(
     let mut taint = Taint::Clean;
     let mut records = 0usize;
 
-    for seq in 0..config.max_steps {
+    for _ in 0..config.max_steps {
         let ctx = context::pack(world, perceptions.clone());
-        match model.next(&ctx) {
+        let block = match model.next(&ctx) {
             ModelTurn::Final(text) => {
                 return SessionOutcome {
                     transcript,
                     final_text: Some(text),
                     records,
-                };
-            }
-            ModelTurn::ToolUse(block) => {
-                let call = match anthropic::tool_use_to_call(&block, session.clone()) {
-                    Ok(call) => call,
-                    Err(e) => {
-                        transcript.push(TranscriptEntry {
-                            action: "<malformed>".to_string(),
-                            verdict: format!("adapter error: {e}"),
-                            result: String::new(),
-                            taint: Taint::Clean,
-                        });
-                        continue;
-                    }
-                };
-
-                let eval = EvalContext {
-                    taint: TaintContext::from_taint(taint),
-                    mode: ExecutionMode::Interactive,
-                    usage: BudgetUsage::default(),
-                };
-                let outcome = decide(world, &call, provenance.clone(), &eval);
-                let record = record_decision(
-                    world,
-                    TraceId::new("agent"),
-                    seq,
-                    &call,
-                    &provenance,
-                    &eval,
-                    &outcome,
-                );
-                let _ = trace.append(&record);
-                records += 1;
-
-                let action = call.action_name.as_str().to_string();
-                match outcome {
-                    KernelOutcome::Evaluated {
-                        intent,
-                        disposition,
-                    } if disposition.decision == Decision::Allow => {
-                        let result = match build_execution_spec(
-                            world,
-                            &intent,
-                            config.effect_mode,
-                            env,
-                            TraceId::new("agent"),
-                        ) {
-                            Ok(spec) => match executor.run(&spec) {
-                                Ok(tv) => {
-                                    let content = describe_output(&tv.value);
-                                    taint = taint.join(tv.taint);
-                                    perceptions.push(result_perception(
-                                        &action, &content, tv.taint, &session,
-                                    ));
-                                    TranscriptEntry {
-                                        action,
-                                        verdict: "ALLOW".to_string(),
-                                        result: content,
-                                        taint: tv.taint,
-                                    }
-                                }
-                                Err(e) => TranscriptEntry {
-                                    action,
-                                    verdict: "ALLOW".to_string(),
-                                    result: format!("exec error: {e}"),
-                                    taint: Taint::Clean,
-                                },
-                            },
-                            Err(e) => TranscriptEntry {
-                                action,
-                                verdict: "ALLOW".to_string(),
-                                result: format!("spec error: {e}"),
-                                taint: Taint::Clean,
-                            },
-                        };
-                        transcript.push(result);
-                    }
-                    other => {
-                        let verdict = verdict_label(&other);
-                        // What a real model would receive back as a tool_result.
-                        let _feedback = anthropic::format_tool_result(&ToolOutcome {
-                            call_id: call.call_id.clone(),
-                            content: verdict.clone(),
-                            is_error: true,
-                        });
-                        transcript.push(TranscriptEntry {
-                            action,
-                            verdict,
-                            result: "(not executed)".to_string(),
-                            taint: Taint::Clean,
-                        });
-                    }
                 }
             }
-        }
+            ModelTurn::ToolUse(block) => block,
+        };
+
+        let call = match anthropic::tool_use_to_call(&block, session.clone()) {
+            Ok(call) => call,
+            Err(e) => {
+                transcript.push(TranscriptEntry {
+                    action: "<malformed>".to_string(),
+                    verdict: format!("adapter error: {e}"),
+                    result: String::new(),
+                    taint: Taint::Clean,
+                });
+                continue;
+            }
+        };
+
+        let action = call.action_name.as_str().to_string();
+        let base = EvalContext {
+            taint: TaintContext::from_taint(taint),
+            mode: config.mode,
+            usage: BudgetUsage::default(),
+            approval_granted: false,
+        };
+        let outcome = decide(world, &call, provenance.clone(), &base);
+        append(
+            trace,
+            world,
+            &call,
+            &provenance,
+            &base,
+            &outcome,
+            &mut records,
+        );
+
+        let entry = match outcome {
+            // Allowed outright → execute.
+            KernelOutcome::Evaluated {
+                intent,
+                disposition,
+            } if disposition.decision == Decision::Allow => run_allowed(
+                world,
+                env,
+                executor,
+                config.effect_mode,
+                &intent,
+                action,
+                &mut perceptions,
+                &mut taint,
+                &session,
+                "ALLOW",
+            ),
+
+            // Needs approval (interactive) → mint, resolve, maybe resume.
+            KernelOutcome::Evaluated { disposition, .. }
+                if disposition.decision == Decision::Ask =>
+            {
+                resolve_approval(
+                    world,
+                    env,
+                    executor,
+                    trace,
+                    store,
+                    config,
+                    &call,
+                    &provenance,
+                    base,
+                    action,
+                    &mut perceptions,
+                    &mut taint,
+                    &session,
+                    &mut records,
+                )
+            }
+
+            // Everything else is feedback the model would receive as an error.
+            other => {
+                let verdict = verdict_label(&other);
+                let _feedback = anthropic::format_tool_result(&ToolOutcome {
+                    call_id: call.call_id.clone(),
+                    content: verdict.clone(),
+                    is_error: true,
+                });
+                TranscriptEntry {
+                    action,
+                    verdict,
+                    result: "(not executed)".to_string(),
+                    taint: Taint::Clean,
+                }
+            }
+        };
+        transcript.push(entry);
     }
 
     SessionOutcome {
         transcript,
         final_text: None,
         records,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_approval(
+    world: &CompiledWorld,
+    env: &ExecEnv,
+    executor: &Executor,
+    trace: &TraceStore,
+    store: &mut ApprovalStore,
+    config: &SessionConfig,
+    call: &harness_types::ToolCall,
+    provenance: &Provenance,
+    base: EvalContext,
+    action: String,
+    perceptions: &mut Vec<Perception>,
+    taint: &mut Taint,
+    session: &SessionId,
+    records: &mut usize,
+) -> TranscriptEntry {
+    let descriptor_hash = world
+        .descriptor_hash(&call.action_name)
+        .cloned()
+        .unwrap_or_default();
+    let token = ApprovalToken::pending(
+        ApprovalTokenId::new(format!("appr-{records}")),
+        call.action_name.clone(),
+        params_hash(&call.arguments),
+        world.world_id().clone(),
+        descriptor_hash.clone(),
+        provenance.clone(),
+        config.effect_mode,
+    );
+    let id = match store.mint(token) {
+        Ok(id) => id,
+        Err(e) => {
+            return entry(action, format!("ASK (store error: {e})"));
+        }
+    };
+
+    match config.approval {
+        ApprovalPolicy::Manual => entry(action, "ASK (pending approval)".to_string()),
+        ApprovalPolicy::AutoReject => {
+            let _ = store.reject(&id);
+            entry(action, "ASK → REJECTED".to_string())
+        }
+        ApprovalPolicy::AutoApprove => {
+            let _ = store.approve(&id);
+            let granted = store.is_granted(
+                &call.action_name,
+                &call.arguments,
+                world.world_id(),
+                &descriptor_hash,
+                provenance,
+                config.effect_mode,
+            );
+            let resumed_ctx = base.with_approval(granted);
+            let resumed = decide(world, call, provenance.clone(), &resumed_ctx);
+            append(
+                trace,
+                world,
+                call,
+                provenance,
+                &resumed_ctx,
+                &resumed,
+                records,
+            );
+
+            match resumed {
+                KernelOutcome::Evaluated {
+                    intent,
+                    disposition,
+                } if disposition.decision == Decision::Allow => {
+                    let mut e = run_allowed(
+                        world,
+                        env,
+                        executor,
+                        config.effect_mode,
+                        &intent,
+                        action,
+                        perceptions,
+                        taint,
+                        session,
+                        "ASK → APPROVED → ALLOW",
+                    );
+                    let _ = store.mark_executed(&id);
+                    e.verdict = "ASK → APPROVED → ALLOW".to_string();
+                    e
+                }
+                other => entry(
+                    action,
+                    format!("ASK → APPROVED but {}", verdict_label(&other)),
+                ),
+            }
+        }
+    }
+}
+
+fn append(
+    trace: &TraceStore,
+    world: &CompiledWorld,
+    call: &harness_types::ToolCall,
+    provenance: &Provenance,
+    ctx: &EvalContext,
+    outcome: &KernelOutcome,
+    records: &mut usize,
+) {
+    let record = record_decision(
+        world,
+        TraceId::new("agent"),
+        *records as u64,
+        call,
+        provenance,
+        ctx,
+        outcome,
+    );
+    let _ = trace.append(&record);
+    *records += 1;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_allowed(
+    world: &CompiledWorld,
+    env: &ExecEnv,
+    executor: &Executor,
+    effect_mode: EffectMode,
+    intent: &IntentIR,
+    action: String,
+    perceptions: &mut Vec<Perception>,
+    taint: &mut Taint,
+    session: &SessionId,
+    verdict: &str,
+) -> TranscriptEntry {
+    match build_execution_spec(world, intent, effect_mode, env, TraceId::new("agent")) {
+        Ok(spec) => match executor.run(&spec) {
+            Ok(tv) => {
+                let content = describe_output(&tv.value);
+                *taint = taint.join(tv.taint);
+                perceptions.push(result_perception(&action, &content, tv.taint, session));
+                TranscriptEntry {
+                    action,
+                    verdict: verdict.to_string(),
+                    result: content,
+                    taint: tv.taint,
+                }
+            }
+            Err(e) => entry(action, format!("{verdict}: exec error: {e}")),
+        },
+        Err(e) => entry(action, format!("{verdict}: spec error: {e}")),
+    }
+}
+
+fn entry(action: String, verdict: String) -> TranscriptEntry {
+    TranscriptEntry {
+        action,
+        verdict,
+        result: "(not executed)".to_string(),
+        taint: Taint::Clean,
     }
 }
 

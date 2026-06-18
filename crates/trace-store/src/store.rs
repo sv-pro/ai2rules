@@ -86,6 +86,7 @@ mod tests {
                     tokens_used: 0,
                     file_writes: 0,
                     network_calls: 0,
+                    approval_granted: false,
                 },
                 outcome: OutcomeSummary {
                     kind: OutcomeKind::Evaluated,

@@ -83,6 +83,7 @@ fn main() {
             taint: TaintContext::from_taint(*taint),
             mode: ExecutionMode::Interactive,
             usage: BudgetUsage::default(),
+            approval_granted: false,
         };
         let outcome = decide(&world, &call, provenance.clone(), &ctx);
         println!("       seq {seq}: {action:<16} -> {:?}", outcome.decision());

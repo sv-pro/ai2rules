@@ -46,7 +46,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | Milestone | Theme | State |
 |---|---|---|
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
-| **M2** Live Agent | a real model drives the loop | in progress (E5 done; E6 next) |
+| **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | M3 Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | planned |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks | planned |
 
@@ -85,8 +85,15 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   trait + deterministic `ScriptedModel` keep it fully offline (a live HTTP client
   is a later, feature-gated add). Reinforces invariants 3 and 4 — starting
   Milestone 2.
+- **E6 — Approvals & Execution Modes:** human-in-the-loop as durable state. The
+  kernel branches on `ExecutionMode` — an approval-required action `ASK`s
+  interactively but **fails closed to `DENY` in background**; a durable
+  `ApprovalStore` (`trace-store`) mints/persists tokens (`pending → approved →
+  executed`) bound to the exact call, so drift voids reuse; the orchestrator
+  resumes an approved `ASK` to `ALLOW`. Honors invariants 9, 10 — **completing
+  Milestone 2.**
 
-Builds clean offline with `clippy -D warnings`; **74 unit tests** green.
+Builds clean offline with `clippy -D warnings`; **82 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -186,6 +193,19 @@ The model proposes Anthropic tool calls; the harness governs each through the on
 gate — a read is `ALLOW`ed and its tainted result feeds back, which then makes a
 web fetch `DENY` by taint, an undefined action `UNKNOWN_TO_ONTOLOGY`, and a PTY
 `ASK` — every step recorded to the trace, with no LLM on the gate.
+
+For **approvals + fail-closed background**, run:
+
+```bash
+cargo run -p agent-core --example approvals_demo
+```
+
+A `start_pty` (approval-required) action: interactive + auto-approve resumes it
+`ASK → APPROVED → ALLOW` (a durable token minted → approved → executed); in
+background it fails closed to `DENY` with no token minted.
+
+> Architectural decisions and the alternatives weighed are logged in
+> [`DECISIONS.md`](DECISIONS.md).
 
 ---
 

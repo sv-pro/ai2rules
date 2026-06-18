@@ -14,6 +14,9 @@ execution plan; the task source of truth).
 - **Don't commit the reference repos.** `agent-hypervisor/` and `safe-mcp-proxy/`
   are separate embedded git repositories kept only as references — not Cargo
   workspace members. Never `git add` them; stage harness paths explicitly.
+- **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
+  a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
+  can be revisited later.
 
 ## Build & test
 

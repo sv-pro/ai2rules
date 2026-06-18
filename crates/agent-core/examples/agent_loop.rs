@@ -15,7 +15,7 @@ use agent_core::{default_executor, run, ScriptedModel, SessionConfig, SessionOut
 use compiler::compile_default;
 use provider_adapters::anthropic::tool_use_block;
 use serde_json::json;
-use trace_store::TraceStore;
+use trace_store::{ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
 fn main() {
@@ -23,6 +23,7 @@ fn main() {
     let executor = default_executor(&world);
     let sandbox = tempfile::tempdir().expect("sandbox");
     let trace = TraceStore::open(sandbox.path().join("trace.jsonl"));
+    let mut store = ApprovalStore::open(sandbox.path().join("approvals.jsonl")).expect("store");
 
     let mut model = ScriptedModel::new([
         agent_core::ModelTurn::ToolUse(tool_use_block(
@@ -56,6 +57,7 @@ fn main() {
         &ExecEnv::default(),
         &executor,
         &trace,
+        &mut store,
         &mut model,
         &SessionConfig::default(),
     );
