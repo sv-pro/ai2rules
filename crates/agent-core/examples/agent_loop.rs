@@ -60,6 +60,7 @@ fn main() {
         &mut store,
         &mut model,
         &SessionConfig::default(),
+        None,
     );
 
     for (i, step) in transcript.iter().enumerate() {

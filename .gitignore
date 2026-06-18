@@ -1,2 +1,4 @@
 /target
 **/*.rs.bk
+# Reference projects (separate git repos kept for study, never committed here).
+/repos/

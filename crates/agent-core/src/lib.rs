@@ -150,6 +150,7 @@ mod tests {
             &mut store,
             &mut model,
             &SessionConfig::default(),
+            None,
         )
     }
 
@@ -210,6 +211,7 @@ mod tests {
             &mut store,
             &mut model,
             config,
+            None,
         )
     }
 
@@ -287,6 +289,7 @@ mod tests {
             &mut store,
             &mut model,
             &config,
+            None,
         );
         assert_eq!(outcome.transcript[0].verdict, "ALLOW");
         assert_eq!(outcome.transcript[0].taint, Taint::Tainted);

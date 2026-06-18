@@ -31,6 +31,14 @@ pub enum ApprovalPolicy {
     Manual,
     AutoApprove,
     AutoReject,
+    /// Pause and ask the human via a callback.
+    Interactive(
+        fn(
+            &harness_types::ToolCall,
+            &harness_types::CompiledWorld,
+            &harness_types::Provenance,
+        ) -> bool,
+    ),
 }
 
 /// One recorded step of the session, for display/inspection.
@@ -75,6 +83,7 @@ pub struct SessionOutcome {
 /// Drive a model through the projected surface until it answers or runs out of
 /// steps. Pure of policy — every verdict comes from the kernel; approvals are
 /// durable state in `store`.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     world: &CompiledWorld,
     env: &ExecEnv,
@@ -83,6 +92,7 @@ pub fn run(
     store: &mut ApprovalStore,
     model: &mut dyn ModelClient,
     config: &SessionConfig,
+    mut observer: Option<&mut dyn FnMut(&TranscriptEntry)>,
 ) -> SessionOutcome {
     let session = SessionId::new("agent-session");
     // The agent proposes with the developer's (trusted) authority; containment
@@ -198,6 +208,9 @@ pub fn run(
                 }
             }
         };
+        if let Some(ref mut obs) = observer {
+            obs(&entry);
+        }
         transcript.push(entry);
     }
 
@@ -251,7 +264,17 @@ fn resolve_approval(
             let _ = store.reject(&id);
             entry(action, "ASK → REJECTED".to_string())
         }
-        ApprovalPolicy::AutoApprove => {
+        ApprovalPolicy::AutoApprove | ApprovalPolicy::Interactive(_) => {
+            let approved = match config.approval {
+                ApprovalPolicy::Interactive(cb) => cb(call, world, provenance),
+                _ => true,
+            };
+
+            if !approved {
+                let _ = store.reject(&id);
+                return entry(action, "ASK → REJECTED (interactive)".to_string());
+            }
+
             let _ = store.approve(&id);
             let granted = store.is_granted(
                 &call.action_name,

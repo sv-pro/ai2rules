@@ -58,7 +58,7 @@ utility on a benchmark suite.
 | **M1 — Deterministic Core** | Kernel works in simulation | E0, E1, E2, E3, E4 | Vertical slice: `read_file` → kernel → sim executor → trace → replay, all deterministic |
 | **M2 — Live Agent** | A real model drives the loop | E5, E6 | One provider proposes through the projected surface; interactive approvals work; background fails closed |
 | **M3 — Full Tool Surface** | Real-world capabilities | E7, E9 | MCP + web + scoped capabilities behind one gate; usable interactive CLI/TUI |
-| **M4 — Isolation & Hardening** | Production posture | E8, E10 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green |
+| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design |
 
 ### Dependency sketch
 
@@ -70,8 +70,10 @@ E0 ─┬─> E1 ─┬─> E2 ─┬─> E3 ─┬─> E4 ──(M1)
     │       └─────────────> E7 ──┐
     └─────────────────────> E9 ──┴─(M3)
                             E8 ──┐
-                            E10 ─┴─(M4, depends on all)
+                            E10 ─┼─(M4, depends on all)
+                            E11 ─┘
 ```
+
 
 ---
 
@@ -350,13 +352,13 @@ independent backstops. Hardens invariant **8**.
 ### E9 — CLI / TUI
 **Goal:** the user-facing harness. **Depends on:** E5, E6. **Completes M3.**
 
-- [ ] **E9.1** Terminal UX: prompt input, streaming output, status.
-- [ ] **E9.2** Approval UX surfacing action / reasoning / provenance, with
-  one-shot vs manifest-extension paths kept separate.
-- [ ] **E9.3** Structured rendering of `ABSENT` / `DENY` / `ASK` / `REPLAN`
+- [x] **E9.1** Terminal UX: prompt input, streaming output, status. (Basic REPL loop using `inquire`).
+- [x] **E9.2** Approval UX surfacing action / reasoning / provenance, with
+  one-shot vs manifest-extension paths kept separate. (Using `ApprovalPolicy::Interactive` callback).
+- [~] **E9.3** Structured rendering of `ABSENT` / `DENY` / `ASK` / `REPLAN`
   feedback (not vague prose).
-- [ ] **E9.4** Session management, world selection, mode toggle.
-- [ ] **E9.5** `--simulate` flag to run against the simulation executor for safe
+- [x] **E9.4** Session management, world selection, mode toggle. (Via `--world`, `--background` CLI args).
+- [x] **E9.5** `--simulate` flag to run against the simulation executor for safe
   demos/tests.
 
 **Exit:** a developer can run the harness interactively against the default world
@@ -382,6 +384,23 @@ end to end.
 regression gates enforced.
 
 ---
+
+### E11 — World Authoring Tool (Design-Time UI)
+**Goal:** A browser-based visual editor for drafting, testing, and visualizing world manifests with real-time feedback on the resulting tool surface, capability mapping, and security decisions. **Depends on:** E1, E2, E4, E5. **Status:** [ ] not started.
+
+- [ ] **E11.1** Scaffolding the React/Vite SPA frontend: 3-column layout (registered/base tools + scoped capabilities on the left, YAML manifest editor with live syntax highlighting/linting in the center, and a live "Effective Tool Surface" + preview panel on the right).
+- [ ] **E11.2** Local Rust API Endpoint: Implement a thin API server subcommand in the CLI harness (e.g. `cli-harness serve --port 8080`) that hosts the static SPA assets and exposes endpoints:
+  - `GET /api/base-tools`: List available base tools/actions and their descriptor schemas.
+  - `POST /api/manifest/compile`: Compiles draft YAML manifest and returns errors or structural success.
+  - `POST /api/manifest/preview`: Accepts a draft YAML manifest and returns the projected tool surface (names, renames, stripped/literal args) and decision matrix (ALLOW/ASK/DENY/ABSENT with reasons).
+- [ ] **E11.3** Live Preview UI Panel: Render the compiled tool surface with color-coded collision flags, mapped scoped capability parameters, and simulated execution previews.
+- [ ] **E11.4** Manifest Exporter: Support local download/save of validated YAML manifest files (updating the workspace `.agents/default_world.yaml` if configured).
+- [ ] **E11.5** Integration with E10.5: Embed manifest-drafting LLM assistant and trace-failure explainer in the UI (e.g., loading an audit trace file to visually trace a denied action and suggest manifest edits to resolve it).
+
+**Exit:** Developer can start `cli-harness serve`, edit the manifest YAML side-by-side with live compilation and tool-surface preview, and download/commit the result.
+
+---
+
 
 ## Acceptance invariant coverage
 

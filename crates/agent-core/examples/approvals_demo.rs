@@ -64,6 +64,7 @@ fn run_once(label: &str, mode: ExecutionMode, approval: ApprovalPolicy) {
         &mut store,
         &mut model,
         &config,
+        None,
     );
 
     println!("  {label}");

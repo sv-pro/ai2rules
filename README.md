@@ -47,8 +47,8 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 |---|---|---|
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
-| **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | in progress (E7 done; E9 next) |
-| M4 Isolation & Hardening | sandbox + acceptance + benchmarks | planned |
+| **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | in progress (E7 done; E9 interactive CLI in place) |
+| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI | planned (E8, E10, E11) |
 
 **Done so far:**
 
@@ -99,6 +99,12 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   same descriptor/drift path (invariant 11); web fetch is an always-tainted
   channel (invariant 7). MCP/web use deterministic **mock** transports (real
   stdio/HTTP deferred). Starts Milestone 3.
+- **E9 — CLI / TUI (in progress):** `cargo run --bin harness` is now an
+  interactive session — `clap` flags (`--world`/`--simulate`/`--background`), a
+  human-driven `ModelClient` that proposes from the projected tool surface via
+  `inquire`, and approval prompts through an `ApprovalPolicy::Interactive`
+  callback; each step streams through the loop's observer. Structured
+  ABSENT/DENY/ASK/REPLAN rendering (E9.3) is still being polished.
 
 Builds clean offline with `clippy -D warnings`; **89 unit tests** green.
 
@@ -123,8 +129,10 @@ crates/               the harness implementation
 docs/                 architecture (harness-architecture.md is canonical)
 PLAN.md               epic-level execution plan
 CLAUDE.md             repo conventions for Claude Code / contributors
-agent-hypervisor/     reference project (separate repo, not a workspace member)
-safe-mcp-proxy/       reference project (separate repo, not a workspace member)
+repos/                reference projects (separate git repos, not workspace members)
+  agent-hypervisor/   research kernel
+  safe-mcp-proxy/     productized MCP control plane
+  mcp-tool-projection/ declarative MCP projections + authoring-UI pattern (informs E11)
 ```
 
 `harness-types` is the foundation: every other crate depends inward on it.
@@ -143,7 +151,7 @@ cargo build --workspace
 cargo test  --workspace
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo run --bin harness        # prints the E0 skeleton banner
+cargo run --bin harness        # interactive harness (flags: --world <yaml> --simulate --background)
 ```
 
 CI runs all four checks on every push and PR
@@ -229,14 +237,18 @@ tainted (invariant 7). MCP/web use deterministic mock transports.
 
 ## Reference projects
 
-The harness distills the best ideas from two prior projects kept alongside it
-(as separate git repositories, not Cargo workspace members):
+The harness distills the best ideas from prior projects kept alongside it under
+`repos/` (separate git repositories, not Cargo workspace members):
 
-- **`agent-hypervisor/`** — the research kernel: sealed typed intent, monotonic
-  taint, the process boundary, design-time HITL, invariants-as-physics.
-- **`safe-mcp-proxy/`** — the productized MCP control plane: `ABSENT`/`DENY`/`ASK`
-  semantics, descriptor-drift detection, scoped capabilities, provider adapters,
-  append-only audit and replay.
+- **`repos/agent-hypervisor/`** — the research kernel: sealed typed intent,
+  monotonic taint, the process boundary, design-time HITL, invariants-as-physics.
+- **`repos/safe-mcp-proxy/`** — the productized MCP control plane:
+  `ABSENT`/`DENY`/`ASK` semantics, descriptor-drift detection, scoped
+  capabilities, provider adapters, append-only audit and replay.
+- **`repos/mcp-tool-projection/`** — declarative MCP tool projections
+  (`verbatim`/`partial`/`simulated`/`absent`) and a browser **authoring tool**
+  with a live "effective tool surface" preview — the pattern behind **E11**
+  (World Authoring Tool); see `DECISIONS.md` D17.
 
 `docs/harness-architecture.md` attributes each borrowed principle to its source.
 

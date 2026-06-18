@@ -36,15 +36,32 @@ base_actions:
   - name: read_workspace
     action_type: Read
     side_effect: Read
+    schema:
+      type: object
+      properties:
+        path: { type: string, description: "Path to read" }
   - name: write_workspace
     action_type: Write
     side_effect: FilesystemWrite
+    schema:
+      type: object
+      properties:
+        path: { type: string, description: "Path to write" }
+        content: { type: string, description: "File contents" }
   - name: apply_patch
     action_type: Patch
     side_effect: FilesystemWrite
+    schema:
+      type: object
+      properties:
+        patch: { type: string, description: "Unified diff/patch content" }
   - name: run_command
     action_type: Command
     side_effect: Process
+    schema:
+      type: object
+      properties:
+        command: { type: string, description: "Shell command string to run" }
   - name: start_pty
     action_type: Pty
     side_effect: Process
@@ -53,12 +70,25 @@ base_actions:
     action_type: Mcp
     side_effect: External
     backing: !McpServer { server: docs, tool: search }
+    schema:
+      type: object
+      properties:
+        query: { type: string, description: "Search query" }
   - name: fetch_web
     action_type: Web
     side_effect: Network
+    schema:
+      type: object
+      properties:
+        url: { type: string, description: "URL to fetch" }
   - name: update_memory
     action_type: Memory
     side_effect: Memory
+    schema:
+      type: object
+      properties:
+        key: { type: string }
+        value: { type: string }
 
 scoped_capabilities:
   - name: read_repo_file

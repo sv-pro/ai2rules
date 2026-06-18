@@ -104,7 +104,7 @@ fn main() {
 
     println!("  B) loop (mock MCP/web, EXECUTE):");
     let outcome = run(
-        &world, &env, &executor, &trace, &mut store, &mut model, &config,
+        &world, &env, &executor, &trace, &mut store, &mut model, &config, None,
     );
     for step in &outcome.transcript {
         println!(
