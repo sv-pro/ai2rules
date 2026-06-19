@@ -39,12 +39,12 @@ To get this flywheel spinning quickly, implement these three automation steps:
 2.  [ ] **Standardize the Demo Pipeline:** Create a template `.tape` file. Ensure that whenever a new security test case is written, running `make demo` automatically spits out a polished, high-res GIF of the terminal output.
 3.  [ ] **Template the Blog:** Create a `DeepDive.md` template in the Astro setup with pre-filled headers: *The Threat*, *Why Current Defenses Fail*, *The Deterministic Solution*, and *The Demo*.
 
-## The Daily Loop
-1. Wake up and read the automated `DISCOVERY_LOG.md`.
-2. Pick an interesting vulnerability and build the defense (Development).
-3. Run `make demo` to capture the proof.
-4. Fill out the `DeepDive.md` template and publish (Advocacy).
-5. Read social feedback to seed tomorrow's Discovery.
+## The Daily Loop (Filesystem Kanban)
+1. Check `_tasks/1_discovery/` for new vulnerabilities found by Codex.
+2. Review the task and assign it to Claude Code for Development (`_tasks/2_development/`).
+3. Claude builds the defense, tests it, and moves it to `_tasks/3_advocacy/`.
+4. Antigravity monitors `3_advocacy/`, generates the `.tape` proof, writes the `DeepDive.md` blog, and moves the task to `_tasks/4_done/`.
+5. Review social feedback to seed tomorrow's `1_discovery/`.
 
 ---
 
@@ -57,25 +57,36 @@ It is entirely possible to have **Claude Code**, **Codex**, and **Antigravity** 
 Agents are restricted to specific directories. They are not allowed to modify files outside their domain.
 
 *   **Codex (The Radar - Discovery)**
-    *   **Domain:** `_research/`, `scripts/`
-    *   **Task:** Runs continuous background scripts querying Hacker News/arXiv. Summarizes findings.
-    *   **Write Access:** Strictly restricted to appending to `_research/DISCOVERY_LOG.md`.
+    *   **Domain:** `_tasks/1_discovery/`, `scripts/`
+    *   **Task:** Runs continuous background scripts querying Hacker News/arXiv. Summarizes findings into individual markdown files.
+    *   **Write Access:** Strictly restricted to creating new files in `_tasks/1_discovery/`.
 *   **Claude Code (The Engine - Development)**
-    *   **Domain:** `crates/`, `src/`, `tests/`
-    *   **Task:** Polls `_research/DISCOVERY_LOG.md`. When a new attack vector is logged, it writes failing tests, implements the Rust/Python defense, and ensures the suite goes green.
-    *   **Write Access:** Modifies core code. Upon success, it appends a technical summary of the fix to `_research/DEFENSE_IMPLEMENTED.md`.
+    *   **Domain:** `crates/`, `src/`, `tests/`, `_tasks/2_development/`
+    *   **Task:** Polls `_tasks/2_development/`. When a new task appears, it writes failing tests, implements the Rust/Python defense, and ensures the suite goes green.
+    *   **Write Access:** Modifies core code. Upon success, it appends a technical summary to the task file and uses `mv` to send it to `_tasks/3_advocacy/`.
 *   **Antigravity (The Megaphone - Advocacy)**
-    *   **Domain:** `docs/`, `demos/`, `blog/`
-    *   **Task:** Polls `_research/DEFENSE_IMPLEMENTED.md`. When a defense is ready, Antigravity generates the `.tape` files for the VHS terminal recording, scaffolds the Astro MDX blog post, and formats the architecture diagrams.
-    *   **Write Access:** Restricted to documentation, media assets, and the blog directory.
+    *   **Domain:** `docs/`, `demos/`, `blog/`, `_tasks/3_advocacy/`
+    *   **Task:** Polls `_tasks/3_advocacy/`. When a task arrives, Antigravity generates `.tape` files, scaffolds the Astro MDX post, and formats architecture diagrams.
+    *   **Write Access:** Modifies documentation/blog. Uses `mv` to archive the completed task to `_tasks/4_done/`.
 
-### 2. The Handoff Mechanism (Files as Queues)
+### 2. The Handoff Mechanism (Filesystem Kanban)
 
-The golden rule for parallel agent execution: **Agents never communicate by modifying the same code files.** 
+The golden rule for parallel agent execution: **Agents never communicate by modifying the same files concurrently.** 
 
-Instead, they use append-only Markdown files as asynchronous event queues:
-1. Codex pushes to `DISCOVERY_LOG.md`.
-2. Claude Code pulls from `DISCOVERY_LOG.md`, writes code, and pushes to `DEFENSE_IMPLEMENTED.md`.
-3. Antigravity pulls from `DEFENSE_IMPLEMENTED.md`, generates the content, and pushes to `docs/BLOG_PLAN.md` / social channels.
+Instead of an append-only log that causes race conditions, use a **Filesystem Kanban Board**. 
 
-By using physical files as handoff queues and strictly bounding their working directories (which can be enforced by the `cli-agent` harness itself!), all three agents can spin the flywheel concurrently without a single merge conflict.
+The structure:
+```text
+_tasks/
+  ├── 1_discovery/           (Inbox for Codex)
+  ├── 2_development/         (Inbox for Claude Code)
+  ├── 3_advocacy/            (Inbox for Antigravity)
+  └── 4_done/                (Archive)
+```
+
+1. **Codex** creates `prompt-injection-bypass.md` in `1_discovery/`. 
+2. When ready, the file is moved to `2_development/`.
+3. **Claude Code** takes ownership, writes the code, and runs `mv prompt-injection-bypass.md ../3_advocacy/`. 
+4. **Antigravity** takes ownership, writes the blog post, and runs `mv prompt-injection-bypass.md ../4_done/`.
+
+**Why this works:** The `mv` command in Linux is an atomic operation. Moving a file instantly transfers "ownership" of the task to the next agent, ensuring zero concurrency conflicts while running totally in parallel.
