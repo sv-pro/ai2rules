@@ -405,7 +405,7 @@ regression gates enforced.
 ---
 
 ### E12 — Developer Advocacy & Blog Platform
-**Goal:** Establish industry authority in deterministic AI execution via a Google Discover-optimized blog. **Depends on:** M1, M2. **Status:** 🚧 in progress (E12.1 + drafts E12.3–E12.5 done & accuracy-reviewed; E12.2 partial; E12.6 pending). Site lives in `blog/` (Astro).
+**Goal:** Establish industry authority in deterministic AI execution via a Google Discover-optimized blog. **Depends on:** M1, M2. **Status:** 🚀 **live at [ai2rules.dev](https://ai2rules.dev)** (Astro site in `blog/`, deployed on Cloudflare Pages, registrar Namecheap — see `blog/DEPLOY.md`). E12.1 + drafts E12.3–E12.5 done & accuracy-reviewed; E12.2 partial (JSON-LD/OG/RSS/sitemap live; WebSub + auto OG-image + AVIF pending); E12.6 (promotion) and Search Console submission pending.
 
 - [x] **E12.1 [Tech]** Scaffold the blog platform: Astro project (MDX, sitemap, RSS, local fonts for Core Web Vitals), `sharp`-based image optimization, and `<meta name="robots" content="max-image-preview:large">`. (Images optimize to WebP today; AVIF output not yet enabled.)
 - [ ] **E12.2 [Tech]** Implement SEO & Discovery layer: **Done** — `Article`/`TechArticle` JSON-LD, OpenGraph/Twitter cards (per-post hero image), RSS + sitemap. **Pending** — WebSub/pubsub pinging for instant indexing and automated OG-image generation. (Production `site` set to `https://ai2rules.dev`.)
