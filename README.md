@@ -137,7 +137,8 @@ crates/               the harness implementation
   cli-harness/        terminal entrypoint + `serve` authoring tool (binary `harness`) (E9, E11)
 docs/                 architecture (harness-architecture.md is canonical)
 PLAN.md               epic-level execution plan
-CLAUDE.md             repo conventions for Claude Code / contributors
+AGENTS.md             repo conventions (canonical; shared across AI assistants)
+CLAUDE.md             Claude Code pointer → AGENTS.md
 repos/                reference projects (separate git repos, not workspace members)
   agent-hypervisor/   research kernel
   safe-mcp-proxy/     productized MCP control plane
