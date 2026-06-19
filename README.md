@@ -48,7 +48,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
-| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI | planned (E8, E10, E11) |
+| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog | planned (E8, E10, E11, E12) |
 
 **Done so far:**
 

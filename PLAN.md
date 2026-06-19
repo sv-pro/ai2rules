@@ -58,7 +58,7 @@ utility on a benchmark suite.
 | **M1 — Deterministic Core** | Kernel works in simulation | E0, E1, E2, E3, E4 | Vertical slice: `read_file` → kernel → sim executor → trace → replay, all deterministic |
 | **M2 — Live Agent** | A real model drives the loop | E5, E6 | One provider proposes through the projected surface; interactive approvals work; background fails closed |
 | **M3 — Full Tool Surface** | Real-world capabilities | E7, E9 | MCP + web + scoped capabilities behind one gate; usable interactive CLI/TUI |
-| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design |
+| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11, E12 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design; establish industry authority via tech blog |
 
 ### Dependency sketch
 
@@ -71,7 +71,8 @@ E0 ─┬─> E1 ─┬─> E2 ─┬─> E3 ─┬─> E4 ──(M1)
     └─────────────────────> E9 ──┴─(M3)
                             E8 ──┐
                             E10 ─┼─(M4, depends on all)
-                            E11 ─┘
+                            E11 ─┤
+                            E12 ─┘
 ```
 
 
@@ -401,6 +402,18 @@ regression gates enforced.
 - [ ] **E11.5** Integration with E10.5: Embed manifest-drafting LLM assistant and trace-failure explainer in the UI (e.g., loading an audit trace file to visually trace a denied action and suggest manifest edits to resolve it).
 
 **Exit:** Developer can start `cli-harness serve`, edit the manifest YAML side-by-side with live compilation and tool-surface preview, and download/commit the result.
+
+---
+
+### E12 — Developer Advocacy & Blog Platform
+**Goal:** Establish industry authority in deterministic AI execution via a Google Discover-optimized blog. **Depends on:** M1, M2. **Status:** [ ] not started.
+
+- [ ] **E12.1 [Tech]** Scaffold the blog platform: Initialize an Astro project optimized for Core Web Vitals, MDX for content, automated WebP/AVIF image generation, and `<meta name="robots" content="max-image-preview:large">`.
+- [ ] **E12.2 [Tech]** Implement SEO & Discovery layer: Generate `Article` / `TechArticle` JSON-LD schema, configure automated OpenGraph/Twitter Card generation, and setup WebSub/RSS feeds for instant indexing.
+- [ ] **E12.3 [Content]** Draft "Why 'Deny' is Dangerous: The Case for Absent Tools in AI" (Thought Leadership): Focus on the architectural failure of wrappers vs. kernels, and the case for "Absent over Deny." Include a stark architectural diagram.
+- [ ] **E12.4 [Content]** Draft "AI Aikido: Using Deterministic Rules to Neutralize Prompt Injection" (Deep Dive): Translate ADRs to prose, focusing on the `WorldManifest`, the design-time stochastic vs runtime deterministic philosophy.
+- [ ] **E12.5 [Content]** Draft "Running Claude Code Safely: A Sandbox Setup Guide" (Tutorial): Provide a practical guide to using the `cli-harness`, demonstrating the interactive approval UI and preventing destructive commands.
+- [ ] **E12.6 [Promotion]** Kickstart Discover algorithm: Seed initial deep dives and architecture arguments on Hacker News, relevant subreddits (`r/LocalLLaMA`, `r/rust`, `r/MachineLearning`), and X (Twitter threads).
 
 ---
 
