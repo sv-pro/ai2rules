@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>World Authoring Tool — CLI Agent Harness</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --muted: #8b949e;
+    --fg: #e6edf3; --accent: #58a6ff;
+    --allow: #3fb950; --deny: #f85149; --ask: #d29922; --absent: #a371f7;
+    --replan: #39c5cf; --unknown: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg); font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .tagline { color: var(--muted); font-size: 12px; }
+  header .meta { margin-left: auto; color: var(--muted); font-size: 12px; }
+  header .meta code { color: var(--accent); }
+  .cols { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
+  .col:last-child { border-right: none; }
+  .col h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  .col .body { flex: 1; overflow: auto; padding: 12px 14px; }
+  textarea {
+    flex: 1; width: 100%; resize: none; border: none; outline: none;
+    background: var(--bg); color: var(--fg); padding: 12px 14px;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2;
+  }
+  .toolbar { padding: 8px 14px; border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
+  button {
+    background: var(--accent); color: #0d1117; border: none; border-radius: 6px;
+    padding: 6px 14px; font-weight: 600; cursor: pointer; font-size: 13px;
+  }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .hint { color: var(--muted); font-size: 12px; }
+  .error { color: var(--deny); white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+
+  .action { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel); }
+  .action .name { font-family: ui-monospace, monospace; font-weight: 600; }
+  .badge { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; border-radius: 999px; padding: 1px 7px; margin-left: 6px; border: 1px solid var(--border); color: var(--muted); }
+  .badge.scoped { color: var(--absent); border-color: var(--absent); }
+  .action .attrs { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .action .args { margin-top: 6px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .action .args div { color: var(--muted); }
+  .action .args b { color: var(--fg); font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  td.act { font-family: ui-monospace, monospace; }
+  .pill { display: inline-block; font-weight: 700; font-size: 11px; letter-spacing: .03em; }
+  .rule { color: var(--muted); font-size: 11px; display: block; }
+  .d-Allow { color: var(--allow); } .d-Deny { color: var(--deny); } .d-Ask { color: var(--ask); }
+  .d-Absent { color: var(--absent); } .d-Replan { color: var(--replan); } .d-UNKNOWN { color: var(--unknown); }
+  .empty { color: var(--muted); padding: 8px 0; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>World Authoring Tool</h1>
+    <span class="tagline">edit a manifest → see the effective tool surface &amp; the kernel's decisions, live</span>
+    <span class="meta" id="meta"></span>
+  </header>
+
+  <div class="cols">
+    <div class="col">
+      <h2>Manifest (YAML)</h2>
+      <textarea id="yaml" spellcheck="false" placeholder="loading default world…"></textarea>
+      <div class="toolbar">
+        <button id="preview">Compile &amp; Preview</button>
+        <button id="reset" class="ghost">Reset to default</button>
+        <span class="hint" id="status">auto-previews as you type</span>
+      </div>
+    </div>
+
+    <div class="col">
+      <h2>Effective Tool Surface</h2>
+      <div class="body" id="surface"></div>
+    </div>
+
+    <div class="col">
+      <h2>Decision Matrix</h2>
+      <div class="body" id="decisions"></div>
+    </div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const yamlEl = $("yaml"), surfaceEl = $("surface"), decisionsEl = $("decisions");
+  const metaEl = $("meta"), statusEl = $("status");
+
+  function decisionClass(d) {
+    return "d-" + d; // matches Allow/Deny/Ask/Absent/Replan/UNKNOWN
+  }
+
+  function renderError(msg) {
+    metaEl.textContent = "";
+    surfaceEl.innerHTML = '<div class="error">' + escapeHtml(msg) + "</div>";
+    decisionsEl.innerHTML = "";
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  }
+
+  function renderSurface(surface) {
+    if (!surface.length) { surfaceEl.innerHTML = '<div class="empty">no actions projected</div>'; return; }
+    surfaceEl.innerHTML = surface.map((a) => {
+      const badge = a.kind === "scoped"
+        ? '<span class="badge scoped">scoped</span>'
+        : '<span class="badge">base</span>';
+      let args = "";
+      if (a.args && Object.keys(a.args).length) {
+        args = '<div class="args">' + Object.entries(a.args)
+          .map(([k, v]) => "<div><b>" + escapeHtml(k) + "</b>: " + escapeHtml(v) + "</div>")
+          .join("") + "</div>";
+      }
+      return '<div class="action"><div class="name">' + escapeHtml(a.name) + badge + "</div>"
+        + '<div class="attrs">' + escapeHtml(a.action_type) + " · " + escapeHtml(a.side_effect) + "</div>"
+        + args + "</div>";
+    }).join("");
+  }
+
+  function cell(v) {
+    return '<span class="pill ' + decisionClass(v.decision) + '">' + escapeHtml(v.decision) + "</span>"
+      + '<span class="rule">' + escapeHtml(v.rule) + "</span>";
+  }
+
+  function renderDecisions(decisions) {
+    if (!decisions.length) { decisionsEl.innerHTML = '<div class="empty">nothing to decide</div>'; return; }
+    decisionsEl.innerHTML = '<table><thead><tr><th>Action</th><th>Clean</th><th>Tainted</th></tr></thead><tbody>'
+      + decisions.map((d) =>
+          '<tr><td class="act">' + escapeHtml(d.action) + "</td>"
+          + "<td>" + cell(d.clean) + "</td>"
+          + "<td>" + cell(d.tainted) + "</td></tr>"
+        ).join("")
+      + "</tbody></table>";
+  }
+
+  async function preview() {
+    statusEl.textContent = "compiling…";
+    try {
+      const res = await fetch("/api/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yaml: yamlEl.value }),
+      });
+      const data = await res.json();
+      if (!data.ok) { renderError(data.error || "unknown error"); statusEl.textContent = "error"; return; }
+      metaEl.innerHTML = "world <code>" + escapeHtml(data.world_id) + "</code> · hash <code>"
+        + escapeHtml(data.manifest_hash) + "</code>";
+      renderSurface(data.surface);
+      renderDecisions(data.decisions);
+      statusEl.textContent = "ok";
+    } catch (e) {
+      renderError("request failed: " + e);
+      statusEl.textContent = "error";
+    }
+  }
+
+  let timer = null;
+  yamlEl.addEventListener("input", () => {
+    clearTimeout(timer);
+    statusEl.textContent = "…";
+    timer = setTimeout(preview, 400);
+  });
+  $("preview").addEventListener("click", preview);
+
+  async function loadDefault() {
+    const res = await fetch("/api/world/default");
+    const data = await res.json();
+    yamlEl.value = data.yaml;
+    preview();
+  }
+  $("reset").addEventListener("click", loadDefault);
+
+  loadDefault();
+</script>
+</body>
+</html>

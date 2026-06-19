@@ -11,10 +11,15 @@ use std::path::PathBuf;
 use trace_store::{ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
+mod serve;
+
 /// CLI Agent Harness
 #[derive(Parser, Debug)]
-#[command(author, version, about = "CLI Agent Harness (E9)", long_about = None)]
+#[command(author, version, about = "CLI Agent Harness", long_about = None)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// Run in simulate mode (no side effects)
     #[arg(long)]
     simulate: bool,
@@ -26,6 +31,17 @@ struct Cli {
     /// Path to world manifest (YAML)
     #[arg(long)]
     world: Option<PathBuf>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    /// Launch the World Authoring Tool: a local browser editor for world
+    /// manifests, backed by the real compiler + kernel (E11).
+    Serve {
+        /// Port to bind on 127.0.0.1
+        #[arg(long, default_value_t = 8787)]
+        port: u16,
+    },
 }
 
 struct InteractiveModel;
@@ -97,6 +113,14 @@ fn ask_approval(call: &ToolCall, _world: &CompiledWorld, _provenance: &Provenanc
 
 fn main() {
     let cli = Cli::parse();
+
+    if let Some(Command::Serve { port }) = cli.command {
+        if let Err(e) = serve::run(port) {
+            eprintln!("authoring server error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     let world = if let Some(path) = cli.world {
         let content = std::fs::read_to_string(path).expect("failed to read world file");

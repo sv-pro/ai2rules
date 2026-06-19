@@ -390,14 +390,13 @@ regression gates enforced.
 ---
 
 ### E11 — World Authoring Tool (Design-Time UI)
-**Goal:** A browser-based visual editor for drafting, testing, and visualizing world manifests with real-time feedback on the resulting tool surface, capability mapping, and security decisions. **Depends on:** E1, E2, E4, E5. **Status:** [ ] not started.
+**Goal:** A browser-based visual editor for drafting, testing, and visualizing world manifests with real-time feedback on the resulting tool surface, capability mapping, and security decisions. **Depends on:** E1, E2, E4, E5. **Status:** 🚧 in progress (E11.1–E11.3 done; E11.4–E11.5 pending).
 
-- [ ] **E11.1** Scaffolding the React/Vite SPA frontend: 3-column layout (registered/base tools + scoped capabilities on the left, YAML manifest editor with live syntax highlighting/linting in the center, and a live "Effective Tool Surface" + preview panel on the right).
-- [ ] **E11.2** Local Rust API Endpoint: Implement a thin API server subcommand in the CLI harness (e.g. `cli-harness serve --port 8080`) that hosts the static SPA assets and exposes endpoints:
-  - `GET /api/base-tools`: List available base tools/actions and their descriptor schemas.
-  - `POST /api/manifest/compile`: Compiles draft YAML manifest and returns errors or structural success.
-  - `POST /api/manifest/preview`: Accepts a draft YAML manifest and returns the projected tool surface (names, renames, stripped/literal args) and decision matrix (ALLOW/ASK/DENY/ABSENT with reasons).
-- [ ] **E11.3** Live Preview UI Panel: Render the compiled tool surface with color-coded collision flags, mapped scoped capability parameters, and simulated execution previews.
+- [x] **E11.1** Single embedded HTML/JS authoring page (no build step; see D18): 3-column layout — YAML manifest editor on the left (plain textarea, auto-previews on input), the effective tool surface in the center, and the kernel's decision matrix on the right. (Live syntax highlighting/linting deferred.)
+- [x] **E11.2** Local Rust API endpoint: a `harness serve [--port <N>]` subcommand runs a std-only blocking HTTP server that serves the embedded page plus two JSON endpoints, backed by the **real** compiler + kernel:
+  - `GET /api/world/default`: the bundled default manifest YAML (seeds the editor).
+  - `POST /api/preview {yaml}`: compiles a draft manifest and returns a parse/compile error, or the projected tool surface (name, base/scoped kind, action/side-effect type, scoped-cap args) plus a per-action decision matrix.
+- [x] **E11.3** Live preview UI: renders the projected tool surface and a color-coded clean-vs-tainted decision matrix (ALLOW/ASK/DENY/ABSENT/REPLAN/UNKNOWN + the deciding rule) that updates as the manifest changes. (Collision flags / simulated-execution previews deferred.)
 - [ ] **E11.4** Manifest Exporter: Support local download/save of validated YAML manifest files (updating the workspace `.agents/default_world.yaml` if configured).
 - [ ] **E11.5** Integration with E10.5: Embed manifest-drafting LLM assistant and trace-failure explainer in the UI (e.g., loading an audit trace file to visually trace a denied action and suggest manifest edits to resolve it).
 

@@ -175,10 +175,30 @@ commit, or the code. Status is `Accepted` unless later `Superseded by D<n>`.
   audit trail consistent — rewriting to the base would mismatch the hash.
 
 ## D17 — World Authoring Tool architecture
-- **Epic:** E11 · **Status:** Accepted
+- **Epic:** E11 · **Status:** Accepted (UI stack refined by D18)
 - **Decision:** Adopting the 3-column UI pattern of `mcp-tool-projection` (visualizing live tools + scoped caps vs. manifest YAML vs. effective tool surface & decisions). The implementation uses a dual stack: a TypeScript React/Vite SPA hosted locally from a thin Rust HTTP API (integrated directly into the harness CLI, e.g. via `cli-harness serve`).
 - **Alternatives:**
   1. Build a pure Rust Terminal User Interface (TUI).
   2. Implement the manifest evaluation/projection rules in TypeScript/Node for the UI backend to keep the tool standalone.
 - **Why:** A browser-based UI is far more expressive and faster to develop for complex JSON/YAML hierarchies and side-by-side comparative views than a Rust TUI. However, rebuilding the complex governance kernel logic (taint propagation, budget checking, descriptor hashing, ontology resolving, scoped cap argument stripping) in TypeScript would lead to double maintenance and inevitable drift. A thin Rust HTTP endpoint wraps the actual production compiler/kernel, ensuring 100% fidelity.
+
+## D18 — Authoring UI ships as one embedded HTML page, not a React/Vite SPA
+- **Epic:** E11 · **Status:** Accepted · **Refines:** D17
+- **Decision:** `harness serve` hosts the World Authoring Tool as a single static
+  HTML/JS page (`crates/cli-harness/src/ui.html`, embedded via `include_str!`)
+  served by a tiny std-only **blocking** HTTP server (`cli-harness/src/serve.rs`)
+  over two JSON endpoints. No JavaScript framework, build step, or runtime
+  dependency; the page is vanilla JS and the binary embeds it.
+- **Alternatives:** The React/Vite SPA of D17; a Rust TUI; an async HTTP stack
+  (axum/tokio) for the API.
+- **Why:** D17's core decision — preview through the *real* compiler/kernel via a
+  thin Rust HTTP API (100% fidelity, no governance logic reimplemented) — is
+  unchanged and met. But a React/Vite SPA would drag a Node toolchain,
+  `node_modules`, and a second package ecosystem into a Rust repo whose whole
+  posture is lean/offline/no-extra-deps, and an async server would add
+  tokio/axum for a single-user localhost tool. One vanilla page over a blocking
+  std listener delivers the same 3-column editor / surface / decision-matrix UX
+  with zero new dependencies and nothing to build. The richer SPA (and the
+  deferred E11.4 export / E11.5 LLM-assist features) can be reintroduced later if
+  the UI outgrows a single file.
 

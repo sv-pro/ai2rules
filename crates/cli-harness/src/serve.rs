@@ -16,11 +16,11 @@ use std::net::{TcpListener, TcpStream};
 
 use compiler::{compile, default_world_yaml, loader::load_yaml};
 use harness_types::{
-    ActionName, ArgSource, CallId, CompiledWorld, ContentHash, Provenance, Provider, SessionId,
-    SourceChannel, Taint, TaintContext, ToolCall,
+    ActionName, ArgSource, CallId, CompiledWorld, ContentHash, ExecutionMode, Provenance, Provider,
+    SessionId, SourceChannel, Taint, TaintContext, ToolCall,
 };
 use serde_json::{json, Value};
-use world_kernel::{decide, BudgetUsage, EvalContext, ExecutionMode, KernelOutcome};
+use world_kernel::{decide, BudgetUsage, EvalContext, KernelOutcome};
 
 const INDEX_HTML: &str = include_str!("ui.html");
 
@@ -29,11 +29,9 @@ const INDEX_HTML: &str = include_str!("ui.html");
 pub fn run(port: u16) -> io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     println!("World Authoring Tool: http://127.0.0.1:{port}  (Ctrl-C to stop)");
-    for stream in listener.incoming() {
-        if let Ok(stream) = stream {
-            // One bad connection shouldn't take down the tool.
-            let _ = handle(stream);
-        }
+    for stream in listener.incoming().flatten() {
+        // One bad connection shouldn't take down the tool.
+        let _ = handle(stream);
     }
     Ok(())
 }
@@ -166,8 +164,11 @@ fn verdict(world: &CompiledWorld, action: &ActionName, taint: Taint) -> Value {
         source_perceptions: vec![],
         session_id: SessionId::new("wat"),
     };
-    let provenance =
-        Provenance::from_channel(SourceChannel::UserPrompt, SessionId::new("wat"), ContentHash::new("wat"));
+    let provenance = Provenance::from_channel(
+        SourceChannel::UserPrompt,
+        SessionId::new("wat"),
+        ContentHash::new("wat"),
+    );
     let ctx = EvalContext {
         taint: TaintContext::from_taint(taint),
         mode: ExecutionMode::Interactive,
@@ -202,7 +203,7 @@ mod tests {
             .collect();
         assert!(names.contains(&"read_workspace"));
         assert!(names.contains(&"read_repo_file")); // a scoped cap is shown too
-        // run_tests is a scoped cap with a locked literal command.
+                                                    // run_tests is a scoped cap with a locked literal command.
         let run_tests = out["surface"]
             .as_array()
             .unwrap()
@@ -217,12 +218,18 @@ mod tests {
     fn decision_matrix_shows_taint_floor() {
         let out = preview(default_world_yaml());
         let decisions = out["decisions"].as_array().unwrap();
-        let fetch = decisions.iter().find(|d| d["action"] == json!("fetch_web")).unwrap();
+        let fetch = decisions
+            .iter()
+            .find(|d| d["action"] == json!("fetch_web"))
+            .unwrap();
         // Clean fetch is allowed; tainted fetch is denied by the taint floor.
         assert_eq!(fetch["clean"]["decision"], json!("Allow"));
         assert_eq!(fetch["tainted"]["decision"], json!("Deny"));
         // start_pty asks for approval regardless of taint.
-        let pty = decisions.iter().find(|d| d["action"] == json!("start_pty")).unwrap();
+        let pty = decisions
+            .iter()
+            .find(|d| d["action"] == json!("start_pty"))
+            .unwrap();
         assert_eq!(pty["clean"]["decision"], json!("Ask"));
     }
 

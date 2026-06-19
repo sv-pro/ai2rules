@@ -48,7 +48,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
-| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog | planned (E8, E10, E11, E12) |
+| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog | 🚧 E11 started; E8, E10, E12 planned |
 
 **Done so far:**
 
@@ -106,8 +106,16 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   callback; each step streams through the loop's observer with structured
   `Decision`, `Rule`, `Effect`, and `Feedback` fields for
   `ABSENT`/`DENY`/`ASK`/`REPLAN` outcomes — **completing Milestone 3.**
+- **E11 — World Authoring Tool (in progress):** `harness serve` launches a local
+  browser editor for world manifests — a single embedded page (no build step)
+  whose `POST /api/preview` endpoint compiles a draft manifest through the
+  **real** compiler + kernel and returns the projected tool surface plus a
+  clean-vs-tainted decision matrix, so the live preview is faithful to what the
+  harness would actually do — no governance logic reimplemented in JS (E11.1–E11.3;
+  manifest export and the LLM-assist/trace explainer are the pending E11.4–E11.5).
+  See `DECISIONS.md` D17/D18.
 
-Builds clean offline with `clippy -D warnings`; **89 unit tests** green.
+Builds clean offline with `clippy -D warnings`; **92 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -126,7 +134,7 @@ crates/               the harness implementation
   trace-store/        append-only audit, redaction, replay (E4)
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
-  cli-harness/        terminal entrypoint (binary `harness`) (E9)
+  cli-harness/        terminal entrypoint + `serve` authoring tool (binary `harness`) (E9, E11)
 docs/                 architecture (harness-architecture.md is canonical)
 PLAN.md               epic-level execution plan
 CLAUDE.md             repo conventions for Claude Code / contributors
@@ -153,6 +161,7 @@ cargo test  --workspace
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run --bin harness        # interactive harness (flags: --world <yaml> --simulate --background)
+cargo run --bin harness -- serve   # World Authoring Tool at http://127.0.0.1:8787 (flag: --port)
 ```
 
 CI runs all four checks on every push and PR
