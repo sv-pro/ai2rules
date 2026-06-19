@@ -33,8 +33,10 @@ go live.
 
 ## 1. Cloudflare Pages — connect & build
 
-Dashboard → **Workers & Pages → Create → Pages → Connect to Git** → authorize
-**GitLab** → select `sv-pro/cli-agent`.
+Dashboard → **Build → Compute** in the left sidebar (Cloudflare renamed the old
+*Workers & Pages* section; if you can't find it, press **Ctrl K** and search
+"Pages") → **Create application → Pages → Connect to Git** → authorize **GitLab**
+→ select `sv-pro/cli-agent`.
 
 Build settings (the subdirectory values matter — the repo root is the Rust
 workspace, not the site):
@@ -59,8 +61,9 @@ before attaching the domain.
 
 The robust path for an apex domain is to let Cloudflare run DNS:
 
-1. **Cloudflare → Add a site →** `ai2rules.dev` → Free plan. It returns **two
-   nameservers**.
+1. **Cloudflare → Domains → Add domain** (the empty-state "add a site" link does
+   the same) → enter `ai2rules.dev` → choose **connect an existing domain / Free
+   plan** (DNS only — *not* a registrar transfer). It returns **two nameservers**.
 2. **Namecheap → Domain List → ai2rules.dev → Manage → Nameservers → Custom
    DNS** → paste the two Cloudflare nameservers → save. (Propagation: minutes to
    a few hours.)
