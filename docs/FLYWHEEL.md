@@ -43,7 +43,7 @@ To get this flywheel spinning quickly, implement these three automation steps:
 1. Check `_tasks/1_discovery/` for new vulnerabilities found by Codex.
 2. Review the task and assign it to Claude Code for Development (`_tasks/2_development/`).
 3. Claude builds the defense, tests it, and moves it to `_tasks/3_advocacy/`.
-4. Antigravity monitors `3_advocacy/`, generates the `.tape` proof, writes the `DeepDive.md` blog, and moves the task to `_tasks/4_done/`.
+4. Antigravity monitors `3_advocacy/`, generates the `.tape` proof and writes the `DeepDive.md` blog; a correcting-review pass then audits the result for accuracy/SEO and fixes it in place before the task lands in `_tasks/4_done/`.
 5. Review social feedback to seed tomorrow's `1_discovery/`.
 
 ---
@@ -68,6 +68,10 @@ Agents are restricted to specific directories. They are not allowed to modify fi
     *   **Domain:** `docs/`, `demos/`, `blog/`, `_tasks/3_advocacy/`
     *   **Task:** Polls `_tasks/3_advocacy/`. When a task arrives, Antigravity generates `.tape` files, scaffolds the Astro MDX post, and formats architecture diagrams.
     *   **Write Access:** Modifies documentation/blog. Uses `mv` to archive the completed task to `_tasks/4_done/`.
+*   **Claude Code (The Critic — Correcting Review)** — *cross-cutting role*
+    *   **Domain:** reads everything; may correct in `crates/`, `src/`, `tests/`, `docs/`, `blog/`.
+    *   **Task:** Audits a handed-off artifact before it reaches `_tasks/4_done/` — code for correctness and regressions, content for **technical accuracy** (does the prose match the *real* kernel, commands, and manifest schema?) and for Google Discover / SEO hygiene.
+    *   **Write Access:** Fixes defects **in place** — the "correcting reviewer" pattern — then appends a short *Review* note to the task file describing what changed. It runs as a *serialized pass* on an artifact whose owner is idle (never concurrently), so the no-conflict guarantee holds even though it crosses domains. It re-queues to `2_development/` or `3_advocacy/` only when a fix genuinely needs the owner's rework.
 
 ### 2. The Handoff Mechanism (Filesystem Kanban)
 
@@ -90,3 +94,11 @@ _tasks/
 4. **Antigravity** takes ownership, writes the blog post, and runs `mv prompt-injection-bypass.md ../4_done/`.
 
 **Why this works:** The `mv` command in Linux is an atomic operation. Moving a file instantly transfers "ownership" of the task to the next agent, ensuring zero concurrency conflicts while running totally in parallel.
+
+### 3. Review: a role, not (yet) a phase
+
+Quality control is deliberately a *role*, not an extra Kanban column. A formal review↔fix loop (its own inbox, tickets bouncing back and forth) buys accuracy at the cost of throughput, and that ping-pong overhead isn't worth it until bounce-backs are frequent enough to pay for themselves.
+
+So the **Correcting Reviewer** (above) instead makes a single in-place pass on an artifact as it heads to `4_done/`: it fixes what's wrong and records what it changed, rather than returning a list of complaints. The handoff stays linear — no new phase, no new queue.
+
+Promote this to a real `review ↔ fix` loop **only** when the data justifies it — e.g. if correcting-review passes routinely surface rework an owner must redo. Until there's real profit in the bureaucracy, correct-in-place wins.

@@ -1,6 +1,6 @@
 ---
 title: 'AI Aikido: Neutralizing Prompt Injection with Determinism'
-description: 'How to use an attackers momentum against them by replacing LLM filters with deterministic tables.'
+description: "How to use an attacker's own momentum against them by replacing LLM filters with deterministic tables."
 pubDate: 'Jun 18 2026'
 heroImage: '../../assets/blog-placeholder-2.jpg'
 ---
@@ -19,17 +19,25 @@ We call this architectural pattern **Design-Time Stochastic, Runtime Determinist
 We acknowledge that LLMs are incredible at synthesis and creativity. We use them at *design time* to draft complex `WorldManifests`. We let the stochastic model do the heavy lifting of deciding what capabilities *might* be useful for a specific workflow, generating the YAML definitions for tools and policies.
 
 ```yaml
-# A generated manifest for a CI/CD agent
-id: "ci-agent-world"
-capabilities:
-  - name: "read_repo"
-    action: "read_file"
-    constraints:
-      path_prefix: "/workspace/src"
-  - name: "trigger_build"
-    action: "http_post"
-    constraints:
-      url_whitelist: ["https://ci.internal.corp/build"]
+# A drafted manifest fragment: base actions, plus a scoped capability that
+# locks an argument to a literal — so the agent gets `run_tests`, never `run_command`.
+base_actions:
+  - name: read_workspace
+    action_type: Read
+    side_effect: Read
+  - name: run_command
+    action_type: Command
+    side_effect: Process
+
+scoped_capabilities:
+  - name: run_tests
+    base_action: run_command
+    args:
+      command: !Literal pytest        # the actor can invoke it, never re-arg it to "rm -rf /"
+
+# Hard floor: tainted input may never cross an effectful boundary.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
 ```
 
 #### 2. Compile Time (Deterministic)
@@ -41,24 +49,17 @@ When an attacker injects a prompt into the agent, the agent attempts to execute 
 There is no LLM evaluating the action. There is no fuzzy logic. It is a pure, `O(1)` table lookup.
 
 ```rust
-// The execution engine is purely deterministic
-fn evaluate_action(
-    compiled_world: &CompiledWorld, 
-    action: &IntentIR
-) -> Result<ExecutionSpec, SecurityError> {
-    
-    // O(1) hash map lookup
-    let policy = compiled_world.policies.get(&action.tool_name)
-        .ok_or(SecurityError::ToolAbsent)?;
-
-    // Strict regex and prefix matching, no AI involved
-    for constraint in &policy.constraints {
-        if !constraint.validate(&action.args) {
-            return Err(SecurityError::ConstraintViolation);
-        }
+// Runtime is a pure function of (call, context, compiled world) — no LLM on the path.
+// Representability checks seal an `IntentIR`; disposition then applies the contextual
+// rules (taint floor, approval, budgets). `decide()` is the single entry point.
+// (Simplified, but this is the real shape.)
+match decide(&world, &call, provenance, &ctx) {
+    KernelOutcome::Evaluated { disposition, intent } if disposition.decision == Decision::Allow => {
+        // An ALLOW is the *only* outcome that can be lowered to an ExecutionSpec.
+        Ok(build_execution_spec(&intent, &env))
     }
-
-    Ok(ExecutionSpec::from(action))
+    // Everything else — ABSENT, DENY, ASK, REPLAN — stops here, deterministically.
+    outcome => Err(outcome),
 }
 ```
 

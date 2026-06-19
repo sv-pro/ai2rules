@@ -6,6 +6,9 @@ import { defineConfig, fontProviders } from 'astro/config';
 
 // https://astro.build/config
 export default defineConfig({
+	// TODO(domain): set to the real production origin before publishing — this is
+	// the base for canonical URLs, RSS item links, the sitemap, and the absolute
+	// OpenGraph/JSON-LD image & page URLs. Discover/SEO is degraded until it's real.
 	site: 'https://example.com',
 	integrations: [mdx(), sitemap()],
 	fonts: [

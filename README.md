@@ -48,7 +48,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
-| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog | 🚧 E11 started; E8, E10, E12 planned |
+| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog | 🚧 E11, E12 started; E8, E10 planned |
 
 **Done so far:**
 
@@ -136,6 +136,7 @@ crates/               the harness implementation
   agent-core/         context packing, projected tool surface, model loop (E5)
   cli-harness/        terminal entrypoint + `serve` authoring tool (binary `harness`) (E9, E11)
 docs/                 architecture (harness-architecture.md is canonical)
+blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
 CLAUDE.md             Claude Code pointer → AGENTS.md

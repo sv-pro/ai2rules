@@ -35,29 +35,27 @@ To the AI, the tool doesn't exist. The physics of its universe simply do not sup
 
 #### How the Ontology is Projected
 
-At the start of the session, the Harness reads the `CompiledWorld` manifest and dynamically generates the tool list for the specific agent session based on its current authorization context.
+At the start of a session the harness compiles the `WorldManifest` into an immutable, hash-addressed `CompiledWorld`, then *projects* only the actions the current trust and capability context is allowed to see. The tool list handed to the model **is** that projection — nothing else is offered.
 
 ```rust
-// Inside the CLI Agent Harness Kernel
-pub fn project_ontology(world: &CompiledWorld, context: &AuthContext) -> Vec<ToolDefinition> {
-    world.tools.iter()
-        .filter(|tool| tool.allowed_roles.contains(&context.role))
-        .map(|tool| tool.to_definition())
-        .collect()
+// The projected surface is the only thing the model is allowed to propose.
+let surface: Vec<&ActionName> = world.projected_actions().collect();
+// `execute_sql` was never declared in the manifest, so it simply isn't in here.
+```
+
+If `execute_sql` isn't a projected action, it never appears in the tool definitions the model receives. The LLM cannot emit a well-formed call for a tool it was never told exists.
+
+And if an injection somehow coerces the model into emitting that call anyway, it dies at the kernel's single gate. `decide()` returns a `KernelOutcome`, and for an undeclared action that outcome is `UnknownToOntology` — surfaced as the `ABSENT` decision — *before* any policy is consulted:
+
+```rust
+match decide(&world, &call, provenance, &ctx) {
+    KernelOutcome::UnknownToOntology { .. }       => Decision::Absent, // no such action
+    KernelOutcome::NotRepresentable { decision, .. } => decision,      // capability / taint floor
+    KernelOutcome::Evaluated { disposition, .. }  => disposition.decision,
 }
 ```
 
-If the developer has not explicitly allowed the `execute_sql` tool in the `WorldManifest`, it is omitted. The LLM cannot hallucinate the correct JSON schema to call a tool it doesn't know exists. 
-
-Even if the attacker somehow guesses the tool name and forces the LLM to emit the JSON call, the Kernel intercepts it at the outer boundary:
-
-```rust
-if !projected_ontology.contains(request.tool_name) {
-    return Response::Error("Tool execution failed: Invalid schema formatting.");
-}
-```
-
-Notice that the error message doesn't say "Permission Denied." It says "Invalid schema formatting." We do not give the attacker the satisfaction of knowing the tool is real but guarded. We gaslight the LLM into thinking it made a syntax error.
+The difference from `DENY` is the whole point. `ABSENT` is not a "no" — it's the absence of a question. There is no policy verdict to probe, no "forbidden" signal to refine against. The action isn't in the agent's universe, so there is nothing for an attacker's feedback loop to grip.
 
 ### Shrinking the Attack Surface
 

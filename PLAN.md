@@ -405,13 +405,13 @@ regression gates enforced.
 ---
 
 ### E12 — Developer Advocacy & Blog Platform
-**Goal:** Establish industry authority in deterministic AI execution via a Google Discover-optimized blog. **Depends on:** M1, M2. **Status:** [ ] not started.
+**Goal:** Establish industry authority in deterministic AI execution via a Google Discover-optimized blog. **Depends on:** M1, M2. **Status:** 🚧 in progress (E12.1 + drafts E12.3–E12.5 done & accuracy-reviewed; E12.2 partial; E12.6 pending). Site lives in `blog/` (Astro).
 
-- [ ] **E12.1 [Tech]** Scaffold the blog platform: Initialize an Astro project optimized for Core Web Vitals, MDX for content, automated WebP/AVIF image generation, and `<meta name="robots" content="max-image-preview:large">`.
-- [ ] **E12.2 [Tech]** Implement SEO & Discovery layer: Generate `Article` / `TechArticle` JSON-LD schema, configure automated OpenGraph/Twitter Card generation, and setup WebSub/RSS feeds for instant indexing.
-- [ ] **E12.3 [Content]** Draft "Why 'Deny' is Dangerous: The Case for Absent Tools in AI" (Thought Leadership): Focus on the architectural failure of wrappers vs. kernels, and the case for "Absent over Deny." Include a stark architectural diagram.
-- [ ] **E12.4 [Content]** Draft "AI Aikido: Using Deterministic Rules to Neutralize Prompt Injection" (Deep Dive): Translate ADRs to prose, focusing on the `WorldManifest`, the design-time stochastic vs runtime deterministic philosophy.
-- [ ] **E12.5 [Content]** Draft "Running Claude Code Safely: A Sandbox Setup Guide" (Tutorial): Provide a practical guide to using the `cli-harness`, demonstrating the interactive approval UI and preventing destructive commands.
+- [x] **E12.1 [Tech]** Scaffold the blog platform: Astro project (MDX, sitemap, RSS, local fonts for Core Web Vitals), `sharp`-based image optimization, and `<meta name="robots" content="max-image-preview:large">`. (Images optimize to WebP today; AVIF output not yet enabled.)
+- [ ] **E12.2 [Tech]** Implement SEO & Discovery layer: **Done** — `Article`/`TechArticle` JSON-LD, OpenGraph/Twitter cards (per-post hero image), RSS + sitemap. **Pending** — WebSub/pubsub pinging for instant indexing and automated OG-image generation; set the real production `site` domain (currently `https://example.com`).
+- [x] **E12.3 [Content]** Draft "Why 'Deny' is Dangerous: The Case for Absent Tools in AI" (Thought Leadership): Focus on the architectural failure of wrappers vs. kernels, and the case for "Absent over Deny." (Stark architectural diagram still TODO.)
+- [x] **E12.4 [Content]** Draft "AI Aikido: Using Deterministic Rules to Neutralize Prompt Injection" (Deep Dive): Translate ADRs to prose, focusing on the `WorldManifest`, the design-time stochastic vs runtime deterministic philosophy.
+- [x] **E12.5 [Content]** Draft "Running Claude Code Safely: A Sandbox Setup Guide" (Tutorial): Practical guide using the real `harness` CLI (authoring-tool preview + governed `--world` loop + interactive approval).
 - [ ] **E12.6 [Promotion]** Kickstart Discover algorithm: Seed initial deep dives and architecture arguments on Hacker News, relevant subreddits (`r/LocalLLaMA`, `r/rust`, `r/MachineLearning`), and X (Twitter threads).
 
 ---
