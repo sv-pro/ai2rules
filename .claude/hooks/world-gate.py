@@ -39,7 +39,22 @@ def emit(decision, reason):
     sys.exit(0)
 
 
+def usage():
+    sys.stderr.write(
+        "world-gate.py is a Claude Code PreToolUse hook: it is invoked as\n"
+        "`python3 world-gate.py` with a PreToolUse event JSON on stdin — not by\n"
+        "hand, and not with `bash` (this is Python, not a shell script).\n\n"
+        "Exercise it instead with:\n"
+        "  bash .claude/hooks/test-gate.sh\n"
+        "  echo '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}' "
+        "| python3 .claude/hooks/world-gate.py\n"
+    )
+
+
 def main():
+    if any(a in ("-h", "--help") for a in sys.argv[1:]) or sys.stdin.isatty():
+        usage()
+        sys.exit(0)
     raw = sys.stdin.read()
     try:
         ev = json.loads(raw)
