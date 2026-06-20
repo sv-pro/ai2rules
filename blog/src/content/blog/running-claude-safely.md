@@ -2,7 +2,7 @@
 title: 'Running Claude Code Safely: A Sandbox Setup Guide'
 description: 'A practical guide to wrapping existing CLI agents with deterministic physics.'
 pubDate: 'Jun 16 2026'
-heroImage: '../../assets/blog-placeholder-4.jpg'
+heroImage: '../../assets/running-claude-safely.jpg'
 ---
 
 Claude Code, Aider, and Codex are incredible developer tools. They can refactor entire codebases, write tests, and debug complex race conditions. But out of the box, they run with **Ambient Authority**. They inherit your SSH keys, your production AWS credentials, and root-level write access to your hard drive. 
