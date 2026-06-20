@@ -288,8 +288,10 @@ commit, or the code. Status is `Accepted` unless later `Superseded by D<n>`.
   (restricting tools, triggering taint, running injection→egress attacks) out of
   the session you develop in. Decisions (hooks) + physics (container) = defense in
   depth.
-- **Known limit:** the full live-contained floor needs an egress-allowlist proxy
-  (a `compose.yaml` with a squid/tinyproxy permitting only the model API) —
-  documented, not yet built. `--network none` blocks the model API, so it is for
-  offline hook/replay testing only.
+- **Live-contained floor (shipped):** `docker/compose.yaml` + `docker/egress-proxy/`
+  put the agent on an `internal` no-gateway network whose only egress is a
+  tinyproxy that allowlists `anthropic.com` (CONNECT :443). Verified: from the
+  agent, `api.anthropic.com` connects (HTTP 401), `example.com` is denied by the
+  proxy, and bypassing the proxy env has no route. `--network none` (run.sh) still
+  blocks the model API entirely, so that mode stays offline-only.
 

@@ -1,0 +1,51 @@
+# Live-but-contained governed Claude Code (PLAN.md E13 / E8) — the real egress floor.
+#
+# The agent sits on an `internal` network with NO route to the internet. Its only
+# way out is the `proxy`, which allowlists the model API (anthropic.com) and denies
+# everything else. So even a fully compromised agent can reach the model but cannot
+# exfiltrate — the OS enforcing what the in-agent taint floor merely decides.
+#
+#   ANTHROPIC_API_KEY=sk-... docker compose -f docker/compose.yaml run --rm agent claude
+#
+# Verify the floor:
+#   docker compose -f docker/compose.yaml run --rm agent python3 -c \
+#     'import urllib.request as u,urllib.error as e
+#      def t(x):
+#       try: print("ALLOW",x,u.urlopen(x,timeout=15).status)
+#       except e.HTTPError as h: print("ALLOW",x,"HTTP",h.code)
+#       except Exception as ex: print("BLOCK",x,type(ex).__name__)
+#      t("https://api.anthropic.com/v1/models"); t("https://example.com/")'
+
+services:
+  proxy:
+    build: ./egress-proxy
+    image: governed-claude-egress
+    networks: [internal, egress]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: governed-claude
+    depends_on: [proxy]
+    networks: [internal]            # internal-only: no direct internet route
+    working_dir: /workspace
+    environment:
+      HTTP_PROXY: http://proxy:8888
+      HTTPS_PROXY: http://proxy:8888
+      NO_PROXY: localhost,127.0.0.1
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CC_WORLD_CONFIG: ${CC_WORLD_CONFIG:-}
+    volumes:
+      - ../:/workspace
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stdin_open: true
+    tty: true
+
+networks:
+  internal:
+    internal: true                  # no gateway to the host/internet
+  egress: {}                        # only the proxy is attached here

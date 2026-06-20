@@ -37,12 +37,28 @@ bash .claude/hooks/demo-cross-agent.sh   # subagent taints shared session -> par
 | `bridge` | full network | live agent governed **only** by the hook — no OS floor |
 | *allowlist proxy* | only the model API reachable | a **live but contained** agent — the real E8 |
 
-The third row is the goal and is not wired up here yet. The shape: a second
-container running an egress proxy (squid/tinyproxy) that allows only
-`api.anthropic.com`, with the agent container joined to it and
-`HTTPS_PROXY`/`HTTP_PROXY` pointed at it (a `compose.yaml` is the natural home).
-Then even a compromised agent can reach the model but cannot exfiltrate — the OS
-enforcing what the taint floor merely decides.
+The third row is shipped in **`docker/compose.yaml`** + **`docker/egress-proxy/`**.
+The agent runs on an `internal` (no-gateway) network; its only egress is a
+tinyproxy that allowlists `anthropic.com` (CONNECT :443 only). A compromised agent
+can reach the model but cannot exfiltrate — and bypassing the proxy env gets *no
+route* at all.
+
+```bash
+ANTHROPIC_API_KEY=sk-... docker compose -f docker/compose.yaml run --rm agent claude
+
+# Verify the floor:
+docker compose -f docker/compose.yaml run --rm agent python3 -c \
+ 'import urllib.request as u,urllib.error as e
+  def t(x):
+   try: print("ALLOW",x,u.urlopen(x,timeout=15).status)
+   except e.HTTPError as h: print("ALLOW",x,"HTTP",h.code)
+   except Exception as ex: print("BLOCK",x,type(ex).__name__)
+  t("https://api.anthropic.com/v1/models"); t("https://example.com/")'
+# => ALLOW api.anthropic.com HTTP 401   (model reachable)
+#    BLOCK example.com URLError         (exfil denied)
+```
+
+Edit the allowlist in `docker/egress-proxy/filter` (one host-regex per line).
 
 ## Shared taint store (cross-instance)
 
