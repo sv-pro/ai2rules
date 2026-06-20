@@ -1,0 +1,21 @@
+{
+  "_doc": "First-slice WorldManifest for the Claude Code host (PLAN.md E13.2). Drives the PreToolUse gate in .claude/hooks/world-gate.py. FAIL-OPEN and ADDITIVE: anything not matched is allowed, and the gate never auto-approves (it only returns deny/ask), so it cannot weaken your existing permission prompts.",
+
+  "projected_tools": null,
+  "_projected_tools_doc": "null = allow all native tools (ABSENT-for-native is OFF — the safe default). Set to a list, e.g. [\"Read\",\"Grep\",\"Glob\"], to project a restricted surface; native tools outside it become ABSENT (denied as 'not in this world'). MCP and control tools are never touched.",
+
+  "taint_sources": {
+    "tools": ["WebFetch"],
+    "read_paths": ["repos/", "untrusted/"]
+  },
+
+  "egress": {
+    "tools": ["WebFetch"],
+    "bash_patterns": ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
+  },
+
+  "ask": {
+    "tools": [],
+    "bash_patterns": ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+  }
+}

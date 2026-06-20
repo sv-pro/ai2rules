@@ -2,3 +2,7 @@
 **/*.rs.bk
 # Reference projects (separate git repos kept for study, never committed here).
 /repos/
+
+# Claude Code local/runtime state
+.claude/settings.local.json
+.claude/state/
