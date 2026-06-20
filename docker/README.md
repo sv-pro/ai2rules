@@ -46,12 +46,13 @@ enforcing what the taint floor merely decides.
 
 ## Shared taint store (cross-instance)
 
-The `governed-claude-state` named volume holds the taint sidecar. The local
-sidecar's limitation is its *locality* — separate sessions/instances don't share
-`.claude/state`. Mounting the **same named volume** into multiple SUT containers
-makes taint cross-instance: a tainted agent in one container taints the floor for
-another. (This is the "shared store" replacement for the local file when locality
-breaks — see `DECISIONS.md` D20/D21.)
+The taint sidecar lives in `.claude/state` under the mounted workspace, so any
+containers mounting the **same repo** already share taint — a tainted agent in one
+taints the floor for another. The local sidecar's only limitation is its
+*locality*: instances that *don't* share a workspace don't share `.claude/state`.
+For that case, mount a shared volume over it —
+`-v sut-taint:/workspace/.claude/state` (chown the volume to uid 1000 first) — the
+"shared store" replacement for the local file (see `DECISIONS.md` D20/D21).
 
 ## Notes & limits
 

@@ -29,9 +29,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g @anthropic-ai/claude-code \
     && npm cache clean --force
 
-# Non-root: the contained agent must never run as root.
-RUN useradd --create-home --uid 1000 agent
-USER agent
+# Non-root: reuse the base image's pre-existing `node` user (uid 1000). Its uid
+# typically matches the host user, which avoids permission friction on the mounted
+# workspace and its .claude/state taint sidecar.
+USER node
 WORKDIR /workspace
 
 # Hooks resolve state under $CLAUDE_PROJECT_DIR/.claude/state; pin it to the
