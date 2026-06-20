@@ -268,3 +268,28 @@ commit, or the code. Status is `Accepted` unless later `Superseded by D<n>`.
   child's state. Out of scope for the local-sidecar approach (the real fix is the
   in-data taint of the in-process kernel, or a shared taint store).
 
+## D21 — Containerized "governed Claude Code" as the system under test + E8 floor
+- **Epic:** E13 / E8 · **Status:** Accepted
+- **Decision:** Ship a containerized Claude Code (`docker/Dockerfile` + `run.sh` +
+  README) that runs the repo's PreToolUse governance under OS-level isolation.
+  Two roles: (1) **separation** — the agent under test and the dogfooding config
+  live in a throwaway container, not the host dev session; (2) **enforcement
+  floor (E8)** — the container physically enforces what the hooks merely decide
+  (network egress policy, non-root, `--cap-drop ALL`, write confinement via
+  mounts). Network is the egress floor: `none` (offline, default), `bridge` (live,
+  hook-only), or an egress-allowlist proxy (live + contained — the real E8). A
+  shared named-volume taint store carries taint across instances (the D20 fix when
+  locality breaks).
+- **Alternatives:** a single host instance (status quo — conflates SUT and dev,
+  no OS floor); a VM / microVM (heavier isolation, slower loop); hooks only (no OS
+  enforcement — decisions without physics).
+- **Why:** the container is where the harness's *declared* network-disable /
+  writable-roots constraints become *enforced*, and it keeps experiments
+  (restricting tools, triggering taint, running injection→egress attacks) out of
+  the session you develop in. Decisions (hooks) + physics (container) = defense in
+  depth.
+- **Known limit:** the full live-contained floor needs an egress-allowlist proxy
+  (a `compose.yaml` with a squid/tinyproxy permitting only the model API) —
+  documented, not yet built. `--network none` blocks the model API, so it is for
+  offline hook/replay testing only.
+
