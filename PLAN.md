@@ -431,7 +431,7 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 
 - [x] **E13.1** Scaffold the Flywheel "Correcting Reviewer" as a real subagent (`.claude/agents/correcting-reviewer.md`) + `/review-blog` command (`.claude/commands/review-blog.md`). *[step (a) — commit + push to both remotes]*
 - [ ] **E13.2** First slice: a manifest-driven `PreToolUse` hook + taint sidecar that ports the kernel's three signature behaviors onto Claude Code — (1) **ABSENT-for-native** (deny native tools not in the projected set), (2) **taint floor** (once a tainted file/web result is read, deny network/egress), (3) **ASK** on writes / destructive commands. Wire into `settings.json` via the `update-config` skill. *[step (b)]*
-- [ ] **E13.3** Design `harness compile --target claude-code`: emit `.claude/settings.json` hooks, `.mcp.json` (→ shim), and subagent allowlists from one `WorldManifest`; record the decision in `DECISIONS.md`. *[step (c)]*
+- [x] **E13.3** Design `harness compile --target claude-code`: emit `.claude/settings.json` hooks, `.mcp.json` (→ shim), and subagent allowlists from one `WorldManifest` — design + manifest→host mapping recorded in `DECISIONS.md` **D19**. (Emitter implementation is future work; E13.4/E13.5 build it out.) *[step (c)]*
 - [ ] **E13.4** *(later)* MCP projection shim for scoped-capability arg-locking, reusing `safe-mcp-proxy` / `mcp-tool-projection`.
 - [ ] **E13.5** *(later)* Demo: the first-slice hook neutralizing a prompt-injection → egress attempt (feeds the "Running Claude Code Safely" article + a VHS recording).
 
