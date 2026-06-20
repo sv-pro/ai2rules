@@ -416,6 +416,29 @@ regression gates enforced.
 
 ---
 
+### E13 — Harness ↔ Claude Code Integration (dogfooding)
+**Goal:** Apply the deterministic governance kernel to the **Claude Code CLI** host via a config-driven gateway, so one `WorldManifest` governs both the *tool surface* (projection / ABSENT) and *per-call decisions* (taint floor, ASK, budgets) — including the native tools an MCP proxy alone can't see. **Depends on:** E1, E2, E7 (+ the `safe-mcp-proxy` / `mcp-tool-projection` references). **Status:** 🚧 in progress.
+
+**Design — Claude Code exposes two enforcement surfaces that mirror the kernel's two stages:**
+1. *What tools exist* — a subagent's `tools` allowlist + which MCP tools are connected = **projection / representability / ABSENT** (a tool not on the surface literally cannot be called).
+2. *What a call may do, in context* — a **`PreToolUse` hook** returning `permissionDecision: allow|deny|ask` = **`decide()` / disposition**; this is the *only* lever over **native** tools (`Bash`/`Edit`/`Write`/`Read`/`WebFetch`).
+
+One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-cap arg-locking) and a **generated hook set** (taint floor, ASK, budgets), plus a **taint sidecar** (a state file the hooks read/write for monotonic, cross-turn taint).
+
+**Value:** an MCP-only proxy can't see native tools — hooks are the only governance there (highest-leverage gap); unifying both under one `CompiledWorld` removes drift across `settings.json` permissions + `.mcp.json` + subagent allowlists + hooks; the sidecar is the only path to cross-tool information-flow control in this host.
+
+**Known friction:** `PreToolUse` hooks gate (allow/deny/ask) but don't reliably *rewrite* native-tool args → scoped-cap arg-locking lives in the MCP shim, native tools are validate-and-deny; taint is heuristic (inferred from which tool touched an untrusted source); subagent allowlists are static → map trust levels onto distinct subagents.
+
+- [x] **E13.1** Scaffold the Flywheel "Correcting Reviewer" as a real subagent (`.claude/agents/correcting-reviewer.md`) + `/review-blog` command (`.claude/commands/review-blog.md`). *[step (a) — commit + push to both remotes]*
+- [ ] **E13.2** First slice: a manifest-driven `PreToolUse` hook + taint sidecar that ports the kernel's three signature behaviors onto Claude Code — (1) **ABSENT-for-native** (deny native tools not in the projected set), (2) **taint floor** (once a tainted file/web result is read, deny network/egress), (3) **ASK** on writes / destructive commands. Wire into `settings.json` via the `update-config` skill. *[step (b)]*
+- [ ] **E13.3** Design `harness compile --target claude-code`: emit `.claude/settings.json` hooks, `.mcp.json` (→ shim), and subagent allowlists from one `WorldManifest`; record the decision in `DECISIONS.md`. *[step (c)]*
+- [ ] **E13.4** *(later)* MCP projection shim for scoped-capability arg-locking, reusing `safe-mcp-proxy` / `mcp-tool-projection`.
+- [ ] **E13.5** *(later)* Demo: the first-slice hook neutralizing a prompt-injection → egress attempt (feeds the "Running Claude Code Safely" article + a VHS recording).
+
+Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
+
+---
+
 
 ## Acceptance invariant coverage
 
