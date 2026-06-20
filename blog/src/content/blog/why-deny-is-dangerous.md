@@ -2,7 +2,7 @@
 title: 'Why "Deny" is Dangerous: The Case for Absent Tools in AI'
 description: 'Exploring why blocking an AI agent is inherently less secure than making the capability entirely absent.'
 pubDate: 'Jun 19 2026'
-heroImage: '../../assets/why-deny-is-dangerous.jpg'
+heroImage: '../../assets/blog-placeholder-1.jpg'
 ---
 
 Most developers try to secure their AI agents by writing rules in a system prompt or a basic proxy layer like: `"DENY any request to drop the database."`
