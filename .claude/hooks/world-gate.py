@@ -67,6 +67,19 @@ def main():
         ti = {}
     sid = str(ev.get("session_id", "default"))
 
+    # Opt-in event log for debugging/demos (off by default): set CC_GATE_DEBUG=1
+    # or `touch .claude/state/debug-on`. Captures the raw event JSON of every tool
+    # call the gate sees — useful for inspecting parent vs subagent sessions.
+    _pd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    if os.environ.get("CC_GATE_DEBUG") or os.path.exists(os.path.join(_pd, ".claude", "state", "debug-on")):
+        try:
+            _sd = os.path.join(_pd, ".claude", "state")
+            os.makedirs(_sd, exist_ok=True)
+            with open(os.path.join(_sd, "debug.log"), "a") as _f:
+                _f.write(raw.rstrip("\n") + "\n")
+        except Exception:
+            pass
+
     proj_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
     cfg_path = os.environ.get("CC_WORLD_CONFIG") or os.path.join(proj_dir, ".claude", "cc-world.json")
     try:
@@ -118,8 +131,9 @@ def main():
     if will_taint and not tainted:
         try:
             os.makedirs(state_dir, exist_ok=True)
+            agent = ev.get("agent_type", "main")
             with open(taint_file, "w") as f:
-                f.write(f"tainted by {tool}: {path or url}\n")
+                f.write(f"tainted by {tool} (agent: {agent}): {path or url}\n")
         except Exception:
             pass  # never block on a state write failure
 
