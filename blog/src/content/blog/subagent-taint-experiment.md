@@ -2,7 +2,7 @@
 title: 'Does Taint Cross the Subagent Boundary? An Experiment'
 description: "I assumed a multi-agent setup would launder tainted data back to the parent. Then I instrumented the gate and ran it — and the host surprised me."
 pubDate: 'Jun 20 2026'
-heroImage: '../../assets/taint-subagent-boundary.jpg'
+heroImage: '../../assets/taint-subagent-boundary-16x9.jpg'
 ---
 
 In [an earlier post](/blog/the-zombieagent-threat/) I argued that an agent can be
