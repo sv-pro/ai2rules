@@ -1,0 +1,65 @@
+---
+/**
+ * Self-hosted asciinema player. Renders a recorded terminal session (.cast)
+ * inline, served entirely from this domain — the player JS/CSS are vendored
+ * under /public/vendor/asciinema-player/ (no runtime CDN dependency), so an
+ * interactive demo never leaves the site's origin.
+ *
+ * Usage (from an .mdx post):
+ *   import AsciinemaPlayer from '../../components/AsciinemaPlayer.astro';
+ *   <AsciinemaPlayer src="/casts/demo-injection-egress.cast" title="..." />
+ */
+interface Props {
+  src: string;          // path to the .cast under /public, e.g. /casts/foo.cast
+  title?: string;       // accessible label
+  poster?: string;      // e.g. "npt:0:01" to show a frame as the still poster
+  idleTimeLimit?: number;
+}
+const { src, title, poster = 'npt:0:01', idleTimeLimit = 2 } = Astro.props;
+const id = 'ap-' + Math.random().toString(36).slice(2);
+---
+
+<link rel="stylesheet" href="/vendor/asciinema-player/asciinema-player.css" />
+<figure class="asciinema-figure">
+  <div id={id} class="asciinema-embed" role="img" aria-label={title}></div>
+  {title && <figcaption>{title}</figcaption>}
+</figure>
+
+<script is:inline define:vars={{ id, src, poster, idleTimeLimit }}>
+  (function () {
+    function mount() {
+      window.AsciinemaPlayer.create(src, document.getElementById(id), {
+        fit: 'width',
+        terminalFontSize: 'small',
+        theme: 'asciinema',
+        poster: poster,
+        idleTimeLimit: idleTimeLimit,
+        controls: true,
+      });
+    }
+    if (window.AsciinemaPlayer) return mount();
+    // Load the vendored player once; queue mounts until it's ready.
+    if (!window.__apQueue) {
+      window.__apQueue = [];
+      var s = document.createElement('script');
+      s.src = '/vendor/asciinema-player/asciinema-player.min.js';
+      s.onload = function () {
+        window.__apReady = true;
+        window.__apQueue.forEach(function (f) { f(); });
+      };
+      document.head.appendChild(s);
+    }
+    window.__apReady ? mount() : window.__apQueue.push(mount);
+  })();
+</script>
+
+<style>
+  .asciinema-figure { margin: 1.5rem 0; }
+  .asciinema-embed { border-radius: 8px; overflow: hidden; }
+  .asciinema-figure figcaption {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: rgb(var(--gray, 96 115 159));
+    text-align: center;
+  }
+</style>

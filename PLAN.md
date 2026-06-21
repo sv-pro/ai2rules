@@ -413,6 +413,7 @@ regression gates enforced.
 - [x] **E12.4 [Content]** Draft "AI Aikido: Using Deterministic Rules to Neutralize Prompt Injection" (Deep Dive): Translate ADRs to prose, focusing on the `WorldManifest`, the design-time stochastic vs runtime deterministic philosophy.
 - [x] **E12.5 [Content]** Draft "Running Claude Code Safely: A Sandbox Setup Guide" (Tutorial): Practical guide using the real `harness` CLI (authoring-tool preview + governed `--world` loop + interactive approval).
 - [ ] **E12.6 [Promotion]** Kickstart Discover algorithm: Seed initial deep dives and architecture arguments on Hacker News, relevant subreddits (`r/LocalLLaMA`, `r/rust`, `r/MachineLearning`), and X (Twitter threads).
+- [ ] **E12.7 [Tech]** Interactive in-browser demos, served entirely from the site's own origin (no third-party playground, no domain-leaving). **Increment 1 — done:** a self-hosted **asciinema** player (`blog/src/components/AsciinemaPlayer.astro`; player JS/CSS vendored under `blog/public/vendor/`) replays the recorded `demo-injection-egress.sh` run inside "Running Claude Code Safely", with the text transcript kept as the no-JS/SEO fallback. **Increment 2 — planned:** swap playback for *live* interaction backed by the real kernel compiled to WebAssembly (see **E14**), so readers can edit a manifest / fire tool events and watch the actual `decide()` respond client-side.
 
 ---
 
@@ -439,6 +440,19 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 - [x] **E13.7** Containerized **governed Claude Code** SUT (`docker/`): a throwaway Claude Code instance running the repo's PreToolUse governance under OS-level isolation — separates the agent-under-test from the host dev session, and provides the **E8** enforcement floor (network egress policy, non-root, dropped caps, write confinement) the hooks' decisions need. A shared named-volume taint store is the cross-instance fix for the local sidecar's locality limit (D20). Image + `run.sh` + README shipped; the live **egress-allowlist proxy** (the full E8 network floor) is shipped + verified in `docker/compose.yaml` + `docker/egress-proxy/` — the agent runs on an internal no-gateway network whose only egress is a tinyproxy allowlisting `anthropic.com`. See DECISIONS **D21**. *(advances E8)*
 
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
+
+---
+
+### E14 — In-Browser Kernel (WASM playground)
+**Goal:** Compile the **real** pure kernel + compiler to WebAssembly so the decision logic runs **client-side, same-origin** — powering live, interactive demos on the blog (E12.7) and a serverless authoring preview (E11) without a backend, and without reimplementing governance in JS. Because in-browser demos must run the *actual* kernel (not a drift-prone JS port), and the kernel is pure by design (no I/O / LLM / mutable state; deps are `serde`/`sha2`/`shell-words` — all wasm-clean), this is a packaging exercise, not a rewrite. **Depends on:** E1, E2 (and reuses the E11.2 `/api/preview` request/response shape). **Status:** 📋 planned — see DECISIONS **D22**.
+
+- [ ] **E14.1** `harness-wasm` crate (`cdylib`, `wasm-bindgen`) exposing a minimal, JSON-in/JSON-out surface over the real compiler + kernel — e.g. `compile_preview(yaml) -> {surface, matrix} | error` (mirroring E11.2 `POST /api/preview`) and `decide(yaml, event) -> KernelOutcome`. No threads, no I/O; panics surfaced as structured errors.
+- [ ] **E14.2** Build pipeline: `wasm-pack`/`wasm-bindgen` target producing a versioned `.wasm` + JS glue, size-checked (target < ~300 KB gz) and reproducible offline; emit the artifact where the Astro site can import it.
+- [ ] **E14.3** Astro island (`KernelPlayground`) consuming the wasm bundle: manifest editor + event picker → live ALLOW/ASK/DENY/ABSENT/REPLAN matrix and deciding rule, all in the browser. First placement: the prompt-injection → egress demo in "Running Claude Code Safely" (replaces the asciinema *playback* with *interaction*; transcript stays as fallback).
+- [ ] **E14.4** Fidelity guard: a shared golden-vector suite (manifest+event → expected decision) run against **both** the native kernel and the wasm build in CI, so the in-browser demo can never silently drift from the product.
+- [ ] **E14.5** *(stretch)* Fold the same bundle into E11 so `harness serve`'s live preview can run fully client-side (static hosting), keeping the Rust HTTP server only as an optional local convenience.
+
+**Exit:** A reader on `ai2rules.dev` can drive the real kernel — edit a world, fire an event, see the deterministic verdict — with nothing leaving their browser, and CI proves the wasm verdicts match the native kernel byte-for-byte.
 
 ---
 
