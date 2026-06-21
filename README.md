@@ -48,7 +48,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
-| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog | 🚧 E11, E12 started; E8, E10 planned |
+| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10 planned |
 
 **Done so far:**
 
@@ -114,6 +114,17 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   harness would actually do — no governance logic reimplemented in JS (E11.1–E11.3;
   manifest export and the LLM-assist/trace explainer are the pending E11.4–E11.5).
   See `DECISIONS.md` D17/D18.
+- **E13 — Claude Code integration (dogfooding, in progress):** the kernel's
+  physics, ported onto the Claude Code host. A `PreToolUse` hook
+  (`.claude/hooks/world-gate.py`) drives a JSON `WorldManifest`
+  (`.claude/cc-world.json`) to enforce three behaviours — ABSENT-for-native, the
+  monotonic **taint floor**, and **ASK** on destructive commands — additively
+  (only ever `deny`/`ask`) and fail-open. Cross-agent taint follows the shared
+  session sidecar (E13.6, D20), and a containerized governed SUT with an
+  egress-allowlist proxy supplies the E8 enforcement floor (E13.7, D21).
+  Self-contained demos: `demo-injection-egress.sh` (prompt-injection → egress,
+  neutralized — E13.5) and `demo-cross-agent.sh` (subagent → parent taint).
+  See `DECISIONS.md` D19–D21.
 
 Builds clean offline with `clippy -D warnings`; **92 unit tests** green.
 
