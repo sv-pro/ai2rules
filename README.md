@@ -48,7 +48,8 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
-| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10, E14 planned |
+| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10 planned |
+| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 📋 planned (E14 engine, E15 suite; first viz = Taint-Flow Simulator) |
 
 **Done so far:**
 

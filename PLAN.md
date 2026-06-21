@@ -58,7 +58,8 @@ utility on a benchmark suite.
 | **M1 — Deterministic Core** | Kernel works in simulation | E0, E1, E2, E3, E4 | Vertical slice: `read_file` → kernel → sim executor → trace → replay, all deterministic |
 | **M2 — Live Agent** | A real model drives the loop | E5, E6 | One provider proposes through the projected surface; interactive approvals work; background fails closed |
 | **M3 — Full Tool Surface** | Real-world capabilities | E7, E9 | MCP + web + scoped capabilities behind one gate; usable interactive CLI/TUI |
-| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11, E12 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design; establish industry authority via tech blog |
+| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11, E12, E13 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design; establish industry authority via tech blog; dogfood the governance onto the Claude Code host |
+| **M5 — Interactive Advocacy** | The product, in the reader's browser | E14, E15 | The real kernel compiled to WASM powers a same-origin, TensorFlow-Playground-class visualization suite — led by the Taint-Flow Simulator — that lets anyone drive the governance live, with CI proving the in-browser verdicts match the native kernel |
 
 ### Dependency sketch
 
@@ -72,7 +73,9 @@ E0 ─┬─> E1 ─┬─> E2 ─┬─> E3 ─┬─> E4 ──(M1)
                             E8 ──┐
                             E10 ─┼─(M4, depends on all)
                             E11 ─┤
-                            E12 ─┘
+                            E12 ─┤
+                            E13 ─┘
+    E1, E2 ───────────────> E14 ──> E15 ──(M5, interactive advocacy)
 ```
 
 
@@ -413,7 +416,7 @@ regression gates enforced.
 - [x] **E12.4 [Content]** Draft "AI Aikido: Using Deterministic Rules to Neutralize Prompt Injection" (Deep Dive): Translate ADRs to prose, focusing on the `WorldManifest`, the design-time stochastic vs runtime deterministic philosophy.
 - [x] **E12.5 [Content]** Draft "Running Claude Code Safely: A Sandbox Setup Guide" (Tutorial): Practical guide using the real `harness` CLI (authoring-tool preview + governed `--world` loop + interactive approval).
 - [ ] **E12.6 [Promotion]** Kickstart Discover algorithm: Seed initial deep dives and architecture arguments on Hacker News, relevant subreddits (`r/LocalLLaMA`, `r/rust`, `r/MachineLearning`), and X (Twitter threads).
-- [ ] **E12.7 [Tech]** Interactive in-browser demos, served entirely from the site's own origin (no third-party playground, no domain-leaving). **Increment 1 — done:** a self-hosted **asciinema** player (`blog/src/components/AsciinemaPlayer.astro`; player JS/CSS vendored under `blog/public/vendor/`) replays the recorded `demo-injection-egress.sh` run inside "Running Claude Code Safely", with the text transcript kept as the no-JS/SEO fallback. **Increment 2 — planned:** swap playback for *live* interaction backed by the real kernel compiled to WebAssembly (see **E14**), so readers can edit a manifest / fire tool events and watch the actual `decide()` respond client-side.
+- [ ] **E12.7 [Tech]** Interactive in-browser demos, served entirely from the site's own origin (no third-party playground, no domain-leaving). **Increment 1 — done:** a self-hosted **asciinema** player (`blog/src/components/AsciinemaPlayer.astro`; player JS/CSS vendored under `blog/public/vendor/`) replays the recorded `demo-injection-egress.sh` run inside "Running Claude Code Safely", with the text transcript kept as the no-JS/SEO fallback. **Increment 2 — planned:** swap playback for *live* interaction — the **Taint-Flow Simulator** (**E15.2**) on the WASM kernel engine (**E14**) — so readers can edit a manifest / fire tool events and watch the actual `decide()` respond client-side.
 
 ---
 
@@ -444,15 +447,29 @@ Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × s
 ---
 
 ### E14 — In-Browser Kernel (WASM playground)
-**Goal:** Compile the **real** pure kernel + compiler to WebAssembly so the decision logic runs **client-side, same-origin** — powering live, interactive demos on the blog (E12.7) and a serverless authoring preview (E11) without a backend, and without reimplementing governance in JS. Because in-browser demos must run the *actual* kernel (not a drift-prone JS port), and the kernel is pure by design (no I/O / LLM / mutable state; deps are `serde`/`sha2`/`shell-words` — all wasm-clean), this is a packaging exercise, not a rewrite. **Depends on:** E1, E2 (and reuses the E11.2 `/api/preview` request/response shape). **Status:** 📋 planned — see DECISIONS **D22**.
+**Goal:** Compile the **real** pure kernel + compiler to WebAssembly so the decision logic runs **client-side, same-origin** — the shared engine under the interactive visualization suite (**E15**) and a serverless authoring preview (E11), with no backend and no reimplementation of governance in JS. Because in-browser demos must run the *actual* kernel (not a drift-prone JS port), and the kernel is pure by design (no I/O / LLM / mutable state; deps are `serde`/`sha2`/`shell-words` — all wasm-clean), this is a packaging exercise, not a rewrite. **Depends on:** E1, E2 (and reuses the E11.2 `/api/preview` request/response shape). **Status:** 📋 planned — see DECISIONS **D22**.
 
 - [ ] **E14.1** `harness-wasm` crate (`cdylib`, `wasm-bindgen`) exposing a minimal, JSON-in/JSON-out surface over the real compiler + kernel — e.g. `compile_preview(yaml) -> {surface, matrix} | error` (mirroring E11.2 `POST /api/preview`) and `decide(yaml, event) -> KernelOutcome`. No threads, no I/O; panics surfaced as structured errors.
 - [ ] **E14.2** Build pipeline: `wasm-pack`/`wasm-bindgen` target producing a versioned `.wasm` + JS glue, size-checked (target < ~300 KB gz) and reproducible offline; emit the artifact where the Astro site can import it.
-- [ ] **E14.3** Astro island (`KernelPlayground`) consuming the wasm bundle: manifest editor + event picker → live ALLOW/ASK/DENY/ABSENT/REPLAN matrix and deciding rule, all in the browser. First placement: the prompt-injection → egress demo in "Running Claude Code Safely" (replaces the asciinema *playback* with *interaction*; transcript stays as fallback).
+- [ ] **E14.3** Bridge smoke-test island: a bare manifest-editor + event-picker that round-trips through the wasm bundle and prints the raw decision (ALLOW/ASK/DENY/ABSENT/REPLAN + deciding rule) — the thinnest proof the engine works end-to-end in the browser. The *polished, public* visualizations build on this in **E15**.
 - [ ] **E14.4** Fidelity guard: a shared golden-vector suite (manifest+event → expected decision) run against **both** the native kernel and the wasm build in CI, so the in-browser demo can never silently drift from the product.
 - [ ] **E14.5** *(stretch)* Fold the same bundle into E11 so `harness serve`'s live preview can run fully client-side (static hosting), keeping the Rust HTTP server only as an optional local convenience.
 
 **Exit:** A reader on `ai2rules.dev` can drive the real kernel — edit a world, fire an event, see the deterministic verdict — with nothing leaving their browser, and CI proves the wasm verdicts match the native kernel byte-for-byte.
+
+---
+
+### E15 — Interactive Visualization Suite ("Harness Playground")
+**Goal:** A family of TensorFlow-Playground-class, in-browser, same-origin interactive visualizations that make the kernel's behaviour *visceral* — every one driven by the real WASM kernel (E14), so the picture is always the product, never a mock. Shipped as reusable Astro islands embeddable across the blog and gathered on a `/playground` hub. The visualizations are the differentiator; the engine (E14) is shared. **Depends on:** E14 (engine), E12 (blog surface). **Status:** 📋 planned — first deliverable is the **Taint-Flow Simulator** (E15.2). Builds on DECISIONS **D22**.
+
+- [ ] **E15.1** Shared substrate ("skins over one engine"): a typed wasm-bridge wrapper (load-once `decide` / `compile_preview`), the canonical decision-state design language (ALLOW green · ASK amber · DENY red · ABSENT grey · REPLAN violet · taint = red wash), a scenario + manifest loader, and a common island shell with the accessible-fallback contract — so each visualization is a *view*, not a re-implementation.
+- [ ] **E15.2 [first deliverable]** **Taint-Flow Simulator** — an agent *session as an animated timeline*. The reader composes or picks a sequence of tool-calls (Read, Edit, WebFetch, Bash …); pressing ▶ runs each step through the real kernel; the UI animates the **monotonic taint floor** rising the instant an untrusted source is read and **severing every later network edge** (DENY + the deciding rule). Direct manipulation: reorder / insert / remove steps and watch decisions re-flip live; toggle the manifest's taint/egress policy; load presets (incl. the prompt-injection → egress attack). Embeds into "Running Claude Code Safely" in place of the asciinema *playback*, with the table transcript retained as the no-JS / SEO fallback (E12.7 increment 2).
+- [ ] **E15.3** **Decision-Matrix Playground** — manifest editor ↔ a live action × {clean, tainted} ALLOW/ASK/DENY/ABSENT grid; the public, polished evolution of the E11 authoring tool (candidate to *unify* with E11 once E14.5 lands).
+- [ ] **E15.4** **Attack Sandbox (with / without physics)** — an editable prompt-injection payload run side-by-side: ungoverned (secrets exfiltrate) vs governed (egress severed at the taint floor); the persuasion piece, paired with "Why Deny is Dangerous" / "AI Aikido".
+- [ ] **E15.5** **Provenance Flow Graph** — an animated information-flow DAG (data + tool-call nodes) coloured by provenance / taint; untrusted reads spread "red" through the session and break proposed network edges. Shares its scenario model with E15.2.
+- [ ] **E15.6** **`/playground` hub + embeds** — a gallery page on `ai2rules.dev` indexing the visualizations, each cross-linked from the post it illustrates (a destination plus an internal-link / SEO surface).
+
+**Exit:** `ai2rules.dev/playground` hosts several real-kernel-backed interactive visualizations — led by the Taint-Flow Simulator embedded in the sandbox guide — each running entirely in the reader's browser and each provably faithful via the E14 fidelity guard.
 
 ---
 
