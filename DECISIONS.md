@@ -321,4 +321,13 @@ commit, or the code. Status is `Accepted` unless later `Superseded by D<n>`.
   (a CI golden-vector suite, E14.4, pins wasm verdicts to the native kernel). The
   asciinema interim buys an honest same-origin demo today without betting the
   fidelity story on a hand-written JS port.
+- **Spike (validated):** the pure `preview` was extracted into a shared
+  `harness-preview` crate (used by both `harness serve` and a new `harness-wasm`
+  `wasm-bindgen` crate), `wasm-pack build --target nodejs` compiled the whole
+  stack (sha2 / serde_yaml / kernel / compiler) to `wasm32`, and a Node smoke
+  test (`crates/harness-wasm/smoke-test.cjs`) confirmed the kernel decides
+  client-side — clean `fetch_web` → Allow, tainted → Deny (`taint_invariant`).
+  The premise holds: no JS reimplementation, one shared implementation, real
+  verdicts in the browser runtime. (Debug `.wasm` is ~2.7 MB; release + `wasm-opt`
+  size tuning is E14.2.)
 

@@ -1,5 +1,7 @@
 /target
 **/*.rs.bk
+# wasm-pack build output (regenerated; see crates/harness-wasm) (E14)
+crates/harness-wasm/pkg/
 # Reference projects (separate git repos kept for study, never committed here).
 /repos/
 

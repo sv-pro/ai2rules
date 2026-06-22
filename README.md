@@ -49,7 +49,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10 planned |
-| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 📋 planned (E14 engine, E15 suite; first viz = Taint-Flow Simulator) |
+| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine spike validated (kernel decides in wasm); E15 suite planned (first viz = Taint-Flow Simulator) |
 
 **Done so far:**
 
@@ -126,6 +126,15 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   Self-contained demos: `demo-injection-egress.sh` (prompt-injection → egress,
   neutralized — E13.5) and `demo-cross-agent.sh` (subagent → parent taint).
   See `DECISIONS.md` D19–D21.
+- **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
+  {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
+  by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the
+  same governance runs natively *and* in the browser, with no reimplementation
+  (D22). A spike compiles the whole stack to `wasm32` and a Node smoke test proves
+  the kernel decides client-side (clean `fetch_web` → Allow, tainted → Deny by
+  `taint_invariant`). This is the engine under the planned visualization suite
+  (M5 / E15); size tuning, a `--target web` bundle, and the native↔wasm fidelity
+  CI guard are the remaining E14 work.
 
 Builds clean offline with `clippy -D warnings`; **92 unit tests** green.
 
@@ -147,6 +156,8 @@ crates/               the harness implementation
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
   cli-harness/        terminal entrypoint + `serve` authoring tool (binary `harness`) (E9, E11)
+  harness-preview/    pure manifest → {surface, decision matrix}, shared by serve + wasm (E11/E14)
+  harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
 docs/                 architecture (harness-architecture.md is canonical)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
 PLAN.md               epic-level execution plan

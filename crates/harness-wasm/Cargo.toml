@@ -1,0 +1,20 @@
+[package]
+name = "harness-wasm"
+description = "WebAssembly engine (E14): the real compiler + kernel preview, callable from JavaScript in the browser — the shared engine under the E15 visualization suite."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib for the wasm artifact; rlib so the crate is testable on the host too.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+harness-preview = { workspace = true }
+compiler = { workspace = true }
+wasm-bindgen = { workspace = true }
+
+[package.metadata.wasm-pack.profile.release]
+# Engine fidelity over micro-optimization for now; size tuning is E14.2.
+wasm-opt = false
