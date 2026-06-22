@@ -2,6 +2,10 @@
 **/*.rs.bk
 # wasm-pack build output (regenerated; see crates/harness-wasm) (E14)
 crates/harness-wasm/pkg/
+crates/harness-wasm/pkg-web/
+# Debug WASM bundle copied into the blog for local preview — keep the 2.7MB blob
+# out of git until the E14.2 release build; the page source is committed.
+blog/public/vendor/harness-wasm/
 # Reference projects (separate git repos kept for study, never committed here).
 /repos/
 

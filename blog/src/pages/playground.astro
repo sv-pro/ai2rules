@@ -1,0 +1,59 @@
+---
+import BaseHead from '../components/BaseHead.astro';
+import Footer from '../components/Footer.astro';
+import Header from '../components/Header.astro';
+import KernelPlayground from '../components/KernelPlayground.astro';
+
+const title = 'Playground — Drive the Governance Kernel Live';
+const description =
+  'Edit a WorldManifest and watch the real CLI Agent Harness kernel decide ALLOW / ASK / DENY / ABSENT — compiled to WebAssembly and running entirely in your browser.';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <BaseHead title={title} description={description} />
+    <style>
+      main {
+        width: 1080px;
+        max-width: calc(100% - 2em);
+      }
+      .intro { margin-bottom: 1.5rem; }
+      .intro h1 { font-size: 2rem; margin: 0 0 0.5rem; line-height: 1.1; }
+      .intro p { color: var(--gray, #8a97ad); margin: 0; }
+      .note {
+        margin-top: 1.25rem;
+        font-size: 0.85rem;
+        color: var(--gray, #8a97ad);
+        border-left: 3px solid var(--accent, #5b9bff);
+        padding-left: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <Header />
+    <main>
+      <div class="intro">
+        <h1>Drive the governance kernel, live</h1>
+        <p>
+          This isn't a mock-up. Editing the manifest re-runs the <strong>real
+          compiler and kernel</strong> — the same Rust code the harness uses —
+          compiled to WebAssembly and executed in your browser. The decision
+          matrix on the right is the actual verdict for every projected action,
+          clean and tainted.
+        </p>
+      </div>
+
+      <KernelPlayground />
+
+      <p class="note">
+        Try it: set a tool's side effect to <code>Network</code> and watch its
+        <em>tainted</em> column flip to <code>Deny</code> — the monotonic taint
+        floor. Anything you don't declare is simply <code>ABSENT</code>. This is
+        an early bridge build (debug WASM); the polished visualization suite is
+        on the way.
+      </p>
+    </main>
+    <Footer />
+  </body>
+</html>

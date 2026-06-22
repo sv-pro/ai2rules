@@ -1,0 +1,98 @@
+---
+/**
+ * KernelPlayground — the E14.3 bridge island / first E15 visualization.
+ *
+ * Loads the real compiler + kernel (compiled to WebAssembly under
+ * /public/vendor/harness-wasm/) and renders a live clean-vs-tainted decision
+ * matrix that recomputes in the browser as you edit the manifest. Nothing
+ * leaves the origin; the verdicts are the actual product logic (no JS port).
+ *
+ * The wasm bundle is currently the debug build (~2.7 MB) copied from
+ * `wasm-pack build crates/harness-wasm --target web`; the release/size-gated
+ * emit pipeline is E14.2.
+ */
+---
+
+<div class="kp">
+  <div class="kp-grid">
+    <section class="kp-panel">
+      <h3 class="kp-h">World manifest (YAML)</h3>
+      <textarea class="kp-yaml" spellcheck="false" aria-label="World manifest YAML"></textarea>
+    </section>
+    <section class="kp-panel">
+      <h3 class="kp-h">Kernel decision surface</h3>
+      <div class="kp-out">Loading the engine…</div>
+    </section>
+  </div>
+  <p class="kp-foot">
+    Engine v<span class="kp-ver">…</span> · the real compiler + kernel, compiled to
+    WebAssembly and running <strong>entirely in your browser</strong>.
+  </p>
+</div>
+
+<script is:inline type="module">
+  import init, { preview, default_world, version } from '/vendor/harness-wasm/harness_wasm.js';
+
+  const root = document.querySelector('.kp');
+  const yamlEl = root.querySelector('.kp-yaml');
+  const outEl = root.querySelector('.kp-out');
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+  }
+
+  function render() {
+    let res;
+    try {
+      res = JSON.parse(preview(yamlEl.value));
+    } catch (e) {
+      outEl.innerHTML = '<div class="kp-err">engine error: ' + escapeHtml(e) + '</div>';
+      return;
+    }
+    if (!res.ok) {
+      outEl.innerHTML = '<div class="kp-err">' + escapeHtml(res.error) + '</div>';
+      return;
+    }
+    const cell = (v) =>
+      '<span class="kp-pill kp-' + escapeHtml(v.decision) + '">' + escapeHtml(v.decision) + '</span>' +
+      ' <span class="kp-rule">' + escapeHtml(v.rule) + '</span>';
+    const rows = res.decisions
+      .map((d) => '<tr><td>' + escapeHtml(d.action) + '</td><td>' + cell(d.clean) + '</td><td>' + cell(d.tainted) + '</td></tr>')
+      .join('');
+    outEl.innerHTML =
+      '<p class="kp-meta">world <b>' + escapeHtml(res.world_id) + '</b> · hash <code>' +
+      escapeHtml(res.manifest_hash) + '</code> · ' + res.surface.length + ' projected tools</p>' +
+      '<table class="kp-table"><thead><tr><th>action</th><th>clean</th><th>tainted</th></tr></thead><tbody>' +
+      rows + '</tbody></table>';
+  }
+
+  try {
+    await init();
+    root.querySelector('.kp-ver').textContent = version();
+    yamlEl.value = default_world();
+    yamlEl.addEventListener('input', render);
+    render();
+  } catch (e) {
+    outEl.innerHTML = '<div class="kp-err">failed to load the WASM engine: ' + escapeHtml(e) + '</div>';
+  }
+</script>
+
+<style is:global>
+  .kp { --kp-allow:#1f9d5c; --kp-ask:#c9922b; --kp-deny:#d2433a; --kp-absent:#5a6679; --kp-replan:#8a63d2; margin: 1.5rem 0; }
+  .kp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 720px) { .kp-grid { grid-template-columns: 1fr; } }
+  .kp-panel { background: rgba(10, 14, 22, 0.55); border: 1px solid var(--glass-border, #232a39); border-radius: 10px; overflow: hidden; }
+  .kp-h { margin: 0; padding: .55rem .9rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--gray, #8a97ad); border-bottom: 1px solid var(--glass-border, #232a39); }
+  .kp-yaml { width: 100%; height: 440px; resize: vertical; border: 0; background: transparent; color: var(--text-main, #d7dee9); padding: .8rem; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
+  .kp-out { padding: .7rem .9rem 1rem; min-height: 440px; }
+  .kp-meta { color: var(--gray, #8a97ad); margin: 0 0 .7rem; font-size: 12.5px; }
+  .kp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .kp-table th, .kp-table td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--glass-border, #232a39); }
+  .kp-table th { color: var(--gray, #8a97ad); font-weight: 600; }
+  .kp-pill { display: inline-block; padding: .04rem .5rem; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
+  .kp-Allow { background: var(--kp-allow); } .kp-Ask { background: var(--kp-ask); }
+  .kp-Deny { background: var(--kp-deny); } .kp-Absent, .kp-UNKNOWN { background: var(--kp-absent); } .kp-Replan { background: var(--kp-replan); }
+  .kp-rule { color: var(--gray, #8a97ad); font: 11px ui-monospace, monospace; }
+  .kp-foot { color: var(--gray, #8a97ad); font-size: 12.5px; margin: .8rem 0 0; }
+  .kp-err { color: var(--kp-deny); font: 12.5px ui-monospace, monospace; white-space: pre-wrap; }
+</style>

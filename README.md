@@ -132,9 +132,11 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   same governance runs natively *and* in the browser, with no reimplementation
   (D22). A spike compiles the whole stack to `wasm32` and a Node smoke test proves
   the kernel decides client-side (clean `fetch_web` → Allow, tainted → Deny by
-  `taint_invariant`). This is the engine under the planned visualization suite
-  (M5 / E15); size tuning, a `--target web` bundle, and the native↔wasm fidelity
-  CI guard are the remaining E14 work.
+  `taint_invariant`). This is the engine under the visualization suite (M5 / E15):
+  a `--target web` bundle now backs a `KernelPlayground` island and a `/playground`
+  page on the blog, verified rendering the live decision matrix in a real browser.
+  Remaining E14 work: a release/size-gated wasm emit pipeline (the page uses a local
+  debug build today) and the native↔wasm fidelity CI guard.
 
 Builds clean offline with `clippy -D warnings`; **92 unit tests** green.
 
