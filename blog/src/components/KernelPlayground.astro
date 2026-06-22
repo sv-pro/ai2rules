@@ -1,27 +1,51 @@
 ---
 /**
- * KernelPlayground — the E14.3 bridge island / first E15 visualization.
+ * KernelPlayground — a structured, visual editor for the governance world
+ * (E14.3 island / first cut of the E15 suite).
  *
- * Loads the real compiler + kernel (compiled to WebAssembly under
- * /public/vendor/harness-wasm/) and renders a live clean-vs-tainted decision
- * matrix that recomputes in the browser as you edit the manifest. Nothing
- * leaves the origin; the verdicts are the actual product logic (no JS port).
+ * No raw-text editing required: flip the Clean/Tainted context, toggle which
+ * tools exist, or pick a preset, and watch tools rearrange between
+ * ALLOWED / ASK / DENIED / ABSENT buckets. Every verdict comes from the real
+ * compiler + kernel compiled to WebAssembly (under /public/vendor/harness-wasm/),
+ * so the picture is the product — no decision logic reimplemented in JS (D22).
  *
- * The wasm bundle is currently the debug build (~2.7 MB) copied from
- * `wasm-pack build crates/harness-wasm --target web`; the release/size-gated
- * emit pipeline is E14.2.
+ * The structured controls only *author the manifest*; the kernel still decides.
+ * The action blocks mirror crates/compiler/assets/default_world.yaml.
  */
 ---
 
 <div class="kp">
   <div class="kp-grid">
     <section class="kp-panel">
-      <h3 class="kp-h">World manifest (YAML)</h3>
-      <textarea class="kp-yaml" spellcheck="false" aria-label="World manifest YAML"></textarea>
+      <h3 class="kp-h">World editor</h3>
+      <div class="kp-controls">
+        <label class="kp-field">
+          <span>Preset</span>
+          <select class="kp-preset">
+            <option value="full">Default world (all tools)</option>
+            <option value="noegress">No network / MCP / memory</option>
+            <option value="readonly">Read-only</option>
+          </select>
+        </label>
+        <div class="kp-field">
+          <span>Context</span>
+          <div class="kp-switch" role="group" aria-label="Taint context">
+            <button type="button" data-ctx="clean" class="on">Clean</button>
+            <button type="button" data-ctx="tainted">Tainted</button>
+          </div>
+        </div>
+      </div>
+      <p class="kp-hint">Untoggle a tool to make it <strong>ABSENT</strong> — it stops existing in this world, rather than being denied.</p>
+      <div class="kp-tools"></div>
+      <details class="kp-src">
+        <summary>View generated manifest (YAML)</summary>
+        <pre class="kp-yaml"></pre>
+      </details>
     </section>
+
     <section class="kp-panel">
-      <h3 class="kp-h">Kernel decision surface</h3>
-      <div class="kp-out">Loading the engine…</div>
+      <h3 class="kp-h">Projected reality <span class="kp-ctxlabel"></span></h3>
+      <div class="kp-buckets">Loading the engine…</div>
     </section>
   </div>
   <p class="kp-foot">
@@ -31,68 +55,257 @@
 </div>
 
 <script is:inline type="module">
-  import init, { preview, default_world, version } from '/vendor/harness-wasm/harness_wasm.js';
+  import init, { preview, version } from '/vendor/harness-wasm/harness_wasm.js';
 
+  // --- World model (mirrors crates/compiler/assets/default_world.yaml) ---------
+  const PREAMBLE = [
+    'world_id: dev-harness-default',
+    '',
+    'actors:',
+    '  - { name: developer, kind: User }',
+    '  - { name: agent, kind: Model }',
+    '  - { name: shell, kind: ShellWorker }',
+    '  - { name: mcp, kind: McpServer }',
+    '',
+    'data_classes: [Public, Workspace, Secret, Credential, Generated, External]',
+    '',
+    'channels:',
+    '  - { name: user_cli, trust: Trusted, taint: false }',
+    '  - { name: workspace_files, trust: Untrusted, taint: true }',
+    '  - { name: shell_output, trust: SemiTrusted, taint: true }',
+    '  - { name: mcp_output, trust: Untrusted, taint: true }',
+    '  - { name: web_fetch, trust: Untrusted, taint: true }',
+    '  - { name: memory, trust: Derived, taint: false }',
+    '',
+    'capabilities:',
+    '  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }',
+    '  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }',
+    '  - { trust: Untrusted, actions: [Read] }',
+    '  - { trust: Derived, actions: [Read] }',
+  ].join('\n');
+
+  const FOOTER = [
+    'transition_policies:',
+    '  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }',
+    '  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }',
+    '  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }',
+    '  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }',
+    '  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }',
+    '',
+    'budget: { max_tokens_per_session: 1000000, max_commands_per_task: 50, command_timeout_ms: 60000 }',
+    '',
+    'observability:',
+    '  redact: ["env.*_TOKEN", "env.*_KEY", "**/.env"]',
+  ].join('\n');
+
+  const BASE = [
+    { id: 'read_workspace',  eff: 'Read',           extra: ['action_type: Read',    'side_effect: Read',           'schema: { type: object, properties: { path: { type: string } } }'] },
+    { id: 'write_workspace', eff: 'FilesystemWrite', extra: ['action_type: Write',   'side_effect: FilesystemWrite', 'schema: { type: object, properties: { path: { type: string }, content: { type: string } } }'] },
+    { id: 'apply_patch',     eff: 'FilesystemWrite', extra: ['action_type: Patch',   'side_effect: FilesystemWrite', 'schema: { type: object, properties: { patch: { type: string } } }'] },
+    { id: 'run_command',     eff: 'Process',         extra: ['action_type: Command', 'side_effect: Process',         'schema: { type: object, properties: { command: { type: string } } }'] },
+    { id: 'start_pty',       eff: 'Process',         extra: ['action_type: Pty',     'side_effect: Process',         'approval_required: true'] },
+    { id: 'call_mcp_tool',   eff: 'External',        extra: ['action_type: Mcp',     'side_effect: External',        'backing: !McpServer { server: docs, tool: search }', 'schema: { type: object, properties: { query: { type: string } } }'] },
+    { id: 'fetch_web',       eff: 'Network',         extra: ['action_type: Web',     'side_effect: Network',         'schema: { type: object, properties: { url: { type: string } } }'] },
+    { id: 'update_memory',   eff: 'Memory',          extra: ['action_type: Memory',  'side_effect: Memory',          'schema: { type: object, properties: { key: { type: string }, value: { type: string } } }'] },
+  ];
+
+  const SCOPED = [
+    { id: 'read_repo_file',      base: 'read_workspace', args: ['path: ActorInput'] },
+    { id: 'apply_workspace_patch', base: 'apply_patch',  args: ['patch: ActorInput'] },
+    { id: 'run_tests',           base: 'run_command',    args: ['command: !Literal pytest'] },
+    { id: 'git_status',          base: 'run_command',    args: ['command: !Literal "git status"'] },
+    { id: 'git_diff',            base: 'run_command',    args: ['command: !Literal "git diff"'] },
+    { id: 'git_commit',          base: 'run_command',    args: ['command: !Literal "git commit"'] },
+    { id: 'call_known_mcp_tool', base: 'call_mcp_tool',  args: ['query: ActorInput'] },
+  ];
+
+  const CATALOG = [...BASE.map((a) => a.id), ...SCOPED.map((c) => c.id)];
+  const EFF = Object.fromEntries(BASE.map((a) => [a.id, a.eff]));
+
+  const PRESETS = {
+    full: new Set(CATALOG),
+    noegress: new Set(CATALOG.filter((id) => !['fetch_web', 'call_mcp_tool', 'call_known_mcp_tool', 'update_memory'].includes(id))),
+    readonly: new Set(['read_workspace', 'read_repo_file']),
+  };
+
+  function baseBlock(a) {
+    return '  - name: ' + a.id + '\n' + a.extra.map((l) => '    ' + l).join('\n');
+  }
+  function scopedBlock(c) {
+    return '  - name: ' + c.id + '\n    base_action: ' + c.base + '\n    args:\n' +
+      c.args.map((l) => '      ' + l).join('\n');
+  }
+  function genYaml(enabled) {
+    const base = BASE.filter((a) => enabled.has(a.id));
+    const scoped = SCOPED.filter((c) => enabled.has(c.id) && enabled.has(c.base));
+    return [
+      PREAMBLE, '',
+      'base_actions:', base.map(baseBlock).join('\n'), '',
+      'scoped_capabilities:', scoped.map(scopedBlock).join('\n'), '',
+      FOOTER,
+    ].join('\n');
+  }
+
+  // --- DOM + state -------------------------------------------------------------
   const root = document.querySelector('.kp');
+  const toolsEl = root.querySelector('.kp-tools');
+  const bucketsEl = root.querySelector('.kp-buckets');
   const yamlEl = root.querySelector('.kp-yaml');
-  const outEl = root.querySelector('.kp-out');
+  const ctxLabel = root.querySelector('.kp-ctxlabel');
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+  let enabled = new Set(PRESETS.full);
+  let context = 'clean';
+  let prevBucket = {}; // toolId -> bucket, for move animation
+
+  function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]); }
+
+  function buildToolToggles() {
+    const row = (id, sub) =>
+      '<label class="kp-tool"><input type="checkbox" data-tool="' + id + '"' +
+      (enabled.has(id) ? ' checked' : '') + '><span class="kp-tname">' + esc(id) +
+      '</span><span class="kp-tsub">' + esc(sub) + '</span></label>';
+    toolsEl.innerHTML =
+      '<div class="kp-tgroup">base actions</div>' +
+      BASE.map((a) => row(a.id, a.eff)).join('') +
+      '<div class="kp-tgroup">scoped capabilities</div>' +
+      SCOPED.map((c) => row(c.id, '→ ' + c.base)).join('');
+    toolsEl.querySelectorAll('input[data-tool]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) enabled.add(cb.dataset.tool); else enabled.delete(cb.dataset.tool);
+        update();
+      });
+    });
   }
 
-  function render() {
+  // A scoped capability can't exist without its base action — reflect that by
+  // disabling + graying its toggle when the base is off (the engine excludes it
+  // from the manifest regardless; this just makes the dependency visible).
+  function syncDeps() {
+    toolsEl.querySelectorAll('input[data-tool]').forEach((cb) => {
+      const sc = SCOPED.find((c) => c.id === cb.dataset.tool);
+      const baseOff = !!sc && !enabled.has(sc.base);
+      cb.disabled = baseOff;
+      cb.closest('.kp-tool').classList.toggle('kp-disabled', baseOff);
+    });
+  }
+
+  function update() {
+    syncDeps();
+    const yaml = genYaml(enabled);
+    yamlEl.textContent = yaml;
+    ctxLabel.textContent = context === 'tainted' ? '· context: tainted' : '· context: clean';
+
     let res;
-    try {
-      res = JSON.parse(preview(yamlEl.value));
-    } catch (e) {
-      outEl.innerHTML = '<div class="kp-err">engine error: ' + escapeHtml(e) + '</div>';
-      return;
+    try { res = JSON.parse(preview(yaml)); }
+    catch (e) { bucketsEl.innerHTML = '<div class="kp-err">engine error: ' + esc(e) + '</div>'; return; }
+    if (!res.ok) { bucketsEl.innerHTML = '<div class="kp-err">' + esc(res.error) + '</div>'; return; }
+
+    const surface = new Set(res.surface.map((s) => s.name));
+    const buckets = { Allow: [], Ask: [], Deny: [], Absent: [] };
+    for (const d of res.decisions) {
+      const v = context === 'tainted' ? d.tainted : d.clean;
+      const b = (v.decision === 'Allow' || v.decision === 'Ask' || v.decision === 'Deny') ? v.decision : 'Deny';
+      buckets[b].push({ name: d.action, rule: v.rule });
     }
-    if (!res.ok) {
-      outEl.innerHTML = '<div class="kp-err">' + escapeHtml(res.error) + '</div>';
-      return;
+    for (const id of CATALOG) {
+      if (!surface.has(id)) buckets.Absent.push({ name: id, rule: 'not in this world' });
     }
-    const cell = (v) =>
-      '<span class="kp-pill kp-' + escapeHtml(v.decision) + '">' + escapeHtml(v.decision) + '</span>' +
-      ' <span class="kp-rule">' + escapeHtml(v.rule) + '</span>';
-    const rows = res.decisions
-      .map((d) => '<tr><td>' + escapeHtml(d.action) + '</td><td>' + cell(d.clean) + '</td><td>' + cell(d.tainted) + '</td></tr>')
-      .join('');
-    outEl.innerHTML =
-      '<p class="kp-meta">world <b>' + escapeHtml(res.world_id) + '</b> · hash <code>' +
-      escapeHtml(res.manifest_hash) + '</code> · ' + res.surface.length + ' projected tools</p>' +
-      '<table class="kp-table"><thead><tr><th>action</th><th>clean</th><th>tainted</th></tr></thead><tbody>' +
-      rows + '</tbody></table>';
+
+    const cols = [
+      ['Allow', 'ALLOWED', '✓'],
+      ['Ask', 'ASK', '?'],
+      ['Deny', 'DENIED', '✕'],
+      ['Absent', 'ABSENT', '∅'],
+    ];
+    const nextBucket = {};
+    bucketsEl.innerHTML = cols.map(([key, label, glyph]) => {
+      const items = buckets[key].sort((a, b) => a.name.localeCompare(b.name));
+      const chips = items.length === 0
+        ? '<li class="kp-empty">—</li>'
+        : items.map((it) => {
+            nextBucket[it.name] = key;
+            const moved = prevBucket[it.name] && prevBucket[it.name] !== key ? ' kp-moved' : '';
+            const se = EFF[it.name] ? ' · side-effect ' + EFF[it.name] : '';
+            const title = it.name + ' — ' + key + ' · rule: ' + it.rule + se;
+            return '<li class="kp-chip kp-c-' + key + moved + '" title="' + esc(title) + '"><b>' +
+              esc(it.name) + '</b><span class="kp-crule">' + esc(it.rule) + '</span></li>';
+          }).join('');
+      return '<div class="kp-col kp-col-' + key + '"><div class="kp-colh"><span class="kp-glyph">' +
+        glyph + '</span>' + label + ' <em>' + buckets[key].length + '</em></div><ul>' + chips + '</ul></div>';
+    }).join('');
+    prevBucket = nextBucket;
   }
+
+  function setContext(ctx) {
+    context = ctx;
+    root.querySelectorAll('.kp-switch button').forEach((b) => b.classList.toggle('on', b.dataset.ctx === ctx));
+    update();
+  }
+
+  root.querySelectorAll('.kp-switch button').forEach((b) =>
+    b.addEventListener('click', () => setContext(b.dataset.ctx)));
+  root.querySelector('.kp-preset').addEventListener('change', (e) => {
+    enabled = new Set(PRESETS[e.target.value] || PRESETS.full);
+    buildToolToggles();
+    update();
+  });
 
   try {
     await init();
     root.querySelector('.kp-ver').textContent = version();
-    yamlEl.value = default_world();
-    yamlEl.addEventListener('input', render);
-    render();
+    buildToolToggles();
+    update();
   } catch (e) {
-    outEl.innerHTML = '<div class="kp-err">failed to load the WASM engine: ' + escapeHtml(e) + '</div>';
+    bucketsEl.innerHTML = '<div class="kp-err">failed to load the WASM engine: ' + esc(e) + '</div>';
   }
 </script>
 
 <style is:global>
-  .kp { --kp-allow:#1f9d5c; --kp-ask:#c9922b; --kp-deny:#d2433a; --kp-absent:#5a6679; --kp-replan:#8a63d2; margin: 1.5rem 0; }
-  .kp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  @media (max-width: 720px) { .kp-grid { grid-template-columns: 1fr; } }
-  .kp-panel { background: rgba(10, 14, 22, 0.55); border: 1px solid var(--glass-border, #232a39); border-radius: 10px; overflow: hidden; }
-  .kp-h { margin: 0; padding: .55rem .9rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--gray, #8a97ad); border-bottom: 1px solid var(--glass-border, #232a39); }
-  .kp-yaml { width: 100%; height: 440px; resize: vertical; border: 0; background: transparent; color: var(--text-main, #d7dee9); padding: .8rem; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; outline: none; }
-  .kp-out { padding: .7rem .9rem 1rem; min-height: 440px; }
-  .kp-meta { color: var(--gray, #8a97ad); margin: 0 0 .7rem; font-size: 12.5px; }
-  .kp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .kp-table th, .kp-table td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--glass-border, #232a39); }
-  .kp-table th { color: var(--gray, #8a97ad); font-weight: 600; }
-  .kp-pill { display: inline-block; padding: .04rem .5rem; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
-  .kp-Allow { background: var(--kp-allow); } .kp-Ask { background: var(--kp-ask); }
-  .kp-Deny { background: var(--kp-deny); } .kp-Absent, .kp-UNKNOWN { background: var(--kp-absent); } .kp-Replan { background: var(--kp-replan); }
-  .kp-rule { color: var(--gray, #8a97ad); font: 11px ui-monospace, monospace; }
-  .kp-foot { color: var(--gray, #8a97ad); font-size: 12.5px; margin: .8rem 0 0; }
+  .kp {
+    --kp-allow: #4ade80; --kp-ask: #fbbf24; --kp-deny: #f87171; --kp-absent: #8a97ad;
+    --kp-border: var(--glass-border, #232a39); --kp-mut: var(--gray, #8a97ad);
+    margin: 1.5rem 0;
+  }
+  .kp-grid { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr); gap: 1rem; }
+  @media (max-width: 760px) { .kp-grid { grid-template-columns: 1fr; } }
+  .kp-panel { background: rgba(10, 14, 22, 0.55); border: 1px solid var(--kp-border); border-radius: 10px; padding: .8rem .9rem 1rem; }
+  .kp-h { margin: 0 0 .7rem; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--kp-mut); }
+  .kp-ctxlabel { font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .kp-controls { display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: end; margin-bottom: .5rem; }
+  .kp-field { display: grid; gap: .3rem; font-size: .8rem; color: var(--kp-mut); }
+  .kp-preset { background: #0d1117; color: var(--text-main, #d7dee9); border: 1px solid var(--kp-border); border-radius: 6px; padding: .4rem .5rem; }
+  .kp-switch { display: inline-flex; border: 1px solid var(--kp-border); border-radius: 6px; overflow: hidden; }
+  .kp-switch button { background: #0d1117; color: var(--kp-mut); border: 0; padding: .4rem .8rem; cursor: pointer; font-size: .82rem; }
+  .kp-switch button.on { background: var(--accent, #5b9bff); color: #fff; }
+  .kp-hint { font-size: .78rem; color: var(--kp-mut); margin: .2rem 0 .6rem; }
+  .kp-tools { display: grid; grid-template-columns: 1fr 1fr; gap: .15rem .8rem; }
+  .kp-tgroup { grid-column: 1 / -1; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--kp-mut); margin: .5rem 0 .1rem; }
+  .kp-tool { display: flex; align-items: baseline; gap: .4rem; font: 12.5px ui-monospace, Menlo, monospace; padding: .12rem 0; cursor: pointer; }
+  .kp-tool input { accent-color: var(--accent, #5b9bff); }
+  .kp-tool.kp-disabled { opacity: .38; }
+  .kp-chip { cursor: default; }
+  .kp-tname { color: var(--text-main, #d7dee9); }
+  .kp-tsub { color: var(--kp-mut); font-size: 11px; margin-left: auto; }
+  .kp-src { margin-top: .8rem; }
+  .kp-src summary { cursor: pointer; font-size: .8rem; color: var(--kp-mut); }
+  .kp-yaml { margin: .5rem 0 0; max-height: 260px; overflow: auto; background: #0d1117; border: 1px solid var(--kp-border); border-radius: 8px; padding: .7rem; font: 11.5px/1.4 ui-monospace, Menlo, monospace; color: var(--text-main, #d7dee9); white-space: pre; }
+  .kp-buckets { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+  .kp-col { background: rgba(0,0,0,.18); border: 1px solid var(--kp-border); border-radius: 8px; padding: .5rem .6rem; }
+  .kp-colh { font-size: .72rem; font-weight: 700; letter-spacing: .04em; margin-bottom: .4rem; display: flex; align-items: center; gap: .35rem; }
+  .kp-colh em { margin-left: auto; opacity: .6; font-style: normal; font-weight: 400; }
+  .kp-glyph { display: inline-grid; place-items: center; width: 1.1rem; height: 1.1rem; border-radius: 4px; font-size: .7rem; color: #0b0e14; }
+  .kp-col-Allow .kp-glyph { background: var(--kp-allow); } .kp-col-Allow .kp-colh { color: var(--kp-allow); }
+  .kp-col-Ask .kp-glyph { background: var(--kp-ask); } .kp-col-Ask .kp-colh { color: var(--kp-ask); }
+  .kp-col-Deny .kp-glyph { background: var(--kp-deny); } .kp-col-Deny .kp-colh { color: var(--kp-deny); }
+  .kp-col-Absent .kp-glyph { background: var(--kp-absent); } .kp-col-Absent .kp-colh { color: var(--kp-absent); }
+  .kp-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .25rem; }
+  .kp-chip { background: #0d1117; border: 1px solid var(--kp-border); border-radius: 6px; padding: .25rem .45rem; font: 12px ui-monospace, Menlo, monospace; display: flex; flex-direction: column; }
+  .kp-chip b { font-weight: 600; color: var(--text-main, #d7dee9); }
+  .kp-crule { font-size: 10px; color: var(--kp-mut); }
+  .kp-c-Deny { border-color: rgba(248,113,113,.45); } .kp-c-Absent { opacity: .6; }
+  .kp-empty { color: var(--kp-mut); font-size: 12px; opacity: .5; }
+  .kp-foot { color: var(--kp-mut); font-size: 12.5px; margin: .8rem 0 0; }
   .kp-err { color: var(--kp-deny); font: 12.5px ui-monospace, monospace; white-space: pre-wrap; }
+  @keyframes kp-pop { 0% { transform: scale(.82); opacity: .25; } 60% { transform: scale(1.06); } 100% { transform: scale(1); opacity: 1; } }
+  .kp-moved { animation: kp-pop .34s ease; }
 </style>

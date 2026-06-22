@@ -49,7 +49,7 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10 planned |
-| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine spike validated (kernel decides in wasm); E15 suite planned (first viz = Taint-Flow Simulator) |
+| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (480 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
 
 **Done so far:**
 
@@ -133,10 +133,11 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   (D22). A spike compiles the whole stack to `wasm32` and a Node smoke test proves
   the kernel decides client-side (clean `fetch_web` → Allow, tainted → Deny by
   `taint_invariant`). This is the engine under the visualization suite (M5 / E15):
-  a `--target web` bundle now backs a `KernelPlayground` island and a `/playground`
-  page on the blog, verified rendering the live decision matrix in a real browser.
-  Remaining E14 work: a release/size-gated wasm emit pipeline (the page uses a local
-  debug build today) and the native↔wasm fidelity CI guard.
+  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **480 KB**) ships on the
+  blog at **`/playground`**, where a structured `KernelPlayground` editor — preset +
+  Clean/Tainted switch + per-tool toggles — sorts every tool live into
+  ALLOWED / ASK / DENIED / ABSENT buckets, all decided by the real kernel in-browser.
+  Remaining E14 work: the native↔wasm fidelity CI guard (E14.4).
 
 Builds clean offline with `clippy -D warnings`; **92 unit tests** green.
 

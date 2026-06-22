@@ -36,22 +36,23 @@ const description =
       <div class="intro">
         <h1>Drive the governance kernel, live</h1>
         <p>
-          This isn't a mock-up. Editing the manifest re-runs the <strong>real
-          compiler and kernel</strong> — the same Rust code the harness uses —
-          compiled to WebAssembly and executed in your browser. The decision
-          matrix on the right is the actual verdict for every projected action,
-          clean and tainted.
+          This isn't a mock-up. Flip the context, toggle which tools exist, or
+          pick a preset — and watch tools rearrange between <strong>Allowed</strong>,
+          <strong>Ask</strong>, <strong>Denied</strong>, and <strong>Absent</strong>.
+          Every verdict is computed by the <strong>real compiler and kernel</strong>
+          — the same Rust code the harness uses — compiled to WebAssembly and run
+          in your browser.
         </p>
       </div>
 
       <KernelPlayground />
 
       <p class="note">
-        Try it: set a tool's side effect to <code>Network</code> and watch its
-        <em>tainted</em> column flip to <code>Deny</code> — the monotonic taint
-        floor. Anything you don't declare is simply <code>ABSENT</code>. This is
-        an early bridge build (debug WASM); the polished visualization suite is
-        on the way.
+        Try it: switch to <code>Tainted</code> and watch the network / MCP / memory
+        tools jump to <code>DENIED</code> — the monotonic taint floor. Untoggle a
+        tool and it becomes <code>ABSENT</code>: it stops existing in this world,
+        rather than being denied. This is an early bridge build (debug WASM); the
+        polished visualization suite is on the way.
       </p>
     </main>
     <Footer />

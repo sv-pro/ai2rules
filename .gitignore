@@ -3,9 +3,10 @@
 # wasm-pack build output (regenerated; see crates/harness-wasm) (E14)
 crates/harness-wasm/pkg/
 crates/harness-wasm/pkg-web/
-# Debug WASM bundle copied into the blog for local preview — keep the 2.7MB blob
-# out of git until the E14.2 release build; the page source is committed.
-blog/public/vendor/harness-wasm/
+# Note: the size-optimized release wasm under blog/public/vendor/harness-wasm/
+# IS committed (it ships with the Cloudflare Pages deploy); only the wasm-pack
+# build dirs above are ignored. Regenerate with:
+#   wasm-pack build crates/harness-wasm --target web --release --out-dir pkg-web
 # Reference projects (separate git repos kept for study, never committed here).
 /repos/
 

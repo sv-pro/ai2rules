@@ -16,5 +16,5 @@ compiler = { workspace = true }
 wasm-bindgen = { workspace = true }
 
 [package.metadata.wasm-pack.profile.release]
-# Engine fidelity over micro-optimization for now; size tuning is E14.2.
-wasm-opt = false
+# Size-optimize the shipped wasm (E14.2). -Oz = optimize aggressively for size.
+wasm-opt = ['-Oz']
