@@ -14,7 +14,7 @@ deliberately separate vendors.
 
 - `astro.config.mjs` → `site: 'https://ai2rules.dev'` (canonical URLs, RSS,
   sitemap, and absolute OpenGraph/JSON-LD URLs all resolve to it).
-- `.nvmrc` → `22.12.0` (Astro 6 needs Node ≥ 22.12; pins the build runtime).
+- `.nvmrc` → `22.12.0` (Astro 7 needs Node ≥ 22.12; pins the build runtime).
 - SEO layer in `src/components/BaseHead.astro`: `Article`/`TechArticle` JSON-LD,
   `robots: max-image-preview:large`, per-post OpenGraph/Twitter cards.
 
