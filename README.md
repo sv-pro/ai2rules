@@ -39,6 +39,11 @@ of `(intent, context, compiled world)` — deterministic and replayable.
 
 Read the full design in **[`docs/harness-architecture.md`](docs/harness-architecture.md)**.
 
+This harness is the **action layer** of a larger thesis — *Agentic Governance at
+the stochastic–deterministic border* — that unifies it with sibling projects
+(governed memory, capability projection, intent). The umbrella spine is
+**[`docs/THESIS.md`](docs/THESIS.md)**.
+
 ---
 
 ## Status
@@ -139,7 +144,15 @@ Read the full design in **[`docs/harness-architecture.md`](docs/harness-architec
   ALLOWED / ASK / DENIED / ABSENT buckets, all decided by the real kernel in-browser.
   Remaining E14 work: the native↔wasm fidelity CI guard (E14.4).
 
-Builds clean offline with `clippy -D warnings`; **92 unit tests** green.
+- **Gate ABI — the host-neutral integration port (D24):** `harness gate --world
+  <manifest>` reads a `GateRequest` JSON on stdin and writes the kernel's verdict
+  (`ABSENT/ALLOW/DENY/ASK/REPLAN` + rule + post-call taint) on stdout — so any
+  host (Claude Code, a Hermes agent, Codex CLI, an MCP proxy) integrates through a
+  **thin adapter** that calls the *real* kernel, never a reimplementation. The
+  decision is the pure `harness_preview::gate()`, shared native and WASM. Schema:
+  [`docs/harness-gate-abi.md`](docs/harness-gate-abi.md).
+
+Builds clean offline with `clippy -D warnings`; **104 unit tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -159,7 +172,7 @@ crates/               the harness implementation
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
   cli-harness/        terminal entrypoint + `serve` authoring tool (binary `harness`) (E9, E11)
-  harness-preview/    pure manifest → {surface, decision matrix}, shared by serve + wasm (E11/E14)
+  harness-preview/    pure design-time preview + runtime gate() ABI, shared by serve + wasm + `harness gate` (E11/E14, D24)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
 docs/                 architecture (harness-architecture.md is canonical)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
@@ -190,6 +203,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run --bin harness        # interactive harness (flags: --world <yaml> --simulate --background)
 cargo run --bin harness -- serve   # World Authoring Tool at http://127.0.0.1:8787 (flag: --port)
+echo '{"tool":"fetch_web","context":{"taint":"tainted"}}' \
+  | cargo run --bin harness -- gate --world crates/compiler/assets/default_world.yaml  # host-neutral gate ABI (D24)
 ```
 
 CI runs all four checks on every push and PR
@@ -267,6 +282,20 @@ cargo run -p agent-core --example tools_demo
 (locked args stripped, literal injected — invariant 12); an MCP call returns a
 tainted result, after which a web fetch is `DENY`ed because the context is now
 tainted (invariant 7). MCP/web use deterministic mock transports.
+
+For the **cross-layer thesis demo** — a poisoned document cannot escalate into a
+forbidden action ([`docs/THESIS.md`](docs/THESIS.md)) — run:
+
+```bash
+cargo run -p agent-core --example poisoned_knowledge_demo
+```
+
+Two sessions isolate one variable. A knowledge base (an MCP-backed retriever, à
+la `context-engine`) returns a poisoned document; because `mcp_output` is
+`Untrusted`+tainted, the *identical* `fetch_web https://docs.example/guide` that
+is `ALLOW`ed in the baseline session is `DENY`ed in the session that retrieved
+first — along with the exfil attempt — by `no_tainted_network` (invariant 7).
+Knowledge-layer provenance drives action-layer enforcement; the layers compose.
 
 > Architectural decisions and the alternatives weighed are logged in
 > [`DECISIONS.md`](DECISIONS.md).

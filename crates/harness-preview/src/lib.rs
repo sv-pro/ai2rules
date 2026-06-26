@@ -10,6 +10,15 @@
 //! - `harness-wasm` (the in-browser engine behind the visualization suite, E14/E15).
 //!
 //! It is pure: no I/O, no threads — safe to compile to `wasm32`.
+//!
+//! Alongside the design-time [`preview`], [`gate`] is the *runtime* half: it
+//! governs one concrete proposed call (the host-neutral `harness gate` ABI,
+//! DECISIONS D24). Both run the real kernel and share this crate so native,
+//! WASM, and the per-host adapters can never diverge.
+
+pub mod gate;
+
+pub use gate::{gate, GateApproval, GateContext, GateRequest, GateResponse, ABI_VERSION};
 
 use compiler::{compile, loader::load_yaml};
 use harness_types::{

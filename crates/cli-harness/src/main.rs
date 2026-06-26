@@ -4,10 +4,12 @@ use agent_core::{
 };
 use clap::Parser;
 use compiler::{compile, compile_default, loader::load_yaml};
+use harness_preview::{gate, GateRequest};
 use harness_types::{CompiledWorld, Decision, EffectMode, ExecutionMode, Provenance, ToolCall};
 use provider_adapters::anthropic::tool_use_block;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use trace_store::{ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
@@ -41,6 +43,14 @@ enum Command {
         /// Port to bind on 127.0.0.1
         #[arg(long, default_value_t = 8787)]
         port: u16,
+    },
+    /// Govern one proposed tool call: read a `GateRequest` JSON on stdin and
+    /// write the `GateResponse` verdict on stdout — the host-neutral gate ABI
+    /// (D24). A host adapter wraps this. See `docs/harness-gate-abi.md`.
+    Gate {
+        /// Path to the world manifest (YAML/JSON) to govern against.
+        #[arg(long)]
+        world: PathBuf,
     },
 }
 
@@ -122,6 +132,10 @@ fn main() {
         return;
     }
 
+    if let Some(Command::Gate { world }) = &cli.command {
+        std::process::exit(run_gate(world));
+    }
+
     let world = if let Some(path) = cli.world {
         let content = std::fs::read_to_string(path).expect("failed to read world file");
         let manifest = load_yaml(&content).expect("failed to parse manifest YAML");
@@ -173,6 +187,62 @@ fn main() {
 
     println!("\nSession ended. Final text: {:?}", outcome.final_text);
     println!("{} records appended to trace.", outcome.records);
+}
+
+/// The `harness gate` subcommand: compile `world_path`, read one `GateRequest`
+/// JSON on stdin, run the pure kernel gate, and write the `GateResponse` on
+/// stdout. Returns the process exit code (`docs/harness-gate-abi.md` §5):
+/// `0` = evaluated — the verdict (incl. `DENY`/`ASK`) is on stdout; `2` = a
+/// malformed request or an unreadable/uncompilable manifest; `1` = internal
+/// error. The verdict is never encoded in the exit code (D24): mapping it to a
+/// host's decision shape is the adapter's job.
+fn run_gate(world_path: &Path) -> i32 {
+    let content = match std::fs::read_to_string(world_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("gate: cannot read world {}: {e}", world_path.display());
+            return 2;
+        }
+    };
+    let manifest = match load_yaml(&content) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("gate: cannot parse world {}: {e}", world_path.display());
+            return 2;
+        }
+    };
+    let world = match compile(&manifest) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("gate: cannot compile world {}: {e}", world_path.display());
+            return 2;
+        }
+    };
+
+    let mut buf = String::new();
+    if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
+        eprintln!("gate: cannot read stdin: {e}");
+        return 1;
+    }
+    let req: GateRequest = match serde_json::from_str(&buf) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("gate: malformed GateRequest: {e}");
+            return 2;
+        }
+    };
+
+    let response = gate(&world, &req);
+    match serde_json::to_string(&response) {
+        Ok(json) => {
+            println!("{json}");
+            0
+        }
+        Err(e) => {
+            eprintln!("gate: cannot serialize response: {e}");
+            1
+        }
+    }
 }
 
 fn render_entry(entry: &TranscriptEntry) {

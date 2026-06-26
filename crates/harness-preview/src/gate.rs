@@ -1,0 +1,388 @@
+//! Pure governance **gate** — the host-neutral decision ABI (DECISIONS D24).
+//!
+//! [`gate`] maps a host-neutral [`GateRequest`] onto the kernel's neutral types,
+//! runs [`world_kernel::decide`], and maps the `KernelOutcome` back to a
+//! [`GateResponse`] — the verdict, the rule that fired, and the **post-call
+//! monotonic taint** the host adapter must persist.
+//!
+//! It is **decision-only** (it never executes — on `ALLOW` the host runs its own
+//! tool) and **pure** (no I/O, no LLM, no mutable state), so the *same* function
+//! backs the `harness gate` subcommand and the WASM engine, the way [`preview`]
+//! does for the authoring tool. Wire schema: `docs/harness-gate-abi.md`.
+//!
+//! [`preview`]: crate::preview
+
+use harness_types::{
+    ActionName, CallId, CompiledWorld, ContentHash, Decision, ExecutionMode, Provenance, Provider,
+    SessionId, SideEffectClass, SourceChannel, Taint, TaintContext, ToolCall,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use world_kernel::{decide, BudgetUsage, EvalContext, KernelOutcome};
+
+/// The current ABI version. Bumped only on a breaking wire change (§8).
+pub const ABI_VERSION: u32 = 1;
+
+/// One proposed tool call to govern, in the manifest's vocabulary (§3).
+#[derive(Debug, Clone, Deserialize)]
+pub struct GateRequest {
+    /// ABI version. Defaults to the current version when omitted.
+    #[serde(default = "default_version")]
+    pub v: u32,
+    /// Action name **in the manifest's vocabulary** — the adapter has already
+    /// mapped the host's tool name. Maps to `ToolCall.action_name`.
+    pub tool: String,
+    /// The proposed call's arguments. Maps to `ToolCall.arguments`.
+    #[serde(default)]
+    pub arguments: Value,
+    /// Carried, host-owned context (taint, mode, session).
+    #[serde(default)]
+    pub context: GateContext,
+}
+
+/// The host-owned context carried alongside a call (§3). Unknown fields are
+/// ignored, so the wire format is forward-compatible.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GateContext {
+    /// Opaque host session id; the taint-sidecar key and trace correlator.
+    #[serde(default)]
+    pub session_id: String,
+    /// `interactive` (default) | `background`. Drives ASK→DENY fail-closed.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// Monotonic carried taint: `clean` (default) | `tainted`.
+    #[serde(default)]
+    pub taint: Option<String>,
+    /// Provenance of this call's trigger (the proposing actor's trust). Defaults
+    /// to `user_prompt`. The inbound taint *floor* is driven by `taint`, not this.
+    #[serde(default)]
+    pub source_channel: Option<String>,
+    /// A granted approval token, when re-submitting a previously `ASK`ed call.
+    #[serde(default)]
+    pub approval_token: Option<String>,
+}
+
+/// The kernel's verdict for one call (§4).
+#[derive(Debug, Clone, Serialize)]
+pub struct GateResponse {
+    pub v: u32,
+    /// `ABSENT` | `ALLOW` | `DENY` | `ASK` | `REPLAN`.
+    pub decision: String,
+    /// The rule/invariant that fired, or `null` for a plain `ALLOW`.
+    pub rule: Option<String>,
+    /// Human-readable rationale, for the host UI / the trace.
+    pub reason: String,
+    pub context: GateResponseContext,
+    /// Present only when `decision == ASK`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval: Option<GateApproval>,
+    /// First 12 hex of the compiled manifest hash, for drift/trace correlation.
+    pub manifest_hash: String,
+}
+
+/// Post-call state the adapter must persist for the next call (§4).
+#[derive(Debug, Clone, Serialize)]
+pub struct GateResponseContext {
+    /// Monotonic post-call taint to persist: `clean` | `tainted`.
+    pub taint: String,
+}
+
+/// Approval handshake returned on `ASK` (§4). The token is a correlation id;
+/// durable binding/validation is the host adapter's `ApprovalStore` (deferred).
+#[derive(Debug, Clone, Serialize)]
+pub struct GateApproval {
+    pub token: String,
+    pub required: bool,
+}
+
+/// Govern one proposed call against a compiled world. Pure and deterministic in
+/// `(world, req)` — the runtime half of the kernel, exposed as a value function.
+pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
+    let action = ActionName::new(&req.tool);
+    let inbound = parse_taint(req.context.taint.as_deref());
+    let channel = parse_channel(req.context.source_channel.as_deref());
+    let session = SessionId::new(&req.context.session_id);
+
+    let call = ToolCall {
+        action_name: action.clone(),
+        arguments: req.arguments.clone(),
+        provider: Provider::CliNative,
+        call_id: CallId::new("gate"),
+        source_perceptions: vec![],
+        session_id: session.clone(),
+    };
+    let provenance = Provenance::from_channel(channel, session, ContentHash::new("gate"));
+    let ctx = EvalContext {
+        taint: TaintContext::from_taint(inbound),
+        mode: parse_mode(req.context.mode.as_deref()),
+        usage: BudgetUsage::default(),
+        approval_granted: req.context.approval_token.is_some(),
+    };
+
+    let (decision, rule) = match decide(world, &call, provenance, &ctx) {
+        KernelOutcome::UnknownToOntology { .. } => {
+            (Decision::Absent, "unknown_to_ontology".to_string())
+        }
+        KernelOutcome::NotRepresentable { decision, rule, .. } => (decision, rule),
+        KernelOutcome::Evaluated { disposition, .. } => (disposition.decision, disposition.rule),
+    };
+
+    // Post-call taint escalation: monotonic join of the carried taint with the
+    // taint this action's *output* introduces. Only an executed (ALLOW) call
+    // ingests anything — a blocked call brings in nothing (§4).
+    let mut out_taint = inbound;
+    if decision == Decision::Allow {
+        if let Some(se) = world.side_effect(&action) {
+            out_taint = out_taint.join(side_effect_taint(se));
+        }
+    }
+
+    let approval = (decision == Decision::Ask).then(|| GateApproval {
+        token: format!("{}:{}", req.context.session_id, req.tool),
+        required: true,
+    });
+
+    GateResponse {
+        v: ABI_VERSION,
+        decision: decision_str(decision).to_string(),
+        // A plain ALLOW surfaces no distinguishing rule (§4).
+        rule: (decision != Decision::Allow).then(|| rule.clone()),
+        reason: reason_for(decision, &rule).to_string(),
+        context: GateResponseContext {
+            taint: taint_str(out_taint).to_string(),
+        },
+        approval,
+        manifest_hash: short_hash(world),
+    }
+}
+
+fn default_version() -> u32 {
+    ABI_VERSION
+}
+
+fn parse_taint(s: Option<&str>) -> Taint {
+    match s {
+        Some("tainted") => Taint::Tainted,
+        _ => Taint::Clean,
+    }
+}
+
+fn parse_mode(s: Option<&str>) -> ExecutionMode {
+    match s {
+        Some("background") => ExecutionMode::Background,
+        _ => ExecutionMode::Interactive,
+    }
+}
+
+/// Map the wire `source_channel` to a kernel channel. An absent or unrecognized
+/// value defaults to `UserPrompt` (the proposing actor); the security-critical
+/// inbound floor is carried by `taint`, not this field.
+fn parse_channel(s: Option<&str>) -> SourceChannel {
+    match s {
+        Some("workspace_file") => SourceChannel::WorkspaceFile,
+        Some("shell_output") => SourceChannel::ShellOutput,
+        Some("mcp_output") => SourceChannel::McpOutput,
+        Some("web") => SourceChannel::Web,
+        Some("memory") => SourceChannel::Memory,
+        Some("generated") => SourceChannel::Generated,
+        _ => SourceChannel::UserPrompt,
+    }
+}
+
+/// The taint an action's *output* introduces, by side-effect class. v1 policy:
+/// network/external/memory ingress brings in untrusted data; pure effects and
+/// local reads do not. The finer, path-sensitive taint-source policy is the
+/// deferred manifest-schema item (`docs/harness-gate-abi.md` §7).
+fn side_effect_taint(se: SideEffectClass) -> Taint {
+    match se {
+        SideEffectClass::Network | SideEffectClass::External | SideEffectClass::Memory => {
+            Taint::Tainted
+        }
+        _ => Taint::Clean,
+    }
+}
+
+fn decision_str(d: Decision) -> &'static str {
+    match d {
+        Decision::Absent => "ABSENT",
+        Decision::Allow => "ALLOW",
+        Decision::Deny => "DENY",
+        Decision::Ask => "ASK",
+        Decision::Replan => "REPLAN",
+    }
+}
+
+fn taint_str(t: Taint) -> &'static str {
+    match t {
+        Taint::Clean => "clean",
+        Taint::Tainted => "tainted",
+    }
+}
+
+fn reason_for(d: Decision, rule: &str) -> &'static str {
+    match (d, rule) {
+        (Decision::Absent, "unknown_to_ontology") => "action is not in this world's ontology",
+        (Decision::Absent, "capability") => "the actor's trust/capability cannot see this action",
+        (Decision::Absent, _) => "action is not projected into this world",
+        (Decision::Deny, "taint_invariant") => {
+            "tainted context cannot reach an externally-effectful action"
+        }
+        (Decision::Deny, "schema_violation") => "arguments violate the action's schema",
+        (Decision::Deny, "descriptor_drift") => "the action descriptor changed since projection",
+        (Decision::Deny, _) => "policy blocked a visible action",
+        (Decision::Ask, _) => "human approval is required before this action",
+        (Decision::Replan, _) => "over budget or too broad; propose a smaller step",
+        (Decision::Allow, _) => "permitted; the host may execute this action",
+    }
+}
+
+fn short_hash(world: &CompiledWorld) -> String {
+    let h = world.manifest_hash().as_str();
+    h[..h.len().min(12)].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use compiler::compile_default;
+
+    /// Build a request for `tool` with the given carried taint, interactive,
+    /// user-prompt provenance, empty args.
+    fn req(tool: &str, taint: &str) -> GateRequest {
+        GateRequest {
+            v: ABI_VERSION,
+            tool: tool.to_string(),
+            arguments: serde_json::json!({}),
+            context: GateContext {
+                session_id: "s1".to_string(),
+                mode: None,
+                taint: Some(taint.to_string()),
+                source_channel: None,
+                approval_token: None,
+            },
+        }
+    }
+
+    #[test]
+    fn clean_read_is_allowed_and_does_not_taint() {
+        let world = compile_default();
+        let res = gate(&world, &req("read_workspace", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.rule, None); // a plain ALLOW surfaces no rule
+        assert_eq!(res.context.taint, "clean"); // Read does not ingest untrusted data
+        assert!(res.approval.is_none());
+        assert_eq!(res.v, ABI_VERSION);
+        assert!(!res.manifest_hash.is_empty());
+    }
+
+    #[test]
+    fn clean_fetch_web_is_allowed_but_escalates_taint() {
+        // The core loop: a web fetch is allowed when clean, and its untrusted
+        // output taints the session for the *next* call.
+        let world = compile_default();
+        let res = gate(&world, &req("fetch_web", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "tainted");
+    }
+
+    #[test]
+    fn tainted_fetch_web_is_denied_by_the_taint_floor() {
+        let world = compile_default();
+        let res = gate(&world, &req("fetch_web", "tainted"));
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+        assert_eq!(res.context.taint, "tainted"); // stays tainted (monotonic)
+    }
+
+    #[test]
+    fn unknown_tool_is_absent_not_denied() {
+        let world = compile_default();
+        let res = gate(&world, &req("send_email", "clean"));
+        assert_eq!(res.decision, "ABSENT");
+        assert_eq!(res.rule.as_deref(), Some("unknown_to_ontology"));
+    }
+
+    #[test]
+    fn approval_required_action_asks_and_returns_a_token() {
+        let world = compile_default();
+        let res = gate(&world, &req("start_pty", "clean"));
+        assert_eq!(res.decision, "ASK");
+        let approval = res.approval.expect("ASK must carry an approval handshake");
+        assert!(approval.required);
+        assert_eq!(approval.token, "s1:start_pty");
+    }
+
+    #[test]
+    fn approval_required_in_background_fails_closed_to_deny() {
+        let world = compile_default();
+        let mut r = req("start_pty", "clean");
+        r.context.mode = Some("background".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert!(res.approval.is_none());
+    }
+
+    #[test]
+    fn granted_approval_token_allows() {
+        let world = compile_default();
+        let mut r = req("start_pty", "clean");
+        r.context.approval_token = Some("s1:start_pty".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "ALLOW");
+    }
+
+    #[test]
+    fn untrusted_source_channel_makes_a_write_absent_by_capability() {
+        // An untrusted actor (web channel) may only Read; a write is ABSENT.
+        let world = compile_default();
+        let mut r = req("write_workspace", "clean");
+        r.context.source_channel = Some("web".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "ABSENT");
+        assert_eq!(res.rule.as_deref(), Some("capability"));
+    }
+
+    #[test]
+    fn deserializes_from_wire_json_with_defaults() {
+        // Minimal request: only `tool`. Everything else defaults.
+        let r: GateRequest = serde_json::from_str(r#"{"tool":"read_workspace"}"#).unwrap();
+        assert_eq!(r.v, ABI_VERSION);
+        assert_eq!(r.tool, "read_workspace");
+        assert!(r.context.taint.is_none());
+
+        let world = compile_default();
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "ALLOW");
+    }
+
+    #[test]
+    fn unknown_wire_fields_are_ignored() {
+        let r: GateRequest =
+            serde_json::from_str(r#"{"tool":"read_workspace","future_field":42}"#).unwrap();
+        assert_eq!(r.tool, "read_workspace");
+    }
+
+    #[test]
+    fn response_serializes_to_documented_shape() {
+        let world = compile_default();
+        let res = gate(&world, &req("fetch_web", "tainted"));
+        let v = serde_json::to_value(&res).unwrap();
+        assert_eq!(v["decision"], "DENY");
+        assert_eq!(v["rule"], "taint_invariant");
+        assert_eq!(v["context"]["taint"], "tainted");
+        assert!(v.get("approval").is_none()); // omitted unless ASK
+    }
+
+    #[test]
+    fn gate_is_deterministic() {
+        let world = compile_default();
+        for tool in ["read_workspace", "fetch_web", "start_pty", "send_email"] {
+            for taint in ["clean", "tainted"] {
+                let r = req(tool, taint);
+                let a = serde_json::to_value(gate(&world, &r)).unwrap();
+                let b = serde_json::to_value(gate(&world, &r)).unwrap();
+                assert_eq!(a, b, "gate must be deterministic for {tool}/{taint}");
+            }
+        }
+    }
+}

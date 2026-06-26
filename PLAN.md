@@ -442,6 +442,8 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 
 - [x] **E13.7** Containerized **governed Claude Code** SUT (`docker/`): a throwaway Claude Code instance running the repo's PreToolUse governance under OS-level isolation — separates the agent-under-test from the host dev session, and provides the **E8** enforcement floor (network egress policy, non-root, dropped caps, write confinement) the hooks' decisions need. A shared named-volume taint store is the cross-instance fix for the local sidecar's locality limit (D20). Image + `run.sh` + README shipped; the live **egress-allowlist proxy** (the full E8 network floor) is shipped + verified in `docker/compose.yaml` + `docker/egress-proxy/` — the agent runs on an internal no-gateway network whose only egress is a tinyproxy allowlisting `anthropic.com`. See DECISIONS **D21**. *(advances E8)*
 
+- [ ] **E13.8** Host-neutral **gate ABI** — the integration port that makes the kernel host-independent (see DECISIONS **D24**, `docs/harness-gate-abi.md`). A `harness gate --world <manifest>` subcommand reads a `GateRequest` JSON on stdin and writes the kernel's verdict (`ABSENT/ALLOW/DENY/ASK/REPLAN` + rule + post-call taint) on stdout, so every host (Claude Code, a Hermes agent, Codex CLI, an MCP proxy) integrates through a **thin adapter calling the real kernel** — not a per-host reimplementation. **Done**: the pure `harness_preview::gate()` (12 tests) + the `harness gate` subcommand honoring the ABI exit-code contract (verdict on stdout, exit 0 even for DENY/ASK; bad input/manifest → 2), verified end-to-end. **Pending**: migrate `cc-world.json` → a real `WorldManifest`, collapse `world-gate.py` to a ~15-line adapter shim calling `harness gate` (retiring the E13.2 Python reimplementation), and add a native↔wasm gate golden-vector conformance guard (folds into E14.4).
+
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
 
 ---
@@ -510,8 +512,14 @@ delivers each (and the epic that hardens it).
 
 ## Next step
 
-This plan stops at the epic level by design. The immediate follow-up is to
-**decompose E0 into concrete tasks** (issues with acceptance tests, estimates,
-and sequencing) and stand up the workspace + CI, since every other epic depends
-on it. Subsequent epics are decomposed just-in-time as their milestone
-approaches.
+This plan is decomposed just-in-time as each milestone approaches. The immediate
+next todo:
+
+- **Wire the real `context-engine` retriever behind the MCP transport** in the
+  cross-layer thesis demo (`agent-core/examples/poisoned_knowledge_demo`),
+  replacing the mock `MockMcpTransport`. Today the poisoned document is scripted;
+  the goal is for it to be a genuinely distilled document served by
+  `context-engine`'s MCP endpoint, so the demo shows *two real systems composing*
+  (knowledge layer → action layer) rather than a faithful model. See
+  [`docs/THESIS.md`](docs/THESIS.md) §7 and `DECISIONS.md` D23. The umbrella-repo
+  *form* stays deferred until this demo reveals the natural structure.
