@@ -1,0 +1,75 @@
+# Claude Code world for the host-neutral gate ABI (DECISIONS D24/D25).
+#
+# A REAL WorldManifest — compiled by the same compiler the harness runs on, then
+# governed per call via `harness gate --world .claude/cc-world.yaml`. This is the
+# successor to the bespoke `cc-world.json` schema + the `world-gate.py`
+# reimplementation: governance lives HERE + in the kernel, not in Python (D24).
+#
+# The host adapter (the PreToolUse shim, E13.8 step 4) maps Claude Code's native
+# tools onto these action names. Most map 1:1. `Bash` is classified by the adapter
+# by command shape into one of three actions (D25): plain `Bash` (Process),
+# `Bash_network` (egress: curl/wget/nc/ssh/…), or `Bash_destructive`
+# (rm -rf/sudo/mkfs/… → approval). The pattern-matching is host-specific
+# event-mapping; the *policy* for each action is declared below.
+world_id: claude-code-default
+
+actors:
+  - { name: developer, kind: User }
+  - { name: claude, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+# Channel trust is taken from the kernel's `SourceChannel` enum at gate time; this
+# section documents the intended provenance model for authoring/preview tools.
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: workspace_files, trust: SemiTrusted, taint: true }
+  - { name: shell_output, trust: SemiTrusted, taint: true }
+  - { name: web_fetch, trust: Untrusted, taint: true }
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  # --- read-only (no taint escalation) ---
+  - { name: Read, action_type: Read, side_effect: Read }
+  - { name: Glob, action_type: Read, side_effect: Read }
+  - { name: Grep, action_type: Read, side_effect: Read }
+  # --- workspace writes (FilesystemWrite: not under the taint floor, matching the
+  #     default world's policy — only PersistentWrite is denied when tainted) ---
+  - { name: Edit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: NotebookEdit, action_type: Patch, side_effect: FilesystemWrite }
+  # --- network / egress (taint floor: tainted context → DENY no_tainted_network) ---
+  - { name: WebFetch, action_type: Web, side_effect: Network }
+  - { name: WebSearch, action_type: Web, side_effect: Network }
+  # --- shell, classified by the adapter (D25) ---
+  - { name: Bash, action_type: Command, side_effect: Process }
+  - { name: Bash_network, action_type: Command, side_effect: Network }
+  - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+
+# Tainted data cannot reach externally-effectful surfaces (the taint floor,
+# invariant 7). Tainted WebFetch/WebSearch/Bash_network all DENY here.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000
+
+observability:
+  redact:
+    - "env.*_TOKEN"
+    - "env.*_KEY"
+    - "**/.env"
