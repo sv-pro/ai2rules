@@ -7,7 +7,7 @@ This document defines the architecture of a reciprocal-feeding system (a "flywhe
 ### 1. Content Discovery (The "Radar")
 The goal of this phase is to automate the ingestion of the state-of-the-art in AI security, filtering strictly for signal over noise.
 
-*   **The Setup:** An autonomous agent (built dogfooding the `cli-agent` harness or `safe-mcp-proxy`) running on a daily `cron` schedule.
+*   **The Setup:** An autonomous agent (built dogfooding the harness or `safe-mcp-proxy`) running on a daily `cron` schedule.
 *   **The Action:** The agent fetches top posts from the Hacker News API, new papers from the `cs.CR` (Cryptography and Security) category on arXiv, and specific security blogs via RSS.
 *   **The Filter:** The LLM evaluates the feed against a strict prompt: *"Does this relate to prompt injection, agent sandboxing, capability security, or LLM vulnerabilities? Score 1-10."*
 *   **The Output:** A daily summary appended to `_research/DISCOVERY_LOG.md`.

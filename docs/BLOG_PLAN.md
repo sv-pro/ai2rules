@@ -1,6 +1,6 @@
-# Blog Strategy & Publishing Plan: CLI Agent Harness
+# Blog Strategy & Publishing Plan: ai2rules
 
-This document outlines a comprehensive plan for launching and maintaining a technical blog centered around the **CLI Agent Harness**. The plan is specifically optimized for **Google Discover**, which favors high-engagement, visually appealing, fast-loading, and authoritative content (E-E-A-T).
+This document outlines a comprehensive plan for launching and maintaining a technical blog centered around the **ai2rules**. The plan is specifically optimized for **Google Discover**, which favors high-engagement, visually appealing, fast-loading, and authoritative content (E-E-A-T).
 
 ## 1. The Stack (Optimized for Google Discover)
 
@@ -38,15 +38,15 @@ To sustain a feed like Google Discover, you need a repeatable framework. The "Hu
 
 ## 3. The Publishing Plan: First 5 Articles
 
-These initial articles are designed to hook developers exploring AI agents, leverage current trending keywords (Prompt Injection, AI Agents, Secure CLI), and establish the core philosophy of the CLI Agent Harness.
+These initial articles are designed to hook developers exploring AI agents, leverage current trending keywords (Prompt Injection, AI Agents, Secure CLI), and establish the core philosophy of the ai2rules.
 
 ### Article 1: "Why Prompt Injection Isn't Just a Prompt Problem—It's an Authority Boundary Problem"
 *   **Type:** Thought Leadership
 *   **Angle:** Most developers are trying to solve prompt injection with better LLM rules. This article argues that you can't filter out danger with an LLM; you must compile the physics of the world the agent lives in. 
 *   **Discover Hook:** The title challenges a common developer assumption.
-*   **Visual:** A stark diagram contrasting a "Wrapper/Filter" architecture vs. the "CLI Agent Harness Kernel" architecture.
+*   **Visual:** A stark diagram contrasting a "Wrapper/Filter" architecture vs. the "ai2rules Kernel" architecture.
 
-### Article 2: "Stop Giving Local AI Ambient Authority: Introducing the CLI Agent Harness"
+### Article 2: "Stop Giving Local AI Ambient Authority: Introducing the ai2rules"
 *   **Type:** Showcase / Launch
 *   **Angle:** A formal introduction to the project. Explaining the danger of giving Codex, Claude Code, or Aider ambient developer authority (SSH keys, `rm -rf /`), and how the Harness provides a deterministic virtualization layer.
 *   **Discover Hook:** Addresses a silent fear every developer has when running autonomous agents locally.

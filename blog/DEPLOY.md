@@ -1,11 +1,11 @@
 # Deploying the blog (ai2rules.dev)
 
-The **CLI Agent Harness** blog is a static [Astro](https://astro.build) site in
+The **ai2rules** blog is a static [Astro](https://astro.build) site in
 `blog/`. It deploys to **Cloudflare Pages** (hosting) and is served from
 **ai2rules.dev** (registered at **Namecheap**). Registrar and host are
 deliberately separate vendors.
 
-> Branding stays **"CLI Agent Harness"** (`SITE_TITLE` in `src/consts.ts`); the
+> Branding stays **"ai2rules"** (`SITE_TITLE` in `src/consts.ts`); the
 > domain is just the home.
 
 ---
@@ -36,7 +36,7 @@ go live.
 Dashboard → **Build → Compute** in the left sidebar (Cloudflare renamed the old
 *Workers & Pages* section; if you can't find it, press **Ctrl K** and search
 "Pages") → **Create application → Pages → Connect to Git** → authorize **GitLab**
-→ select `sv-pro/cli-agent`.
+→ select `sv-pro/ai2rules`.
 
 Build settings (the subdirectory values matter — the repo root is the Rust
 workspace, not the site):

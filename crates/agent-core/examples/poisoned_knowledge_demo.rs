@@ -40,7 +40,7 @@ fn main() {
     let world = compile_default();
 
     println!();
-    println!("  CLI Agent Harness — cross-layer demo");
+    println!("  ai2rules — cross-layer demo");
     println!("  knowledge layer (poisoned doc)  ✕  action layer (egress)\n");
 
     let sandbox = tempfile::tempdir().expect("sandbox");

@@ -29,7 +29,7 @@ fn main() {
     let world = compile_default();
 
     println!();
-    println!("  CLI Agent Harness — tools demo (scoped caps · MCP · web)\n");
+    println!("  ai2rules — tools demo (scoped caps · MCP · web)\n");
 
     // ── Part A: scoped-capability narrowing (invariant 12) ──
     println!("  A) run_tests proposed with a malicious command + extra arg:");

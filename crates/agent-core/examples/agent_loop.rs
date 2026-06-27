@@ -44,7 +44,7 @@ fn main() {
     ]);
 
     println!();
-    println!("  CLI Agent Harness — agent loop demo");
+    println!("  ai2rules — agent loop demo");
     println!("  world: {}", world.world_id().as_str());
     println!("  A scripted model proposes; the kernel governs; results feed back.\n");
 

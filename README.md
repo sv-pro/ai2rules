@@ -1,8 +1,16 @@
-# CLI Agent Harness
+# ai2rules
 
 > Deterministic virtualization for local CLI developer agents.
 > We don't filter what the agent does — we compile the physics of the world the
 > agent lives in. Dangerous actions aren't blocked by a rule; they don't exist.
+
+**This repository is the umbrella / companion codebase for the
+[ai2rules.dev](https://ai2rules.dev) site** — *Agentic Governance at the
+stochastic–deterministic border*. It unifies several projects across five layers
+(action · capability · knowledge · intent · substrate) under one thesis; the spine
+is [`docs/THESIS.md`](docs/THESIS.md). The flagship and most mature layer is the
+governance **harness** described below (which was formerly this whole repo's name,
+"CLI Agent Harness").
 
 A governance **kernel** that sits underneath a local CLI developer agent (Claude
 Code, Codex CLI, Gemini CLI, Aider, …) and controls what the agent can perceive,

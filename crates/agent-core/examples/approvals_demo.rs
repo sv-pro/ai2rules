@@ -21,7 +21,7 @@ use world_kernel::ExecEnv;
 
 fn main() {
     println!();
-    println!("  CLI Agent Harness — approvals demo");
+    println!("  ai2rules — approvals demo");
     println!("  Action: start_pty (approval_required in the default world)\n");
 
     run_once(

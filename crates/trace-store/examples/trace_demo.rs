@@ -27,7 +27,7 @@ fn main() {
     let store = TraceStore::open(&path);
 
     println!();
-    println!("  CLI Agent Harness — trace & replay demo");
+    println!("  ai2rules — trace & replay demo");
     println!("  trace: {}\n", path.display());
 
     // (action, args, channel, taint) — one of each verdict, and a secret to redact.

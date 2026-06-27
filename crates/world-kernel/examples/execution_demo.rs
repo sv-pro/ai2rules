@@ -49,7 +49,7 @@ fn main() {
     };
 
     println!();
-    println!("  CLI Agent Harness — real-execution demo");
+    println!("  ai2rules — real-execution demo");
     println!("  sandbox: {}", root.display());
     println!("  Allowed actions really run here; writes can't escape this dir.\n");
 

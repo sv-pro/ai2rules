@@ -74,7 +74,7 @@ source repos (§5):
 Every fragment is the same border move applied to a different governed resource.
 
 ### 4.1 Action — *what the agent does*
-- **Fragment:** the `cli-agent` harness (`world-kernel`, `compiler`, executor).
+- **Fragment:** the harness (`world-kernel`, `compiler`, executor).
 - **Border move:** `ToolCall → sealed IntentIR → ExecutionSpec`. An `IntentIR` is
   unforgeable outside the kernel; its existence is a validity witness. A
   `WorldManifest` (LLM-drafted, human-reviewed) compiles to an immutable

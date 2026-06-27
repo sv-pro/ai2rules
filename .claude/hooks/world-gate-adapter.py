@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse host adapter for the CLI Agent Harness gate ABI (DECISIONS D24/D26).
+"""PreToolUse host adapter for the ai2rules gate ABI (DECISIONS D24/D26).
 
 A THIN adapter — it contains NO governance logic. It maps a Claude Code PreToolUse
 event onto a GateRequest, calls the real kernel via `harness gate --world

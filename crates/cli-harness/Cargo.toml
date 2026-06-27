@@ -1,6 +1,6 @@
 [package]
 name = "cli-harness"
-description = "Terminal entrypoint for the CLI agent harness (E9)."
+description = "Terminal entrypoint for the ai2rules harness (E9)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

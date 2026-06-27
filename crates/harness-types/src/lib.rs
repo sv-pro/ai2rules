@@ -1,6 +1,6 @@
 //! # harness-types
 //!
-//! Language-neutral core contracts shared across the CLI agent harness (see
+//! Language-neutral core contracts shared across the ai2rules harness (see
 //! `docs/harness-architecture.md` §5). This crate is pure data: no I/O, no
 //! policy logic, no LLM.
 //!

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse gate — a first slice of the CLI Agent Harness kernel ported onto the
+"""PreToolUse gate — a first slice of the ai2rules kernel ported onto the
 Claude Code host (PLAN.md E13.2).
 
 It reads a Claude Code PreToolUse event on stdin and a small WorldManifest

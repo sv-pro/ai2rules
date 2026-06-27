@@ -1,4 +1,4 @@
-# CLI Agent Harness — Execution Plan
+# ai2rules — Execution Plan
 
 High-level execution plan for building the harness specified in
 [`docs/harness-architecture.md`](docs/harness-architecture.md): a deterministic

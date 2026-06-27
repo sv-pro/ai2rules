@@ -1,6 +1,6 @@
 [package]
 name = "harness-types"
-description = "Language-neutral core contracts for the CLI agent harness (architecture §5)."
+description = "Language-neutral core contracts for the ai2rules harness (architecture §5)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

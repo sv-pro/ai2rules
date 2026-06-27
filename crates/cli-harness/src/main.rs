@@ -15,9 +15,9 @@ use world_kernel::ExecEnv;
 
 mod serve;
 
-/// CLI Agent Harness
+/// ai2rules
 #[derive(Parser, Debug)]
-#[command(author, version, about = "CLI Agent Harness", long_about = None)]
+#[command(author, version, about = "ai2rules", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -168,7 +168,7 @@ fn main() {
         max_steps: 100, // Let the interactive model handle stopping
     };
 
-    println!("CLI Agent Harness initialized.");
+    println!("ai2rules initialized.");
     println!("World: {}", world.world_id().as_str());
     println!("Mode: {:?} | Effect: {:?}", config.mode, config.effect_mode);
 

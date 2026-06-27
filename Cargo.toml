@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/sv-pro/cli-agent"
+repository = "https://github.com/sv-pro/ai2rules"
 
 # Shared dependency versions. Concrete versions are pinned to what is available
 # offline; bump deliberately. See PLAN.md E0.

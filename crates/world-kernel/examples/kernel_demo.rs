@@ -36,7 +36,7 @@ fn main() {
     let world = compile_default();
 
     println!();
-    println!("  CLI Agent Harness — kernel demo");
+    println!("  ai2rules — kernel demo");
     println!(
         "  world: {}   manifest: {}",
         world.world_id().as_str(),

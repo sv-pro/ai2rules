@@ -1,9 +1,11 @@
 # AGENTS.md
 
 Canonical guidance for AI coding assistants (Claude Code, Codex, Google
-Antigravity, …) and humans working in this repository — the **CLI Agent
-Harness**. This is the single source of truth for project conventions;
-per-assistant files just point here (see [Per-assistant setup](#per-assistant-setup)).
+Antigravity, …) and humans working in this repository — **ai2rules**, the umbrella
+codebase for the [ai2rules.dev](https://ai2rules.dev) site (its flagship layer is
+the CLI governance **harness**). This is the single source of truth for project
+conventions; per-assistant files just point here (see [Per-assistant
+setup](#per-assistant-setup)).
 
 Orient with `README.md` (overview), `docs/harness-architecture.md` (canonical
 design), and `PLAN.md` (epic-level execution plan; the task source of truth).

@@ -1,5 +1,5 @@
 # Governed Claude Code — a containerized "system under test" (SUT) for the
-# CLI Agent Harness (PLAN.md E13 / E8).
+# ai2rules (PLAN.md E13 / E8).
 #
 # Why this exists: it separates the agent *under test* (running the harness's
 # PreToolUse governance hooks) from your host dev session, AND provides the
