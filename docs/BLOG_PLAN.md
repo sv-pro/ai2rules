@@ -84,6 +84,10 @@ Google Discover picks up articles that already have a heartbeat. You must seed t
 *   **Reddit:** Share specific security insights in `r/LocalLLaMA`, `r/MachineLearning`, and `r/rust`.
 *   **X (Twitter):** Thread out the architecture diagram and the core philosophy ("Absence over denial").
 
+Per-post promotion copy (threads + standalone posts + HN/Reddit titles) lives under
+[`blog/social/`](../blog/social/) — one file per post slug. See
+[`blog/social/README.md`](../blog/social/README.md) for the convention.
+
 ## 6. Catchy Article Ideas (From Research Repos)
 
 Drawing inspiration from the `agent-hypervisor`, `safe-mcp-proxy`, and `mcp-tool-projection` repositories, here are 20 catchy, Discover-optimized article titles:
