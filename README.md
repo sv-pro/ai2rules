@@ -337,6 +337,16 @@ incorporate, position against, or ignore — and why — is recorded in
 **[`docs/THIRD-PARTY-ADOPTION.md`](docs/THIRD-PARTY-ADOPTION.md)** (with `DECISIONS.md`
 D27 on the Agent Governance Toolkit and D28 on MGP).
 
+What you actually install — the product family (a Claude Code governance **plugin**, an
+MCP **proxy sidecar**, the `world-kernel` **library**) and who each is for — is in
+**[`docs/USE-CASES.md`](docs/USE-CASES.md)**. The delivery model is *infrastructure, not
+an app* (governance you plug into a host you already run; the standalone-agent path is
+cut) — see `DECISIONS.md` **D31**.
+
+Speculative, research-grade directions that aren't committed work (e.g. a cross-host
+"super-harness" governance plane) are parked in the idea pool at
+**[`docs/RESEARCH-BACKLOG.md`](docs/RESEARCH-BACKLOG.md)**.
+
 ---
 
 ## License

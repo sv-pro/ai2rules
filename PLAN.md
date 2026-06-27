@@ -11,6 +11,10 @@ dependencies, constituent tasks, and exit criteria. Detailed task breakdown
 (issues, estimates, owners, acceptance tests per task) is deliberately deferred —
 see [Next step](#next-step).
 
+Speculative, research-grade ideas that aren't committed work live in the idea pool
+at [`docs/RESEARCH-BACKLOG.md`](docs/RESEARCH-BACKLOG.md) — promote one here when it's
+ready to become an epic.
+
 ---
 
 ## North star
@@ -22,6 +26,27 @@ decision is *deterministic and replayable*, and no LLM sits on the enforcement
 path. Success is measured by the [16 acceptance invariants](#acceptance-invariant-coverage)
 passing deterministically in CI, with bounded attack-success-rate and high task
 utility on a benchmark suite.
+
+## Delivery model & packaging
+
+ai2rules ships as **infrastructure, not an application**: a governance engine that always
+wraps a host the user already runs (think **OPA / seccomp for agent actions**) —
+standalone in *form*, plugin in *role*. The "custom standalone agent" ambition is **cut**
+as a product (`DECISIONS.md` **D31**); the `cli-harness` CLI / E9 TUI remain a dev & demo
+harness, not the shipped artifact. Full rationale, user segments, and "install → get"
+walkthroughs: [`docs/USE-CASES.md`](docs/USE-CASES.md).
+
+**Ship order — one kernel, several surfaces (re-frames the epics below as products):**
+
+1. **Claude Code Governance Pack** (plugin) — *v1 / lead*. Packaging + `ai2rules init`
+   over the dogfooded `PreToolUse` hooks + `cc-world` manifest, backed by `world-kernel`
+   through the gate ABI. Builds on **E13** (esp. **E13.8**) on **E1/E2**.
+2. **Safe MCP Proxy** (sidecar) — protocol-level, host-agnostic reach. **E7** + **E13.4**,
+   reusing the `safe-mcp-proxy` / `mcp-tool-projection` references.
+3. **`harness gate` binary + `world-kernel` crate** (sidecar / library) — for embedders on
+   any host. **E13.8 (D24)** + the kernel crates.
+4. **Supporting layers** (knowledge / intent / substrate) ship **later**, each as an
+   optional sidecar / MCP-server behind a spine contract — never a v1 prerequisite.
 
 ## Guiding principles (carried from the architecture)
 

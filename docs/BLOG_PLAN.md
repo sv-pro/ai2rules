@@ -147,3 +147,60 @@ what it does well, then show the mechanism difference.
 *   **Visual:** A pipeline: prose → (distillation border) → typed facts/rules → MGP
     lifecycle → governed recall.
 *   **Source:** `DECISIONS.md` D28, `docs/THESIS.md` §8 / §4.3.
+
+## 8. Concept / Explainer Articles (vendor-neutral foundations)
+
+Top-of-funnel explainers that stand on their own — each names a distinction the field
+routinely conflates, so they're Discover-friendly (challenge an assumption) and
+evergreen. They need **no** project context to be useful, but each lands a closing
+turn back to the thesis (the project is the worked example, not the premise). Sourced
+from the agent-infra discussion behind [`RESEARCH-BACKLOG.md`](RESEARCH-BACKLOG.md) R1.
+
+### Article: "MCP Is for Tools. A2A Is for Agents. Don't Confuse Them."
+*   **Type:** Thought Leadership / Explainer
+*   **Angle:** Two interop protocols are colliding in everyone's mental model. **MCP**
+    standardizes agent ↔ *tools/data*; **A2A** standardizes agent ↔ *agent*
+    (cross-vendor). They compose — they don't compete — and knowing which boundary
+    you're standing on tells you which one to reach for. Closing turn: a governance
+    gate is the same shape under both.
+*   **Discover Hook:** Names two of the hottest protocols and resolves the confusion in
+    the title.
+*   **Visual:** A two-plane diagram — tools plane (MCP) under agents plane (A2A).
+
+### Article: "Routing Is the Easy Part: The Missing Layer in Multi-Agent Systems"
+*   **Type:** Thought Leadership
+*   **Angle:** Every orchestration framework (LangGraph, CrewAI, AutoGen, the Agents
+    SDKs) solves *routing* — getting the right subtask to the right worker. None solve
+    **governed** routing: taint/provenance that survives a handoff, least-capability
+    projection per worker, one deterministic audit across vendors. The frontier isn't
+    smarter routers; it's the boundary the work crosses.
+*   **Discover Hook:** Contrarian take on a crowded space ("routing is solved; you're
+    optimizing the wrong thing").
+*   **Visual:** A router with clean arrows vs. the same router annotated with
+    taint/capability/audit gaps at each hop.
+*   **Related:** `RESEARCH-BACKLOG.md` R1, `docs/THESIS.md`.
+
+### Article: "Stop Automating the IDE: Hosts vs. Capabilities in AI Agents"
+*   **Type:** Showcase / Explainer
+*   **Angle:** There are two things people mean by "an AI agent": the **host** (Claude
+    Code, Codex CLI, Antigravity — a loop + tools + permissions) and the **capability**
+    (Claude, GPT, Gemini/Imagen — the model). Drivable hosts you orchestrate at their
+    headless surface; GUI-first hosts you *don't* — you drop to the capability's API.
+    Worked example: getting images out of a Gemini-backed editor by calling Gemini, not
+    the editor.
+*   **Discover Hook:** Practical, counterintuitive ("the IDE is the wrong integration
+    point").
+*   **Visual:** Host layer (3 logos) sitting on a capability layer (3 models), with the
+    automation arrow pointing past the GUI host straight to the API.
+
+### Article: "Your REST API Is Not an ABI (and Why the Difference Matters)"
+*   **Type:** Deep Dive / Fundamentals
+*   **Angle:** A clean three-level taxonomy — **API** (source-level names & types),
+    **ABI** (binary/in-memory conventions: registers, struct layout, syscalls), and
+    **wire protocol** (a message format over a transport: REST, gRPC, stdio-JSON).
+    REST is the third, not the second; the "B" in ABI is load-bearing. Honest kicker:
+    a JSON-over-stdio "gate ABI" is *also* really a wire protocol — same category as
+    REST, differing only in transport.
+*   **Discover Hook:** Corrects a term nearly everyone uses loosely; evergreen systems
+    fundamentals.
+*   **Visual:** The three-row table (agree-on / need-in-common / examples).
