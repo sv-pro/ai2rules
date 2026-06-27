@@ -190,11 +190,45 @@ maturities**, not a shipped monorepo. Consolidation, smallest-leverage-first:
    / Cedar / capability-security as related work; harness + governed memory as the
    system; injection/taint benchmarks as evidence).
 
+## 8. Related work (the two that occupy this ground)
+
+Two external projects land directly on this thesis's territory and sharpen it by
+contrast. (Full survey + adoption verdicts for all of `repos/3p`:
+[`THIRD-PARTY-ADOPTION.md`](THIRD-PARTY-ADOPTION.md).)
+
+**Microsoft's Agent Governance Toolkit (AGT)** shares the *goal* almost verbatim —
+deny-by-construction, "the difference between asking an agent to behave and making it
+incapable of misbehaving" — but reaches it by **in-process policy middleware**: a
+`default_action: allow` engine evaluating deny rules, with (its own SECURITY note) the
+policy engine and agents on the *same* process boundary. That is governance by *policy
+decision*. The border governs by **structure instead of decision**: the dangerous
+capability is `ABSENT` — it does not exist in the compiled world (§3, *absence not
+refusal*), not denied by a rule a model can argue with; trust is **monotonic and
+provenanced** (§3, *trust is monotonic*), never silently downgraded; and the policy
+layer **owns no handler callables** (§5, process boundary). AGT's MCP Security Gateway (tool poisoning, descriptor drift) parallels
+`safe-mcp-proxy`, and its OWASP-Agentic-Top-10 / red-team corpus is direct Flywheel
+input — we treat AGT as the strongest incumbent to *position against*, not adopt
+(`DECISIONS.md` D27). *(Note: AGT ships a package named "Agent Hypervisor," distinct
+from our source `repos/agent-hypervisor`.)*
+
+**HKUDS's Memory Governance Protocol (MGP)** is the knowledge-layer analog: it
+standardizes governed memory as a protocol — a full lifecycle
+(`Write → … → Revoke → Purge`), per-request policy context ("who acts, for whom, under
+what constraints"), and a queryable audit trail, explicitly *peer to MCP*. MGP
+standardizes the **interface** to governed memory; the border's knowledge layer (§4.3)
+adds the move MGP leaves open — the stochastic→deterministic **distillation** of prose
+into typed Facts / Rules / Capsules at ingestion, with deterministic governed recall.
+The two **compose**: MGP as the wire contract, the distillation border as what sits
+behind it. We therefore align vocabulary to MGP and defer adopting its runtime until a
+second consumer exists (`DECISIONS.md` D28).
+
 ---
 
 *Companion docs: [`PRINCIPLES.md`](PRINCIPLES.md) (forced vs arbitrary + a
 trial/proof/reject program), [`GLOSSARY.md`](GLOSSARY.md) (normalized vocabulary),
 [`harness-architecture.md`](harness-architecture.md) (action layer, canonical),
 [`papers/hipporag2-vs-context-engine.md`](papers/hipporag2-vs-context-engine.md)
-(knowledge layer), [`FLYWHEEL.md`](FLYWHEEL.md) (method), `repos/*/` (the fragments).
+(knowledge layer), [`FLYWHEEL.md`](FLYWHEEL.md) (method),
+[`THIRD-PARTY-ADOPTION.md`](THIRD-PARTY-ADOPTION.md) (what to do with `repos/3p`),
+`repos/*/` (the fragments).
 Cross-layer proof: `agent-core/examples/poisoned_knowledge_demo`.*

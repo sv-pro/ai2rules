@@ -19,11 +19,23 @@ Design notes mirroring the real kernel:
     never brick a session.
   * Taint is MONOTONIC and per-session, persisted in a sidecar file under
     .claude/state/ (gitignored) — the cross-turn analogue of TaintContext.
+  * The sidecar is a LEDGER of taint causes, recomputed each call: tainted iff
+    some recorded cause is not covered by a valid `trust_pins` entry (an operator
+    attestation pinned to content identity; drift re-taints). The shared logic
+    lives in _gatelib.py. See DECISIONS D29 / docs/trust-pins.md.
 
 Config path: $CC_WORLD_CONFIG, else $CLAUDE_PROJECT_DIR/.claude/cc-world.json,
 else ./.claude/cc-world.json. State dir: $CLAUDE_PROJECT_DIR/.claude/state.
 """
 import sys, os, re, json
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from _gatelib import is_tainted as _is_tainted, load_pins as _load_pins
+except Exception:  # fail open: degrade to existence-based taint if helper is missing
+    _is_tainted = None
+    def _load_pins(_cfg):
+        return []
 
 NATIVE = {"Bash", "Read", "Edit", "Write", "MultiEdit", "NotebookEdit",
           "Glob", "Grep", "WebFetch", "WebSearch"}
@@ -90,7 +102,11 @@ def main():
 
     state_dir = os.path.join(proj_dir, ".claude", "state")
     taint_file = os.path.join(state_dir, "taint-" + re.sub(r"[^A-Za-z0-9_.-]", "_", sid))
-    tainted = os.path.exists(taint_file)
+    pins = _load_pins(cfg)
+    # Recompute taint from the ledger MINUS any cause covered by a valid trust_pin
+    # (D29). A pinned, content-verified source was never an untrusted-taint source;
+    # drift re-taints. Degrade to existence-based taint only if the helper is absent.
+    tainted = _is_tainted(taint_file, pins, proj_dir) if _is_tainted else os.path.exists(taint_file)
 
     cmd = str(ti.get("command", "") or "")
     url = str(ti.get("url", "") or "")
@@ -123,17 +139,26 @@ def main():
     if tool == "Bash" and any(p in cmd for p in ask.get("bash_patterns", [])):
         emit("ask", "approval required: potentially destructive command.")
 
-    # Side effect: taint the session (monotonic) for the *next* call.
+    # Side effect: append this call to the monotonic taint-cause LEDGER if it is an
+    # untrusted source. is_tainted() recomputes from this ledger minus valid
+    # trust_pins (D29), so a pinned cause never escalates. Causes are deduped; the
+    # ledger is append-only (taint never silently decreases — invariant 6).
     ts = cfg.get("taint_sources", {}) or {}
     will_taint = tool in ts.get("tools", [])
     if not will_taint and tool in ("Read", "Glob", "Grep", "NotebookEdit") and path:
         will_taint = any(prefix in path for prefix in ts.get("read_paths", []))
-    if will_taint and not tainted:
+    if will_taint:
         try:
             os.makedirs(state_dir, exist_ok=True)
             agent = ev.get("agent_type", "main")
-            with open(taint_file, "w") as f:
-                f.write(f"tainted by {tool} (agent: {agent}): {path or url}\n")
+            cause = f"tainted by {tool} (agent: {agent}): {path or url}"
+            existing = set()
+            if os.path.exists(taint_file):
+                with open(taint_file) as f:
+                    existing = {ln.rstrip("\n") for ln in f}
+            if cause not in existing:
+                with open(taint_file, "a") as f:
+                    f.write(cause + "\n")
         except Exception:
             pass  # never block on a state write failure
 

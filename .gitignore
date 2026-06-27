@@ -13,3 +13,7 @@ crates/harness-wasm/pkg-web/
 # Claude Code local/runtime state
 .claude/settings.local.json
 .claude/state/
+
+# Python bytecode (the .claude/hooks/*.py gate hooks generate this)
+__pycache__/
+*.pyc

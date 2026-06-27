@@ -493,3 +493,117 @@ commit, or the code. Status is `Accepted` unless later `Superseded by D<n>`.
   ships only `python3`). Packaging — a Rust build stage in the Dockerfile vs a
   mounted host-built static/musl binary — is recorded when taken.
 
+## D27 — Position against Agent Governance Toolkit: govern by ontology + taint + process boundary, not by policy middleware
+- **Status:** Accepted (positioning) · **See:** [`docs/THIRD-PARTY-ADOPTION.md`](docs/THIRD-PARTY-ADOPTION.md) (A), [`docs/THESIS.md`](docs/THESIS.md) §8
+- **Decision:** Treat Microsoft's **Agent Governance Toolkit (AGT)** as the dominant
+  *prior art* for the Action/Capability layers and position explicitly against it —
+  neither adopt it nor ignore it. The differentiation is **mechanism, not goal**: AGT
+  states our headline almost verbatim ("incapable of misbehaving," not "ask the agent
+  to behave") but enforces via **in-process policy middleware** — a
+  `default_action: allow` engine evaluating deny rules, with the policy engine and the
+  agent sharing **one process boundary** (AGT's own SECURITY note). That is governance
+  by *policy decision*. The border governs by *structure*: the dangerous capability is
+  **`ABSENT`** (it does not exist in the compiled world, not denied by a rule a model
+  can argue with), taint is **monotonic and provenanced**, and the policy layer
+  **owns no handler callables** (the process-boundary primitive). Record AGT's MCP
+  Security Gateway (tool-poisoning / descriptor drift) as a parallel to
+  `safe-mcp-proxy`'s descriptor-drift primitive, and its OWASP-Agentic-Top-10 +
+  PromptDefense corpus as **Flywheel discovery input**.
+- **Alternatives:** (a) **adopt AGT as the policy layer** — rejected: different stack,
+  and a same-process, default-allow rule engine is precisely the LLM-arguable surface
+  the border removes; (b) **ignore it** — rejected: it is the most credible same-pitch
+  project (Microsoft, MIT, 992 conformance tests), so silence cedes the comparison
+  that *is* our contribution; (c) **reframe our positioning to avoid the overlap** —
+  rejected: the overlap is the leverage — "deny-rule vs absent capability" only lands
+  against a concrete incumbent.
+- **Why:** the contrast (policy-decision vs ontology + taint + boundary) is the
+  sharpest statement of the thesis and is only legible against the strongest existing
+  system. Their conformance-test + RFC-2119-spec discipline is also a *method* worth
+  borrowing for our own invariants.
+- **Caveat:** AGT ships a package literally named **Agent Hypervisor** — distinct from
+  our source `repos/agent-hypervisor` (a different artifact). Disambiguate in any
+  public writing.
+
+## D28 — Knowledge layer treats MGP as an interop/vocabulary target, not a runtime to adopt (yet)
+- **Epic:** Knowledge layer (context-engine) · **Status:** Accepted (direction) · **See:** [`docs/THESIS.md`](docs/THESIS.md) §4.3, §8
+- **Decision:** For the Knowledge layer, treat HKUDS's **Memory Governance Protocol
+  (MGP)** as the **interop contract and vocabulary** to align to — its governed-memory
+  lifecycle (`Write → Search → Get → Update → Expire → Revoke → Delete → Purge`),
+  per-request policy context ("who acts, for whom, under what constraints"), and
+  queryable audit map onto what we already mean by *governed recall* — **without**
+  adopting its gateway/adapter stack as our runtime now. Align `GLOSSARY.md` and
+  context-engine's *external surface* to MGP terms; keep our distinctive move internal
+  and independent: the stochastic→deterministic **distillation border** (an LLM
+  distills prose into typed Facts / Rules / Capsules at ingestion; deterministic
+  governed recall). Speaking MGP on the wire is **gated on a concrete trigger** — a
+  second consumer of context-engine that is not our own harness.
+- **Alternatives:** (a) **adopt MGP as the knowledge-layer runtime now** — rejected:
+  premature (context-engine has no external consumer yet, so importing a
+  gateway/adapter stack is cost without a second speaker), and it would subordinate
+  our distillation border to someone else's interface before it is proven; (b)
+  **ignore MGP, grow vocabulary ad hoc** — rejected: MGP is the clearest existing
+  articulation of "governed memory as a protocol," explicitly *peer to MCP*, so
+  divergent vocabulary is needless drift; (c) **treat MGP as a competitor** —
+  rejected: it standardizes the *interface* to governed memory while our contribution
+  is the *distillation border behind it* — composable, not competing (MGP as wire
+  contract, distillation as what sits behind it).
+- **Why:** aligning vocabulary is near-zero cost and pays off in legibility and a
+  clean future integration seam; adopting the protocol implementation is real cost
+  that should wait for a real second consumer. Keeps *correctness > completeness*
+  (THESIS §4.3) and avoids over-building the least-load-bearing seam.
+
+## D29 — `trust_pins`: operator trust attestations pinned to content identity; taint becomes a recomputed cause-ledger
+- **Epic:** E13.8 / E2 (taint) · extends D25 · **Status:** Accepted (live-hook interim shipped; canonical kernel field pending) · **See:** [`docs/trust-pins.md`](docs/trust-pins.md)
+- **Decision:** Add **`trust_pins`** — operator attestations that a *specific read
+  source is trusted*, each pinned to the source's **content identity** (`sha256` of
+  the file bytes, or a reference repo's own `git_commit` + clean tree). At gate time
+  a `Read` whose **live** content still matches a pin is classified **Trusted** and
+  does **not** taint; any **drift** (bytes/commit change) or `expires` date revokes
+  the pin and the read taints as normal. The per-session taint sidecar becomes a
+  **ledger of causes**, and `tainted` is **recomputed every call** = *any recorded
+  cause not covered by a valid pin*. Shipped in the live host hook: shared logic in
+  `.claude/hooks/_gatelib.py` (used by both `world-gate.py` and `taint-notify.py`),
+  `trust_pins` declared in `.claude/cc-world.json`. The **canonical home** is a
+  `trust_pins` field in the real `WorldManifest` enforced by the pure `gate()`
+  (kernel), to land with the D26 host cutover.
+- **Why it is NOT a hole in invariant 6 (monotonic taint) or 7 (egress floor):** a
+  pin re-classifies a source's trust **upstream of taint** — a pinned, content-
+  verified read was *never* an untrusted-taint cause, so the recompute reflects
+  *corrected provenance* (a human, design-time, auditable attestation), not a
+  decrease of taint under fixed facts. The ledger **retains every cause** (audit),
+  drift is **tamper-evident** (the descriptor-drift primitive from `safe-mcp-proxy`
+  applied to reads), and the floor itself is untouched — an unpinned/tainted cause
+  still `DENY`s egress. In the manifest's channel model it is exactly: a valid pin
+  flips a read's `source_channel` from `workspace_files` (SemiTrusted, taint:true)
+  to **Trusted (taint:false)**.
+- **Binding correction (vs the initial "pin to HEAD" sketch):** bound to **content
+  identity, not the harness repo's `HEAD`** — `repos/3p` is *not tracked in this
+  repo* (`AGENTS.md`: never `git add repos/`), so this repo's HEAD says nothing about
+  that content. Use the file's `sha256` (git-agnostic, per-file precise) or the
+  **reference repo's own** HEAD commit + clean tree.
+- **Resolves D25's deferred read-taint:** D25 option (a) was "tag an untrusted read
+  with an untrusted `source_channel`"; `trust_pins` is the *exception* that re-tags a
+  vouched read as Trusted. Implement the two together in the kernel port.
+- **Alternatives:** (a) **delete the sidecar / reset taint** — rejected: unrecorded,
+  blind re-taint, indistinguishable from a decrease-by-fiat; (b) **drop `repos/` from
+  `taint_sources`** — rejected: blanket-trusts the whole tree *forever*, including
+  future malicious edits, with no drift detection; (c) **drop `WebFetch` from
+  `egress.tools`** — rejected: weakens invariant 7 itself; (d) **implement only in the
+  kernel/manifest now** — the correct long-term home, but it does not govern the live
+  session, so it cannot clear an in-flight tainted session (the operator's immediate
+  need); recorded as the canonical follow-up; (e) **pin to the harness repo's HEAD** —
+  rejected per the binding correction above.
+- **Why ship the interim in the live hook:** the live `world-gate.py` is what governs
+  this session; the pin/ledger is provable in isolation (`test-gate.sh` §4 + a
+  throwaway-projdir simulation, both run green) and fails **open** on any helper/parse
+  error, so it cannot brick a session. This mirrors the E13.2 "Python-first slice
+  before the kernel ABI" pattern (D19→D24).
+- **Known limits:** (1) the interim **grows the Python reimplementation D24 wants to
+  retire** — accepted as interim; canonical logic is one `gate()` in the kernel.
+  (2) a `sha256` pin is per-file; a `git_commit` pin trusts a whole clean tree at a
+  commit (coarser, voided by any local edit). (3) editing the hook that governs *this*
+  session is the **self-governance risk D26 flags** — done at operator direction, with
+  fail-open preserved and out-of-band validation before reliance. (4) a pin is only as
+  good as the operator's review of those bytes — it deliberately moves trust from *the
+  model's runtime judgement* to *a human's design-time attestation*. That is the point.
+

@@ -45,3 +45,21 @@ run world-default.json allow "$(ev s-clean WebFetch '{"url":"https://ok.test"}')
 echo "== 3. ASK on destructive =="
 run world-default.json ask   "$(ev s-ask Bash '{"command":"rm -rf build"}')"       "Bash rm -rf"
 run world-default.json allow "$(ev s-ask Bash '{"command":"ls -la"}')"             "Bash ls"
+
+echo "== 4. trust_pins (pinned read does NOT taint; drift re-taints) =="
+PIN_FILE="$TMP/vouched.md"; printf 'trusted reference content\n' > "$PIN_FILE"
+PIN_HASH="$(sha256sum "$PIN_FILE" | cut -d' ' -f1)"
+cat > "$TMP/world-pinned.json" <<JSON
+{
+  "projected_tools": null,
+  "taint_sources": { "tools": ["WebFetch"], "read_paths": ["$TMP/"] },
+  "egress": { "tools": ["WebFetch"], "bash_patterns": [] },
+  "ask": { "tools": [], "bash_patterns": [] },
+  "trust_pins": [ { "path": "$PIN_FILE", "identity": { "kind": "sha256", "hash": "$PIN_HASH" } } ]
+}
+JSON
+run world-pinned.json allow "$(ev s-pin Read "{\"file_path\":\"$PIN_FILE\"}")"     "Read pinned (no taint)"
+run world-pinned.json allow "$(ev s-pin WebFetch '{"url":"https://ok.test"}')"     "WebFetch after pinned read"
+printf 'tampered\n' >> "$PIN_FILE"   # bytes drift -> pinned hash no longer matches
+run world-pinned.json allow "$(ev s-drift Read "{\"file_path\":\"$PIN_FILE\"}")"   "Read drifted (taints)"
+run world-pinned.json deny  "$(ev s-drift WebFetch '{"url":"https://x.test"}')"    "WebFetch after drift"

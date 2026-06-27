@@ -17,5 +17,16 @@
   "ask": {
     "tools": [],
     "bash_patterns": ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
-  }
+  },
+
+  "_trust_pins_doc": "Operator attestations that a specific source is trusted, pinned to its content identity (DECISIONS D29, docs/trust-pins.md). A Read of a matching path whose live content still matches `identity` is classified Trusted and does NOT taint; any drift (hash/commit change) revokes the pin and the read taints as normal. Pins never weaken the egress floor (invariant 7) — they re-classify a vouched source upstream of taint, they do not let tainted data egress. identity.kind: 'sha256' (file bytes) or 'git_commit' (a reference repo's own HEAD with a clean tree).",
+  "trust_pins": [
+    {
+      "path": "repos/3p/agent-governance-toolkit/README.md",
+      "identity": { "kind": "sha256", "hash": "e99e836204772a0ad7a79768e83bd6df998c0ab4194166491fbbc0af9b7f3473" },
+      "reason": "Reviewed AGT README for the repos/3p adoption analysis (docs/THIRD-PARTY-ADOPTION.md, DECISIONS D27).",
+      "attested_by": "sergey",
+      "_subrepo_head_at_pin": "e5693cb11db5e336508ee0a793356ccfb84c1834"
+    }
+  ]
 }

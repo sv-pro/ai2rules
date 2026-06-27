@@ -16,6 +16,12 @@ Fails open: any error exits 0.
 """
 import sys, os, re, json
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from _gatelib import is_tainted as _is_tainted, load_pins as _load_pins, load_cfg as _load_cfg
+except Exception:  # fail open: degrade to existence-based taint if helper is missing
+    _is_tainted = None
+
 
 def state_dir():
     pd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
@@ -45,7 +51,14 @@ def main():
     sid = ev.get("session_id")
     # Defensive: field name for the parent link isn't guaranteed across versions.
     parent = ev.get("parent_session_id") or ev.get("parent_id") or ev.get("parent_tool_use_session_id")
-    child_tainted = bool(sid) and os.path.exists(taint_path(sd, sid))
+    # Same taint truth as world-gate.py: a ledger covered entirely by valid
+    # trust_pins is NOT tainted (D29). Degrade to existence only if helper missing.
+    pd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    tf = taint_path(sd, sid)
+    if _is_tainted is not None:
+        child_tainted = bool(sid) and _is_tainted(tf, _load_pins(_load_cfg(pd)), pd)
+    else:
+        child_tainted = bool(sid) and os.path.exists(tf)
 
     # Distinct-session case (isolated/background): union child taint into parent.
     if child_tainted and parent and parent != sid:

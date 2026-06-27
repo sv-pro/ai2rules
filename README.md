@@ -128,9 +128,13 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   (only ever `deny`/`ask`) and fail-open. Cross-agent taint follows the shared
   session sidecar (E13.6, D20), and a containerized governed SUT with an
   egress-allowlist proxy supplies the E8 enforcement floor (E13.7, D21).
+  **Trust pins** (D29, `docs/trust-pins.md`) let the operator vouch for a specific
+  read source by content identity (sha256 / clean commit), so a reviewed file no
+  longer taints while it matches — drift re-taints; taint is a recomputed
+  cause-ledger, with the shared logic in `.claude/hooks/_gatelib.py`.
   Self-contained demos: `demo-injection-egress.sh` (prompt-injection → egress,
   neutralized — E13.5) and `demo-cross-agent.sh` (subagent → parent taint).
-  See `DECISIONS.md` D19–D21.
+  See `DECISIONS.md` D19–D21, D29.
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the
@@ -318,6 +322,12 @@ The harness distills the best ideas from prior projects kept alongside it under
   (World Authoring Tool); see `DECISIONS.md` D17.
 
 `docs/harness-architecture.md` attributes each borrowed principle to its source.
+
+A wider set of external projects (governance toolkits, memory protocols, sandboxes,
+skill packs) is parked under **`repos/3p/`** for comparison. What to adopt,
+incorporate, position against, or ignore — and why — is recorded in
+**[`docs/THIRD-PARTY-ADOPTION.md`](docs/THIRD-PARTY-ADOPTION.md)** (with `DECISIONS.md`
+D27 on the Agent Governance Toolkit and D28 on MGP).
 
 ---
 

@@ -108,3 +108,38 @@ Drawing inspiration from the `agent-hypervisor`, `safe-mcp-proxy`, and `mcp-tool
 18. **"Don't Let the Agent Decide: Deterministic Proxies for MCP"** (Focus: safe-mcp-proxy's deterministic policy engine)
 19. **"How We Achieved a 0% Attack Success Rate on the AgentDojo Benchmark"** (Focus: Empirical results of the hypervisor)
 20. **"Taming the Tool Surface: How to Strip and Narrow MCP Capabilities"** (Focus: mcp-tool-projection's `partial` projections)
+
+## 7. Positioning Articles (From the `repos/3p` Analysis)
+
+Competitive/positioning pieces that contrast the border with the strongest external
+projects on the same ground. Sourced from [`docs/THIRD-PARTY-ADOPTION.md`](THIRD-PARTY-ADOPTION.md)
+and `DECISIONS.md` D27/D28. These are *fair* comparisons — name the incumbent, credit
+what it does well, then show the mechanism difference.
+
+### Article: "A Deny-Rule Is Not a Boundary: Ontology + Taint vs. Policy Middleware"
+*   **Type:** Thought Leadership / Positioning
+*   **Angle:** Microsoft's Agent Governance Toolkit makes our exact pitch ("incapable
+    of misbehaving"), but enforces it with an in-process, default-allow policy engine
+    sharing the agent's process boundary. This piece argues a deny-rule the model can
+    argue with is a weaker guarantee than a capability that is **`ABSENT`** (doesn't
+    exist), trust that is **monotonic and provenanced**, and a policy layer that
+    **owns no handler callables**. Decision vs. structure.
+*   **Discover Hook:** Names a major Microsoft project and respectfully draws the line
+    — engagement without clickbait.
+*   **Visual:** Side-by-side — "policy engine evaluates a rule" (same process) vs.
+    "compiled world has no such capability" (sealed kernel + taint join).
+*   **Source:** `DECISIONS.md` D27, `docs/THESIS.md` §8.
+
+### Article: "Governed Memory Needs Two Things: A Protocol *and* a Border"
+*   **Type:** Deep Dive / Positioning
+*   **Angle:** HKUDS's MGP standardizes the *interface* to governed memory (lifecycle,
+    per-request policy context, queryable audit). That's necessary but not sufficient:
+    what writes *into* the store still has to cross a stochastic→deterministic
+    **distillation border** (LLM distills prose into typed Facts/Rules/Capsules at
+    ingestion; deterministic governed recall). MGP as the wire contract, the border as
+    what sits behind it — they compose.
+*   **Discover Hook:** "MCP standardizes tools; MGP standardizes memory — here's the
+    missing third piece."
+*   **Visual:** A pipeline: prose → (distillation border) → typed facts/rules → MGP
+    lifecycle → governed recall.
+*   **Source:** `DECISIONS.md` D28, `docs/THESIS.md` §8 / §4.3.
