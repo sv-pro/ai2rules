@@ -2,7 +2,7 @@
 title: 'My Own Sandbox Blocked Me. The Fix Wasn’t a Hole.'
 description: "While researching competitors, the harness tainted my session and denied my own web request — exactly as designed. Here's why I added a new primitive instead of punching through the floor."
 pubDate: 'Jun 27 2026'
-heroImage: '../../assets/blog-placeholder-5.jpg'
+heroImage: '../../assets/harness-blocked-itself.jpg'
 ---
 
 I was doing competitor research — reading a pile of third-party governance projects
