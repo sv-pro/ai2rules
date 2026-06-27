@@ -1,0 +1,12 @@
+{
+  "_comment": "Claude Code MCP config. Place at your project root as .mcp.json (or merge into it). Replace the absolute path with your checkout. The governed proxy is the ONLY JIRA server Claude Code sees — it never talks to Atlassian directly.",
+  "mcpServers": {
+    "jira-governed": {
+      "command": "bash",
+      "args": ["/ABS/PATH/TO/ai2rules/docs/demos/jira-copilot/run-proxy.sh"],
+      "env": {
+        "JIRA_DEMO_PROJECT": "DEMO"
+      }
+    }
+  }
+}

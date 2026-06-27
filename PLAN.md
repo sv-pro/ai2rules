@@ -36,6 +36,12 @@ as a product (`DECISIONS.md` **D31**); the `cli-harness` CLI / E9 TUI remain a d
 harness, not the shipped artifact. Full rationale, user segments, and "install → get"
 walkthroughs: [`docs/USE-CASES.md`](docs/USE-CASES.md).
 
+**🔝 Immediate priority (2026-06-28): E16 — internal demo on the hosts the team actually
+uses.** A governed **JIRA MCP** capability surface for **GitHub Copilot** (VS Code +
+JetBrains) **and Claude Code**, via the Safe MCP Proxy. This brings the MCP-proxy surface
+(#2 below) forward as the fastest path to a live, host-agnostic proof; see
+`DECISIONS.md` **D32** and **E16**.
+
 **Ship order — one kernel, several surfaces (re-frames the epics below as products):**
 
 1. **Claude Code Governance Pack** (plugin) — *v1 / lead*. Packaging + `ai2rules init`
@@ -497,6 +503,50 @@ Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × s
 - [ ] **E15.6** **`/playground` hub + embeds** — a gallery page on `ai2rules.dev` indexing the visualizations, each cross-linked from the post it illustrates (a destination plus an internal-link / SEO surface).
 
 **Exit:** `ai2rules.dev/playground` hosts several real-kernel-backed interactive visualizations — led by the Taint-Flow Simulator embedded in the sandbox guide — each running entirely in the reader's browser and each provably faithful via the E14 fidelity guard.
+
+---
+
+### E16 — Internal demo: governed JIRA MCP on Copilot + Claude Code  🔝 HIGH PRIORITY
+**Goal:** A live internal demo showing **one governance manifest shaping the capability
+surface of the Atlassian/JIRA MCP** across **GitHub Copilot (VS Code + JetBrains)** and
+**Claude Code** — read + comment only, scope arg-locked to a specific project, every
+destructive JIRA tool **ABSENT** (doesn't exist for the agent). The line it sells:
+*"I can give Copilot JIRA access and not worry about an accidental destructive action."*
+**Depends on:** E7 + `repos/safe-mcp-proxy` (Atlassian passthrough) + the gate ABI (D24).
+**Approach:** D32 — govern via the **MCP surface** (Copilot exposes no native per-call
+gate; MCP is where it *is* governable, and it's host-agnostic — one proxy, three hosts).
+**Status:** 📋 planned — top near-term priority. Largely *wire + author + validate*, not
+build: `safe-mcp-proxy` already ships the Atlassian passthrough, an MCP server mode
+(`mcp_server --upstream`), `manifests/atlassian_mvp.yaml`, and an audit dashboard.
+
+- [ ] **E16.1** Validate the `safe-mcp-proxy` Atlassian passthrough end-to-end against a
+  **real** Atlassian Remote MCP Server (or a sandbox JIRA): run the proxy's MCP server
+  with the JIRA MCP upstream; confirm tool-list shaping, a real read, a real comment, a
+  **blocked destructive (ABSENT)**, and the project scope lock. *(Needs: JIRA instance +
+  auth, the target project key(s), and the exact read/comment tool set.)*
+- [ ] **E16.2** Author the **demo manifest** (tailored from `manifests/atlassian_mvp.yaml`):
+  allow JIRA read tools + `jira_add_comment`; **ABSENT** every write/destructive tool
+  (delete, bulk, create/update/transition/assign); **arg-lock scope** to the project
+  key(s) — JQL constrained + issue-key prefix check on comment.
+- [ ] **E16.3** **Host wiring:** VS Code Copilot (`.vscode/mcp.json`), JetBrains Copilot
+  MCP config, and Claude Code (`.mcp.json`) all pointing at the proxy as the JIRA gateway
+  — one proxy governs all three.
+- [ ] **E16.4** **Demo runbook + script** (`docs/demos/jira-copilot.md`): the before/after
+  (ungoverned full JIRA surface vs. shaped surface), the "ask Copilot to delete an issue →
+  the tool doesn't exist" beat, the audit dashboard as the visual, and Claude Code parity
+  on the same manifest. Plus a recorded fallback (asciinema / screen capture).
+- [ ] **E16.5** *(advocacy)* "Broader Claude Code use" framing — show CC governed by the
+  same manifest; cross-link the relevant blog posts.
+- [ ] **E16.6** *(stretch / productization, not a demo blocker)* Route the proxy's
+  decisions through the **real kernel** via the gate ABI (advances **E13.4**) so the demo
+  proxy *is* the product kernel, not a parallel Python engine — or ship a parity note.
+
+**Exit:** a repeatable live demo (and a recording) on VS Code Copilot + JetBrains Copilot
++ Claude Code where the JIRA MCP surface is shaped by one manifest — destructive actions
+ABSENT, scope project-locked, every call audited.
+
+Relates to acceptance invariants 2 (ABSENT-over-DENY), 7 (taint × side-effect floor),
+11 (descriptor drift), 12 (scoped caps strip locked args) — re-proved on Copilot.
 
 ---
 

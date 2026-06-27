@@ -1,0 +1,10 @@
+{
+  "_comment": "VS Code (GitHub Copilot agent mode) MCP config. Place at .vscode/mcp.json in your workspace. VS Code expands ${workspaceFolder}. After adding, open the Copilot Chat tool picker and confirm only the read + jira_add_comment tools appear.",
+  "servers": {
+    "jira-governed": {
+      "type": "stdio",
+      "command": "bash",
+      "args": ["${workspaceFolder}/docs/demos/jira-copilot/run-proxy.sh"]
+    }
+  }
+}

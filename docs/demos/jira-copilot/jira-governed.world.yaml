@@ -1,0 +1,48 @@
+# Demo world manifest — governed JIRA MCP surface for GitHub Copilot + Claude Code.
+# Schema: safe-mcp-proxy Atlassian `ManifestPolicyEngine`
+#   (repos/safe-mcp-proxy/src/main/python/safe_mcp_proxy/atlassian/policy.py).
+# Decision order: ABSENT (not allowlisted) → DENY (tainted+external write) →
+#                 DENY (data-flow) → DENY (arg rule) → ALLOW.
+world_id: jira_governed_demo
+
+# --- Capability surface -------------------------------------------------------
+# Atlassian Remote MCP Server tool names. Everything NOT listed is ABSENT — it
+# does not exist in the agent's world (stronger than DENY). [supported today]
+allowed_tools:
+  # Jira — read
+  - jira_get_issue
+  - jira_search_issues_using_jql
+  - jira_get_project
+  - jira_get_transitions      # read-only: lists transitions; does NOT execute them
+  # Jira — the single write we permit
+  - jira_add_comment
+
+# ABSENT by omission — call these out during the demo ("the tool does not exist"):
+#   jira_create_issue, jira_update_issue, jira_transition_issue, jira_assign_issue,
+#   jira_delete_issue, jira_bulk_create_issues, and the entire confluence_* surface.
+# We also omit jira_list_projects so the agent cannot even enumerate other projects.
+
+# --- Taint floor (belt-and-suspenders) ---------------------------------------
+# A write driven by untrusted context (web/email/tool_output) is denied.
+external_write_tools:
+  - jira_add_comment
+flow_rules:
+  tainted_source_blocks_external_write: true
+
+# --- Project scope lock -------------------------------------------------------
+# SUPPORTED TODAY (exact-match `allowed_values`) — works for tools that take a
+# project-key argument:
+arg_rules:
+  jira_get_project:
+    - arg: project_key
+      allowed_values: ["DEMO"]      # ← set to your project key(s)
+      rule: project_scoped_to_demo
+
+# NOT YET SUPPORTED by ManifestPolicyEngine (arg_rules only do exact allowed_values):
+#   - scoping jira_get_issue / jira_add_comment by issue-key PREFIX (e.g. DEMO-*)
+#   - constraining the free-form `jql` of jira_search_issues_using_jql
+#   → needs a small arg_rules extension (an `allowed_pattern` / regex branch in
+#     policy.py, ~10 lines). Tracked as PLAN E16.2.
+#   Interim (no code change): rely on the ABSENT list above + a dedicated DEMO
+#   project. The headline punch ("destructive tools don't exist") needs no
+#   per-issue scoping; per-project arg-locking is the follow-on nicety.
