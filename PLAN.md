@@ -515,9 +515,24 @@ destructive JIRA tool **ABSENT** (doesn't exist for the agent). The line it sell
 **Depends on:** E7 + `repos/safe-mcp-proxy` (Atlassian passthrough) + the gate ABI (D24).
 **Approach:** D32 — govern via the **MCP surface** (Copilot exposes no native per-call
 gate; MCP is where it *is* governable, and it's host-agnostic — one proxy, three hosts).
-**Status:** 🚧 in progress — top near-term priority. **E16.1 compose glue done & tested**;
-remaining is real-JIRA validation, the demo manifest tailoring, host wiring, and the
-runbook.
+**Status:** 🚧 in progress — **PIVOTED to Rust-only, one binary (DECISIONS D33).** The Python
+compose glue (safe-mcp-proxy `feat/mcp-gateway`) was the prototype that proved the shape; the
+demo is being rebuilt in Rust around the **governability gap** (CC deep vs Copilot MCP-only).
+New task list:
+
+- [ ] **E16.A** `harness mock-jira` — self-contained Rust MCP stdio upstream (jira_* tools
+  incl. destructive); no creds / Node / Python.
+- [ ] **E16.B** `harness mcp-gateway --world <m> --upstream <cmd…>` — Rust MCP gateway over the
+  **real kernel**: spawn the upstream, ABSENT-filter `tools/list` via `gate()`, gate each
+  `tools/call`, forward **only ALLOW**, audit decisions.
+- [ ] **E16.C** Claude Code *deep*: `PreToolUse` hook → the Rust `harness gate` binary
+  (retire the Python hooks for the demo) — native tools + MCP.
+- [ ] **E16.D** **Governability scorecard** + runbook; host MCP configs (VS Code / JetBrains
+  Copilot + Claude Code) point at `harness mcp-gateway`.
+- [ ] **E16.E** *(later)* real Atlassian upstream **skin** (`mcp-remote` bridge or a Rust SSE
+  MCP client).
+
+*(The original Python-path tasks below are superseded by D33; kept for history.)*
 
 - [~] **E16.1** Compose glue + validation. **Done:** built `safe_mcp_proxy.mcp_gateway`
   (in the `safe-mcp-proxy` repo) — a host-facing stdio MCP server composing

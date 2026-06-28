@@ -1,0 +1,76 @@
+# Harness WorldManifest for the governability demo (DECISIONS D33 / E16.B).
+# Compiled by the real kernel; consumed by `harness mcp-gateway`.
+#
+# The shaped JIRA surface: read tools + the single write (jira_add_comment).
+# Every destructive tool is simply NOT declared, so the kernel reports it ABSENT —
+# it does not exist for the agent (stronger than a deny it can argue with).
+world_id: jira-governed-demo
+
+actors:
+  - { name: developer, kind: User }
+  - { name: agent, kind: Model }
+  - { name: jira, kind: McpServer }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: mcp_output, trust: Untrusted, taint: true }
+  - { name: web_fetch, trust: Untrusted, taint: true }
+
+capabilities:
+  - trust: Trusted
+    actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory]
+  - trust: SemiTrusted
+    actions: [Read, Write, Patch, Command]
+  - trust: Untrusted
+    actions: [Read]
+  - trust: Derived
+    actions: [Read]
+
+base_actions:
+  # --- Allowed: reads ---
+  - name: jira_get_issue
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        issue_key: { type: string }
+  - name: jira_search_issues_using_jql
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        jql: { type: string }
+  - name: jira_get_project
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        project_key: { type: string }
+  # --- Allowed: the one write, subject to the taint floor (External) ---
+  - name: jira_add_comment
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: jira, tool: add_comment }
+    schema:
+      type: object
+      properties:
+        issue_key: { type: string }
+        body: { type: string }
+
+# DELIBERATELY ABSENT (not declared): jira_delete_issue, jira_transition_issue,
+# jira_bulk_create_issues — they do not exist in this world.
+
+# Taint floor: untrusted context cannot drive an external write.
+transition_policies:
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 50
+  command_timeout_ms: 60000

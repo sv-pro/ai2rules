@@ -1,5 +1,22 @@
 # Demo: governed JIRA MCP on GitHub Copilot + Claude Code
 
+> **⚠ Pivoted — now Rust-only, one binary (DECISIONS D33).** The Python `safe-mcp-proxy`
+> path described further down is the *superseded prototype*. The live demo runs the **real
+> kernel** via `harness mcp-gateway` over a self-contained `harness mock-jira` upstream — no
+> creds, no Node, no Python. Quick start (from the repo root, after `cargo build`):
+>
+> ```bash
+> harness mcp-gateway --world docs/demos/jira-copilot/jira-world.yaml -- harness mock-jira
+> # add --taint tainted to demo the taint floor severing the external write
+> ```
+>
+> Verdicts (proven by `crates/cli-harness/tests/mcp_gateway.rs`): `tools/list` hides the
+> destructive tools (ABSENT); `jira_get_issue`/`jira_add_comment` ALLOW when clean;
+> `jira_delete_issue` → ABSENT; under taint, `jira_add_comment` → DENY (taint floor).
+> Manifest: [`jira-world.yaml`](jira-world.yaml) (harness `WorldManifest` schema). The host
+> MCP configs in `hosts/` still apply — point them at `harness mcp-gateway` instead of
+> `run-proxy.sh`. A full rewrite of the sections below is pending.
+
 **The pitch:** *"I can give GitHub Copilot access to JIRA and not worry about an
 accidental destructive action."* One governance manifest **shapes the Atlassian/JIRA
 MCP capability surface** for **VS Code Copilot, JetBrains Copilot, and Claude Code**

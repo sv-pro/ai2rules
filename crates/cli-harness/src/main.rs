@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use trace_store::{ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
+mod mcp_gateway;
+mod mock_jira;
 mod serve;
 
 /// ai2rules
@@ -51,6 +53,28 @@ enum Command {
         /// Path to the world manifest (YAML/JSON) to govern against.
         #[arg(long)]
         world: PathBuf,
+    },
+    /// Run a self-contained mock JIRA MCP server on stdio — the demo upstream the
+    /// gateway governs (DECISIONS D33 / E16.A).
+    MockJira,
+    /// Front a real upstream MCP server with the kernel: shape its `tools/list`
+    /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
+    McpGateway {
+        /// Path to the world manifest (YAML/JSON) that shapes the surface.
+        #[arg(long)]
+        world: PathBuf,
+        /// Provenance source channel = the proposer's trust (cli|workspace_file|web|…).
+        #[arg(long, default_value = "cli")]
+        source: String,
+        /// Initial carried session taint floor: `clean` (default) | `tainted`.
+        #[arg(long, default_value = "clean")]
+        taint: String,
+        /// Optional append-only JSONL audit log path.
+        #[arg(long)]
+        audit: Option<PathBuf>,
+        /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        upstream: Vec<String>,
     },
 }
 
@@ -134,6 +158,28 @@ fn main() {
 
     if let Some(Command::Gate { world }) = &cli.command {
         std::process::exit(run_gate(world));
+    }
+
+    if let Some(Command::MockJira) = &cli.command {
+        std::process::exit(mock_jira::run());
+    }
+
+    if let Some(Command::McpGateway {
+        world,
+        source,
+        taint,
+        audit,
+        upstream,
+    }) = &cli.command
+    {
+        let tainted = taint == "tainted";
+        std::process::exit(mcp_gateway::run(
+            world,
+            upstream,
+            source,
+            tainted,
+            audit.as_deref(),
+        ));
     }
 
     let world = if let Some(path) = cli.world {
