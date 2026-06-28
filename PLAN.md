@@ -515,15 +515,19 @@ destructive JIRA tool **ABSENT** (doesn't exist for the agent). The line it sell
 **Depends on:** E7 + `repos/safe-mcp-proxy` (Atlassian passthrough) + the gate ABI (D24).
 **Approach:** D32 — govern via the **MCP surface** (Copilot exposes no native per-call
 gate; MCP is where it *is* governable, and it's host-agnostic — one proxy, three hosts).
-**Status:** 📋 planned — top near-term priority. Largely *wire + author + validate*, not
-build: `safe-mcp-proxy` already ships the Atlassian passthrough, an MCP server mode
-(`mcp_server --upstream`), `manifests/atlassian_mvp.yaml`, and an audit dashboard.
+**Status:** 🚧 in progress — top near-term priority. **E16.1 compose glue done & tested**;
+remaining is real-JIRA validation, the demo manifest tailoring, host wiring, and the
+runbook.
 
-- [ ] **E16.1** Validate the `safe-mcp-proxy` Atlassian passthrough end-to-end against a
-  **real** Atlassian Remote MCP Server (or a sandbox JIRA): run the proxy's MCP server
-  with the JIRA MCP upstream; confirm tool-list shaping, a real read, a real comment, a
-  **blocked destructive (ABSENT)**, and the project scope lock. *(Needs: JIRA instance +
-  auth, the target project key(s), and the exact read/comment tool set.)*
+- [~] **E16.1** Compose glue + validation. **Done:** built `safe_mcp_proxy.mcp_gateway`
+  (in the `safe-mcp-proxy` repo) — a host-facing stdio MCP server composing
+  `ManifestPolicyEngine` (ABSENT / arg_rules / taint) + `UpstreamConnector` (real MCP
+  client): ABSENT-filters `tools/list` to the manifest allowlist, gates `tools/call`,
+  forwards only ALLOW upstream, audits decisions; `run-proxy.sh` launches it. Verified by
+  12 tests incl. a real end-to-end (gateway ⇄ UpstreamConnector ⇄ bundled upstream); full
+  suite 550 OK. **Pending:** validate against a **real** Atlassian Remote MCP Server /
+  sandbox JIRA — confirm tool-list shaping, a real read + comment, a blocked destructive
+  (ABSENT), and scope lock. *(Needs: JIRA instance + auth, project key(s), read/comment set.)*
 - [ ] **E16.2** Author the **demo manifest** (tailored from `manifests/atlassian_mvp.yaml`):
   allow JIRA read tools + `jira_add_comment`; **ABSENT** every write/destructive tool
   (delete, bulk, create/update/transition/assign); **arg-lock scope** to the project

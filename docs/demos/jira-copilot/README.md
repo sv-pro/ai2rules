@@ -37,7 +37,7 @@ host-agnostic, so the same proxy config serves all three.
 | File | Purpose |
 |---|---|
 | `jira-governed.world.yaml` | the demo manifest (read + comment, scoped, destructive ABSENT) |
-| `run-proxy.sh` | launches the governed stdio proxy the hosts spawn (⚠ scaffold — see Status) |
+| `run-proxy.sh` | launches the governed gateway the hosts spawn (`safe_mcp_proxy.mcp_gateway`) |
 | `hosts/claude-code.mcp.json` | Claude Code `.mcp.json` |
 | `hosts/vscode.mcp.json` | VS Code `.vscode/mcp.json` |
 | `hosts/jetbrains.md` | JetBrains Copilot MCP config |
@@ -52,12 +52,15 @@ The hard parts already **exist and work** in `repos/safe-mcp-proxy`:
 - ✅ a starter manifest (`manifests/atlassian_mvp.yaml`) with real Atlassian tool names
 - ✅ an append-only **audit log + dashboard**
 
-Remaining work (not greenfield, but not pure config either):
+**E16.1 — compose glue: ✅ DONE.** `safe_mcp_proxy.mcp_gateway` is the host-facing stdio
+server that connects upstream via `UpstreamConnector`, ABSENT-filters `tools/list` against
+the manifest allowlist, routes `tools/call` through `ManifestPolicyEngine`, forwards only
+ALLOW upstream, and audits decisions. Verified by 12 tests incl. a real end-to-end
+(gateway ⇄ `UpstreamConnector` ⇄ test upstream); full safe-mcp-proxy suite 550 OK.
+`run-proxy.sh` now launches it directly.
 
-- **E16.1 — compose them.** The stdio server, the upstream connector, and the
-  Atlassian engine aren't wired into one entry point yet (`run-proxy.sh` marks where
-  that goes). Modest glue: connect upstream → ABSENT-filter `tools/list` → route
-  `tools/call` through the engine → forward ALLOW.
+Remaining work:
+
 - **E16.2 — per-project scoping (optional for the core punch).** `arg_rules` today
   only do exact `allowed_values`. Scoping `jira_get_issue` / `jira_add_comment` by
   issue-key prefix (`DEMO-*`) or constraining `jql` needs a ~10-line `allowed_pattern`
