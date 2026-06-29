@@ -228,6 +228,18 @@ echo '{"tool":"fetch_web","context":{"taint":"tainted"}}' \
 CI runs all four checks on every push and PR
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
+### Release binaries (no local toolchain needed)
+
+Pushing a `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml),
+which builds the `harness` binary on native GitHub runners and attaches the archives
+to the matching GitHub Release: **Linux x86_64-musl** (static), **macOS arm64**,
+**macOS x86_64**, and **Windows x86_64**. `workflow_dispatch` runs the same build for
+testing without publishing a Release.
+
+```bash
+git tag v0.1.0 && git push gh v0.1.0   # → cross-OS binaries on the v0.1.0 Release
+```
+
 ### See the kernel decide
 
 For a quick noninteractive demo, run the kernel plus the execution boundary. It

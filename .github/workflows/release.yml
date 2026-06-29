@@ -1,0 +1,97 @@
+name: Release
+
+# Build the `harness` binary for each OS on its native GitHub runner (no local
+# Rust toolchain needed) and attach the archives to a GitHub Release.
+#
+# Trigger: push a tag like `v0.1.0`  ->  builds + uploads to the Release for that tag.
+# `workflow_dispatch` runs the same build for testing; it uploads workflow artifacts
+# but does NOT publish a Release (the release step is tag-only).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write # required to create/update the Release
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            bin: harness
+            archive: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            bin: harness
+            archive: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            bin: harness
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: harness.exe
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # The musl target links statically; musl-tools provides the toolchain.
+      # (No C deps in the tree today, so this is belt-and-suspenders.)
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked -p cli-harness --target ${{ matrix.target }}
+
+      # Package: tar.gz on Unix, zip on Windows. Stage the binary so the archive
+      # has no nested target/.../release path.
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          name="harness-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/$name/"
+          cp README.md "dist/$name/" 2>/dev/null || true
+          tar -C dist -czf "$name.tar.gz" "$name"
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $name = "harness-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/$name/"
+          Copy-Item "README.md" "dist/$name/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "dist/$name" -DestinationPath "$name.zip"
+
+      # Always keep the build artifact (handy for workflow_dispatch test runs).
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-${{ matrix.target }}
+          path: harness-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+      # Publish to the GitHub Release — only on a tag push.
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: harness-${{ matrix.target }}.${{ matrix.archive }}
+          fail_on_unmatched_files: true
