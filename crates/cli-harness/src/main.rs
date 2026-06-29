@@ -17,6 +17,7 @@ mod cc_hook;
 mod mcp_gateway;
 mod mock_jira;
 mod serve;
+mod shim;
 
 /// ai2rules
 #[derive(Parser, Debug)]
@@ -70,6 +71,14 @@ enum Command {
         #[arg(long, default_value = ".claude/state")]
         state: PathBuf,
     },
+    /// PATH-level governance shims for hosts without native hook support
+    /// (e.g., VS Code Copilot). One world manifest governs both `cc-hook`
+    /// (native CC tools) and shims (any shell exec), closing the governability
+    /// gap in the E16 scorecard.
+    Shim {
+        #[command(subcommand)]
+        sub: ShimSub,
+    },
     /// Front a real upstream MCP server with the kernel: shape its `tools/list`
     /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
     McpGateway {
@@ -88,6 +97,53 @@ enum Command {
         /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
+    },
+}
+
+/// Sub-commands for `harness shim`.
+#[derive(clap::Subcommand, Debug)]
+enum ShimSub {
+    /// Generate wrapper shell scripts in `--dir` for each `--tools` entry.
+    /// Each script calls `harness shim exec` before forwarding to the real
+    /// binary. Print the `export PATH` line to activate governance.
+    Install {
+        /// Path to the world manifest (YAML) that governs the shims.
+        #[arg(long)]
+        world: PathBuf,
+        /// Directory to write shim scripts into.
+        #[arg(long, default_value = ".harness/shims")]
+        dir: PathBuf,
+        /// Directory for the per-session taint sidecar (shared with cc-hook).
+        #[arg(long, default_value = ".harness/state")]
+        state: PathBuf,
+        /// Comma-separated tool names to shim (e.g. `bash,curl,git`).
+        #[arg(long, default_value = "bash")]
+        tools: String,
+        /// Collapse ASK to DENY in the wrappers — for CI / headless sessions.
+        #[arg(long)]
+        background: bool,
+    },
+    /// Govern one shim invocation in-process and exec the real binary on ALLOW.
+    /// Called by the generated wrapper scripts; rarely invoked directly.
+    Exec {
+        /// Path to the world manifest (YAML/JSON) that governs this call.
+        #[arg(long)]
+        world: PathBuf,
+        /// Logical tool name for D25 classification (bash, curl, git, …).
+        #[arg(long)]
+        tool: String,
+        /// Absolute path to the real binary to exec on ALLOW.
+        #[arg(long)]
+        real: PathBuf,
+        /// Directory for the per-session taint sidecar.
+        #[arg(long, default_value = ".harness/state")]
+        state: PathBuf,
+        /// Collapse ASK to DENY (CI / background sessions).
+        #[arg(long)]
+        background: bool,
+        /// Arguments forwarded verbatim to the real binary.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 }
 
@@ -179,6 +235,31 @@ fn main() {
 
     if let Some(Command::CcHook { world, state }) = &cli.command {
         std::process::exit(cc_hook::run(world, state));
+    }
+
+    if let Some(Command::Shim { sub }) = &cli.command {
+        let code = match sub {
+            ShimSub::Install {
+                world,
+                dir,
+                state,
+                tools,
+                background,
+            } => {
+                let tool_list: Vec<String> =
+                    tools.split(',').map(|s| s.trim().to_string()).collect();
+                shim::install(world, dir, &tool_list, state, *background)
+            }
+            ShimSub::Exec {
+                world,
+                tool,
+                real,
+                state,
+                background,
+                args,
+            } => shim::exec_shim(world, tool, real, state, *background, args),
+        };
+        std::process::exit(code);
     }
 
     if let Some(Command::McpGateway {
