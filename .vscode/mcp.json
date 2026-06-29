@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "jira-governed-real": {
+      "type": "stdio",
+      "command": "bash",
+      "args": ["${workspaceFolder}/docs/demos/jira-copilot/run-proxy.sh"],
+      "env": {
+        "MANIFEST": "${workspaceFolder}/docs/demos/jira-copilot/jira-atlassian.world.yaml",
+        "UPSTREAM": "npx.cmd -y mcp-remote https://mcp.atlassian.com/v1/mcp/authv2"
+      }
+    }
+  }
+}

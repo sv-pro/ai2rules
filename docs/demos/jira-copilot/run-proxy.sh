@@ -17,8 +17,11 @@ AUDIT="${AUDIT:-}"           # optional JSONL audit log path
 HARNESS="${HARNESS:-$(command -v harness || echo "$REPO/target/debug/harness")}"
 
 # Upstream = the self-contained mock JIRA by default (offline, no creds). To wire
-# the real Atlassian MCP later (E16.E), set UPSTREAM to an mcp-remote bridge, e.g.
-#   UPSTREAM=(npx -y mcp-remote https://mcp.atlassian.com/v1/sse)
+# the real Atlassian Rovo MCP (E16.E), set UPSTREAM to an mcp-remote bridge AND point
+# MANIFEST at the real-tool-name world. See REAL-ATLASSIAN.md. e.g.:
+#   MANIFEST=docs/demos/jira-copilot/jira-atlassian.world.yaml \
+#   UPSTREAM="npx -y mcp-remote https://mcp.atlassian.com/v1/mcp/authv2" \
+#   bash docs/demos/jira-copilot/run-proxy.sh
 UPSTREAM=(${UPSTREAM[@]:-})
 [ "${#UPSTREAM[@]}" -eq 0 ] && UPSTREAM=("$HARNESS" mock-jira)
 

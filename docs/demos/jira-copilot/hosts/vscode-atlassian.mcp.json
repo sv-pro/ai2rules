@@ -1,0 +1,14 @@
+{
+  "_comment": "VS Code (GitHub Copilot agent mode) MCP config for the REAL Atlassian upstream (E16.E). Place at .vscode/mcp.json in your workspace. VS Code expands ${workspaceFolder}. The env block points run-proxy.sh at the real-tool-name manifest and an mcp-remote bridge to the Rovo MCP server; first launch opens a browser for OAuth. WINDOWS: UPSTREAM uses npx.cmd, not npx — harness mcp-gateway spawns the upstream directly (no shell), so the bare 'npx' (a .cmd shim) is not found on PATH. On macOS/Linux use 'npx'. After it starts, the Copilot tool picker should show only the 5 governed tools.",
+  "servers": {
+    "jira-governed-real": {
+      "type": "stdio",
+      "command": "bash",
+      "args": ["${workspaceFolder}/docs/demos/jira-copilot/run-proxy.sh"],
+      "env": {
+        "MANIFEST": "${workspaceFolder}/docs/demos/jira-copilot/jira-atlassian.world.yaml",
+        "UPSTREAM": "npx.cmd -y mcp-remote https://mcp.atlassian.com/v1/mcp/authv2"
+      }
+    }
+  }
+}
