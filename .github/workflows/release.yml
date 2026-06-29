@@ -34,7 +34,9 @@ jobs:
             target: aarch64-apple-darwin
             bin: harness
             archive: tar.gz
-          - os: macos-13
+          # Intel macOS: cross-compiled on the Apple Silicon runner (its SDK is
+          # universal), avoiding the scarce/slow `macos-13` Intel runner queue.
+          - os: macos-14
             target: x86_64-apple-darwin
             bin: harness
             archive: tar.gz
