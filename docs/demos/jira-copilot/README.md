@@ -71,7 +71,8 @@ cargo test -p cli-harness --test cc_hook     --offline   # native seam (Claude C
 | [`run-proxy.sh`](run-proxy.sh) | launches `harness mcp-gateway` over `harness mock-jira` (the script hosts spawn) |
 | [`hosts/claude-code.mcp.json`](hosts/claude-code.mcp.json) | Claude Code `.mcp.json` (MCP seam) |
 | [`hosts/claude-code.settings.json`](hosts/claude-code.settings.json) | Claude Code `.claude/settings.json` PreToolUse hook (native seam) |
-| [`hosts/vscode.mcp.json`](hosts/vscode.mcp.json) | VS Code Copilot `.vscode/mcp.json` |
+| [`hosts/vscode.mcp.json`](hosts/vscode.mcp.json) | VS Code Copilot `.vscode/mcp.json` (mock upstream) |
+| [`hosts/vscode-atlassian.mcp.json`](hosts/vscode-atlassian.mcp.json) | VS Code Copilot `.vscode/mcp.json` for the **real** Atlassian upstream (E16.E) — see [`REAL-ATLASSIAN.md`](REAL-ATLASSIAN.md) |
 | [`hosts/jetbrains.md`](hosts/jetbrains.md) | JetBrains Copilot MCP config |
 
 > `jira-governed.world.yaml` and the Python-path notes from the earlier prototype

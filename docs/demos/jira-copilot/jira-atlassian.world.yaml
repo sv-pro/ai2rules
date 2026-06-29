@@ -1,0 +1,97 @@
+# Harness WorldManifest for the REAL Atlassian upstream (DECISIONS D33 / E16.E).
+# Same shape as jira-world.yaml, but the base_action names are the *real* tool names
+# emitted by the Atlassian Rovo MCP Server (https://mcp.atlassian.com/v1/mcp/authv2),
+# NOT the mock's jira_* names. The gateway filters tools/list and gates tools/call by
+# EXACT name match, so these must equal the upstream tool ids verbatim or nothing is
+# exposed. Tool names verified against Atlassian's "Supported tools" doc.
+#
+# Shaped surface: 3 reads + the single write (addCommentToJiraIssue). Every other tool
+# the Rovo server emits (transitionJiraIssue, editJiraIssue, createJiraIssue, all the
+# Confluence/Bitbucket/JSM/Compass/Teamwork-Graph tools) is simply NOT declared, so the
+# kernel reports it ABSENT — it does not exist for the agent.
+#
+# NOTE: the real Rovo server has NO delete-issue tool. The destructive tools to point at
+# in the demo are transitionJiraIssue / editJiraIssue / createJiraIssue.
+world_id: jira-atlassian-demo
+
+actors:
+  - { name: developer, kind: User }
+  - { name: agent, kind: Model }
+  - { name: jira, kind: McpServer }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: mcp_output, trust: Untrusted, taint: true }
+  - { name: web_fetch, trust: Untrusted, taint: true }
+
+capabilities:
+  - trust: Trusted
+    actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory]
+  - trust: SemiTrusted
+    actions: [Read, Write, Patch, Command]
+  - trust: Untrusted
+    actions: [Read]
+  - trust: Derived
+    actions: [Read]
+
+base_actions:
+  # --- Allowed: reads (real Rovo tool names) ---
+  - name: getJiraIssue
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        cloudId: { type: string }
+        issueIdOrKey: { type: string }
+  - name: searchJiraIssuesUsingJql
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        cloudId: { type: string }
+        jql: { type: string }
+  - name: getVisibleJiraProjects
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        cloudId: { type: string }
+  # --- Operational read: lets the agent resolve its cloudId (harmless, no jira data).
+  #     Drop this entry if you want the strict "3 reads + 1 write" surface; then supply
+  #     cloudId by hand in the demo calls instead. ---
+  - name: getAccessibleAtlassianResources
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties: {}
+  # --- Allowed: the one write, subject to the taint floor (External) ---
+  - name: addCommentToJiraIssue
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: jira, tool: addCommentToJiraIssue }
+    schema:
+      type: object
+      properties:
+        cloudId: { type: string }
+        issueIdOrKey: { type: string }
+        commentBody: { type: string }
+
+# DELIBERATELY ABSENT (not declared): transitionJiraIssue, editJiraIssue,
+# createJiraIssue, addWorklogToJiraIssue — plus every Confluence/Bitbucket/JSM/
+# Compass/Teamwork-Graph tool the Rovo server advertises. They do not exist here.
+
+# Taint floor: untrusted context cannot drive an external write.
+transition_policies:
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 50
+  command_timeout_ms: 60000

@@ -25,7 +25,11 @@ use crate::context;
 use crate::model::{ModelClient, ModelTurn};
 
 /// How an interactive `ASK` is resolved when the loop has no live human.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//
+// No `PartialEq`/`Eq`: the `Interactive` variant holds a `fn` pointer, whose
+// address is not guaranteed unique (clippy::unpredictable_function_pointer_comparisons),
+// and nothing compares policies for equality anyway.
+#[derive(Debug, Clone, Copy)]
 pub enum ApprovalPolicy {
     /// Leave the token pending and surface `ASK` (a real CLI would block here).
     Manual,
