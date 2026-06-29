@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use trace_store::{ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
+mod cc_hook;
 mod mcp_gateway;
 mod mock_jira;
 mod serve;
@@ -57,6 +58,18 @@ enum Command {
     /// Run a self-contained mock JIRA MCP server on stdio — the demo upstream the
     /// gateway governs (DECISIONS D33 / E16.A).
     MockJira,
+    /// Claude Code PreToolUse adapter, in Rust (D33 / E16.C): read a PreToolUse
+    /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
+    /// decision. Additive (never auto-allows); fail-open. Replaces the Python
+    /// `world-gate-adapter.py` — this is the "deep" half governing native tools.
+    CcHook {
+        /// Path to the world manifest (YAML/JSON) that governs this session.
+        #[arg(long)]
+        world: PathBuf,
+        /// Directory for the per-session taint sidecar.
+        #[arg(long, default_value = ".claude/state")]
+        state: PathBuf,
+    },
     /// Front a real upstream MCP server with the kernel: shape its `tools/list`
     /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
     McpGateway {
@@ -162,6 +175,10 @@ fn main() {
 
     if let Some(Command::MockJira) = &cli.command {
         std::process::exit(mock_jira::run());
+    }
+
+    if let Some(Command::CcHook { world, state }) = &cli.command {
+        std::process::exit(cc_hook::run(world, state));
     }
 
     if let Some(Command::McpGateway {

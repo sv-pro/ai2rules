@@ -1,12 +1,9 @@
 {
-  "_comment": "Claude Code MCP config. Place at your project root as .mcp.json (or merge into it). Replace the absolute path with your checkout. The governed proxy is the ONLY JIRA server Claude Code sees — it never talks to Atlassian directly.",
+  "_comment": "Claude Code MCP config (the 'shallow'/MCP half — same for all hosts). Place at your project root as .mcp.json (or merge into it). Replace the absolute path with your checkout. run-proxy.sh launches `harness mcp-gateway` over the self-contained mock JIRA, so the governed gateway is the ONLY JIRA server the agent sees. For the 'deep'/native half (governing Bash/Edit/web), also merge hosts/claude-code.settings.json. Set TAINT=tainted in run-proxy.sh's env to demo the taint floor severing the comment write.",
   "mcpServers": {
     "jira-governed": {
       "command": "bash",
-      "args": ["/ABS/PATH/TO/ai2rules/docs/demos/jira-copilot/run-proxy.sh"],
-      "env": {
-        "JIRA_DEMO_PROJECT": "DEMO"
-      }
+      "args": ["/ABS/PATH/TO/ai2rules/docs/demos/jira-copilot/run-proxy.sh"]
     }
   }
 }

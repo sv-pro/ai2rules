@@ -1,119 +1,95 @@
 # Demo: governed JIRA MCP on GitHub Copilot + Claude Code
 
-> **⚠ Pivoted — now Rust-only, one binary (DECISIONS D33).** The Python `safe-mcp-proxy`
-> path described further down is the *superseded prototype*. The live demo runs the **real
-> kernel** via `harness mcp-gateway` over a self-contained `harness mock-jira` upstream — no
-> creds, no Node, no Python. Quick start (from the repo root, after `cargo build`):
->
-> ```bash
-> harness mcp-gateway --world docs/demos/jira-copilot/jira-world.yaml -- harness mock-jira
-> # add --taint tainted to demo the taint floor severing the external write
-> ```
->
-> Verdicts (proven by `crates/cli-harness/tests/mcp_gateway.rs`): `tools/list` hides the
-> destructive tools (ABSENT); `jira_get_issue`/`jira_add_comment` ALLOW when clean;
-> `jira_delete_issue` → ABSENT; under taint, `jira_add_comment` → DENY (taint floor).
-> Manifest: [`jira-world.yaml`](jira-world.yaml) (harness `WorldManifest` schema). The host
-> MCP configs in `hosts/` still apply — point them at `harness mcp-gateway` instead of
-> `run-proxy.sh`. A full rewrite of the sections below is pending.
-
 **The pitch:** *"I can give GitHub Copilot access to JIRA and not worry about an
 accidental destructive action."* One governance manifest **shapes the Atlassian/JIRA
 MCP capability surface** for **VS Code Copilot, JetBrains Copilot, and Claude Code**
-alike — read + comment only, scoped to one project, every destructive JIRA tool
-**ABSENT** (it does not exist for the agent — stronger than a deny it can argue with).
+alike — read + comment only, every destructive JIRA tool **ABSENT** (it does not
+exist for the agent — stronger than a deny it can argue with).
 
-Decision: [`DECISIONS.md` D32](../../../DECISIONS.md) · Epic: [`PLAN.md` E16](../../../PLAN.md).
+**The deeper point:** hosts are **not equal in governability**. The JIRA risk lives
+behind an MCP server, so *every* host here can be made safe at that seam. But the
+agent's **native** shell/file/web tools are governable only where the host exposes a
+per-call hook — and **only Claude Code does**. The demo makes that gap visible
+instead of leaving it to be discovered later. → [`SCORECARD.md`](SCORECARD.md).
 
-## Architecture — one proxy, three hosts
+Rust-only, one binary (`harness`). No Python, no Node, no creds — the upstream is a
+self-contained mock JIRA. Real Atlassian is a later *skin* (E16.E), not a rewrite.
+
+Decision: [`DECISIONS.md` D33](../../../DECISIONS.md) · Epic: [`PLAN.md` E16](../../../PLAN.md).
+
+## Quick start (offline)
+
+```bash
+cargo build --offline    # builds `harness`
+# MCP gateway over the mock JIRA, governed by the manifest:
+harness mcp-gateway --world docs/demos/jira-copilot/jira-world.yaml -- harness mock-jira
+#   add --taint tainted to demo the taint floor severing the external write
+```
+
+Drive it (newline-delimited JSON-RPC on stdin) or just run the tests:
+
+```bash
+cargo test -p cli-harness --test mcp_gateway --offline   # MCP seam (all hosts)
+cargo test -p cli-harness --test cc_hook     --offline   # native seam (Claude Code)
+```
+
+## Architecture — one kernel, two seams, three hosts
 
 ```
- VS Code Copilot ─┐
- JetBrains Copilot├─ (MCP/stdio) ─▶  Safe MCP Proxy  ─ (MCP) ─▶  Atlassian Remote
- Claude Code     ─┘                  (governed by         mcp-remote   MCP Server
-                                      jira-governed.world.yaml)        (mcp.atlassian.com)
+                        native tools (shell/edit/web)        MCP tools (JIRA)
+ Claude Code  ───────▶  PreToolUse → harness cc-hook ──┐     .mcp.json ─┐
+ VS Code Copilot ──────  (no native seam)              │               ├─▶ harness mcp-gateway ─▶ upstream
+ JetBrains Copilot ────  (no native seam)              │   .vscode/... ─┘   (shapes tools/list,    (mock-jira
+                                                       └─────────────────▶   gates tools/call)     today; real
+                                                          one kernel: gate(world, request)          Atlassian later)
 ```
 
-The host never talks to Atlassian directly. The proxy: filters `tools/list` to the
-allowlist (**ABSENT** for everything else), routes each `tools/call` through the
-deterministic policy engine (taint floor, arg rules), forwards only ALLOW upstream,
-and **audits every decision**. Copilot exposes no per-call hook over its *native*
-tools, but the **MCP surface is exactly where it is governable** — and it's
-host-agnostic, so the same proxy config serves all three.
+- **`harness mcp-gateway`** sits between any host and the JIRA MCP server. It filters
+  `tools/list` to the manifest's declared actions (**ABSENT** for everything else),
+  routes each `tools/call` through the kernel (`gate()` — taint floor, args),
+  forwards only **ALLOW** upstream, and can **audit** every decision. Host-agnostic.
+- **`harness cc-hook`** is the Claude Code `PreToolUse` adapter, in Rust: it governs
+  the host's *native* tools (the seam Copilot doesn't expose). Additive (only ever
+  deny/ask) and fail-open. Replaces the old Python `world-gate-adapter.py`.
 
 ## What this proves to the audience
 
-| Without governance | With the proxy |
+| Without governance | With the harness |
 |---|---|
-| Copilot sees the full JIRA MCP surface incl. `jira_delete_issue`, `jira_bulk_create_issues`, transitions, edits, across all projects | Copilot sees only read + `jira_add_comment`; destructive tools **do not appear** |
+| Copilot sees the full JIRA MCP surface incl. `jira_delete_issue`, `jira_bulk_create_issues`, transitions | Copilot sees only reads + `jira_add_comment`; destructive tools **do not appear** |
 | "Clean up old issues" can delete | "delete this issue" → the tool doesn't exist (ABSENT) |
-| No record | Append-only audit log + dashboard of every ALLOW/DENY/ABSENT |
+| A tainted/untrusted context can still drive a write | Tainted session → `jira_add_comment` **DENIED** (taint floor) |
+| On Claude Code, a tainted session can still `curl` out / `rm -rf` | `cc-hook` **denies** tainted egress, **asks** before destructive Bash |
+| No record | Append-only audit log of every ALLOW/DENY/ABSENT |
 
 ## Files here
 
 | File | Purpose |
 |---|---|
-| `jira-governed.world.yaml` | the demo manifest (read + comment, scoped, destructive ABSENT) |
-| `run-proxy.sh` | launches the governed gateway the hosts spawn (`safe_mcp_proxy.mcp_gateway`) |
-| `hosts/claude-code.mcp.json` | Claude Code `.mcp.json` |
-| `hosts/vscode.mcp.json` | VS Code `.vscode/mcp.json` |
-| `hosts/jetbrains.md` | JetBrains Copilot MCP config |
+| [`jira-world.yaml`](jira-world.yaml) | the demo manifest — harness `WorldManifest`; declares reads + `jira_add_comment`, everything else ABSENT |
+| [`SCORECARD.md`](SCORECARD.md) | the governability scorecard + live runbook |
+| [`run-proxy.sh`](run-proxy.sh) | launches `harness mcp-gateway` over `harness mock-jira` (the script hosts spawn) |
+| [`hosts/claude-code.mcp.json`](hosts/claude-code.mcp.json) | Claude Code `.mcp.json` (MCP seam) |
+| [`hosts/claude-code.settings.json`](hosts/claude-code.settings.json) | Claude Code `.claude/settings.json` PreToolUse hook (native seam) |
+| [`hosts/vscode.mcp.json`](hosts/vscode.mcp.json) | VS Code Copilot `.vscode/mcp.json` |
+| [`hosts/jetbrains.md`](hosts/jetbrains.md) | JetBrains Copilot MCP config |
 
-## Status — honest build state
+> `jira-governed.world.yaml` and the Python-path notes from the earlier prototype
+> are superseded by D33; the manifest is now [`jira-world.yaml`](jira-world.yaml).
 
-The hard parts already **exist and work** in `repos/safe-mcp-proxy`:
+## Status
 
-- ✅ a host-facing **stdio MCP server** (`mcp_server.py`)
-- ✅ a real upstream **MCP client** (`mcp_upstream.py::UpstreamConnector`, official `mcp` SDK)
-- ✅ the **Atlassian policy engine** — ABSENT / `arg_rules` / taint (`atlassian/policy.py`)
-- ✅ a starter manifest (`manifests/atlassian_mvp.yaml`) with real Atlassian tool names
-- ✅ an append-only **audit log + dashboard**
+- ✅ **E16.A** `harness mock-jira` — self-contained MCP stdio upstream (7 jira_* tools).
+- ✅ **E16.B** `harness mcp-gateway` — real-kernel gateway (ABSENT-filter, gate, audit).
+- ✅ **E16.C** `harness cc-hook` — native-tool governance for Claude Code.
+- ✅ **E16.D** scorecard + runbook + host configs (this directory).
+- ⏳ **E16.E** *(later)* real Atlassian upstream skin — set `UPSTREAM=(npx -y mcp-remote
+  https://mcp.atlassian.com/v1/sse)` in `run-proxy.sh` once OAuth/creds are available;
+  nothing else changes (the gateway and manifest are upstream-agnostic).
 
-**E16.1 — compose glue: ✅ DONE.** `safe_mcp_proxy.mcp_gateway` is the host-facing stdio
-server that connects upstream via `UpstreamConnector`, ABSENT-filters `tools/list` against
-the manifest allowlist, routes `tools/call` through `ManifestPolicyEngine`, forwards only
-ALLOW upstream, and audits decisions. Verified by 12 tests incl. a real end-to-end
-(gateway ⇄ `UpstreamConnector` ⇄ test upstream); full safe-mcp-proxy suite 550 OK.
-`run-proxy.sh` now launches it directly.
+## Wiring real hosts
 
-Remaining work:
-
-- **E16.2 — per-project scoping (optional for the core punch).** `arg_rules` today
-  only do exact `allowed_values`. Scoping `jira_get_issue` / `jira_add_comment` by
-  issue-key prefix (`DEMO-*`) or constraining `jql` needs a ~10-line `allowed_pattern`
-  branch in `policy.py`. **Interim:** use a dedicated `DEMO` project + the ABSENT list
-  — the "destructive tools don't exist" headline needs no per-issue scoping.
-
-## Prerequisites
-
-- A JIRA instance + the **Atlassian Remote MCP Server** (OAuth) — or a sandbox JIRA.
-- `node`/`npx` (for the `mcp-remote` stdio↔SSE bridge), `python` ≥ 3.10.
-- A `repos/safe-mcp-proxy` checkout (point `run-proxy.sh`'s `SMP_REPO` at it).
-
-## Demo script
-
-1. **Baseline (the fear).** Point a host at the Atlassian MCP *directly*; show the tool
-   list includes `jira_delete_issue` etc.; ask the agent to "tidy up stale issues" and
-   watch it be *able* to delete.
-2. **Governed.** Switch the host to `run-proxy.sh` (the configs in `hosts/`). Re-open
-   the tool picker → only the read tools + `jira_add_comment`. Ask to delete an issue →
-   *the tool does not exist*. Ask to comment on `DEMO-123` → it works. Open the audit
-   dashboard → every decision is logged.
-3. **Same manifest, Claude Code.** Repeat step 2 on Claude Code to make the
-   host-agnostic / "broader CC use" point.
-
-## Validation checklist (E16.1)
-
-- [ ] proxy connects to the real Atlassian MCP upstream via `mcp-remote`
-- [ ] `tools/list` returns only the allowlisted tools (destructive ones ABSENT)
-- [ ] a real `jira_get_issue` / search returns data
-- [ ] a real `jira_add_comment` posts a comment
-- [ ] a `jira_delete_issue` attempt is ABSENT (not offered, refused if forced)
-- [ ] every call appears in the audit log
-- [ ] all three host configs spawn the proxy and see the shaped surface
-
-## What I need from you to wire real JIRA
-
-JIRA instance + auth · target **project key(s)** · the exact **read tool set** you want
-allowed (defaults in the manifest) · confirm you can add an MCP server in **both** VS
-Code and JetBrains Copilot at work.
+Replace `/ABS/PATH` in the `hosts/` configs with your checkout. For the **MCP seam**,
+point each host at `run-proxy.sh`. For the **native seam** (Claude Code only), merge
+`hosts/claude-code.settings.json`. Verify in each host's tool picker: only the read
+tools + `jira_add_comment` appear; the destructive JIRA tools are absent.

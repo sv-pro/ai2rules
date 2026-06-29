@@ -164,7 +164,13 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   decision is the pure `harness_preview::gate()`, shared native and WASM. Schema:
   [`docs/harness-gate-abi.md`](docs/harness-gate-abi.md).
 
-Builds clean offline with `clippy -D warnings`; **104 unit tests** green.
+The same gate also powers the **governability demo** (`docs/demos/jira-copilot/`,
+DECISIONS D33): `harness mcp-gateway` fronts an MCP server — shaping its `tools/list`
+(ABSENT) and gating each `tools/call` on the real kernel — over a self-contained
+`harness mock-jira` upstream, and `harness cc-hook` is the Claude Code `PreToolUse`
+adapter in Rust (governing native tools, replacing the Python hook).
+
+Builds clean offline with `clippy -D warnings`; **111 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -183,7 +189,7 @@ crates/               the harness implementation
   trace-store/        append-only audit, redaction, replay (E4)
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
-  cli-harness/        terminal entrypoint + `serve` authoring tool (binary `harness`) (E9, E11)
+  cli-harness/        terminal entrypoint + `serve`/`gate`/`mcp-gateway`/`cc-hook`/`mock-jira` (binary `harness`) (E9, E11, E16)
   harness-preview/    pure design-time preview + runtime gate() ABI, shared by serve + wasm + `harness gate` (E11/E14, D24)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
 docs/                 architecture (harness-architecture.md is canonical)

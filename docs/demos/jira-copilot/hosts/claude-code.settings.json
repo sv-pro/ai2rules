@@ -1,0 +1,16 @@
+{
+  "_comment": "Claude Code NATIVE-tool governance (the 'deep' half). Merge into .claude/settings.json. This PreToolUse hook routes every native tool call (Bash/Edit/Write/Read/WebFetch/...) through the real kernel via `harness cc-hook`, which denies tainted egress (taint floor) and asks before destructive Bash. Additive + fail-open. Pair it with hosts/claude-code.mcp.json (the MCP 'shallow' half) for full coverage. Replace /ABS/PATH and ensure `harness` is on PATH or use an absolute binary path.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "harness cc-hook --world /ABS/PATH/TO/ai2rules/.claude/cc-world.yaml --state /ABS/PATH/TO/ai2rules/.claude/state"
+          }
+        ]
+      }
+    ]
+  }
+}

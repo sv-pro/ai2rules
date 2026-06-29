@@ -68,10 +68,16 @@ fn requests() -> Vec<Value> {
 }
 
 fn is_error(resp: &Value) -> bool {
-    resp["result"].get("isError").and_then(|b| b.as_bool()).unwrap_or(false)
+    resp["result"]
+        .get("isError")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false)
 }
 fn text(resp: &Value) -> String {
-    resp["result"]["content"][0]["text"].as_str().unwrap_or("").to_string()
+    resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or("")
+        .to_string()
 }
 
 #[test]

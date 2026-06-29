@@ -517,20 +517,26 @@ destructive JIRA tool **ABSENT** (doesn't exist for the agent). The line it sell
 gate; MCP is where it *is* governable, and it's host-agnostic — one proxy, three hosts).
 **Status:** 🚧 in progress — **PIVOTED to Rust-only, one binary (DECISIONS D33).** The Python
 compose glue (safe-mcp-proxy `feat/mcp-gateway`) was the prototype that proved the shape; the
-demo is being rebuilt in Rust around the **governability gap** (CC deep vs Copilot MCP-only).
+demo is now Rust around the **governability gap** (CC deep vs Copilot MCP-only). **E16.A–D
+built and tested** (mock-jira + mcp-gateway + cc-hook + scorecard/host configs, 7 e2e tests
+green). Remaining: E16.E (real Atlassian skin) and an optional recorded walkthrough.
 New task list:
 
-- [ ] **E16.A** `harness mock-jira` — self-contained Rust MCP stdio upstream (jira_* tools
-  incl. destructive); no creds / Node / Python.
-- [ ] **E16.B** `harness mcp-gateway --world <m> --upstream <cmd…>` — Rust MCP gateway over the
+- [x] **E16.A** `harness mock-jira` — self-contained Rust MCP stdio upstream (7 jira_* tools
+  incl. destructive); no creds / Node / Python. (`crates/cli-harness/src/mock_jira.rs`.)
+- [x] **E16.B** `harness mcp-gateway --world <m> -- <cmd…>` — Rust MCP gateway over the
   **real kernel**: spawn the upstream, ABSENT-filter `tools/list` via `gate()`, gate each
-  `tools/call`, forward **only ALLOW**, audit decisions.
-- [ ] **E16.C** Claude Code *deep*: `PreToolUse` hook → the Rust `harness gate` binary
-  (retire the Python hooks for the demo) — native tools + MCP.
-- [ ] **E16.D** **Governability scorecard** + runbook; host MCP configs (VS Code / JetBrains
-  Copilot + Claude Code) point at `harness mcp-gateway`.
+  `tools/call` (monotonic session taint), forward **only ALLOW**, audit decisions.
+  (`src/mcp_gateway.rs`; 3 e2e tests in `tests/mcp_gateway.rs`.)
+- [x] **E16.C** Claude Code *deep*: `harness cc-hook --world <m>` — the PreToolUse adapter
+  **in Rust**, calling `gate()` **in-process** (no subprocess, retires the Python
+  `world-gate-adapter.py`). Classifies Bash (D25), manages the taint sidecar, emits
+  deny/ask; additive + fail-open. (`src/cc_hook.rs`; 4 e2e tests in `tests/cc_hook.rs`.)
+- [x] **E16.D** **Governability scorecard** (`docs/demos/jira-copilot/SCORECARD.md`) + runbook;
+  `run-proxy.sh` now launches `harness mcp-gateway` over `harness mock-jira` (Rust, offline);
+  CC native governance wired via `hosts/claude-code.settings.json` (`harness cc-hook`).
 - [ ] **E16.E** *(later)* real Atlassian upstream **skin** (`mcp-remote` bridge or a Rust SSE
-  MCP client).
+  MCP client) — swap the `mock-jira` upstream for the real Atlassian Remote MCP Server.
 
 *(The original Python-path tasks below are superseded by D33; kept for history.)*
 
