@@ -41,6 +41,28 @@ NATIVE = {"Bash", "Read", "Edit", "Write", "MultiEdit", "NotebookEdit",
           "Glob", "Grep", "WebFetch", "WebSearch"}
 
 
+def cmd_matches(cmd, patterns):
+    """True iff any `patterns` entry occurs in `cmd` at a LEFT word boundary.
+
+    The egress/ask command patterns ('nc ', 'rm -rf', 'sudo ', 'dd if=') carry their
+    own RIGHT boundary (a trailing space or '='); the left side was missing, so a raw
+    `pattern in cmd` matched substrings of larger words — 'nc ' inside 'jsonc ', 'rm '
+    inside 'warm ', etc. — and over-blocked benign commands. A negative lookbehind for
+    a word char fixes that while staying a cheap argv-shape check (D25): 'curl ' still
+    matches 'curl x' and '; curl x', but not 'mycurl x'. Degrades to substring on a
+    malformed pattern; an empty pattern never matches."""
+    for p in patterns:
+        if not p:
+            continue
+        try:
+            if re.search(r"(?<![A-Za-z0-9_])" + re.escape(p), cmd):
+                return True
+        except re.error:
+            if p in cmd:
+                return True
+    return False
+
+
 def emit(decision, reason):
     """Emit a PreToolUse decision and exit. Only used for deny/ask."""
     print(json.dumps({"hookSpecificOutput": {
@@ -128,7 +150,7 @@ def main():
         if tool in eg.get("tools", []):
             emit("deny", f"taint floor: context is tainted; '{tool}' can reach the "
                          f"network and is blocked (rule no_tainted_network).")
-        if tool == "Bash" and any(p in cmd for p in eg.get("bash_patterns", [])):
+        if tool == "Bash" and cmd_matches(cmd, eg.get("bash_patterns", [])):
             emit("deny", "taint floor: context is tainted; this command performs "
                          "network egress and is blocked (rule no_tainted_network).")
 
@@ -136,7 +158,7 @@ def main():
     ask = cfg.get("ask", {}) or {}
     if tool in ask.get("tools", []):
         emit("ask", f"approval required before '{tool}'.")
-    if tool == "Bash" and any(p in cmd for p in ask.get("bash_patterns", [])):
+    if tool == "Bash" and cmd_matches(cmd, ask.get("bash_patterns", [])):
         emit("ask", "approval required: potentially destructive command.")
 
     # Side effect: append this call to the monotonic taint-cause LEDGER if it is an

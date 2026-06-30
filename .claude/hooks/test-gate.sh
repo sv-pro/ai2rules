@@ -63,3 +63,23 @@ run world-pinned.json allow "$(ev s-pin WebFetch '{"url":"https://ok.test"}')"  
 printf 'tampered\n' >> "$PIN_FILE"   # bytes drift -> pinned hash no longer matches
 run world-pinned.json allow "$(ev s-drift Read "{\"file_path\":\"$PIN_FILE\"}")"   "Read drifted (taints)"
 run world-pinned.json deny  "$(ev s-drift WebFetch '{"url":"https://x.test"}')"    "WebFetch after drift"
+
+echo "== 5. egress/ask word boundary (no substring false positives) =="
+cat > "$TMP/world-egress.json" <<'JSON'
+{
+  "projected_tools": null,
+  "taint_sources": { "tools": ["WebFetch"], "read_paths": [] },
+  "egress": { "tools": [], "bash_patterns": ["curl ","nc "] },
+  "ask": { "tools": [], "bash_patterns": ["rm -rf","mkfs"] }
+}
+JSON
+run world-egress.json allow "$(ev s-eg WebFetch '{"url":"https://x.test"}')"        "WebFetch (taints s-eg)"
+# tainted session, but these are NOT egress/destructive — must NOT be blocked:
+run world-egress.json allow "$(ev s-eg Bash '{"command":"cat app.jsonc 2>/dev/null"}')" "cat *.jsonc (not 'nc ')"
+run world-egress.json allow "$(ev s-eg Bash '{"command":"git sync origin"}')"      "git sync (not 'nc ')"
+run world-egress.json allow "$(ev s-eg Bash '{"command":"mycurl https://x"}')"     "mycurl (not 'curl ')"
+run world-egress.json allow "$(ev s-eg Bash '{"command":"warm -rf cache"}')"       "warm -rf (not 'rm -rf')"
+# real egress / destructive in the same tainted session — still caught:
+run world-egress.json deny  "$(ev s-eg Bash '{"command":"nc -l 9000"}')"           "nc (real egress)"
+run world-egress.json deny  "$(ev s-eg Bash '{"command":"curl https://x"}')"       "curl (real egress)"
+run world-egress.json ask   "$(ev s-eg Bash '{"command":"rm -rf build"}')"         "rm -rf (destructive)"
