@@ -49,9 +49,13 @@ JetBrains) **and Claude Code**, via the Safe MCP Proxy. This brings the MCP-prox
    through the gate ABI. Builds on **E13** (esp. **E13.8**) on **E1/E2**.
 2. **Safe MCP Proxy** (sidecar) — protocol-level, host-agnostic reach. **E7** + **E13.4**,
    reusing the `safe-mcp-proxy` / `mcp-tool-projection` references.
-3. **`harness gate` binary + `world-kernel` crate** (sidecar / library) — for embedders on
+3. **OpenCode Governance Pack** (plugin) — next native-tool host adapter after Claude Code:
+   an `.opencode/plugins/` `tool.execute.before` shim calls the same gate ABI, with
+   OpenCode `permission` rules as the host approval/safety layer. Builds on **E13.8** and
+   reuses the host-governability scorecard from **E16**. Planned as **E17**.
+4. **`harness gate` binary + `world-kernel` crate** (sidecar / library) — for embedders on
    any host. **E13.8 (D24)** + the kernel crates.
-4. **Supporting layers** (knowledge / intent / substrate) ship **later**, each as an
+5. **Supporting layers** (knowledge / intent / substrate) ship **later**, each as an
    optional sidecar / MCP-server behind a spine contract — never a v1 prerequisite.
 
 ## Guiding principles (carried from the architecture)
@@ -572,6 +576,74 @@ ABSENT, scope project-locked, every call audited.
 
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 7 (taint × side-effect floor),
 11 (descriptor drift), 12 (scoped caps strip locked args) — re-proved on Copilot.
+
+---
+
+### E17 — OpenCode Governance Pack (plugin target)
+**Goal:** Add **OpenCode** as the next native-tool host target by reusing the existing
+host-neutral gate rather than creating another policy engine. OpenCode exposes a useful
+pre-tool seam through `.opencode/plugins/*` and `tool.execute.before`; the adapter maps each
+OpenCode tool call into a `GateRequest`, calls the real kernel (`harness gate` initially),
+persists monotonic taint in an OpenCode sidecar, and lets the call continue only on `ALLOW`.
+OpenCode's built-in `permission` rules remain the host's coarse `allow`/`ask`/`deny` UX and
+defense-in-depth layer. **Depends on:** E13.8 / D24 (gate ABI), E16 (host-governability
+scorecard pattern), and E14 if/when the adapter moves from subprocess to WASM/in-process JS.
+**Status:** 📋 planned — organic expansion of the host-adapter track after E16.
+
+**Design — OpenCode exposes two relevant governance surfaces:**
+
+1. *Coarse host permissions* — `opencode.json(c)` `permission` rules (`allow` / `ask` /
+   `deny`) over built-in tools such as `bash`, `edit`, `read`, `webfetch`, `task`, and
+   external-directory access.
+2. *Per-call pre-execution hook* — a TypeScript/JavaScript plugin hook,
+   `tool.execute.before`, that can inspect and mutate tool arguments or throw to block the
+   call. This is the OpenCode analogue to Claude Code's `PreToolUse`, but it does not expose
+   the same structured `permissionDecision: allow|deny|ask` return channel; `ASK` handling
+   must either be delegated to OpenCode permissions or represented as a clear block in the
+   first slice.
+
+**Value:** this reuses the existing **one kernel + thin adapters** model on another real CLI
+agent without waiting for a vendor-native hook API. It also sharpens the E16 governability
+scorecard: Claude Code has structured hook decisions; OpenCode has a powerful plugin seam plus
+permission rules; Copilot/JetBrains remain MCP-only for now.
+
+- [ ] **E17.1** Host mapping note: document OpenCode tool/event shapes, config locations,
+  permission semantics, plugin load order, and the mapping into the existing `GateRequest`
+  vocabulary. Capture the semantic gaps explicitly: `ASK` UX is host-permission-driven, plugin
+  blocks are thrown errors, and argument rewrite is possible but should not become policy logic.
+- [ ] **E17.2** Demo world + runbook: add `docs/demos/opencode/opencode-world.yaml` and a
+  short runbook showing clean reads/searches, tainted egress denial, destructive Bash ASK/DENY,
+  and MCP governance via the existing `harness mcp-gateway` where applicable.
+- [ ] **E17.3** Minimal plugin adapter: ship an example `.opencode/plugins/ai2rules-gate.ts`
+  that hooks `tool.execute.before`, restores session taint from `.opencode/ai2rules-state.json`,
+  builds a v1 `GateRequest`, invokes `harness gate --world <manifest>`, persists returned taint
+  monotonically, returns normally on `ALLOW`, and throws on `DENY` / `ABSENT` / `REPLAN` / first-slice
+  `ASK`. The adapter must remain plumbing only: no taint algebra, no policy duplication.
+- [ ] **E17.4** Defensive OpenCode config: provide an `opencode.jsonc` example that sets safe
+  coarse permissions (`read`/`grep`/`glob` allowed, `edit`/`bash`/`webfetch` ask by default,
+  secrets and external directories denied unless explicit) so host UX and kernel decisions
+  reinforce each other.
+- [ ] **E17.5** Contract tests / golden vectors: add Rust-side tests for the OpenCode event →
+  `GateRequest` mapping and shared gate verdicts (clean read → `ALLOW`, tainted webfetch/curl →
+  `DENY`, destructive command → `ASK` or `DENY` by mode, unknown tool → `ABSENT`). Keep direct
+  OpenCode process tests optional/manual unless a stable offline harness exists.
+- [ ] **E17.6** Packaging follow-up: once the demo plugin is stable, add a `harness
+  opencode-init --world <yaml>` or fold OpenCode into a generic `harness init --target opencode`
+  emitter that writes `opencode.jsonc`, the plugin shim, and the taint sidecar path. Defer until
+  the checked-in demo proves the shape.
+- [ ] **E17.7** Optional in-process/WASM adapter: if subprocess overhead or distribution becomes
+  painful, evaluate loading the E14 WASM gate from the OpenCode plugin. This is a packaging
+  optimization only; the subprocess `harness gate` path remains the conformance oracle for
+  non-Rust/out-of-process hosts.
+
+**Exit:** a repeatable OpenCode demo where native OpenCode tools are governed by the same
+`WorldManifest` and real kernel as Claude Code / MCP gateway: absent tools block before
+execution, taint denies egress, destructive actions require host approval or block, every
+decision is explainable, and the adapter contains no reimplemented governance.
+
+Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect
+floor), 9/10 (approval / fail-closed where host mode supports it), and 14/15 (audit/replay once
+the adapter writes trace records).
 
 ---
 

@@ -37,6 +37,7 @@ hosts/protocols (the "1 kernel + adapters" collapse).
 | Package | Install | What they get | Form |
 |---|---|---|---|
 | **Claude Code Governance Pack** ← lead | `pipx install ai2rules; ai2rules init` | ABSENT tools · taint floor · ASK/DENY · audit ledger · trust pins — same Claude Code, now governed | **plugin** (hooks) |
+| **OpenCode Governance Pack** *(planned)* | `harness init --target opencode` | same kernel over OpenCode native tools via `tool.execute.before`, with OpenCode permissions as the host approval layer | **plugin** (`.opencode/plugins/`) |
 | **Safe MCP Proxy** | run as a sidecar between MCP client ↔ servers | tool projection · descriptor-drift detection · ABSENT · audit — host-agnostic | **sidecar / proxy** |
 | **`harness gate`** | drop-in binary, wired via the stdio ABI | one governance engine callable from a Python hook / shell / any CLI | **sidecar (ABI)** |
 | **`world-kernel`** | `cargo add` (or a binding) | `IntentIR` + `CompiledWorld` + monotonic taint + deterministic disposition as a vetted dependency | **library** |
@@ -76,14 +77,17 @@ agent you already use.*
    **E13.8**, on **E1/E2**.)
 2. **Safe MCP Proxy** (sidecar) — protocol-level reach. (PLAN: **E7**, **E13.4**, +
    `safe-mcp-proxy` / `mcp-tool-projection` references.)
-3. **`harness gate` binary + `world-kernel` crate** (sidecar / library) — embedders.
+3. **OpenCode Governance Pack** (plugin) — next native-tool host adapter after the Claude
+   Code / E16 path proves the pattern; uses `.opencode/plugins/` + `tool.execute.before` and
+   the `harness gate` wire ABI. (PLAN: **E17**, DECISIONS **D35**.)
+4. **`harness gate` binary + `world-kernel` crate** (sidecar / library) — embedders.
    (PLAN: **E13.8 / D24** + kernel crates.)
-4. **Supporting layers** (knowledge / intent / substrate) ship **later**, each as an
+5. **Supporting layers** (knowledge / intent / substrate) ship **later**, each as an
    optional sidecar / MCP-server behind a spine contract — never a v1 prerequisite.
 
 ## Related
 
-[`DECISIONS.md`](../DECISIONS.md) D31 (this decision), D24 (gate ABI) · [`THESIS.md`](THESIS.md)
+[`DECISIONS.md`](../DECISIONS.md) D31 (this decision), D24 (gate ABI), D35 (OpenCode target) · [`THESIS.md`](THESIS.md)
 §4 (layers) / §7 (consolidation) · [`harness-gate-abi.md`](harness-gate-abi.md) ·
 [`RESEARCH-BACKLOG.md`](RESEARCH-BACKLOG.md) R1 (the cross-host super-harness — a *later*
 surface, not v1) · [`PLAN.md`](../PLAN.md) (Delivery model & packaging).

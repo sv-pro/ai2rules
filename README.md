@@ -13,7 +13,7 @@ governance **harness** described below (which was formerly this whole repo's nam
 "CLI Agent Harness").
 
 A governance **kernel** that sits underneath a local CLI developer agent (Claude
-Code, Codex CLI, Gemini CLI, Aider, …) and controls what the agent can perceive,
+Code, OpenCode, Codex CLI, Gemini CLI, Aider, …) and controls what the agent can perceive,
 what actions it can represent, and what validated specs may cross into real
 execution. The model never touches raw reality: it sees a virtualized world
 defined by a compiled manifest and can only *propose* typed intents into it.
@@ -169,6 +169,10 @@ DECISIONS D33): `harness mcp-gateway` fronts an MCP server — shaping its `tool
 (ABSENT) and gating each `tools/call` on the real kernel — over a self-contained
 `harness mock-jira` upstream, and `harness cc-hook` is the Claude Code `PreToolUse`
 adapter in Rust (governing native tools, replacing the Python hook).
+
+Planned next host target: **OpenCode** (E17 / DECISIONS D35), using an
+`.opencode/plugins/` `tool.execute.before` adapter plus OpenCode `permission` rules to
+call the same `harness gate` ABI for native-tool governance.
 
 Builds clean offline with `clippy -D warnings`; **111 tests** green.
 
