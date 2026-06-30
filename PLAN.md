@@ -588,8 +588,8 @@ persists monotonic taint in an OpenCode sidecar, and lets the call continue only
 OpenCode's built-in `permission` rules remain the host's coarse `allow`/`ask`/`deny` UX and
 defense-in-depth layer. **Depends on:** E13.8 / D24 (gate ABI), E16 (host-governability
 scorecard pattern), and E14 if/when the adapter moves from subprocess to WASM/in-process JS.
-**Status:** 🚧 in progress — **E17.1–E17.4 built & verified** (live plugin + world + runbook +
-defensive config; 9 gate scenarios proven, plugin syntax-checked). E17.5–E17.7 pending.
+**Status:** 🚧 in progress — **E17.1–E17.5 built & verified** (live plugin + world + runbook +
+defensive config + Rust golden-vector/classification contract tests). E17.6–E17.7 pending.
 
 **Design — OpenCode exposes two relevant governance surfaces:**
 
@@ -623,10 +623,12 @@ permission rules; Copilot/JetBrains remain MCP-only for now.
 - [x] **E17.4** Defensive OpenCode config: example `opencode.jsonc` in the README sets coarse
   `permission` rules (`edit` allow, `webfetch` ask, `external_directory` deny, per-pattern
   `bash`) as the host layer reinforcing the kernel.
-- [ ] **E17.5** Contract tests / golden vectors: add Rust-side tests for the OpenCode event →
-  `GateRequest` mapping and shared gate verdicts (clean read → `ALLOW`, tainted webfetch/curl →
-  `DENY`, destructive command → `ASK` or `DENY` by mode, unknown tool → `ABSENT`). Keep direct
-  OpenCode process tests optional/manual unless a stable offline harness exists.
+- [x] **E17.5** Contract tests / golden vectors: `tests/opencode_world.rs` drives `harness gate`
+  against the real `opencode-world.yaml` (clean reads ALLOW, tainted webfetch/bash_network →
+  DENY taint_invariant, edit-when-tainted ALLOW, bash_destructive → ASK then DENY in background,
+  unknown → ABSENT); the D25 classification spec is pinned by unit tests on the shared
+  `classify()` in `src/cc_hook.rs`, incl. the substring-false-positive regression (`jsonc`/
+  `sync`/`mycurl`/`warm -rf` → plain Bash). +12 tests (111 → 123).
 - [ ] **E17.6** Packaging follow-up: once the demo plugin is stable, add a `harness
   opencode-init --world <yaml>` or fold OpenCode into a generic `harness init --target opencode`
   emitter that writes `opencode.jsonc`, the plugin shim, and the taint sidecar path. Defer until

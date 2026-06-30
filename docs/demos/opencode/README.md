@@ -115,5 +115,7 @@ compiled-world / taint / ABSENT model; OpenCode permissions add a familiar allow
 - ✅ **E17.2** Demo world + runbook ([`opencode-world.yaml`](opencode-world.yaml) + this file).
 - ✅ **E17.3** Minimal plugin adapter ([`ai2rules-gate.ts`](../../../.opencode/plugin/ai2rules-gate.ts)).
 - ✅ **E17.4** Defensive `opencode.jsonc` example (above).
-- ⏳ **E17.5** Rust-side contract tests / golden vectors for the OpenCode mapping.
+- ✅ **E17.5** Rust contract tests — `crates/cli-harness/tests/opencode_world.rs` (gate verdicts
+  against this world) + D25 classification golden vectors in `src/cc_hook.rs` (incl. the
+  substring-false-positive regression). 123 tests green.
 - ⏳ **E17.6/E17.7** `harness opencode-init` emitter; optional WASM/in-process adapter.

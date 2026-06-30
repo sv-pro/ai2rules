@@ -25,6 +25,28 @@ const EGRESS: [&str; 8] = [
 ];
 const DESTRUCTIVE: [&str; 6] = ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"];
 
+/// True iff `pat` occurs in `cmd` at a LEFT word boundary (start, or preceded by a
+/// non-alphanumeric/non-`_` byte). The patterns carry their own right boundary (a
+/// trailing space or `=`); the left side keeps `"nc "` from matching inside `"jsonc "`
+/// or `"rm -rf"` inside `"warm -rf"`. Mirrors `_gatelib`/`world-gate.py` `cmd_matches`.
+fn word_match(cmd: &str, pat: &str) -> bool {
+    if pat.is_empty() {
+        return false;
+    }
+    let bytes = cmd.as_bytes();
+    let mut start = 0;
+    while let Some(i) = cmd[start..].find(pat) {
+        let at = start + i;
+        let boundary =
+            at == 0 || !matches!(bytes[at - 1], b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_');
+        if boundary {
+            return true;
+        }
+        start = at + 1;
+    }
+    false
+}
+
 /// Map a host tool + input onto a manifest action name. The only place a host quirk
 /// (Bash being one tool with many effects) is normalized.
 fn classify(tool: &str, ti: &Value) -> String {
@@ -32,10 +54,10 @@ fn classify(tool: &str, ti: &Value) -> String {
         return tool.to_string();
     }
     let cmd = ti.get("command").and_then(|c| c.as_str()).unwrap_or("");
-    if EGRESS.iter().any(|p| cmd.contains(p)) {
+    if EGRESS.iter().any(|p| word_match(cmd, p)) {
         return "Bash_network".to_string();
     }
-    if DESTRUCTIVE.iter().any(|p| cmd.contains(p)) {
+    if DESTRUCTIVE.iter().any(|p| word_match(cmd, p)) {
         return "Bash_destructive".to_string();
     }
     "Bash".to_string()
@@ -125,5 +147,82 @@ pub fn run(world_path: &Path, state_dir: &Path) -> i32 {
         "DENY" => emit("deny", &res.reason),
         "ASK" => emit("ask", &res.reason),
         _ => 0, // passthrough — ALLOW / ABSENT / REPLAN
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify;
+    use serde_json::json;
+
+    fn c(cmd: &str) -> String {
+        classify("Bash", &json!({ "command": cmd }))
+    }
+
+    // D25 classification golden vectors — the canonical bash-shape spec the OpenCode
+    // plugin (`.opencode/plugin/ai2rules-gate.ts`) mirrors (with lowercase action names).
+    // These also guard the word-boundary fix shared with `world-gate.py`.
+
+    #[test]
+    fn egress_commands_classify_as_network() {
+        for cmd in [
+            "curl http://x",
+            "wget http://x",
+            "nc -l 9000",
+            "ncat host 1",
+            "telnet host 23",
+            "ssh host",
+            "scp a b",
+            "sftp host",
+            "ls && curl http://x", // chained, at a boundary
+        ] {
+            assert_eq!(c(cmd), "Bash_network", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn destructive_commands_classify_as_destructive() {
+        for cmd in [
+            "rm -rf build",
+            "rm -fr build",
+            "sudo systemctl restart x",
+            "mkfs.ext4 /dev/sda",
+            "dd if=/dev/zero of=/dev/sda",
+            ":(){ :|:& };:",
+        ] {
+            assert_eq!(c(cmd), "Bash_destructive", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn ordinary_commands_classify_as_plain_bash() {
+        for cmd in ["ls -la", "git status", "echo hi", "cargo test"] {
+            assert_eq!(c(cmd), "Bash", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn substrings_of_larger_words_do_not_false_match() {
+        // The bug this guards against: naive substring matching flagged these as egress
+        // ("nc " inside "jsonc "/"sync ") or destructive ("rm -rf" inside "warm -rf").
+        for cmd in [
+            "cat app.jsonc 2>/dev/null",
+            "git sync origin",
+            "mycurl http://x",
+            "warm -rf cache",
+            "echo unscp",
+        ] {
+            assert_eq!(c(cmd), "Bash", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn non_bash_tools_pass_through_unchanged() {
+        assert_eq!(classify("Read", &json!({ "file_path": "x" })), "Read");
+        assert_eq!(
+            classify("WebFetch", &json!({ "url": "http://x" })),
+            "WebFetch"
+        );
+        assert_eq!(classify("Edit", &json!({})), "Edit");
     }
 }

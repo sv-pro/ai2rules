@@ -175,7 +175,7 @@ Next host target: **OpenCode** (E17 / DECISIONS D35) — a working first slice l
 (plus OpenCode `permission` rules) calls the same `harness gate` ABI to govern OpenCode's
 native tools, dogfooded against this repo like `.claude/`.
 
-Builds clean offline with `clippy -D warnings`; **111 tests** green.
+Builds clean offline with `clippy -D warnings`; **123 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

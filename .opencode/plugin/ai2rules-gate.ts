@@ -31,11 +31,25 @@ import { join, dirname } from "node:path";
 const EGRESS = ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "];
 const DESTRUCTIVE = ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"];
 
+// True iff `pat` occurs in `cmd` at a LEFT word boundary. The patterns carry their own
+// right boundary (a trailing space or "="), so "nc " matches "; nc x" but not "jsonc ".
+// Mirrors the Rust `word_match` (cc_hook.rs) and Python `cmd_matches` (world-gate.py).
+function wordMatch(cmd: string, pat: string): boolean {
+  if (!pat) return false;
+  for (let from = 0; ; ) {
+    const i = cmd.indexOf(pat, from);
+    if (i < 0) return false;
+    const before = i === 0 ? "" : cmd[i - 1];
+    if (before === "" || !/[A-Za-z0-9_]/.test(before)) return true;
+    from = i + 1;
+  }
+}
+
 function classify(tool: string, args: any): string {
   if (tool !== "bash") return tool;
   const cmd = String(args?.command ?? "");
-  if (EGRESS.some((p) => cmd.includes(p))) return "bash_network";
-  if (DESTRUCTIVE.some((p) => cmd.includes(p))) return "bash_destructive";
+  if (EGRESS.some((p) => wordMatch(cmd, p))) return "bash_network";
+  if (DESTRUCTIVE.some((p) => wordMatch(cmd, p))) return "bash_destructive";
   return "bash";
 }
 
