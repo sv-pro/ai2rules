@@ -14,6 +14,9 @@ crates/harness-wasm/pkg-web/
 .claude/settings.local.json
 .claude/state/
 
+# OpenCode plugin runtime state (E17 governance adapter taint sidecar)
+.opencode/ai2rules-state.json
+
 # Python bytecode (the .claude/hooks/*.py gate hooks generate this)
 __pycache__/
 *.pyc

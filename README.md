@@ -170,9 +170,10 @@ DECISIONS D33): `harness mcp-gateway` fronts an MCP server — shaping its `tool
 `harness mock-jira` upstream, and `harness cc-hook` is the Claude Code `PreToolUse`
 adapter in Rust (governing native tools, replacing the Python hook).
 
-Planned next host target: **OpenCode** (E17 / DECISIONS D35), using an
-`.opencode/plugins/` `tool.execute.before` adapter plus OpenCode `permission` rules to
-call the same `harness gate` ABI for native-tool governance.
+Next host target: **OpenCode** (E17 / DECISIONS D35) — a working first slice lives in
+`docs/demos/opencode/`: a `.opencode/plugin/ai2rules-gate.ts` `tool.execute.before` adapter
+(plus OpenCode `permission` rules) calls the same `harness gate` ABI to govern OpenCode's
+native tools, dogfooded against this repo like `.claude/`.
 
 Builds clean offline with `clippy -D warnings`; **111 tests** green.
 

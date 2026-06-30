@@ -1,0 +1,74 @@
+# OpenCode world for the host-neutral gate ABI (DECISIONS D24 / D34 / D35, E17).
+#
+# A REAL WorldManifest — compiled by the same kernel as Claude Code's cc-world.yaml —
+# governed per OpenCode tool call by the `.opencode/plugin/ai2rules-gate.ts` adapter,
+# which calls `harness gate` (the wire ABI; non-Rust hosts use it, D34).
+#
+# The adapter maps OpenCode's native tool names onto these actions. Most map 1:1.
+# `bash` is classified by the adapter by command shape (D25) into plain `bash`
+# (Process), `bash_network` (egress: curl/wget/nc/ssh/…), or `bash_destructive`
+# (rm -rf/sudo/mkfs/… → approval). The pattern-matching is host-specific event
+# mapping; the *policy* for each action is declared below.
+world_id: opencode-default
+
+actors:
+  - { name: developer, kind: User }
+  - { name: opencode, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: workspace_files, trust: SemiTrusted, taint: true }
+  - { name: shell_output, trust: SemiTrusted, taint: true }
+  - { name: web_fetch, trust: Untrusted, taint: true }
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  # --- read-only (OpenCode: read, grep, glob, list, todoread) ---
+  - { name: read, action_type: Read, side_effect: Read }
+  - { name: grep, action_type: Read, side_effect: Read }
+  - { name: glob, action_type: Read, side_effect: Read }
+  - { name: list, action_type: Read, side_effect: Read }
+  - { name: todoread, action_type: Read, side_effect: Read }
+  # --- workspace writes (FilesystemWrite: not under the taint floor, matching
+  #     cc-world — only PersistentWrite is denied when tainted) ---
+  - { name: edit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: patch, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: todowrite, action_type: Patch, side_effect: FilesystemWrite }
+  # --- network / egress (taint floor: tainted context → DENY no_tainted_network) ---
+  - { name: webfetch, action_type: Web, side_effect: Network }
+  # --- subagent spawn ---
+  - { name: task, action_type: Command, side_effect: Process }
+  # --- shell, classified by the adapter (D25) ---
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+
+# Tainted data cannot reach externally-effectful surfaces (the taint floor,
+# invariant 7). Tainted webfetch / bash_network DENY here.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000
+
+observability:
+  redact:
+    - "env.*_TOKEN"
+    - "env.*_KEY"
+    - "**/.env"

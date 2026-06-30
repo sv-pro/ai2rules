@@ -588,7 +588,8 @@ persists monotonic taint in an OpenCode sidecar, and lets the call continue only
 OpenCode's built-in `permission` rules remain the host's coarse `allow`/`ask`/`deny` UX and
 defense-in-depth layer. **Depends on:** E13.8 / D24 (gate ABI), E16 (host-governability
 scorecard pattern), and E14 if/when the adapter moves from subprocess to WASM/in-process JS.
-**Status:** 📋 planned — organic expansion of the host-adapter track after E16.
+**Status:** 🚧 in progress — **E17.1–E17.4 built & verified** (live plugin + world + runbook +
+defensive config; 9 gate scenarios proven, plugin syntax-checked). E17.5–E17.7 pending.
 
 **Design — OpenCode exposes two relevant governance surfaces:**
 
@@ -607,22 +608,21 @@ agent without waiting for a vendor-native hook API. It also sharpens the E16 gov
 scorecard: Claude Code has structured hook decisions; OpenCode has a powerful plugin seam plus
 permission rules; Copilot/JetBrains remain MCP-only for now.
 
-- [ ] **E17.1** Host mapping note: document OpenCode tool/event shapes, config locations,
-  permission semantics, plugin load order, and the mapping into the existing `GateRequest`
-  vocabulary. Capture the semantic gaps explicitly: `ASK` UX is host-permission-driven, plugin
-  blocks are thrown errors, and argument rewrite is possible but should not become policy logic.
-- [ ] **E17.2** Demo world + runbook: add `docs/demos/opencode/opencode-world.yaml` and a
-  short runbook showing clean reads/searches, tainted egress denial, destructive Bash ASK/DENY,
-  and MCP governance via the existing `harness mcp-gateway` where applicable.
-- [ ] **E17.3** Minimal plugin adapter: ship an example `.opencode/plugins/ai2rules-gate.ts`
-  that hooks `tool.execute.before`, restores session taint from `.opencode/ai2rules-state.json`,
-  builds a v1 `GateRequest`, invokes `harness gate --world <manifest>`, persists returned taint
-  monotonically, returns normally on `ALLOW`, and throws on `DENY` / `ABSENT` / `REPLAN` / first-slice
-  `ASK`. The adapter must remain plumbing only: no taint algebra, no policy duplication.
-- [ ] **E17.4** Defensive OpenCode config: provide an `opencode.jsonc` example that sets safe
-  coarse permissions (`read`/`grep`/`glob` allowed, `edit`/`bash`/`webfetch` ask by default,
-  secrets and external directories denied unless explicit) so host UX and kernel decisions
-  reinforce each other.
+- [x] **E17.1** Host mapping note: documented in `docs/demos/opencode/README.md` against the
+  real `@opencode-ai/plugin@1.1.34` types — `tool.execute.before(input,output)` blocks by
+  **throwing** (no structured `allow/deny/ask` return), `bash` classified by command shape
+  (D25), the rest 1:1; `ASK` surfaced as a block in slice 1.
+- [x] **E17.2** Demo world + runbook: `docs/demos/opencode/opencode-world.yaml` + README; 9
+  gate scenarios proven via `harness gate` (clean reads ALLOW, tainted webfetch/bash_network →
+  DENY taint_invariant, edit-when-tainted ALLOW, bash_destructive → ASK, unknown → ABSENT).
+- [x] **E17.3** Minimal plugin adapter: `.opencode/plugin/ai2rules-gate.ts` (live dogfood, like
+  `.claude/`) — hooks `tool.execute.before`, restores taint from `.opencode/ai2rules-state.json`,
+  builds a v1 `GateRequest`, shells to `harness gate --world <manifest>` via the Bun `$`, persists
+  taint monotonically, returns on `ALLOW`, throws on `DENY` / `ABSENT` / `REPLAN` / `ASK`.
+  Plumbing only (no taint algebra / policy); fail-open. Syntax-checked.
+- [x] **E17.4** Defensive OpenCode config: example `opencode.jsonc` in the README sets coarse
+  `permission` rules (`edit` allow, `webfetch` ask, `external_directory` deny, per-pattern
+  `bash`) as the host layer reinforcing the kernel.
 - [ ] **E17.5** Contract tests / golden vectors: add Rust-side tests for the OpenCode event →
   `GateRequest` mapping and shared gate verdicts (clean read → `ALLOW`, tainted webfetch/curl →
   `DENY`, destructive command → `ASK` or `DENY` by mode, unknown tool → `ABSENT`). Keep direct
