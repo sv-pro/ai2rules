@@ -86,6 +86,70 @@ echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"},"session_id":
 - **Native (Claude Code only):** merge [`hosts/claude-code.settings.json`](hosts/claude-code.settings.json)
   into `.claude/settings.json` to add the `harness cc-hook` PreToolUse hook.
 
+## Narrative arc — story-driven script (~8 min)
+
+A pedagogical alternative to the runbook below: builds from first principles
+rather than leading with fear. Better for an audience unfamiliar with MCP.
+
+**1. Context — what are MCP tools? (1 min)**
+Explain that modern AI coding assistants (Copilot, Claude Code) expose two kinds
+of tools: *native* built-ins (shell, file edit, web fetch) and *MCP tools* —
+capabilities served over the Model Context Protocol by an external server. Show
+the VS Code Copilot tool picker with the raw JIRA MCP wired in: the agent sees
+`jira_delete_issue`, `jira_bulk_create_issues`, transitions. Note that individual
+tools can be toggled off manually — but that's per-session, per-developer, and
+error-prone.
+
+**2. The problem — full surface, no policy (1 min)**
+Repeat on Claude Code: same raw JIRA MCP, same sprawling tool list. Then show how
+Claude Code's tool surface is *configured* (`.mcp.json`). The risk: "tidy up
+stale issues" is a perfectly natural prompt — and the agent now has the tool to
+act on it destructively.
+
+**3. Hooks — what Claude Code adds (1.5 min)**
+Claude Code exposes a `PreToolUse` hook: a per-call interception point that fires
+*before* any tool executes. Show `hosts/claude-code.settings.json` — a single
+entry wires the harness as the hook handler. Copilot has no equivalent seam:
+native shell and file calls are opaque to third parties. *"So if I want consistent
+policy across both hosts, where does it live?"*
+
+**4. The answer — one proxy, both hosts (2 min)**
+Switch both hosts to point at `run-proxy.sh` instead of the raw MCP server.
+Re-open the tool picker on VS Code Copilot: destructive tools are gone — not
+disabled, not denied — they *do not appear*. Ask the agent to delete an issue
+→ "I don't have that tool." On Claude Code: same tool list. One manifest
+(`jira-world.yaml`), two hosts, same governed surface.
+
+**5. Taint floor — untrusted context can't drive an external write (1 min)**
+Run with `TAINT=tainted` (simulates a context that read from an untrusted source).
+`jira_add_comment` — which was ALLOW — is now **DENY**. The taint floor severs the
+write: the MCP surface is shaped by the manifest, but the *session context* also
+gates each call. Show the audit log entry.
+
+**6. Going deeper — native shell on Claude Code only (1 min)**
+Enable the `cc-hook` PreToolUse hook. Fetch a web page (taints the session).
+Now ask for `curl` → **denied** at the native shell — not at the MCP layer but
+*before the subprocess spawns*. Ask for `rm -rf` → **ask**. Point at Copilot:
+*there is no seam here for third-party policy, regardless of what you configure.*
+
+**7. The scorecard (30 s)**
+Show the table above. Close with: *"Same manifest. On Copilot I'm safe at the MCP
+surface — that's where the JIRA risk lives, so it's enough. On Claude Code I'm
+safe everywhere, including the native shell. The gap is the host, not the
+governance engine."*
+
+| Asset | Step |
+|---|---|
+| `hosts/vscode.mcp.json` (raw) | 1, 2 |
+| `hosts/claude-code.mcp.json` (raw) | 2 |
+| `hosts/claude-code.settings.json` | 3 |
+| `jira-world.yaml` + `run-proxy.sh` | 4 |
+| `TAINT=tainted run-proxy.sh` | 5 |
+| `harness cc-hook --world .claude/cc-world.yaml` | 6 |
+| this scorecard table | 7 |
+
+---
+
 ## Runbook (live demo, ~6 min)
 
 1. **The fear (30s).** Point a host at the JIRA MCP *directly*; the tool list
