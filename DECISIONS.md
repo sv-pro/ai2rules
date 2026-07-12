@@ -812,3 +812,66 @@ Copilot is governable only at the MCP surface).
   conformance ABI for non-Rust hosts).
 - **Related:** **D24** (gate ABI), **D34** (non-Rust hosts use the wire ABI), **E17**
   (OpenCode Governance Pack), **E16** (host governability scorecard).
+
+## D36 — Command classification is manifest/world data, not adapter code
+
+**Date:** 2026-07-12. **Extends D25** (which placed classification in the adapter).
+
+- **Context:** D25 let each host adapter classify `Bash` by command shape into
+  `Bash`/`Bash_network`/`Bash_destructive`. By E17 the same pattern lists + word-boundary
+  matcher existed **three times** — Rust (`cc_hook.rs`), TypeScript (`ai2rules-gate.ts`),
+  Python (`world-gate.py`) — the exact reimplementation-drift class D24 exists to end
+  (one had already drifted once: the word-boundary fix had to be ported to all copies).
+- **Decision:** classification is **world data**. The manifest gains `command_classes`
+  (`action` + `arg` (default `command`) + ordered `classes: [{to, patterns}]`), compiled
+  into `CompiledWorld`; `gate()` resolves the **effective action** first
+  (`classify_command`: first class whose any pattern matches at a left word boundary) and
+  returns it as the new `GateResponse.action` field (a backward-compatible v1 addition,
+  used in the approval token and the adapters' taint-cause notes). Adapters send the
+  **raw host tool name**. `skip_serializing_if` keeps pre-D36 manifest hashes stable;
+  `validate()` rejects classifiers naming undeclared actions or empty patterns. The D25
+  golden vectors moved into `harness-preview` gate tests; a conformance test pins the
+  pattern lists byte-identical across the three host manifests.
+- **Alternatives rejected:** (a) **per-adapter regex copies** (status quo) — three
+  drifting engines; (b) **a generated shared list** (codegen from one source into each
+  language) — sync tooling for what is simply *data the kernel already compiles*;
+  (c) **host-specific exceptions** (let a host override classes locally) — reintroduces
+  per-host policy, the thing adapters must never own.
+- **Why this does not violate "no shell parsing in the kernel" (D25 alt (a)):** the
+  kernel still parses nothing — it substring-matches operator-declared patterns from the
+  compiled world, the same class of data-driven check as `arg_constraints`. What a
+  command *is* remains manifest-declared (design-time, auditable), not adapter-coded.
+- **Related:** D24, D25, D34, `docs/one-kernel-many-hosts.md`, `tests/one_kernel.rs`.
+
+## D37 — Claude Code live-hook cutover to `harness cc-hook` via in-place bootstrap shims
+
+**Date:** 2026-07-12. **Executes the cutover D26 deferred**; supersedes the live Python
+engine (E13.2/D29 interim).
+
+- **Decision:** the live host's PreToolUse governance now runs the **real Rust kernel**:
+  `settings.json` points at `.claude/hooks/world-gate.sh`, a bootstrap shim (locate
+  `harness` via `$HARNESS_BIN` → `target/{release,debug}/harness` → `PATH`; fail-open
+  exit 0 if absent; else `exec harness cc-hook --world .claude/cc-world.yaml --state
+  .claude/state`). `world-gate.py` was **replaced in content, in place**, with the same
+  ~15-line shim in Python. The Python engine (`world-gate.py` original, `_gatelib.py`,
+  `world-gate-adapter.py`, `cc-world.json`, its tests and demos) is archived under
+  `.claude/hooks/superseded/` with a README. `taint-notify.py` stays (observability, not
+  policy; degrades gracefully without `_gatelib`).
+- **The in-place-shim rule:** hook configs may be **snapshotted at session start** — if
+  the configured hook *file* disappears mid-session, `python3` exits 2 and every
+  subsequent tool call is blocked, unrecoverably (a session was lost exactly this way:
+  `git mv world-gate.py superseded/` before editing `settings.json`). Therefore a live
+  hook file is never moved or deleted; it is emptied into a shim, and only *new* wiring
+  changes paths.
+- **What the cutover consciously drops** (recorded, not hidden): **trust pins (D29)** —
+  no typed `trust_pins` field exists in the compiled `WorldManifest` yet, so operator
+  attestations are not honored until it lands; **path-based read-taint** — reading
+  `repos/` no longer taints (taint enters via Network/External/Memory outputs, the v1
+  gate policy); the archived `demo-injection-egress.sh` depended on it.
+- **Alternatives rejected:** keep the Python engine as the live gate (two sources of
+  truth — the state D24/D33 exist to end); cut over by moving files + editing
+  `settings.json` (the session-bricking trap above); wait for trust-pins/path-taint
+  parity first (indefinite delay for features the kernel will gain as typed manifest
+  fields — D26 already validated the adapter path).
+- **Related:** D24, D26, D29 (open follow-up), D34, D36, `docs/one-kernel-many-hosts.md`,
+  `.claude/hooks/superseded/README.md`.

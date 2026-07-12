@@ -46,5 +46,31 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
         }
     }
 
+    // Command classifiers (D36) must reference declared base actions only, and
+    // carry no empty pattern (an empty pattern would match nothing meaningfully
+    // and hints at an authoring mistake).
+    for def in &manifest.command_classes {
+        if !base_names.contains(def.action.as_str()) {
+            return Err(CompileError::Invalid(format!(
+                "command classifier references unknown action {}",
+                def.action
+            )));
+        }
+        for class in &def.classes {
+            if !base_names.contains(class.to.as_str()) {
+                return Err(CompileError::Invalid(format!(
+                    "command classifier for {} maps to unknown action {}",
+                    def.action, class.to
+                )));
+            }
+            if class.patterns.iter().any(|p| p.is_empty()) {
+                return Err(CompileError::Invalid(format!(
+                    "command classifier for {} contains an empty pattern",
+                    def.action
+                )));
+            }
+        }
+    }
+
     Ok(())
 }

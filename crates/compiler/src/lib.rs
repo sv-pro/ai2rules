@@ -143,6 +143,38 @@ scoped_capabilities:
     }
 
     #[test]
+    fn validate_rejects_classifier_with_unknown_actions_or_empty_patterns() {
+        // D36: a classifier's `action` and every `to` must be declared base
+        // actions, and no pattern may be empty.
+        let base = r#"
+world_id: w
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+"#;
+        for (fragment, what) in [
+            (
+                "command_classes:\n  - { action: ghost, classes: [ { to: bash_network, patterns: [\"curl \"] } ] }\n",
+                "unknown classifier action",
+            ),
+            (
+                "command_classes:\n  - { action: bash, classes: [ { to: ghost, patterns: [\"curl \"] } ] }\n",
+                "unknown `to` action",
+            ),
+            (
+                "command_classes:\n  - { action: bash, classes: [ { to: bash_network, patterns: [\"\"] } ] }\n",
+                "empty pattern",
+            ),
+        ] {
+            let manifest = load_yaml(&format!("{base}{fragment}")).expect("parses");
+            assert!(
+                matches!(compile(&manifest), Err(CompileError::Invalid(_))),
+                "{what} must be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn validate_rejects_duplicate_base_action() {
         let yaml = r#"
 world_id: w

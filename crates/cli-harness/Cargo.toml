@@ -23,3 +23,6 @@ serde_json = { workspace = true }
 tempfile = { workspace = true }
 clap = { version = "4.6.1", features = ["derive"] }
 inquire = "0.9.4"
+
+[dev-dependencies]
+serde_yaml = "0.9"

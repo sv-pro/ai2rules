@@ -69,6 +69,16 @@ enum Command {
         /// Directory for the per-session taint sidecar.
         #[arg(long, default_value = ".claude/state")]
         state: PathBuf,
+        /// Execution mode threaded into every gate call. The kernel itself
+        /// collapses ASK→DENY in background (invariant 10).
+        #[arg(long, default_value = "interactive", value_parser = ["interactive", "background"])]
+        mode: String,
+        /// Enforce ABSENT: deny tools the world does not declare (reason
+        /// prefixed "ABSENT: "). Default is passthrough — additive dogfooding,
+        /// since a PreToolUse hook cannot remove native tools and denying
+        /// everything outside the manifest would brick the host.
+        #[arg(long)]
+        enforce_absent: bool,
     },
     /// Front a real upstream MCP server with the kernel: shape its `tools/list`
     /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
@@ -82,6 +92,10 @@ enum Command {
         /// Initial carried session taint floor: `clean` (default) | `tainted`.
         #[arg(long, default_value = "clean")]
         taint: String,
+        /// Execution mode threaded into every gate call. The kernel itself
+        /// collapses ASK→DENY in background (invariant 10).
+        #[arg(long, default_value = "interactive", value_parser = ["interactive", "background"])]
+        mode: String,
         /// Optional append-only JSONL audit log path.
         #[arg(long)]
         audit: Option<PathBuf>,
@@ -177,14 +191,21 @@ fn main() {
         std::process::exit(mock_jira::run());
     }
 
-    if let Some(Command::CcHook { world, state }) = &cli.command {
-        std::process::exit(cc_hook::run(world, state));
+    if let Some(Command::CcHook {
+        world,
+        state,
+        mode,
+        enforce_absent,
+    }) = &cli.command
+    {
+        std::process::exit(cc_hook::run(world, state, mode, *enforce_absent));
     }
 
     if let Some(Command::McpGateway {
         world,
         source,
         taint,
+        mode,
         audit,
         upstream,
     }) = &cli.command
@@ -195,6 +216,7 @@ fn main() {
             upstream,
             source,
             tainted,
+            mode,
             audit.as_deref(),
         ));
     }

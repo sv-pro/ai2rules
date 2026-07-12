@@ -55,4 +55,26 @@ mod tests {
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
     }
+
+    #[test]
+    fn empty_command_classes_keep_pre_d36_manifest_hashes_stable() {
+        // D36 adds `command_classes` with `skip_serializing_if = "Vec::is_empty"`:
+        // a manifest that declares none serializes byte-identically to its
+        // pre-D36 form, so its manifest hash (the world version identity) does
+        // not change. A manifest that DOES declare classifiers hashes differently.
+        let base = "world_id: hash-stability\nbase_actions:\n  - { name: bash, action_type: Command, side_effect: Process }\n  - { name: bash_network, action_type: Command, side_effect: Network }\n";
+        let plain = crate::loader::load_yaml(base).unwrap();
+        assert!(plain.command_classes.is_empty());
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(
+            !json.contains("command_classes"),
+            "empty classifiers must be skipped from the canonical form: {json}"
+        );
+
+        let classified = crate::loader::load_yaml(&format!(
+            "{base}command_classes:\n  - {{ action: bash, classes: [ {{ to: bash_network, patterns: [\"curl \"] }} ] }}\n"
+        ))
+        .unwrap();
+        assert_ne!(hash_manifest(&plain), hash_manifest(&classified));
+    }
 }

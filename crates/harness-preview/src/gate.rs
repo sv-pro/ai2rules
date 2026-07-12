@@ -63,11 +63,15 @@ pub struct GateContext {
 }
 
 /// The kernel's verdict for one call (§4).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateResponse {
     pub v: u32,
     /// `ABSENT` | `ALLOW` | `DENY` | `ASK` | `REPLAN`.
     pub decision: String,
+    /// The **effective action** the kernel decided on — the request's `tool`
+    /// after the world's `command_classes` classifiers ran (D36). Equal to the
+    /// raw tool when no classifier matched. A backward-compatible v1 addition.
+    pub action: String,
     /// The rule/invariant that fired, or `null` for a plain `ALLOW`.
     pub rule: Option<String>,
     /// Human-readable rationale, for the host UI / the trace.
@@ -81,7 +85,7 @@ pub struct GateResponse {
 }
 
 /// Post-call state the adapter must persist for the next call (§4).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateResponseContext {
     /// Monotonic post-call taint to persist: `clean` | `tainted`.
     pub taint: String,
@@ -89,7 +93,7 @@ pub struct GateResponseContext {
 
 /// Approval handshake returned on `ASK` (§4). The token is a correlation id;
 /// durable binding/validation is the host adapter's `ApprovalStore` (deferred).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateApproval {
     pub token: String,
     pub required: bool,
@@ -98,7 +102,9 @@ pub struct GateApproval {
 /// Govern one proposed call against a compiled world. Pure and deterministic in
 /// `(world, req)` — the runtime half of the kernel, exposed as a value function.
 pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
-    let action = ActionName::new(&req.tool);
+    // The effective action: the world's own command classifiers run first
+    // (D36), so classification is kernel data, identical for every host.
+    let action = world.classify_command(&ActionName::new(&req.tool), &req.arguments);
     let inbound = parse_taint(req.context.taint.as_deref());
     let channel = parse_channel(req.context.source_channel.as_deref());
     let session = SessionId::new(&req.context.session_id);
@@ -138,13 +144,14 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
     }
 
     let approval = (decision == Decision::Ask).then(|| GateApproval {
-        token: format!("{}:{}", req.context.session_id, req.tool),
+        token: format!("{}:{}", req.context.session_id, action.as_str()),
         required: true,
     });
 
     GateResponse {
         v: ABI_VERSION,
         decision: decision_str(decision).to_string(),
+        action: action.as_str().to_string(),
         // A plain ALLOW surfaces no distinguishing rule (§4).
         rule: (decision != Decision::Allow).then(|| rule.clone()),
         reason: reason_for(decision, &rule).to_string(),
@@ -371,6 +378,128 @@ mod tests {
         assert_eq!(v["rule"], "taint_invariant");
         assert_eq!(v["context"]["taint"], "tainted");
         assert!(v.get("approval").is_none()); // omitted unless ASK
+    }
+
+    /// An inline world with manifest-declared command classifiers (D36) — the
+    /// canonical bash-shape spec previously duplicated in the Claude Code and
+    /// OpenCode adapters. The kernel now owns these golden vectors.
+    fn classified_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: classified-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+command_classes:
+  - action: bash
+    arg: command
+    classes:
+      - { to: bash_network, patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "] }
+      - { to: bash_destructive, patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"] }
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    fn bash_req(cmd: &str, taint: &str) -> GateRequest {
+        let mut r = req("bash", taint);
+        r.arguments = serde_json::json!({ "command": cmd });
+        r
+    }
+
+    #[test]
+    fn egress_commands_classify_as_network() {
+        let world = classified_world();
+        for cmd in [
+            "curl http://x",
+            "wget http://x",
+            "nc -l 9000",
+            "ncat host 1",
+            "telnet host 23",
+            "ssh host",
+            "scp a b",
+            "sftp host",
+            "ls && curl http://x", // chained, at a boundary
+        ] {
+            let res = gate(&world, &bash_req(cmd, "clean"));
+            assert_eq!(res.action, "bash_network", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn destructive_commands_classify_as_destructive_and_ask() {
+        let world = classified_world();
+        for cmd in [
+            "rm -rf build",
+            "rm -fr build",
+            "sudo systemctl restart x",
+            "mkfs.ext4 /dev/sda",
+            "dd if=/dev/zero of=/dev/sda",
+            ":(){ :|:& };:",
+        ] {
+            let res = gate(&world, &bash_req(cmd, "clean"));
+            assert_eq!(res.action, "bash_destructive", "{cmd}");
+            assert_eq!(res.decision, "ASK", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn ordinary_commands_classify_as_plain_bash() {
+        let world = classified_world();
+        for cmd in ["ls -la", "git status", "echo hi", "cargo test"] {
+            let res = gate(&world, &bash_req(cmd, "clean"));
+            assert_eq!(res.action, "bash", "{cmd}");
+            assert_eq!(res.decision, "ALLOW", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn substrings_of_larger_words_do_not_false_match() {
+        // The regression this guards: naive substring matching flagged these as
+        // egress ("nc " inside "jsonc "/"sync ") or destructive ("rm -rf" inside
+        // "warm -rf").
+        let world = classified_world();
+        for cmd in [
+            "cat app.jsonc 2>/dev/null",
+            "git sync origin",
+            "mycurl http://x",
+            "warm -rf cache",
+            "echo unscp",
+        ] {
+            let res = gate(&world, &bash_req(cmd, "clean"));
+            assert_eq!(res.action, "bash", "{cmd}");
+        }
+    }
+
+    #[test]
+    fn tainted_classified_egress_is_denied_by_the_taint_floor() {
+        let world = classified_world();
+        let res = gate(&world, &bash_req("ls && curl http://exfil", "tainted"));
+        assert_eq!(res.action, "bash_network");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+    }
+
+    #[test]
+    fn effective_action_is_used_in_the_approval_token() {
+        let world = classified_world();
+        let res = gate(&world, &bash_req("rm -rf /tmp/x", "clean"));
+        let approval = res.approval.expect("ASK carries an approval handshake");
+        assert_eq!(approval.token, "s1:bash_destructive");
+    }
+
+    #[test]
+    fn unclassified_worlds_pass_the_raw_action_through() {
+        // The default world declares no command_classes: the response's
+        // effective action is the raw tool, for every tool.
+        let world = compile_default();
+        for tool in ["read_workspace", "fetch_web", "no_such_tool"] {
+            let res = gate(&world, &req(tool, "clean"));
+            assert_eq!(res.action, tool);
+        }
     }
 
     #[test]

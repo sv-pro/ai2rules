@@ -50,7 +50,14 @@ cargo test -p cli-harness --test cc_hook     --offline   # native seam (Claude C
   forwards only **ALLOW** upstream, and can **audit** every decision. Host-agnostic.
 - **`harness cc-hook`** is the Claude Code `PreToolUse` adapter, in Rust: it governs
   the host's *native* tools (the seam Copilot doesn't expose). Additive (only ever
-  deny/ask) and fail-open. Replaces the old Python `world-gate-adapter.py`.
+  deny/ask; ABSENT denies only under `--enforce-absent`), fail-open, with a `--mode`
+  flag (the kernel collapses ASK→DENY in background). Since **D37** it *is* the live
+  hook behind `.claude/hooks/world-gate.sh`. Bash classification is **kernel-side**
+  (D36 `command_classes` in the manifest) — no pattern lists in any adapter. Both this
+  and the gateway map verdicts through the shared `host_outcome()` layer, and the
+  gateway's audit line carries `action`, `manifest_hash`, and `mode`.
+  See `docs/one-kernel-many-hosts.md` + `scripts/demo-one-kernel-many-hosts.sh` for
+  the cross-host parity demo and conformance suite.
 
 ## What this proves to the audience
 

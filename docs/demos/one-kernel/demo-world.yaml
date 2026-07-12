@@ -1,22 +1,18 @@
-# OpenCode world for the host-neutral gate ABI (DECISIONS D24 / D34 / D35, E17).
+# One-kernel-many-hosts canonical demo world (docs/one-kernel-many-hosts.md).
 #
-# A REAL WorldManifest — compiled by the same kernel as Claude Code's cc-world.yaml —
-# governed per OpenCode tool call by the `.opencode/plugin/ai2rules-gate.ts` adapter,
-# which calls `harness gate` (the wire ABI; non-Rust hosts use it, D34).
+# A REAL WorldManifest, compiled by the real compiler, governing the SAME case
+# set (cases.yaml) on every entry point: in-process `gate()`, the `harness gate`
+# wire ABI, `harness cc-hook`, OpenCode-shaped requests, and `harness
+# mcp-gateway` over `harness mock-jira`. Host-neutral lowercase vocabulary.
 #
-# The adapter maps OpenCode's native tool names onto these actions 1:1 and holds
-# no governance logic. `bash` is classified by the KERNEL from the
-# `command_classes` block below (D25 → D36) into plain `bash` (Process),
-# `bash_network` (egress: curl/wget/nc/ssh/…), or `bash_destructive`
-# (rm -rf/sudo/mkfs/… → approval). Classification is world data, so every host
-# shares byte-identical classification; the *policy* for each action is declared
-# in `base_actions` / `transition_policies`.
-world_id: opencode-default
+# The parity guarantee: same manifest + same request ⇒ same decision / rule /
+# post-call taint / manifest_hash on every entry point (tests/one_kernel.rs).
+world_id: one-kernel-demo
 
 actors:
   - { name: developer, kind: User }
-  - { name: opencode, kind: Model }
-  - { name: subagent, kind: Subagent }
+  - { name: agent, kind: Model }
+  - { name: jira, kind: McpServer }
   - { name: shell, kind: ShellWorker }
 
 data_classes: [Public, Workspace, Secret, Credential, Generated, External]
@@ -25,6 +21,7 @@ channels:
   - { name: user_cli, trust: Trusted, taint: false }
   - { name: workspace_files, trust: SemiTrusted, taint: true }
   - { name: shell_output, trust: SemiTrusted, taint: true }
+  - { name: mcp_output, trust: Untrusted, taint: true }
   - { name: web_fetch, trust: Untrusted, taint: true }
 
 capabilities:
@@ -34,30 +31,51 @@ capabilities:
   - { trust: Derived, actions: [Read] }
 
 base_actions:
-  # --- read-only (OpenCode: read, grep, glob, list, todoread) ---
+  # --- JIRA reads (the shaped MCP surface) ---
+  - name: jira_get_issue
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        issue_key: { type: string }
+  - name: jira_search_issues_using_jql
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        jql: { type: string }
+  - name: jira_get_project
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        project_key: { type: string }
+  # --- The one JIRA write, subject to the taint floor (External) ---
+  - name: jira_add_comment
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: jira, tool: add_comment }
+    schema:
+      type: object
+      properties:
+        issue_key: { type: string }
+        body: { type: string }
+  # --- native tools (host-neutral lowercase) ---
   - { name: read, action_type: Read, side_effect: Read }
-  - { name: grep, action_type: Read, side_effect: Read }
-  - { name: glob, action_type: Read, side_effect: Read }
-  - { name: list, action_type: Read, side_effect: Read }
-  - { name: todoread, action_type: Read, side_effect: Read }
-  # --- workspace writes (FilesystemWrite: not under the taint floor, matching
-  #     cc-world — only PersistentWrite is denied when tainted) ---
-  - { name: edit, action_type: Patch, side_effect: FilesystemWrite }
-  - { name: write, action_type: Write, side_effect: FilesystemWrite }
-  - { name: patch, action_type: Patch, side_effect: FilesystemWrite }
-  - { name: todowrite, action_type: Patch, side_effect: FilesystemWrite }
-  # --- network / egress (taint floor: tainted context → DENY no_tainted_network) ---
   - { name: webfetch, action_type: Web, side_effect: Network }
-  # --- subagent spawn ---
-  - { name: task, action_type: Command, side_effect: Process }
-  # --- shell, classified by the adapter (D25) ---
   - { name: bash, action_type: Command, side_effect: Process }
   - { name: bash_network, action_type: Command, side_effect: Network }
   - { name: bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
 
+# DELIBERATELY NOT DECLARED (→ ABSENT, never offered): jira_delete_issue,
+# jira_create_issue, jira_bulk_create_issues, jira_transition_issue.
+
 # Kernel-side command classification (D36): the shared pattern lists — keep
 # byte-identical with .claude/cc-world.yaml and
-# docs/demos/one-kernel/demo-world.yaml (pinned by tests/one_kernel.rs).
+# docs/demos/opencode/opencode-world.yaml (pinned by tests/one_kernel.rs).
 command_classes:
   - action: bash
     arg: command
@@ -68,7 +86,7 @@ command_classes:
         patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
 
 # Tainted data cannot reach externally-effectful surfaces (the taint floor,
-# invariant 7). Tainted webfetch / bash_network DENY here.
+# invariant 7).
 transition_policies:
   - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
   - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }

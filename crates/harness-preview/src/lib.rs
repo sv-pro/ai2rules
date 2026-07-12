@@ -17,8 +17,10 @@
 //! WASM, and the per-host adapters can never diverge.
 
 pub mod gate;
+pub mod host;
 
 pub use gate::{gate, GateApproval, GateContext, GateRequest, GateResponse, ABI_VERSION};
+pub use host::{host_outcome, BlockKind, HostOutcome};
 
 use compiler::{compile, loader::load_yaml};
 use harness_types::{
