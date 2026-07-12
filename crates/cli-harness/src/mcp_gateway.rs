@@ -17,7 +17,9 @@
 //! stdio is hand-rolled (newline-delimited JSON-RPC), so no async runtime / SDK.
 
 use compiler::{compile, loader::load_yaml};
-use harness_preview::{gate, GateContext, GateRequest, GateResponse, ABI_VERSION};
+use harness_preview::{
+    gate, host_outcome, GateContext, GateRequest, GateResponse, HostOutcome, ABI_VERSION,
+};
 use harness_types::CompiledWorld;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -131,12 +133,14 @@ impl Drop for Upstream {
 
 /// `source` is the proposer's channel (its *trust*); `tainted` is the carried,
 /// monotonic session taint (the inbound floor). They're independent dimensions.
+/// `mode` is threaded into every request so ASK fails closed in background.
 fn govern(
     world: &CompiledWorld,
     tool: &str,
     args: &Value,
     source: &str,
     tainted: bool,
+    mode: &str,
 ) -> GateResponse {
     let req = GateRequest {
         v: ABI_VERSION,
@@ -144,7 +148,7 @@ fn govern(
         arguments: args.clone(),
         context: GateContext {
             session_id: "mcp-gateway".to_string(),
-            mode: Some("interactive".to_string()),
+            mode: Some(mode.to_string()),
             taint: tainted.then(|| "tainted".to_string()),
             source_channel: Some(source.to_string()),
             approval_token: None,
@@ -181,6 +185,7 @@ pub fn run(
     upstream: &[String],
     source: &str,
     initial_taint: bool,
+    mode: &str,
     audit_path: Option<&Path>,
 ) -> i32 {
     let content = match std::fs::read_to_string(world_path) {
@@ -292,27 +297,36 @@ pub fn run(
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                let verdict = govern(&world, &name, &args, source, session_taint);
-                let decision = verdict.decision.clone();
-                let rule = verdict.rule.clone().unwrap_or_default();
+                let verdict = govern(&world, &name, &args, source, session_taint, mode);
                 audit(
                     audit_path,
-                    json!({"tool": name, "decision": decision, "rule": rule,
+                    json!({"tool": name, "action": verdict.action,
+                           "decision": verdict.decision,
+                           "rule": verdict.rule.clone().unwrap_or_default(),
+                           "manifest_hash": verdict.manifest_hash, "mode": mode,
                            "source": source, "taint_in": session_taint}),
                 );
-                if decision == "ALLOW" {
-                    // Monotonic escalation from the call's post-call taint.
-                    if verdict.context.taint == "tainted" {
-                        session_taint = true;
+                // The gateway is fail-closed by design: an unevaluated or
+                // non-ALLOW call is never forwarded upstream. ABSENT / ASK /
+                // DENY / REPLAN stay distinguishable via the label prefix —
+                // MCP's only structural channel is the isError text.
+                match host_outcome(&verdict) {
+                    HostOutcome::Proceed => {
+                        // Monotonic escalation from the call's post-call taint.
+                        if verdict.context.taint == "tainted" {
+                            session_taint = true;
+                        }
+                        match up.call_tool(&name, &args) {
+                            Ok(r) => r,
+                            Err(e) => json!({"isError": true,
+                                "content": [{"type": "text", "text": format!("upstream error: {e}")}]}),
+                        }
                     }
-                    match up.call_tool(&name, &args) {
-                        Ok(r) => r,
-                        Err(e) => json!({"isError": true,
-                            "content": [{"type": "text", "text": format!("upstream error: {e}")}]}),
-                    }
-                } else {
-                    json!({"isError": true,
-                        "content": [{"type": "text", "text": format!("{decision}: {rule}")}]})
+                    HostOutcome::NeedsApproval { reason } => json!({"isError": true,
+                        "content": [{"type": "text", "text": format!("ASK: {reason}")}]}),
+                    HostOutcome::Block { kind, reason } => json!({"isError": true,
+                        "content": [{"type": "text",
+                                     "text": format!("{}: {reason}", kind.label())}]}),
                 }
             }
             other => {

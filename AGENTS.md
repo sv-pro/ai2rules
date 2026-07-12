@@ -68,9 +68,10 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
 | **cli-harness** | `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate` |
 
-**Test counts (all passing):**
-harness-types 9 · world-kernel 15 · compiler 13 · executor 12 · trace-store 13 ·
-provider-adapters 5 · agent-core 5 · harness-preview 12 · harness-wasm 3 · **total 104**
+**Test counts (all passing, native):**
+harness-types 5 · world-kernel 32 · compiler 15 · executor 12 · trace-store 13 ·
+provider-adapters 5 · agent-core 9 · harness-preview 26 · cli-harness 19 ·
+**total 136** (plus the harness-wasm Node smoke tests, run via wasm-pack)
 
 ---
 
@@ -169,9 +170,11 @@ CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
 | `docs/harness-gate-abi.md` | Gate ABI schema (D24) |
 | `docs/trust-pins.md` | Trust pins design (D29) |
 | `docs/demos/jira-copilot/` | E16 JIRA MCP demo runbook |
-| `.claude/cc-world.yaml` | Live `WorldManifest` governing Claude Code (dogfood) |
-| `.claude/hooks/world-gate.py` | PreToolUse hook — real governance gate |
-| `.claude/hooks/_gatelib.py` | Shared gate logic (taint floor, ASK, ABSENT) |
+| `.claude/cc-world.yaml` | Live `WorldManifest` governing Claude Code (dogfood), incl. D36 `command_classes` |
+| `.claude/hooks/world-gate.sh` | PreToolUse bootstrap shim → `harness cc-hook` (the real kernel; D37) |
+| `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37) |
+| `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source) |
+| `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
 
 ---
 
@@ -180,19 +183,27 @@ CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
 The `.claude/` directory dogfoods the harness against Claude Code itself (E13
 slice):
 
-- **`cc-world.yaml`** — the `WorldManifest` that governs this session.
-- **`hooks/world-gate.py`** — PreToolUse hook; invokes the harness gate ABI (D24)
-  for native tool calls.
-- **`hooks/world-gate-adapter.py`** — adapter that shells out to `harness gate`
-  for the real binary path.
+- **`cc-world.yaml`** — the `WorldManifest` that governs this session (a real
+  manifest compiled by the real compiler; Bash classification lives in its
+  `command_classes` block, D36).
+- **`hooks/world-gate.sh`** — the PreToolUse **bootstrap shim** (canonical
+  wiring): locates the `harness` binary and `exec`s `harness cc-hook --world
+  .claude/cc-world.yaml --state .claude/state`. Fail-open if no binary. No
+  governance logic lives in the shim (D37).
+- **`hooks/world-gate.py`** — the same shim in Python, kept **in place** for
+  sessions whose hook config snapshotted the old path. NEVER move or delete it
+  mid-session: a missing hook file bricks every subsequent tool call (D37).
+- **`hooks/superseded/`** — the archived pre-cutover Python engine
+  (world-gate.py original, `_gatelib.py`, `cc-world.json`, tests, demos) + README.
 - **`hooks/taint-notify.py`** — SubagentStop hook for cross-agent taint
-  observability (D21).
+  observability (D21); degrades gracefully without `_gatelib`.
 - **`agents/correcting-reviewer.md`** — Flywheel correcting-reviewer subagent
   (E13.1).
 - **`commands/review-blog.md`** — `/review-blog` skill.
 
-When editing hooks or the world manifest, validate with
-`.claude/hooks/test-gate.sh` before committing.
+When editing the world manifest or the adapters, validate with
+`cargo test -p cli-harness` (the `one_kernel.rs` conformance suite + adapter
+contract tests) before committing.
 
 ---
 

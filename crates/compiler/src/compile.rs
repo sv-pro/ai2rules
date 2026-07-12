@@ -131,6 +131,10 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
         });
     }
 
+    // Command classifiers are world data (D36): compiled in, so every host's
+    // gate call classifies identically — no adapter carries a pattern copy.
+    parts.command_classes = manifest.command_classes.clone();
+
     parts.budget = manifest.budget.clone();
     parts.redaction = manifest.observability.redact.clone();
 

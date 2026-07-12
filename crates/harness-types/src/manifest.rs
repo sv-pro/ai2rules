@@ -76,6 +76,35 @@ pub struct ScopedCapabilityDef {
     pub args: BTreeMap<String, ArgSource>,
 }
 
+/// One class of a host-syntactic command classifier (DECISIONS D36): if any
+/// pattern matches the command at a left word boundary, the call is reclassified
+/// to the `to` action. Patterns carry their own right boundary (a trailing space
+/// or `=`), e.g. `"curl "`, `"dd if="`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandClassRule {
+    pub to: ActionName,
+    #[serde(default)]
+    pub patterns: Vec<String>,
+}
+
+/// A manifest-declared command classifier (DECISIONS D36): for calls proposed
+/// as `action`, inspect the string argument named `arg` (default `command`) and
+/// reclassify to the first matching class's `to` action. Classification is world
+/// *data* compiled into `CompiledWorld` — never adapter code — so every host
+/// shares byte-identical classification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandClassDef {
+    pub action: ActionName,
+    #[serde(default = "default_command_arg")]
+    pub arg: String,
+    #[serde(default)]
+    pub classes: Vec<CommandClassRule>,
+}
+
+fn default_command_arg() -> String {
+    "command".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransitionPolicy {
     pub from_taint: Taint,
@@ -121,6 +150,10 @@ pub struct WorldManifest {
     pub base_actions: Vec<BaseActionDef>,
     #[serde(default)]
     pub scoped_capabilities: Vec<ScopedCapabilityDef>,
+    /// Host-syntactic command classifiers (DECISIONS D36). Skipped when empty so
+    /// pre-D36 manifests keep their manifest hash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command_classes: Vec<CommandClassDef>,
     #[serde(default)]
     pub transition_policies: Vec<TransitionPolicy>,
     #[serde(default)]

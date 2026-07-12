@@ -21,14 +21,16 @@ first slice), the seam is open and extensible — not a vendor gate you must wai
 
 `.opencode/plugin/ai2rules-gate.ts` hooks `tool.execute.before` on every OpenCode tool call:
 
-1. Maps the OpenCode tool name onto a manifest action (`bash` is classified by command
-   shape — D25 — into `bash` / `bash_network` / `bash_destructive`; everything else 1:1).
+1. Sends the **raw** OpenCode tool name — since **D36** the *kernel* classifies `bash`
+   by command shape into `bash` / `bash_network` / `bash_destructive` from the world's
+   `command_classes` block (no pattern lists live in the plugin); everything else maps 1:1.
 2. Builds a `GateRequest` and shells to `harness gate --world opencode-world.yaml` (the wire
-   ABI — D34: non-Rust hosts use the subprocess).
+   ABI — D34: non-Rust hosts use the subprocess). `AI2RULES_MODE=background` threads
+   `context.mode` so the kernel collapses ASK→DENY unattended.
 3. **`ALLOW`** → returns, OpenCode runs the tool. **`DENY` / `ABSENT` / `REPLAN` / `ASK`** →
-   **throws**, OpenCode aborts the call.
+   **throws** with the kernel's decision label + effective action (`verdict.action`).
 4. Persists monotonic session taint in `.opencode/ai2rules-state.json`.
-5. **Fail-open:** any adapter/internal error logs a warning and allows — only an explicit
+5. **Fail-open:** any adapter/process error logs a warning and allows — only an explicit
    kernel verdict blocks, so a broken gate never bricks a session.
 
 ## Proven decisions
@@ -116,6 +118,6 @@ compiled-world / taint / ABSENT model; OpenCode permissions add a familiar allow
 - ✅ **E17.3** Minimal plugin adapter ([`ai2rules-gate.ts`](../../../.opencode/plugin/ai2rules-gate.ts)).
 - ✅ **E17.4** Defensive `opencode.jsonc` example (above).
 - ✅ **E17.5** Rust contract tests — `crates/cli-harness/tests/opencode_world.rs` (gate verdicts
-  against this world) + D25 classification golden vectors in `src/cc_hook.rs` (incl. the
+  against this world) + D36 classification golden vectors in `harness-preview` gate tests (incl. the
   substring-false-positive regression). 123 tests green.
 - ⏳ **E17.6/E17.7** `harness opencode-init` emitter; optional WASM/in-process adapter.

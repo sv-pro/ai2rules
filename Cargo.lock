@@ -146,6 +146,7 @@ dependencies = [
  "inquire",
  "provider-adapters",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "trace-store",
  "world-kernel",

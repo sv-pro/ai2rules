@@ -128,21 +128,21 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   harness would actually do — no governance logic reimplemented in JS (E11.1–E11.3;
   manifest export and the LLM-assist/trace explainer are the pending E11.4–E11.5).
   See `DECISIONS.md` D17/D18.
-- **E13 — Claude Code integration (dogfooding, in progress):** the kernel's
-  physics, ported onto the Claude Code host. A `PreToolUse` hook
-  (`.claude/hooks/world-gate.py`) drives a JSON `WorldManifest`
-  (`.claude/cc-world.json`) to enforce three behaviours — ABSENT-for-native, the
-  monotonic **taint floor**, and **ASK** on destructive commands — additively
-  (only ever `deny`/`ask`) and fail-open. Cross-agent taint follows the shared
-  session sidecar (E13.6, D20), and a containerized governed SUT with an
+- **E13 — Claude Code integration (dogfooding; live hook cut over to the Rust
+  kernel, D37):** the `PreToolUse` hook is now a bootstrap shim
+  (`.claude/hooks/world-gate.sh`, canonical; `world-gate.py` kept as the same
+  shim for snapshotted sessions) that `exec`s **`harness cc-hook`** — the real
+  kernel deciding in-process against the real `WorldManifest`
+  `.claude/cc-world.yaml`: ABSENT (opt-in `--enforce-absent`), the monotonic
+  **taint floor**, **ASK** on destructive commands (collapsing to DENY under
+  `--mode background`), with Bash classified **kernel-side** from the manifest's
+  `command_classes` (D36). Additive (only ever `deny`/`ask`) and fail-open. The
+  Python engine is archived under `.claude/hooks/superseded/`; the cutover
+  consciously drops trust pins (D29) and path-based read-taint until they land
+  as typed manifest fields. Cross-agent taint still follows the shared session
+  sidecar (E13.6, D20), and the containerized governed SUT with an
   egress-allowlist proxy supplies the E8 enforcement floor (E13.7, D21).
-  **Trust pins** (D29, `docs/trust-pins.md`) let the operator vouch for a specific
-  read source by content identity (sha256 / clean commit), so a reviewed file no
-  longer taints while it matches — drift re-taints; taint is a recomputed
-  cause-ledger, with the shared logic in `.claude/hooks/_gatelib.py`.
-  Self-contained demos: `demo-injection-egress.sh` (prompt-injection → egress,
-  neutralized — E13.5) and `demo-cross-agent.sh` (subagent → parent taint).
-  See `DECISIONS.md` D19–D21, D29.
+  See `DECISIONS.md` D19–D21, D29, D36, D37.
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the
@@ -170,12 +170,36 @@ DECISIONS D33): `harness mcp-gateway` fronts an MCP server — shaping its `tool
 `harness mock-jira` upstream, and `harness cc-hook` is the Claude Code `PreToolUse`
 adapter in Rust (governing native tools, replacing the Python hook).
 
-Next host target: **OpenCode** (E17 / DECISIONS D35) — a working first slice lives in
-`docs/demos/opencode/`: a `.opencode/plugin/ai2rules-gate.ts` `tool.execute.before` adapter
-(plus OpenCode `permission` rules) calls the same `harness gate` ABI to govern OpenCode's
-native tools, dogfooded against this repo like `.claude/`.
+**One kernel, many hosts (shipped — D36/D37, `docs/one-kernel-many-hosts.md`):**
+Claude Code, OpenCode, and the MCP gateway all decide through the one Rust kernel
+via thin adapters that hold no policy, no taint algebra, and no command
+classification — bash shapes are classified by the *kernel* from the manifest's
+`command_classes` (D36), and verdict→host mapping is the shared `host_outcome()`
+layer (ABSENT stays distinct from DENY everywhere):
 
-Builds clean offline with `clippy -D warnings`; **123 tests** green.
+```
+Claude Code ─┐
+OpenCode    ─┼─→ thin adapter → GateRequest → one Rust kernel
+MCP Gateway ─┘                        ↓
+                                 GateResponse
+```
+
+The parity guarantee — same manifest + same request ⇒ same decision / rule /
+post-call taint / manifest_hash on every entry point — is pinned by the
+conformance suite (`crates/cli-harness/tests/one_kernel.rs` over
+`docs/demos/one-kernel/{demo-world.yaml,cases.yaml}`) and demonstrated offline in
+seconds by:
+
+```bash
+bash scripts/demo-one-kernel-many-hosts.sh
+```
+
+OpenCode (E17 / DECISIONS D35) is dogfooded the same way: the
+`.opencode/plugin/ai2rules-gate.ts` `tool.execute.before` adapter (plus OpenCode
+`permission` rules) calls the same `harness gate` wire ABI, sending raw tool
+names — see `docs/demos/opencode/`.
+
+Builds clean offline with `clippy -D warnings`; **136 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -197,7 +221,8 @@ crates/               the harness implementation
   cli-harness/        terminal entrypoint + `serve`/`gate`/`mcp-gateway`/`cc-hook`/`mock-jira` (binary `harness`) (E9, E11, E16)
   harness-preview/    pure design-time preview + runtime gate() ABI, shared by serve + wasm + `harness gate` (E11/E14, D24)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
-docs/                 architecture (harness-architecture.md is canonical)
+docs/                 architecture (harness-architecture.md is canonical; one-kernel-many-hosts.md = cross-host parity)
+scripts/              runnable demos (demo-one-kernel-many-hosts.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
