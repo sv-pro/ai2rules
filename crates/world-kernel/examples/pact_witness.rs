@@ -33,10 +33,20 @@
 //!
 //! The flat monitor's block is *sound* (no false negatives) — it over-approximates
 //! because it cannot prove the URL is clean-origin. The L2 check needs real
-//! **per-argument** provenance, which the current `TaintContext` scalar and the
-//! opaque `ToolCall.arguments` blob do not carry. Recovering it is the upgrade;
-//! roles come from the manifest at design time (no LLM on the gate), so it stays
-//! on the right side of the stochastic–deterministic border (`docs/THESIS.md` §3).
+//! **per-argument** provenance; roles come from the manifest at design time (no
+//! LLM on the gate), so it stays on the right side of the stochastic–deterministic
+//! border (`docs/THESIS.md` §3).
+//!
+//! # This is now shipped
+//!
+//! When this witness was written the standalone `l2_blocks` below was a *proposal*.
+//! The kernel now implements it for real (merged in `977330c`): `TaintContext`
+//! carries a per-argument taint map, `invariants::effective_floor_taint` feeds the
+//! unchanged floor a per-argument value, and `agent-core::arg_provenance` produces
+//! that map from data flow. This example is kept as the discovery artifact — the
+//! `l2_blocks` here mirrors what `effective_floor_taint` now does in the kernel.
+//! For the shipped behavior see the `l2_*` tests in `world-kernel` and the
+//! `l2_producer_recovers_*` test in `agent-core`.
 
 use compiler::compile_default;
 use harness_types::{

@@ -4,10 +4,16 @@
 Argument-Level Provenance Solves Enforcement and Isolates the LLM Reasoning Bottleneck."*
 [arXiv:2605.11039](https://arxiv.org/abs/2605.11039)
 
-**Status:** 🔬 explored — mechanism confirmed against the code; runnable witness landed
-(`crates/world-kernel/examples/pact_witness.rs`). Not yet promoted to `PLAN.md`.
+**Status:** ✅ **implemented** — the L2 fix designed below is **merged to `main`** (squash
+`977330c`, "PACT L2 argument-level taint — carrier + data-flow producer"). This document is now the
+discovery record for a shipped feature; the "Next steps" checklist reflects what landed and what
+remains.
 
-**Runnable proof:** `cargo run -p world-kernel --example pact_witness --offline`
+**Runnable proof (the original witness, standalone L2 vs the real flat floor):**
+`cargo run -p world-kernel --example pact_witness --offline`
+
+**The shipped behavior** (kernel + orchestrator now do this for real):
+`cargo test -p world-kernel l2_ && cargo test -p agent-core l2_producer`
 
 ---
 
@@ -102,15 +108,31 @@ today that provenance is thrown away. So this is not "invariant 7 is wrong" — 
 maximally conservative because it is starved of the data that would let it be precise." Recovering
 that data is the experiment.
 
-## Next steps (for `PLAN.md` if promoted)
+## Status of the plan (merged in `977330c`)
 
-- [ ] Prototype the `arg_path → Taint` carrier in `harness-types`; keep the scalar as the L1 fallback.
-- [ ] Add `role:` to argument schemas in the default world; extend the compiler to carry it.
-- [ ] Implement the L2 check in `world-kernel` behind the existing floor (floor stays as the
-      non-overridable L0/L1 physics; L2 refines *within* what the floor permits — never relaxes it).
-- [ ] Turn `pact_witness.rs` into a regression test, and add the step-3 false-positive as an
-      explicit assertion so the demo's framing is corrected.
-- [ ] Measure: on `poisoned_knowledge_demo` + a small benign-mixed-trust suite, count false
+- [x] **Per-argument carrier** — `TaintContext` gained an `arg_taint` map (`with_arg_taint` /
+      `arg_taint`); the ambient scalar stays as the L0/L1 fallback. (`harness-types/src/provenance.rs`)
+- [x] **`role:` as manifest data** — `ArgRole` on `BaseActionDef`/`Descriptor`; `fetch_web` opts in
+      with `url: Target`. Not code, not an LLM. (`harness-types`, `compiler`, `default_world.yaml`)
+- [x] **L2 check in `world-kernel`** — `effective_floor_taint()` feeds the **unchanged** floor rule a
+      per-argument value; `IntentIR.floor_taint` keeps disposition consistent. The floor stays the
+      non-overridable L0/L1 physics; L2 refines *within* it. (`world-kernel/src/invariants.rs`)
+- [x] **Data-flow producer** — `agent-core::arg_provenance` computes `arg_taint` from real perceptions
+      (the deterministic, no-LLM half of PACT §3.4); wired into `run()` via `SessionConfig.user_request`.
+- [x] **Regression tests** — 9 kernel tests (`l2_*`, incl. the step-3 recovery through `decide()`) +
+      7 producer tests (`arg_provenance` + `l2_producer_recovers_*` through `run()`). The demo's
+      false-positive is now an explicit, passing assertion.
+
+**Remaining (not yet built):**
+
+- [ ] **Transformation-aware provenance.** The producer only catches *verbatim* data flow;
+      paraphrased/summarized tainted content falls through to the ambient floor (that is exactly the
+      case PACT hands to its LLM classifier, and we refuse it). A deterministic step up: track taint
+      through the executor's actual value transformations rather than string matching.
+- [ ] **OutputSpec read-taint** so memory/MCP can opt into L2. Today they stay on the ambient floor —
+      relaxing tainted→memory before taint is preserved on *read* would be a real false negative (the
+      ZombieAgent threat).
+- [ ] **Promote to `PLAN.md`** as a real epic, and **measure** on a benign-mixed-trust suite: false
       positives recovered vs. false negatives introduced (target: >0 recovered, 0 introduced).
 
 ## Flywheel advocacy hook
