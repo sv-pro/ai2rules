@@ -875,3 +875,79 @@ engine (E13.2/D29 interim).
   fields — D26 already validated the adapter path).
 - **Related:** D24, D26, D29 (open follow-up), D34, D36, `docs/one-kernel-many-hosts.md`,
   `.claude/hooks/superseded/README.md`.
+
+## D38 — The March-2026 runtime cluster is superseded; record the lineage
+
+**Date:** 2026-07-17.
+
+- **Context:** In March 2026 the border ideas were first stated as four separate `sv-pro`
+  repos, all dormant since late March: `safe-agent-runtime-core` (deterministic policy kernel +
+  IRBuilder + taint, 43 commits, Mar 18–22), `safe-agent-runtime-pro` (typed models / capability
+  DSL / presets, 21 commits), `agent-world-compiler` (workflow → world manifest → capability
+  surface, 26 commits), `agent-world-compiler-poc` (least-privilege-from-observed-execution PoC,
+  30 commits). `docs/THESIS.md` §5 credits only `agent-hypervisor` and `safe-mcp-proxy` as
+  primitive sources and is silent on these four — the single biggest "which repo is real?"
+  ambiguity in the cluster. Silence is not a decision; this entry makes it one.
+- **Decision:** Declare the March cluster **superseded**, and record where each idea now lives:
+  - `safe-agent-runtime-core` (kernel, IRBuilder, taint/provenance) → **`crates/world-kernel`**.
+    The lineage is concrete: `-core`'s final commits added the "Safe MCP Proxy / Agent Runtime
+    Firewall" positioning that `safe-mcp-proxy` carried forward a month later (→ `ABSENT ≠ DENY`,
+    §5).
+  - `agent-world-compiler` (workflow → manifest compiler) → **`crates/compiler`**.
+  - `safe-agent-runtime-pro` (typed models / capability DSL / presets) → the manifest schema
+    across **`crates/compiler` + `crates/harness-types`**.
+  - `agent-world-compiler-poc` → **spent**; its PoC role is fulfilled by `crates/compiler`.
+  - Capability projection as a *concept* now lives in
+    `agentic-execution-governance/mcp-tool-projection` (a §5 primitive source) and
+    `cedar-world-playground`, not in the dead compiler.
+  - **Archive** all four on GitHub with a one-line README pointer here. Archive, not delete —
+    the provenance trail is what makes this supersession auditable.
+- **Not superseded by this entry:** `sv-pro/agent-harness` is a **model-eval fixture**
+  (`HARD_TASK.md`, hard-opus vs hard-fable), not part of this lineage — keep it; retitle its
+  README so it stops reading as a product. It is distinct from the third-party
+  `agent-harness-generator`/MetaHarness rejected in D24, and from the separate 1-commit
+  `agentic-execution-governance/agent-harness` placeholder (a name collision resolved elsewhere).
+- **Why:** converts §5's silence into an explicit decision and closes the largest source of
+  cluster ambiguity, while preserving lineage.
+- **Alternatives rejected:** keep them as separate active repos (N drifting statements of one
+  thesis, none authoritative — the fragmentation D23 exists to end); delete them (loses the
+  lineage record).
+- **Related:** D23 (unify under one thesis), D30 (rename to `ai2rules`), **D39** (umbrella form),
+  §5 / §7.3.
+
+## D39 — Umbrella form (resolves §7.3): federated org-per-layer under one master thesis
+
+**Date:** 2026-07-17. **Resolves** the umbrella-form decision deferred in `docs/THESIS.md` §7.3
+and `PLAN.md`.
+
+- **Context:** §7.3 left three options open — (a) meta-repo with submodules, (b) docs-only
+  umbrella site, (c) Cargo/workspace consolidation — and `PLAN.md` deferred the choice "until the
+  context-engine demo reveals the natural structure." As of 2026-07-17 the cluster is *already*
+  split across GitHub orgs by thesis layer: **`agentic-execution-governance`** (action +
+  capability: `mcp-tool-projection`, `cedar-world-playground`), **`Intent-Hub`** (intent +
+  knowledge: `intentos-core`, `intentos-specs`, `intent-workbench`), and **`sv-pro`** (the
+  `ai2rules` action flagship + everything else). Two documents each claim source-of-truth status:
+  this repo's `docs/THESIS.md` (the border) and `Intent-Hub/intentos-specs` ("the single source
+  of truth" for the intent layer). That is the `semlens` spec-drift failure mode, one level up.
+- **Decision:** Adopt a **federated** umbrella — org-per-layer, unified by one master thesis:
+  - **`docs/THESIS.md` (this repo) is the single master thesis** for the whole program (the
+    border + five layers). There is exactly one.
+  - Each layer keeps its own org and may keep its own specs (e.g. `Intent-Hub/intentos-specs`),
+    but **those specs point *up* to the master thesis and never restate it** — the same anti-drift
+    rule the control-room workspace follows. Layer specs govern implementation detail *within* a
+    layer; the thesis governs what the layers are and why.
+  - **No forced consolidation into a single repo.** Crates remain the unit of modularity *within*
+    a repo; orgs remain the unit *across* layers.
+- **Why:** it matches the structure already built instead of fighting it; it kills the two-SSOT
+  drift by subordinating every layer spec to one thesis; migration cost is ~zero. It rejects
+  "one repo" specifically because the evidence for it (10 crates already work) argues for
+  crate-granularity *within* a repo, not for collapsing three orgs into one.
+- **Alternatives rejected:**
+  - (c) single consolidated repo — absorb the org repos as crates, archive the orgs: real
+    migration cost, and it fights a deliberate org structure; the crate evidence supports
+    intra-repo granularity, not cross-layer collapse.
+  - fully independent projects with co-equal SSOTs — exactly the drift this entry prevents.
+  - keep deferring — the deferral itself was the management cost that prompted this.
+- **Follow-ups (non-blocking):** open `intentos-specs` with a pointer to the master thesis; add a
+  "layers & homes" table to §7 listing each org; resolve the `agent-harness` name collision (D38).
+- **Related:** D23, D30, **D38**, §7.3, `PLAN.md` "Next step".
