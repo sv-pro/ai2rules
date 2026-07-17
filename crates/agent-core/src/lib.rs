@@ -9,6 +9,7 @@
 //! of an `ExecutionSpec`, so the model can never reach the executor directly
 //! (invariant 4). See [`orchestrator::run`].
 
+pub mod arg_provenance;
 pub mod context;
 pub mod intent;
 pub mod model;
@@ -324,5 +325,68 @@ mod tests {
         assert_eq!(outcome.transcript[0].verdict, "ALLOW");
         assert_eq!(outcome.transcript[0].taint, Taint::Tainted);
         assert!(outcome.transcript[1].verdict.starts_with("Deny"));
+    }
+
+    #[test]
+    fn l2_producer_recovers_user_supplied_url_in_tainted_session() {
+        // PACT L2 end-to-end through the orchestrator producer: a tainted MCP
+        // result taints the session, but a fetch to the URL the *user asked for*
+        // (verbatim in the trusted request → provably clean-origin) is recovered,
+        // while a fetch to a model-supplied URL is still denied by ambient taint.
+        const GUIDE: &str = "https://docs.example/guide";
+        let world = compile_default();
+        let dir = tempfile::tempdir().unwrap();
+        let trace = TraceStore::open(dir.path().join("t.jsonl"));
+        let mut store = ApprovalStore::open(dir.path().join("a.jsonl")).unwrap();
+        let mcp = MockMcpTransport::new().with("docs", "search", json!({ "answer": "x" }));
+        let web = MockWebFetcher::new().with(GUIDE, "<html>guide</html>");
+        let executor = executor_with_transports(&world, Box::new(mcp), Box::new(web));
+        let mut model = ScriptedModel::new([
+            // 1. retrieve from the KB → allowed, result tainted → ambient tainted.
+            ModelTurn::ToolUse(tool_use_block(
+                "t1",
+                "call_known_mcp_tool",
+                json!({ "query": "q" }),
+            )),
+            // 2. fetch the URL the user asked for → recovered by L2 (clean url).
+            ModelTurn::ToolUse(tool_use_block("t2", "fetch_web", json!({ "url": GUIDE }))),
+            // 3. fetch a model-invented URL → still denied (ambient tainted).
+            ModelTurn::ToolUse(tool_use_block(
+                "t3",
+                "fetch_web",
+                json!({ "url": "https://model.invented/leak" }),
+            )),
+            ModelTurn::Final("done".into()),
+        ]);
+        let config = SessionConfig {
+            effect_mode: EffectMode::Execute,
+            user_request: Some(format!("please fetch {GUIDE} and summarize it")),
+            ..SessionConfig::default()
+        };
+        let outcome = run(
+            &world,
+            &ExecEnv::default(),
+            &executor,
+            &trace,
+            &mut store,
+            &mut model,
+            &config,
+            None,
+        );
+
+        assert_eq!(outcome.transcript[0].verdict, "ALLOW"); // retrieval
+        assert_eq!(outcome.transcript[0].taint, Taint::Tainted); // …taints the session
+        assert_eq!(
+            outcome.transcript[1].verdict, "ALLOW",
+            "user-supplied URL should be recovered by the L2 producer despite tainted session"
+        );
+        assert!(
+            outcome.transcript[2].verdict.starts_with("Deny"),
+            "model-invented URL must stay denied by the ambient floor"
+        );
+        assert_eq!(
+            outcome.transcript[2].rule.as_deref(),
+            Some("taint_invariant")
+        );
     }
 }

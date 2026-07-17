@@ -251,6 +251,7 @@ fn main() {
         },
         approval: ApprovalPolicy::Interactive(ask_approval),
         max_steps: 100, // Let the interactive model handle stopping
+        ..SessionConfig::default()
     };
 
     println!("ai2rules initialized.");
