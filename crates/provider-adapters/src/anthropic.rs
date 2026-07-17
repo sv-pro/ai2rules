@@ -96,6 +96,7 @@ mod tests {
             side_effect: SideEffectClass::Read,
             backing: BackingIdentity::LocalHandler(action.to_string()),
             metadata: Value::Null,
+            arg_roles: Default::default(),
         }
     }
 

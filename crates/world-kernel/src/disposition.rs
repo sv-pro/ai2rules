@@ -28,7 +28,7 @@ pub struct BudgetUsage {
 /// The runtime moment the kernel evaluates against: the inbound taint context
 /// (used by `IRBuilder::build` via [`crate::decide`]), the execution mode, and
 /// current budget usage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvalContext {
     pub taint: TaintContext,
     pub mode: ExecutionMode,
@@ -83,7 +83,12 @@ pub fn evaluate(world: &CompiledWorld, intent: &IntentIR, ctx: &EvalContext) -> 
     //    reach here; this catches any *additional* manifest-authored rule (e.g.
     //    a softer `Tainted + FilesystemWrite → Ask`).
     for rule in world.taint_rules() {
-        if rule.from_taint == intent.taint() && rule.side_effect == intent.side_effect() {
+        // Match on the L2-effective floor taint (PACT §3.3) so a manifest taint
+        // rule stays consistent with the hard floor: an action whose *authority-
+        // bearing* arguments are clean is not re-blocked here on ambient taint.
+        // Actions without argument roles have `floor_taint == taint`, so this is
+        // unchanged for them.
+        if rule.from_taint == intent.floor_taint() && rule.side_effect == intent.side_effect() {
             return Disposition::of(rule.decision, rule.rule.clone());
         }
     }

