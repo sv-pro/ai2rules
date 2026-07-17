@@ -21,6 +21,7 @@ use world_kernel::{
     build_execution_spec, decide, BudgetUsage, EvalContext, ExecEnv, IntentIR, KernelOutcome,
 };
 
+use crate::arg_provenance;
 use crate::context;
 use crate::model::{ModelClient, ModelTurn};
 
@@ -66,6 +67,12 @@ pub struct SessionConfig {
     /// How an interactive `ASK` is resolved.
     pub approval: ApprovalPolicy,
     pub max_steps: u64,
+    /// The trusted user request seeding the clean provenance corpus (PACT L2).
+    /// A value that appears verbatim here is provably clean-origin, so an
+    /// authority-bearing argument the user themselves supplied is not blocked by
+    /// ambient session taint. `None` → no clean seed → the per-argument producer
+    /// only ever falls back to the ambient floor (fully conservative).
+    pub user_request: Option<String>,
 }
 
 impl Default for SessionConfig {
@@ -75,6 +82,7 @@ impl Default for SessionConfig {
             mode: ExecutionMode::Interactive,
             approval: ApprovalPolicy::Manual,
             max_steps: 16,
+            user_request: None,
         }
     }
 }
@@ -114,6 +122,10 @@ pub fn run(
     let mut perceptions: Vec<Perception> = Vec::new();
     let mut taint = Taint::Clean;
     let mut records = 0usize;
+    // The trusted user request seeds the clean provenance corpus for the L2
+    // producer. It is the one source we can assert is clean-origin by construction
+    // (a Trusted, untainted channel — the developer's own words).
+    let clean_sources: Vec<String> = config.user_request.iter().cloned().collect();
 
     for _ in 0..config.max_steps {
         let ctx = context::pack(world, perceptions.clone());
@@ -145,8 +157,17 @@ pub fn run(
         };
 
         let action = call.action_name.as_str().to_string();
+        // PACT L2 producer: derive per-argument taint from the actual data flow —
+        // which tainted output (or clean source) each argument's value came from —
+        // so the kernel can judge authority-bearing arguments individually instead
+        // of blocking on ambient session taint. Deterministic, no LLM.
+        let arg_taint = arg_provenance::arg_taint(
+            &call.arguments,
+            &tainted_payloads(&perceptions),
+            &clean_sources,
+        );
         let base = EvalContext {
-            taint: TaintContext::from_taint(taint),
+            taint: TaintContext::from_taint(taint).with_arg_taint(arg_taint),
             mode: config.mode,
             usage: BudgetUsage::default(),
             approval_granted: false,
@@ -372,6 +393,16 @@ fn resolve_approval(
             }
         }
     }
+}
+
+/// The payloads of every tainted perception so far — the tainted corpus the L2
+/// producer matches argument values against.
+fn tainted_payloads(perceptions: &[Perception]) -> Vec<String> {
+    perceptions
+        .iter()
+        .filter(|p| p.taint.is_tainted())
+        .map(|p| p.payload_ref.0.clone())
+        .collect()
 }
 
 fn append(

@@ -81,6 +81,12 @@ base_actions:
       type: object
       properties:
         url: { type: string, description: "URL to fetch" }
+    # PACT L2 (arXiv:2605.11039): `url` is the authority-bearing destination.
+    # Opting this action into the argument-level floor means a fetch is blocked
+    # when the *url* is tainted, not merely when the session is. Actions without
+    # arg_roles keep the ambient-taint floor unchanged.
+    arg_roles:
+      url: Target
   - name: update_memory
     action_type: Memory
     side_effect: Memory

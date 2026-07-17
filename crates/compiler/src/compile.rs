@@ -49,6 +49,7 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
             side_effect: action.side_effect,
             backing,
             metadata: Value::Null,
+            arg_roles: action.arg_roles.clone(),
         };
         parts
             .descriptor_hashes
@@ -92,6 +93,10 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
             side_effect: base.side_effect,
             backing,
             metadata,
+            // Scoped capabilities inherit their base action's argument roles;
+            // arguments pinned to a Literal are design-time-clean and are
+            // filtered out at the L2 check, not here.
+            arg_roles: base.arg_roles.clone(),
         };
         parts
             .descriptor_hashes

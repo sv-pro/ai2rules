@@ -138,17 +138,25 @@ impl<T> TaintedValue<T> {
 
 /// Mandatory threading object for taint propagation between pipeline stages.
 /// Callers cannot silently drop taint: building an intent requires one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `taint` is the **ambient** scalar — the monotonic join of every prior output,
+/// the L0/L1 signal the floor has always used. `arg_taint` is the optional
+/// **per-argument** provenance (PACT §3.3): the taint of the value bound to each
+/// named argument, when the pipeline knows it. Empty `arg_taint` means "no
+/// per-argument information" and the floor falls back to the ambient scalar —
+/// exactly today's behavior.
+///
+/// (No longer `Copy`: it now owns a map. `Clone` is retained.)
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TaintContext {
     taint: Taint,
+    arg_taint: std::collections::BTreeMap<String, Taint>,
 }
 
 impl TaintContext {
     /// A fresh CLEAN context for pipeline entry points (no prior tainted data).
     pub fn clean() -> Self {
-        Self {
-            taint: Taint::Clean,
-        }
+        Self::default()
     }
 
     /// Derive a context from prior executor outputs (monotonic join of all).
@@ -157,15 +165,36 @@ impl TaintContext {
         for output in outputs {
             taint = taint.join(output.taint);
         }
-        Self { taint }
+        Self {
+            taint,
+            ..Default::default()
+        }
     }
 
     /// Derive from an explicit taint value.
     pub fn from_taint(taint: Taint) -> Self {
-        Self { taint }
+        Self {
+            taint,
+            ..Default::default()
+        }
     }
 
+    /// Attach per-argument taint (PACT §3.3). Builder-style; the ambient scalar
+    /// is unchanged, so this can only ever *refine* a floor decision, never
+    /// weaken the ambient fallback for arguments it does not mention.
+    pub fn with_arg_taint(mut self, arg_taint: impl IntoIterator<Item = (String, Taint)>) -> Self {
+        self.arg_taint = arg_taint.into_iter().collect();
+        self
+    }
+
+    /// The ambient scalar taint (the join of all prior outputs).
     pub fn taint(&self) -> Taint {
         self.taint
+    }
+
+    /// The taint of the value bound to `arg`, if the pipeline tracked it.
+    /// `None` means unknown — callers must fail closed (fall back to ambient).
+    pub fn arg_taint(&self, arg: &str) -> Option<Taint> {
+        self.arg_taint.get(arg).copied()
     }
 }

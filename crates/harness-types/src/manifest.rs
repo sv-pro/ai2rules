@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::action::{ActionType, ActorKind, DataClass};
 use crate::decision::Decision;
-use crate::descriptor::{BackingIdentity, SideEffectClass};
+use crate::descriptor::{ArgRole, BackingIdentity, SideEffectClass};
 use crate::ids::{ActionName, WorldId};
 use crate::provenance::{Taint, TrustLevel};
 
@@ -49,6 +49,11 @@ pub struct BaseActionDef {
     /// Additional argument constraints (regex, enums, …).
     #[serde(default)]
     pub arg_constraints: Value,
+    /// Per-argument policy roles (PACT §3.2). Optional; when present, the
+    /// action opts in to the L2 argument-level taint check. Omitted → the
+    /// action keeps the ambient-taint floor unchanged.
+    #[serde(default)]
+    pub arg_roles: BTreeMap<String, ArgRole>,
     /// What backs the action. Defaults to a local handler named after the
     /// action when omitted.
     #[serde(default)]
