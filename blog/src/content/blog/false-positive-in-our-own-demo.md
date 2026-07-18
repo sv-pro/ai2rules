@@ -12,7 +12,8 @@ The paper is [*The Granularity Mismatch in Agent Security*](https://arxiv.org/ab
 (Fan et al., 2026), which introduces **PACT** — Provenance-Aware Capability
 Contracts. Its central claim is uncomfortable in the best way: indirect prompt
 injection is dangerous not when untrusted content is *in context*, but when it
-**determines an authority-bearing argument** to a tool. So a monitor that decides
+**determines an authority-bearing argument** to a tool — the one that decides what the
+call can *do*, like the destination URL or the shell command. So a monitor that decides
 per *tool call* is operating at the wrong granularity — and any such monitor,
 they prove, must be wrong somewhere.
 
@@ -21,7 +22,9 @@ theorem seriously and pointed it at our [taint floor](/blog/the-zombieagent-thre
 
 ## The floor, in one scalar
 
-The harness enforces a **monotonic taint floor** — the same invariant behind the
+The harness enforces a **monotonic taint floor** — *taint* is the label we attach to any
+value derived from an untrusted source, and *monotonic* means it only ever spreads, never
+washes out. It's the same invariant behind the
 [ZombieAgent post](/blog/the-zombieagent-threat/) and the
 [subagent experiment](/blog/subagent-taint-experiment/). Acceptance invariant 7,
 in `world-kernel`, is essentially one line:
@@ -36,7 +39,8 @@ if externally_effectful(side_effect) && taint.is_tainted() {
 The `taint` there is a single `Taint` scalar carried by `TaintContext`, and it is
 computed as the **join of every prior output** in the session. One untrusted
 document retrieved anywhere, and the whole next intent is `Tainted`. The check is
-sound — once anything dirty is in play, nothing effectful gets out.
+sound — once anything dirty is in play, nothing *effectful* — nothing that can reach
+outside the sandbox, like a network call or a file write — gets out.
 
 That single-scalar shape has a name in the PACT paper. It's **Definition 1: the
 flat tool-level monitor** — one label per call, block <abbr title="if and only if">iff</abbr>
@@ -125,7 +129,8 @@ Three changes, and the floor rule itself never moved:
 
 Then the piece that makes it real: a deterministic **data-flow producer**
 (`agent-core::arg_provenance`) that fills the per-argument map from actual data
-flow — the no-LLM half of PACT's §3.4. It is aggressively fail-closed:
+flow — the no-LLM half of PACT's §3.4. It is aggressively **fail-closed** — when it can't
+prove something safe, it defaults to the restrictive answer:
 
 - An argument is `Clean` **only with positive proof** — its value appears verbatim
   in the trusted user request.
