@@ -39,8 +39,8 @@ document retrieved anywhere, and the whole next intent is `Tainted`. The check i
 sound — once anything dirty is in play, nothing effectful gets out.
 
 That single-scalar shape has a name in the PACT paper. It's **Definition 1: the
-flat tool-level monitor** — one label per call, block iff the action is externally
-effectful and the value is tainted. We did not borrow it from PACT; we arrived at
+flat tool-level monitor** — one label per call, block <abbr title="if and only if">iff</abbr>
+the action is externally effectful and the value is tainted. We did not borrow it from PACT; we arrived at
 the same object independently. (The convergence runs deep: PACT's provenance merge
 `⟨O, τ, B⟩` with `min(τ₁, τ₂)` is our monotonic taint, arrived at from the other
 direction.) Which makes their **Theorem 3** land squarely on us:
