@@ -2,7 +2,7 @@
 title: 'We Found a False Positive in Our Own Flagship Demo'
 description: "A paper didn't propose a competing system — it proved a theorem, and the theorem was aimed at our taint floor. It was right. Here's the argument-level fix, and the one part of the paper we refused to adopt."
 pubDate: 'Jul 18 2026'
-heroImage: '../../assets/blog-placeholder-4.jpg'
+heroImage: '../../assets/false-positive-argument-taint.jpg'
 ---
 
 Most security papers give you a system to compare against. This one gave us a

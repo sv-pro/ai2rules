@@ -1,7 +1,7 @@
 # Task: blog hero illustrations — Antigravity + Gemini
 
 **Owner:** Google Antigravity (Gemini) — it generated the existing house-style heroes,
-so it should generate the new ones. **Status:** fix #1 done (this commit); images #2/#3 open.
+so it should generate the new ones. **Status:** fix #1 done; images #2/#3 done.
 
 ## Problem
 
@@ -10,8 +10,8 @@ Two published posts lack a proper dedicated hero, and one is mis-wired:
 | Post | Was | Issue |
 |---|---|---|
 | `running-claude-safely.mdx` | `blog-placeholder-4.jpg` | ✅ **fixed** — a dedicated `running-claude-safely.jpg` already existed, unused; rewired to it. No new art. |
-| `false-positive-in-our-own-demo.md` | `blog-placeholder-4.jpg` | ⬜ shares the placeholder (same image as running-claude-safely). Needs a dedicated hero. |
-| `programmatic-tool-calling-governance.md` | *(empty)* | ⬜ no hero at all. Needs a dedicated hero. |
+| `false-positive-in-our-own-demo.md` | `blog-placeholder-4.jpg` | ✅ **fixed** — generated `false-positive-argument-taint.jpg` |
+| `programmatic-tool-calling-governance.md` | *(empty)* | ✅ **fixed** — generated `programmatic-tool-calling.jpg` |
 
 ## House style + hard specs
 

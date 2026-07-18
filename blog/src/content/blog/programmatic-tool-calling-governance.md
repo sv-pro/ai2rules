@@ -2,6 +2,7 @@
 title: 'Your Agent Just Learned to Write Programs. Can You Still Govern It?'
 description: 'GPT-5.6 Programmatic Tool Calling makes tool-heavy agents faster. It also moves the governance boundary from individual calls to generated execution plans.'
 pubDate: 'Jul 12 2026'
+heroImage: '../../assets/programmatic-tool-calling.jpg'
 ---
 
 GPT-5.6 introduces a deceptively small change to tool use: **Programmatic Tool
