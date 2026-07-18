@@ -275,6 +275,7 @@ pub fn run(
                         Vec::new()
                     }
                 };
+                let advertised = tools.len();
                 let exposed: Vec<Value> = tools
                     .into_iter()
                     .filter(|t| {
@@ -284,6 +285,14 @@ pub fn run(
                             .unwrap_or(false)
                     })
                     .collect();
+                // Surface-shaping ratio — the visible governability story: how much
+                // of the upstream's advertised surface the world actually exposes.
+                eprintln!(
+                    "[mcp-gateway] surface shaped: upstream advertised {advertised} tools, \
+                     exposing {} ({} ABSENT)",
+                    exposed.len(),
+                    advertised.saturating_sub(exposed.len())
+                );
                 json!({"tools": exposed})
             }
             "tools/call" => {

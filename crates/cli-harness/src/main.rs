@@ -57,7 +57,14 @@ enum Command {
     },
     /// Run a self-contained mock JIRA MCP server on stdio — the demo upstream the
     /// gateway governs (DECISIONS D33 / E16.A).
-    MockJira,
+    MockJira {
+        /// Advertise the REAL Atlassian Rovo tool names (`getJiraIssue`, …) plus a
+        /// Confluence tool, instead of the invented `jira_*` mock names — so the
+        /// real-Atlassian manifest (`jira-atlassian.world.yaml`) can be exercised
+        /// offline (E16.E). See `docs/demos/jira-copilot/REAL-ATLASSIAN.md`.
+        #[arg(long)]
+        rovo: bool,
+    },
     /// Claude Code PreToolUse adapter, in Rust (D33 / E16.C): read a PreToolUse
     /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
     /// decision. Additive (never auto-allows); fail-open. Replaces the Python
@@ -187,8 +194,8 @@ fn main() {
         std::process::exit(run_gate(world));
     }
 
-    if let Some(Command::MockJira) = &cli.command {
-        std::process::exit(mock_jira::run());
+    if let Some(Command::MockJira { rovo }) = &cli.command {
+        std::process::exit(mock_jira::run(*rovo));
     }
 
     if let Some(Command::CcHook {

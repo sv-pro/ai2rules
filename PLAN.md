@@ -521,9 +521,12 @@ destructive JIRA tool **ABSENT** (doesn't exist for the agent). The line it sell
 gate; MCP is where it *is* governable, and it's host-agnostic — one proxy, three hosts).
 **Status:** 🚧 in progress — **PIVOTED to Rust-only, one binary (DECISIONS D33).** The Python
 compose glue (safe-mcp-proxy `feat/mcp-gateway`) was the prototype that proved the shape; the
-demo is now Rust around the **governability gap** (CC deep vs Copilot MCP-only). **E16.A–D
-built and tested** (mock-jira + mcp-gateway + cc-hook + scorecard/host configs, 7 e2e tests
-green). Remaining: E16.E (real Atlassian skin) and an optional recorded walkthrough.
+demo is now Rust around the **governability gap** (CC deep vs Copilot MCP-only). **E16.A–E
+built and tested** (mock-jira + mcp-gateway + cc-hook + scorecard/host configs + the real
+Atlassian skin, **10 e2e tests green**). The E16.E skin is built, **verified offline** (the
+real-name manifest is exercised against a Rovo-named stand-in) **and live-validated
+2026-07-19** against a real Atlassian Cloud site — so E16's exit criterion (a repeatable live
+demo) is met; only an optional recorded walkthrough remains.
 New task list:
 
 - [x] **E16.A** `harness mock-jira` — self-contained Rust MCP stdio upstream (7 jira_* tools
@@ -543,8 +546,20 @@ New task list:
 - [x] **E16.D** **Governability scorecard** (`docs/demos/jira-copilot/SCORECARD.md`) + runbook;
   `run-proxy.sh` now launches `harness mcp-gateway` over `harness mock-jira` (Rust, offline);
   CC native governance wired via `hosts/claude-code.settings.json` (`harness cc-hook`).
-- [ ] **E16.E** *(later)* real Atlassian upstream **skin** (`mcp-remote` bridge or a Rust SSE
-  MCP client) — swap the `mock-jira` upstream for the real Atlassian Remote MCP Server.
+- [x] **E16.E** real Atlassian upstream **skin** — swap the `mock-jira` upstream for the real
+  Atlassian Rovo MCP Server via an `mcp-remote` OAuth bridge. **No kernel/gateway change:** the
+  gateway already parameterizes its upstream (`run-proxy.sh` `UPSTREAM` env), so the skin is a
+  real-tool-name manifest (`jira-atlassian.world.yaml`) + host configs
+  (`hosts/{vscode,claude-code}-atlassian.mcp.json`) + the runbook (`REAL-ATLASSIAN.md`). Proven
+  **offline** by `tests/mcp_gateway_atlassian.rs` (3 e2e): `harness mock-jira --rovo` advertises
+  the genuine Rovo names, and the gateway shapes the manifest's exact 5-tool surface, ABSENTs
+  every write/transition/create + Confluence, and severs the comment write under taint.
+  **Live-validated 2026-07-19** against a real Atlassian Cloud site (project `KAN`): the Rovo
+  server advertised **40** tools, the gateway exposed **5** (35 ABSENT); `getJiraIssue` /
+  `searchJiraIssuesUsingJql` / `getVisibleJiraProjects` reads forwarded and returned real data;
+  `addCommentToJiraIssue` **ALLOW** in a clean session (comment posted) and **DENY** in a tainted
+  session — same call, gate-side, before reaching Atlassian. Only an optional recorded
+  walkthrough remains.
 
 *(The original Python-path tasks below are superseded by D33; kept for history.)*
 
