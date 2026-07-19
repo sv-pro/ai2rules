@@ -117,12 +117,14 @@ parallel identity:
 
 ## Implementation slices
 
-| Slice | Size |
-|---|---|
-| `harness approvals list` + `harness approve/reject <id>` over `ApprovalStore` | S |
-| Gateway `--approvals`; on `ASK`: `is_granted` → forward + `mark_executed`, else `mint` pending + informative block | M |
-| Idempotent `mint` (key on binding hash) + TTL on `ApprovalToken` | S |
-| Tests: `ASK` → pending → approve → retry → `ALLOW` → executed; changed-args → new pending (old inert); replay → `ASK` | M |
-| (later) MCP elicitation path for hosts that support it | L |
+Promoted to **[`PLAN.md` E18](../PLAN.md)** — "Out-of-band approvals for MCP-only hosts."
+
+| Slice | Size | Epic task |
+|---|---|---|
+| `harness approvals list` + `harness approve/reject <id>` over `ApprovalStore` | S | E18.1 |
+| Gateway `--approvals`; on `ASK`: `is_granted` → forward + `mark_executed`, else `mint` pending + informative block | M | E18.2 |
+| Idempotent `mint` (key on binding hash) + TTL on `ApprovalToken` | S | E18.3 |
+| Tests: `ASK` → pending → approve → retry → `ALLOW` → executed; changed-args → new pending (old inert); replay → `ASK` | M | E18.4 |
+| (later) MCP elicitation path for hosts that support it | L | E18.5 |
 
 Claude Code needs **none** of these — its native prompt already satisfies `approval_required`.

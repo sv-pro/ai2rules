@@ -655,6 +655,49 @@ the adapter writes trace records).
 
 ---
 
+### E18 — Out-of-band approvals for MCP-only hosts (satisfy `ASK` via `ApprovalStore`)
+**Goal:** Make `approval_required` actions **completable** on MCP-only hosts (Copilot VS Code /
+JetBrains, via `harness mcp-gateway`) that have no per-call approval channel — by satisfying the
+kernel's `ASK` verdict *out of band* through the existing `ApprovalStore`: mint a pending token
+bound to the exact call, let a human approve it via a CLI, and forward the retried call exactly
+once. This implements the MCP-only tier of **D41**. Claude Code (native prompt via `cc-hook`) and
+unattended/background (`DENY`) already work and are **out of scope** here.
+**Depends on:** **E6** (`ApprovalStore`, `ApprovalToken`, `is_granted` drift-voiding), **E16.B**
+(`mcp-gateway`), **D24** (gate ABI), **D41**. Design frozen in
+[`docs/approval-capable-hosts.md`](docs/approval-capable-hosts.md).
+**Status:** 🔲 not started — design complete; this is mostly *wiring* of primitives that exist.
+
+- [ ] **E18.1** `harness approvals` CLI over `ApprovalStore`: `list` (pending/approved/executed
+  with the bound action + a params digest — the human reviews the concrete arguments, not just a
+  tool name), `approve <id>`, `reject <id>`. Wraps `ApprovalStore::{token, approve, reject}`.
+- [ ] **E18.2** Gateway `--approvals <path>`: thread an `ApprovalStore` into `mcp-gateway`. On an
+  `ASK` verdict for a `tools/call`, compute the binding `(action, params_hash, world_id,
+  descriptor_hash, provenance, effect_mode)` **using the kernel's own derivation** (never a
+  divergent recompute, or the retry won't match the mint); then — if `is_granted` → forward
+  upstream and `mark_executed` (single-use); else `mint` a pending token and return an informative
+  block naming the token id. Fail-closed is preserved: background `DENY`s *before* any mint.
+- [ ] **E18.3** Idempotent `mint` (key the pending token on the binding hash so repeated identical
+  `ASK`s reuse one row) + a **TTL** on `ApprovalToken` (approve-within-N; an expired pending token
+  is treated as not-granted).
+- [ ] **E18.4** e2e tests over the gateway + a mock upstream: `ASK` → pending → `approve` → retry
+  (same args) → `ALLOW` → `mark_executed`; **drift** — changed args on retry → new pending, old
+  approval inert; **single-use** — replay after execute → `ASK` again; **fail-closed** — background
+  never mints; **TTL** — an expired pending token does not grant.
+- [ ] **E18.5** *(later, host-native)* MCP **elicitation** path: when a host advertises the
+  elicitation capability, request approval mid-call and drop the retry round-trip. Optional — the
+  out-of-band store path stays the baseline for hosts without it.
+
+**Exit:** on an MCP-only host, an `approval_required` action (e.g. `updateConfluencePage` pinned to
+one page) can be **completed** — blocked until a human runs `harness approve`, then forwarded
+exactly once on retry — with the approval **drift-voided**, **single-use**, and every decision
+audited; Claude Code continues to use its native prompt unchanged.
+
+Relates to acceptance invariants 9 (approval tokens bound to the exact call), 10 (fail-closed in
+background), 2 (`ABSENT`/`DENY`/`ASK` stay distinct), and 14/15 (audit/replay of the approval
+lifecycle).
+
+---
+
 
 ## Acceptance invariant coverage
 
