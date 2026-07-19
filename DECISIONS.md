@@ -996,3 +996,42 @@ and `PLAN.md`.
   to preserve; archive `Intent-Hub` now — discards live intent work and the other half of the border.
 - **Related:** D23, D30, **D38** (the March cluster this batch archives), **D39** (umbrella
   ownership this completes), §7.3.
+
+## D41 — `ASK` is satisfied per host: native on Claude Code, out-of-band `ApprovalStore` on MCP-only hosts, `DENY` when unattended
+
+**Date:** 2026-07-19. Records *how* the kernel's `ASK` verdict (E6 `approval_required`, or a
+policy escalation) actually gets satisfied by a host — the piece D24 / E16 left open once
+`approval_required` manifests appeared (see [`docs/demos/confluence-docs/`](docs/demos/confluence-docs/)).
+
+- **Context:** The kernel emits `ASK` and `host_outcome` maps it to `NeedsApproval`, but only
+  `cc-hook` currently has anywhere to put it (Claude Code's native prompt). The `mcp-gateway`
+  surfaces `ASK` as a non-forwarded block — safe, but it means governed *updates* can never
+  complete on MCP-only hosts. We need a way to satisfy `ASK` without inventing an approval
+  channel where the host has none, and without weakening the fail-closed default.
+- **Decision:** Satisfy `ASK` **per host**, three tiers:
+  1. **Claude Code (native).** `cc-hook` already emits `permissionDecision:"ask"`; the host owns
+     the prompt and pause/resume. No new code. (PreToolUse also fires for `mcp__…` tools, so even
+     gateway-reached tools get the native prompt on CC.)
+  2. **MCP-only hosts (out-of-band).** The `mcp-gateway` gains `--approvals <store>` and uses the
+     existing `ApprovalStore` as an async bridge: on `ASK`, `mint` a pending token bound to the
+     exact call; a human approves out of band via a new `harness approve <id>` CLI; the agent
+     retries and `is_granted` lets it through once, then `mark_executed` (single-use). The binding
+     reuses `ApprovalToken`'s fields `(action, params_hash, world_id, descriptor_hash, provenance,
+     effect_mode)`, so drift-voiding is inherited: change the args, edit the manifest, or replay,
+     and the approval no longer matches.
+  3. **Unattended / background / CI.** No human ⇒ stays `DENY` (`background_denies_ask`).
+  Two guardrails: **do not** build interactive approval into the stateless gateway, and **do not**
+  relabel `ASK → DENY` globally — the verdict stays distinct so approval-capable hosts still prompt.
+  Full design + sequence + safety properties: [`docs/approval-capable-hosts.md`](docs/approval-capable-hosts.md).
+- **Why:** It is mostly *wiring* — `ApprovalStore`, `is_granted` drift-voiding, and the `cc-hook`
+  mapping already exist. It keeps fail-closed as the default on every host, preserves the
+  `ASK`/`DENY` distinction the deep host needs, and gives the human a real out-of-band review of the
+  concrete params (not just a tool name) on MCP-only hosts.
+- **Alternatives rejected:** an interactive TTY prompt inside the gateway (fragile; blocks the host
+  synchronously; no UI on piped stdio); relabel `ASK → DENY` everywhere (loses the distinction
+  Claude Code relies on); auto-approve in the gateway (defeats the point of `approval_required`);
+  require **MCP elicitation** now (server-initiated user input mid-call is the clean native fix and
+  removes the retry round-trip, but host support is not yet universal — it is the forward path, not
+  the baseline).
+- **Related:** **E6** (approval tokens), **E16.B/E16.C** (`mcp-gateway`, `cc-hook`), **D24** (gate
+  ABI), [`docs/approval-capable-hosts.md`](docs/approval-capable-hosts.md).

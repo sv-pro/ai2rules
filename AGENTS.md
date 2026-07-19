@@ -173,6 +173,7 @@ CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
 | `.claude/cc-world.yaml` | Live `WorldManifest` governing Claude Code (dogfood), incl. D36 `command_classes` |
 | `.claude/hooks/world-gate.sh` | PreToolUse bootstrap shim → `harness cc-hook` (the real kernel; D37) |
 | `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37) |
+| `docs/approval-capable-hosts.md` | How `ASK` is satisfied per host (D41) |
 | `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source) |
 | `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
 
