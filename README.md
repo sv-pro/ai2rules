@@ -168,7 +168,11 @@ The same gate also powers the **governability demo** (`docs/demos/jira-copilot/`
 DECISIONS D33): `harness mcp-gateway` fronts an MCP server — shaping its `tools/list`
 (ABSENT) and gating each `tools/call` on the real kernel — over a self-contained
 `harness mock-jira` upstream, and `harness cc-hook` is the Claude Code `PreToolUse`
-adapter in Rust (governing native tools, replacing the Python hook).
+adapter in Rust (governing native tools, replacing the Python hook). The **real
+Atlassian skin** (E16.E) swaps that mock upstream for the Atlassian Rovo MCP Server
+via an `mcp-remote` OAuth bridge with no kernel change — and its shaping is proven
+offline (no creds) by `harness mock-jira --rovo`, which advertises the genuine Rovo
+tool names (see [`docs/demos/jira-copilot/REAL-ATLASSIAN.md`](docs/demos/jira-copilot/REAL-ATLASSIAN.md)).
 
 **One kernel, many hosts (shipped — D36/D37, `docs/one-kernel-many-hosts.md`):**
 Claude Code, OpenCode, and the MCP gateway all decide through the one Rust kernel
@@ -199,7 +203,7 @@ OpenCode (E17 / DECISIONS D35) is dogfooded the same way: the
 `permission` rules) calls the same `harness gate` wire ABI, sending raw tool
 names — see `docs/demos/opencode/`.
 
-Builds clean offline with `clippy -D warnings`; **136 tests** green.
+Builds clean offline with `clippy -D warnings`; **155 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
