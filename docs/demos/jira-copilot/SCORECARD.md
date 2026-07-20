@@ -38,13 +38,33 @@ Reading it: **the MCP row is identical across all three hosts** — that's why t
 JIRA pitch ("destructive tools don't exist for the agent") holds for Copilot just
 as well as for Claude Code. The **native rows are where Copilot has no seam**: a
 shell command or a file write inside Copilot is ungoverned by any third party. On
-Claude Code the *same manifest* also covers those.
+Claude Code the *same kernel* also covers those.
 
 So: if the risk you care about lives behind an MCP server (JIRA, GitHub, a
 database), **every host here can be made safe**. If it lives in the agent's native
 shell/filesystem, **only Claude Code can**. That is the governability gap, stated
 precisely — and the argument for broader Claude Code use where native-tool blast
 radius matters.
+
+## Against real Atlassian (E16.E)
+
+The table above is proven offline against `harness mock-jira`, but it holds **identically**
+against the live **Atlassian Rovo MCP Server** (`https://mcp.atlassian.com/v1/mcp/authv2`,
+OAuth 2.1) — the gateway and kernel don't change, only the upstream and the manifest's tool
+names (`jira-atlassian.world.yaml`). Two things get *sharper* on the real upstream:
+
+- **The surface shrink is far more dramatic.** Rovo advertises **~50 tools** across Jira /
+  Confluence / Bitbucket / JSM / Compass; the manifest exposes **5** (3 reads +
+  `getAccessibleAtlassianResources` + `addCommentToJiraIssue`). Every transition/edit/create
+  and every non-Jira tool is `ABSENT`. The mock's 7→4 shrink becomes **~50→5**.
+- **There is no delete tool.** Rovo exposes none, so the destructive beat is
+  `transitionJiraIssue` / `editJiraIssue` / `createJiraIssue`, not `jira_delete_issue`.
+
+The **deep-vs-shallow gap is unchanged — and that's the point.** Against production Atlassian,
+all three hosts shape the MCP surface identically (the JIRA risk lives behind MCP, so Copilot
+is safe where it counts), but only **Claude Code** also governs its own native shell/file/web
+via `cc-hook` on the **same kernel** (`.claude/cc-world.yaml`). See
+[`REAL-ATLASSIAN.md`](REAL-ATLASSIAN.md) for the live runbook on both hosts.
 
 ## Reproduce it (offline, no creds)
 
@@ -133,7 +153,7 @@ Now ask for `curl` → **denied** at the native shell — not at the MCP layer b
 *there is no seam here for third-party policy, regardless of what you configure.*
 
 **7. The scorecard (30 s)**
-Show the table above. Close with: *"Same manifest. On Copilot I'm safe at the MCP
+Show the table above. Close with: *"Same kernel. On Copilot I'm safe at the MCP
 surface — that's where the JIRA risk lives, so it's enough. On Claude Code I'm
 safe everywhere, including the native shell. The gap is the host, not the
 governance engine."*
@@ -164,5 +184,5 @@ governance engine."*
 4. **Go deep on Claude Code (2m).** Enable the `cc-hook` PreToolUse hook. Fetch a
    web page (taints the session), then ask for a `curl` → **denied** at the native
    shell. Ask for `rm -rf` → **ask**. Point out: *Copilot has no seam for this.*
-5. **The scorecard (30s).** Show this table. The line: *"Same manifest. On Copilot
+5. **The scorecard (30s).** Show this table. The line: *"Same kernel. On Copilot
    I'm safe at the MCP surface; on Claude Code I'm safe everywhere."*
