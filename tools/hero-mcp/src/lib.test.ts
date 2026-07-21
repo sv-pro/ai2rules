@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ProfileSchema, nameSchema, buildPrompt, assetReturnPath } from "./lib.js";
 
@@ -53,4 +54,12 @@ test("ProfileSchema validates a good profile and rejects a bad one", () => {
   const bad = { ...profile } as Record<string, unknown>;
   delete bad.dims;
   assert.equal(ProfileSchema.safeParse(bad).success, false);
+});
+
+test("the shipped hero-profile.json parses under ProfileSchema (no profile drift)", () => {
+  // dist/lib.test.js -> ../hero-profile.json = tools/hero-mcp/hero-profile.json
+  const raw = readFileSync(new URL("../hero-profile.json", import.meta.url), "utf8");
+  const shipped = ProfileSchema.parse(JSON.parse(raw));
+  assert.deepEqual(shipped.dims, [1376, 768]);
+  assert.equal(shipped.format, "jpg");
 });

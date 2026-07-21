@@ -68,7 +68,7 @@ arrives *pre-governed* — the whole point.
 | `HERO_REPO_ROOT` | repo root, so `assets_dir` resolves (default: cwd) |
 | `HERO_AGY_BIN` | agy binary name/path (default: `agy`) |
 | `HERO_AGY_FLAGS` | agy permission flags (default: `--sandbox --dangerously-skip-permissions`) |
-| `HERO_ELICIT` | ask the human before running agy via MCP elicitation, if the host supports it (`on`/default; `off` to disable) |
+| `HERO_ELICIT` | ASK posture: `auto` (default — ask when the host can elicit, else proceed), `require` (**fail closed** when the host can't ask a human), `off` (never ask) |
 | `HERO_AGY_TIMEOUT_MS` | max time for one agy generation (default: 420000) |
 | `HERO_ASSETS_DIR` | override the output dir |
 | `HERO_PROFILE` | path to a different profile (serve another blog) |
@@ -89,5 +89,7 @@ arrives *pre-governed* — the whole point.
   the deeper fence. Tune via `HERO_AGY_FLAGS`.
 - **It asks first** (`ASK` → the present human). If the host supports MCP elicitation
   (Claude Code does, no config), `generate_hero` surfaces the `concept` for a human
-  proceed/deny *before* launching agy — so untrusted input gets a glance. Falls through
-  when the host can't elicit; set `HERO_ELICIT=off` for unattended runs.
+  proceed/deny *before* launching agy — so untrusted input gets a glance. Default `auto`
+  falls through when the host can't elicit (the sandbox is the backstop); set
+  `HERO_ELICIT=require` to **fail closed** instead — no human channel ⇒ no run (the right
+  posture behind `mcp-gateway` with non-human callers) — or `off` for unattended runs.

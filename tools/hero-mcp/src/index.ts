@@ -64,8 +64,13 @@ const agyFlags = (
 const rawTimeout = Number(process.env.HERO_AGY_TIMEOUT_MS);
 const agyTimeoutMs =
   Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 420000;
-// Ask the present human before running the agent (via MCP elicitation) unless disabled.
-const elicitEnabled = (process.env.HERO_ELICIT ?? "auto") !== "off";
+// Ask the present human before running the agent (via MCP elicitation).
+//   off     — never ask
+//   auto    — ask when the host can; proceed when it can't (sandbox is the backstop)
+//   require — ask, and FAIL CLOSED when the host has no elicitation channel: with no
+//             human to ask, ASK collapses to DENY (invariant-10 posture) — the right
+//             default once this sits behind mcp-gateway for non-human callers.
+const elicitMode = process.env.HERO_ELICIT ?? "auto";
 const [W, H] = profile.dims;
 
 /**
@@ -125,8 +130,16 @@ async function confirmWithUser(
   concept: string,
   name: string,
 ): Promise<boolean> {
-  if (!elicitEnabled) return true;
-  if (!server.server.getClientCapabilities()?.elicitation) return true; // no human gate
+  if (elicitMode === "off") return true;
+  if (!server.server.getClientCapabilities()?.elicitation) {
+    if (elicitMode === "require") {
+      throw new Error(
+        "HERO_ELICIT=require: the host has no elicitation channel, so there is no " +
+          "human to ask — failing closed (ASK -> DENY). Use HERO_ELICIT=auto|off to proceed.",
+      );
+    }
+    return true; // auto: no human gate available — the sandbox is the backstop
+  }
   const result = await server.server.elicitInput({
     message:
       `Generate hero "${name}" by running the agy agent (sandboxed) on this concept — ` +
