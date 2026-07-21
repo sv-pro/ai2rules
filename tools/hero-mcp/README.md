@@ -67,6 +67,8 @@ arrives *pre-governed* — the whole point.
 |---|---|
 | `HERO_REPO_ROOT` | repo root, so `assets_dir` resolves (default: cwd) |
 | `HERO_AGY_BIN` | agy binary name/path (default: `agy`) |
+| `HERO_AGY_FLAGS` | agy permission flags (default: `--sandbox --dangerously-skip-permissions`) |
+| `HERO_ELICIT` | ask the human before running agy via MCP elicitation, if the host supports it (`on`/default; `off` to disable) |
 | `HERO_AGY_TIMEOUT_MS` | max time for one agy generation (default: 420000) |
 | `HERO_ASSETS_DIR` | override the output dir |
 | `HERO_PROFILE` | path to a different profile (serve another blog) |
@@ -80,3 +82,12 @@ arrives *pre-governed* — the whole point.
   instead. See `generation_directive` in the profile.
 - The intermediate PNG is written to a throwaway temp dir and deleted; only the final JPG
   lands in `blog/src/assets/`.
+- **`concept` is untrusted** — it becomes an agent prompt, so agy runs with `--sandbox`
+  to fence the worst outcome (no arbitrary shell). `--dangerously-skip-permissions` is
+  still needed for the non-interactive flow (`--mode accept-edits` alone generates
+  *nothing*). For an untrusted caller, run it inside the OS-level container (`docker/`) —
+  the deeper fence. Tune via `HERO_AGY_FLAGS`.
+- **It asks first** (`ASK` → the present human). If the host supports MCP elicitation
+  (Claude Code does, no config), `generate_hero` surfaces the `concept` for a human
+  proceed/deny *before* launching agy — so untrusted input gets a glance. Falls through
+  when the host can't elicit; set `HERO_ELICIT=off` for unattended runs.

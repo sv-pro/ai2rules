@@ -43,7 +43,21 @@ const assetsDir = path.resolve(
   process.env.HERO_ASSETS_DIR ?? profile.assets_dir,
 );
 const agyBin = process.env.HERO_AGY_BIN ?? "agy";
-const agyTimeoutMs = Number(process.env.HERO_AGY_TIMEOUT_MS ?? 420000);
+// Permission posture: `--sandbox` fences the worst prompt-injection outcome — a crafted
+// `concept` can't run arbitrary shell. `--dangerously-skip-permissions` is still needed
+// so the non-interactive `-p` flow auto-approves agy's own image-gen tool (`--mode
+// accept-edits` alone silently produces nothing). For an untrusted caller, run the whole
+// thing inside the OS-level container sandbox (docker/). Override via HERO_AGY_FLAGS.
+const agyFlags = (
+  process.env.HERO_AGY_FLAGS ?? "--sandbox --dangerously-skip-permissions"
+)
+  .split(/\s+/)
+  .filter(Boolean);
+const rawTimeout = Number(process.env.HERO_AGY_TIMEOUT_MS);
+const agyTimeoutMs =
+  Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 420000;
+// Ask the present human before running the agent (via MCP elicitation) unless disabled.
+const elicitEnabled = (process.env.HERO_ELICIT ?? "auto") !== "off";
 const [W, H] = profile.dims;
 
 /** Compose the agy task prompt: force generative art + baked house style + scene. */
@@ -78,12 +92,20 @@ async function generate(
   try {
     const prompt = buildPrompt(concept, outPng, labels);
     // Backend: the already-authenticated agy (Antigravity) CLI. No API key here —
-    // agy carries the user's Google auth. `-p` runs a single prompt non-interactively.
-    await execFileP(
-      agyBin,
-      ["-p", prompt, "--dangerously-skip-permissions", "--add-dir", workdir],
-      { cwd: workdir, timeout: agyTimeoutMs, maxBuffer: 16 * 1024 * 1024 },
-    );
+    // agy carries the user's Google auth. `-p` runs a single prompt non-interactively;
+    // `agyFlags` set the permission posture (see above). Untrusted `concept` is a
+    // prompt-injection surface, so we constrain agy rather than skip all permissions.
+    try {
+      await execFileP(
+        agyBin,
+        ["-p", prompt, ...agyFlags, "--add-dir", workdir],
+        { cwd: workdir, timeout: agyTimeoutMs, maxBuffer: 64 * 1024 * 1024 },
+      );
+    } catch (err) {
+      // agy may exit non-zero or overflow stdout yet still have written the image;
+      // only treat it as a failure if the file really isn't there.
+      if (!existsSync(outPng)) throw err;
+    }
     if (!existsSync(outPng)) {
       throw new Error(`agy did not produce an image at ${outPng}`);
     }
@@ -100,7 +122,40 @@ async function generate(
   }
 }
 
-const server = new McpServer({ name: "hero-mcp", version: "0.2.0" });
+/**
+ * Surface an ASK to the present human before running the agent, via MCP elicitation.
+ * The caller's `concept` becomes the agent's prompt, so this is where untrusted input
+ * gets a human glance. If the host can't elicit (or HERO_ELICIT=off), proceed — the
+ * sandbox is still the backstop. This is the coarse, server-level version of `ASK`;
+ * per-action forwarding from the agent is the next layer.
+ */
+async function confirmWithUser(
+  server: McpServer,
+  concept: string,
+  name: string,
+): Promise<boolean> {
+  if (!elicitEnabled) return true;
+  if (!server.server.getClientCapabilities()?.elicitation) return true; // no human gate
+  const result = await server.server.elicitInput({
+    message:
+      `Generate hero "${name}" by running the agy agent (sandboxed) on this concept — ` +
+      `the concept becomes the agent's prompt:\n\n"${concept}"\n\nProceed?`,
+    requestedSchema: {
+      type: "object",
+      properties: {
+        proceed: {
+          type: "boolean",
+          title: "Proceed",
+          description: "Run agy to generate this hero image?",
+        },
+      },
+      required: ["proceed"],
+    },
+  });
+  return result.action === "accept" && result.content?.proceed === true;
+}
+
+const server = new McpServer({ name: "hero-mcp", version: "0.3.0" });
 
 server.registerTool(
   "generate_hero",
@@ -127,6 +182,16 @@ server.registerTool(
   },
   async ({ concept, name, labels }) => {
     try {
+      if (!(await confirmWithUser(server, concept, name))) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "generate_hero: declined by the user; no image generated.",
+            },
+          ],
+        };
+      }
       const asset = await generate(concept, name, labels);
       return {
         content: [

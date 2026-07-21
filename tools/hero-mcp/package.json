@@ -1,6 +1,6 @@
 {
   "name": "hero-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Focused, governable MCP capability: generate a house-style blog hero image via the agy CLI.",
