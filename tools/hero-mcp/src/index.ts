@@ -7,7 +7,8 @@
  *
  * Backend: shells out to the already-authenticated `agy` (Antigravity) CLI —
  * `agy -p "<task>"` generates the image with the user's own Google auth, so this
- * server needs NO API key of its own. See _tasks/2_development/hero-mcp-server.md.
+ * server needs NO API key of its own. Pure helpers live in ./lib.ts (tested).
+ * See _tasks/2_development/hero-mcp-server.md.
  */
 import { readFileSync, mkdirSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,23 +20,30 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import sharp from "sharp";
 import { z } from "zod";
+import {
+  ProfileSchema,
+  type Profile,
+  nameSchema,
+  buildPrompt,
+  assetReturnPath,
+} from "./lib.js";
 
 const execFileP = promisify(execFile);
-
-type Profile = {
-  assets_dir: string;
-  dims: [number, number];
-  format: string;
-  jpeg_quality: number;
-  generation_directive: string;
-  style: string;
-  reference_heroes: string[];
-};
 
 const profilePath =
   process.env.HERO_PROFILE ??
   fileURLToPath(new URL("../hero-profile.json", import.meta.url));
-const profile: Profile = JSON.parse(readFileSync(profilePath, "utf8"));
+// Fail fast and clearly on a missing/malformed profile (#5).
+const profile: Profile = (() => {
+  try {
+    return ProfileSchema.parse(JSON.parse(readFileSync(profilePath, "utf8")));
+  } catch (err) {
+    console.error(
+      `hero-mcp: invalid or unreadable profile at ${profilePath}: ${(err as Error).message}`,
+    );
+    process.exit(1);
+  }
+})();
 
 const repoRoot = process.env.HERO_REPO_ROOT ?? process.cwd();
 const assetsDir = path.resolve(
@@ -60,26 +68,9 @@ const agyTimeoutMs =
 const elicitEnabled = (process.env.HERO_ELICIT ?? "auto") !== "off";
 const [W, H] = profile.dims;
 
-/** Compose the agy task prompt: force generative art + baked house style + scene. */
-function buildPrompt(concept: string, outPng: string, labels?: string[]): string {
-  const textRule =
-    labels && labels.length
-      ? `Only these short, legible labels may appear: ${labels.join(", ")}. No other text.`
-      : "No text of any kind in the image.";
-  return [
-    profile.generation_directive,
-    `STYLE: ${profile.style}`,
-    `SCENE: ${concept}`,
-    textRule,
-    `Composition 16:9, roughly ${W}x${H}.`,
-    `Save the result as a PNG at exactly this path: ${outPng} . Create only that one ` +
-      `image file. When done, reply with just the path.`,
-  ].join("\n\n");
-}
-
 /**
  * Drive `agy` to render the scene, then crop/resize to EXACTLY WxH JPG in the blog
- * assets dir. Returns the repo-relative asset path.
+ * assets dir. Returns the asset path (repo-relative if inside the repo, else absolute).
  */
 async function generate(
   concept: string,
@@ -90,7 +81,7 @@ async function generate(
   const workdir = mkdtempSync(path.join(os.tmpdir(), "hero-mcp-"));
   const outPng = path.join(workdir, `${name}.png`);
   try {
-    const prompt = buildPrompt(concept, outPng, labels);
+    const prompt = buildPrompt(profile, concept, outPng, [W, H], labels);
     // Backend: the already-authenticated agy (Antigravity) CLI. No API key here —
     // agy carries the user's Google auth. `-p` runs a single prompt non-interactively;
     // `agyFlags` set the permission posture (see above). Untrusted `concept` is a
@@ -116,7 +107,7 @@ async function generate(
       .resize(W, H, { fit: "cover" })
       .jpeg({ quality: profile.jpeg_quality })
       .toFile(outJpg);
-    return path.relative(repoRoot, outJpg);
+    return assetReturnPath(repoRoot, outJpg);
   } finally {
     rmSync(workdir, { recursive: true, force: true });
   }
@@ -170,10 +161,7 @@ server.registerTool(
       concept: z
         .string()
         .describe("The scene to depict — subject/composition only, not palette or size."),
-      name: z
-        .string()
-        .regex(/^[a-z0-9-]+$/, "kebab-case slug")
-        .describe("kebab-case theme slug, e.g. permission-taint-gate"),
+      name: nameSchema.describe("kebab-case theme slug, e.g. permission-taint-gate"),
       labels: z
         .array(z.string())
         .optional()
