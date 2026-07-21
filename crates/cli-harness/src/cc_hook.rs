@@ -11,12 +11,15 @@
 //! classified by the *kernel* from the world's `command_classes` (D36); the
 //! adapter sends the raw host tool name.
 //!
-//! - **Additive by default:** it only ever emits `deny`/`ask`; ALLOW / REPLAN
-//!   fall through to Claude Code's normal permission flow (the hook never
-//!   auto-allows). `ABSENT` passes through too unless `--enforce-absent`: a
-//!   PreToolUse hook cannot remove native tools from the host's surface, and
-//!   denying every tool outside the manifest would brick the host — so
-//!   ABSENT-enforcement is an explicit opt-in.
+//! - **Additive by default:** it only emits `deny`/`ask`; ALLOW / REPLAN fall
+//!   through to Claude Code's normal permission flow (the hook never
+//!   auto-allows). With `--grant` (replace mode) ALLOW instead emits an explicit
+//!   `allow` that *grants* — bypassing the host's Allow/Deny prompt — so the
+//!   manifest becomes the authoritative allowlist, not an overlay. `ABSENT`
+//!   passes through too unless `--enforce-absent`: a PreToolUse hook cannot
+//!   remove native tools from the host's surface, and denying every tool outside
+//!   the manifest would brick the host — so ABSENT-enforcement is an explicit
+//!   opt-in.
 //! - **Fail-open (documented strategy):** any PROCESS error — unreadable event,
 //!   uncompilable world — exits 0 with no output. A broken hook must never brick
 //!   a session. A process failure is never an outcome (see `host.rs`).
@@ -42,7 +45,7 @@ fn sanitize(s: &str) -> String {
         .collect()
 }
 
-/// Emit a PreToolUse decision (only used for deny/ask) and exit 0.
+/// Emit a PreToolUse decision (`deny`/`ask`, or `allow` in `--grant` mode) and exit 0.
 fn emit(decision: &str, reason: &str) -> ! {
     println!(
         "{}",
@@ -69,7 +72,13 @@ fn normalize(world: &harness_types::CompiledWorld, tool: &str) -> String {
     tool.to_string()
 }
 
-pub fn run(world_path: &Path, state_dir: &Path, mode: &str, enforce_absent: bool) -> i32 {
+pub fn run(
+    world_path: &Path,
+    state_dir: &Path,
+    mode: &str,
+    enforce_absent: bool,
+    grant: bool,
+) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
         return 0; // fail-open
@@ -125,7 +134,18 @@ pub fn run(world_path: &Path, state_dir: &Path, mode: &str, enforce_absent: bool
     }
 
     match host_outcome(&res) {
-        HostOutcome::Proceed => 0, // passthrough — the host runs the tool
+        // ALLOW. Additive default: stay silent (exit 0) and defer to the host's
+        // normal permission flow. With `--grant` (replace mode) emit an explicit
+        // `allow`, which *grants* — the host skips its Allow/Deny prompt — so the
+        // manifest is the authoritative allowlist, not an overlay. An explicit
+        // `allow` still cannot override a native deny/ask rule, so replace mode
+        // wants an emptied settings.json baseline (docs/demos/replace-permissions).
+        HostOutcome::Proceed => {
+            if grant {
+                emit("allow", &format!("manifest ALLOW: {}", res.action));
+            }
+            0 // additive default: defer to the host's permission flow
+        }
         HostOutcome::NeedsApproval { reason } => emit("ask", &reason),
         HostOutcome::Block {
             kind: BlockKind::Deny,

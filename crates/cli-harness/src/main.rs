@@ -67,8 +67,10 @@ enum Command {
     },
     /// Claude Code PreToolUse adapter, in Rust (D33 / E16.C): read a PreToolUse
     /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
-    /// decision. Additive (never auto-allows); fail-open. Replaces the Python
-    /// `world-gate-adapter.py` — this is the "deep" half governing native tools.
+    /// decision — or, in `--grant`/replace mode, an explicit `allow` that grants
+    /// (skips the host's Allow/Deny prompt). Additive by default (never
+    /// auto-allows); fail-open. Replaces the Python `world-gate-adapter.py` —
+    /// this is the "deep" half governing native tools.
     CcHook {
         /// Path to the world manifest (YAML/JSON) that governs this session.
         #[arg(long)]
@@ -86,6 +88,13 @@ enum Command {
         /// everything outside the manifest would brick the host.
         #[arg(long)]
         enforce_absent: bool,
+        /// Replace mode: emit an explicit `allow` on ALLOW verdicts, which
+        /// *grants* — Claude Code skips its Allow/Deny prompt — so the manifest
+        /// is the authoritative allowlist, not an additive overlay. Pair with an
+        /// emptied `settings.json` deny/ask baseline (native deny/ask still fire
+        /// even on a hook `allow`). Default off: ALLOW stays a silent passthrough.
+        #[arg(long)]
+        grant: bool,
     },
     /// Front a real upstream MCP server with the kernel: shape its `tools/list`
     /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
@@ -203,9 +212,10 @@ fn main() {
         state,
         mode,
         enforce_absent,
+        grant,
     }) = &cli.command
     {
-        std::process::exit(cc_hook::run(world, state, mode, *enforce_absent));
+        std::process::exit(cc_hook::run(world, state, mode, *enforce_absent, *grant));
     }
 
     if let Some(Command::McpGateway {
