@@ -49,10 +49,18 @@ matters: it must explicitly demand *generative* art (not a programmatic drawing)
 profile's `generation_directive` does that (the probe: a forced-generative prompt made a
 1.7 MB render; a lax "cyan circle" prompt made a 1.2 KB programmatic sketch).
 
-## Open decision
+## Open decisions / follow-ups
 
-- **Governed vs raw** — ship v1 behind `harness mcp-gateway` (recommended) or a plain
-  `.mcp.json` server, promote to governed once it's in daily use?
+- **Governed vs raw** — shipped raw (v1): wired into the workspace `.mcp.json` as server
+  `hero` (merged #20, `e6ae922`). Promote behind `harness mcp-gateway` once in daily use.
+- **⚠️ Blocker for governed delivery: `mcp-gateway` elicitation pass-through.** hero-mcp's
+  `ASK` (D41, coarse) works by MCP **elicitation** — an upstream server→host request. The
+  gateway gates `tools/list` / `tools/call` but is **not known to forward elicitation**
+  requests up to the real host. So behind the gateway the human ASK would silently degrade
+  (`HERO_ELICIT=auto` → proceed) or, worse, fail closed under `HERO_ELICIT=require` for a
+  legitimate call. **Before promoting hero-mcp (or any elicitation-using server) to governed
+  delivery, `mcp-gateway` must proxy elicitation (and sampling) both directions.** Verify the
+  current gateway behavior first — this is an assumption, not a confirmed gap.
 
 ## v1 scope / non-goals
 
