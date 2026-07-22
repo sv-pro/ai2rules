@@ -10,6 +10,10 @@ crates/harness-wasm/pkg-web/
 # Reference projects (separate git repos kept for study, never committed here).
 /repos/
 
+# Internal, non-public material (pitch decks, employer-specific proposals).
+# This repo is public — anything here stays local by design.
+/_private/
+
 # Claude Code local/runtime state
 .claude/settings.local.json
 .claude/state/
