@@ -13,6 +13,7 @@ crates/harness-wasm/pkg-web/
 # Claude Code local/runtime state
 .claude/settings.local.json
 .claude/state/
+.claude/gate-off
 
 # OpenCode plugin runtime state (E17 governance adapter taint sidecar)
 .opencode/ai2rules-state.json

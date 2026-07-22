@@ -7,6 +7,10 @@
 # the old path. Fail-open: no binary → exit 0 (stdin passes through on exec).
 set -u
 PD="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+# Rollback layer #1 — instant kill-switch, no restart. `touch .claude/gate-off`
+# (project) or `touch ~/.claude/gate-off` (panic, everywhere) disables governance on
+# the NEXT tool call; `rm` re-enables. The shim runs per-call, so the toggle is immediate.
+if [ -f "$PD/.claude/gate-off" ] || [ -f "$HOME/.claude/gate-off" ]; then exit 0; fi
 BIN="${HARNESS_BIN:-}"
 if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then
   BIN=""
@@ -20,4 +24,7 @@ fi
 if [ -z "$BIN" ]; then
   exit 0 # fail-open: no kernel binary, fall through to the host's own flow
 fi
-exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state"
+# Tier-1 dogfood: --grant makes the manifest the allowlist (ALLOW -> explicit `allow`,
+# no prompt). Deliberately NO --enforce-absent: undeclared tools fall through to the
+# normal prompt, so a manifest gap is "still asks", never a lockout.
+exec "$BIN" cc-hook --grant --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state"

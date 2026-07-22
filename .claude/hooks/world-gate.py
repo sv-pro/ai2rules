@@ -9,6 +9,11 @@ archived in superseded/. Fail-open: no binary → exit 0 (stdin passes through o
 import os, shutil, sys
 
 pd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+# Kill-switch parity with world-gate.sh (rollback layer #1): a gate-off sentinel
+# disables governance for the next call. Additive fallback path — no --grant here.
+if os.path.exists(os.path.join(pd, ".claude", "gate-off")) or \
+   os.path.exists(os.path.expanduser("~/.claude/gate-off")):
+    sys.exit(0)
 candidates = [os.environ.get("HARNESS_BIN"),
               os.path.join(pd, "target", "release", "harness"),
               os.path.join(pd, "target", "debug", "harness"),
