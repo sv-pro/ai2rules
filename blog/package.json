@@ -9,6 +9,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "check:heroes": "bash scripts/check-heroes.sh",
     "astro": "astro"
   },
   "dependencies": {
