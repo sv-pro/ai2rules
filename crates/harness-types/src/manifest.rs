@@ -110,6 +110,50 @@ fn default_command_arg() -> String {
     "command".to_string()
 }
 
+/// How a filesystem path may be accessed under a root rule (spatial scope).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RootAccess {
+    /// Reads allowed; writes/patches denied.
+    Read,
+    /// Reads and writes allowed.
+    ReadWrite,
+    /// Any access requires human approval.
+    Ask,
+    /// No access — the path is out of bounds.
+    Deny,
+}
+
+/// One path-scope rule (spatial confinement). Longest matching prefix wins, so a
+/// longer `Deny` shadows a broader `ReadWrite`. `class` tags the matched path's
+/// data class; `taint_source` makes reads under this path taint the session —
+/// the D25/D37-deferred read-taint, now *declared* per path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootRule {
+    pub path: String,
+    pub access: RootAccess,
+    #[serde(default)]
+    pub class: Option<DataClass>,
+    #[serde(default)]
+    pub taint_source: bool,
+}
+
+fn default_root_default() -> RootAccess {
+    RootAccess::Ask
+}
+
+/// Path-scoped capabilities (`roots`) — the spatial axis the kernel was blind to.
+/// Absent ⇒ no path scope (legacy behavior). Present ⇒ file actions are decided by
+/// *where* they land, closed-world: a path outside every rule gets `default`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootsDef {
+    /// Access for a path matching no rule (the closed-world floor). `Ask` = soft
+    /// jail (prompt), `Deny` = hard jail.
+    #[serde(default = "default_root_default")]
+    pub default: RootAccess,
+    #[serde(default)]
+    pub rules: Vec<RootRule>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransitionPolicy {
     pub from_taint: Taint,
@@ -161,6 +205,10 @@ pub struct WorldManifest {
     pub command_classes: Vec<CommandClassDef>,
     #[serde(default)]
     pub transition_policies: Vec<TransitionPolicy>,
+    /// Path-scoped capabilities (spatial confinement). Absent ⇒ no path scope, so
+    /// pre-roots manifests keep their hash and their behavior unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roots: Option<RootsDef>,
     #[serde(default)]
     pub budget: Budget,
     #[serde(default)]
