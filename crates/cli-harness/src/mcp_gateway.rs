@@ -146,6 +146,7 @@ fn govern(
         v: ABI_VERSION,
         tool: tool.to_string(),
         arguments: args.clone(),
+        path: None, // MCP tools are not file paths — path scope does not apply here
         context: GateContext {
             session_id: "mcp-gateway".to_string(),
             mode: Some(mode.to_string()),

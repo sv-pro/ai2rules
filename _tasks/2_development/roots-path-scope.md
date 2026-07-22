@@ -1,7 +1,12 @@
 # Task: `roots` — path-scoped capabilities (spatial confinement primitive)
 
-**Owner:** kernel (build). **Status:** design todo — the build end of the
-[spatial-scope discovery](../1_discovery/spatial-scope-gap.md). Not started.
+**Owner:** kernel (build). **Status:** ✅ **v1 built** (`feat/roots-path-scope`) — the build end
+of the [spatial-scope discovery](../1_discovery/spatial-scope-gap.md). Manifest `roots`
+(RootAccess/RootRule/RootsDef) → pure `classify_path`/`path_taints` on `CompiledWorld` →
+`gate()` tightens ALLOW (deny/ask/read-only) + `taint_source` read-taint → `cc-hook` resolves the
+target path; `resolve_root_paths` keeps `compile` pure. Closed-world allowlist, Bash exempt (no
+path), canonicalization at the adapter. 14 new tests (172 workspace, green). **Follow-ups:**
+symlink canonicalization (v1 is lexical), a formal PLAN acceptance invariant, per-actor roots.
 
 ## Why
 

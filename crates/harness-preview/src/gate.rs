@@ -13,8 +13,9 @@
 //! [`preview`]: crate::preview
 
 use harness_types::{
-    ActionName, CallId, CompiledWorld, ContentHash, Decision, ExecutionMode, Provenance, Provider,
-    SessionId, SideEffectClass, SourceChannel, Taint, TaintContext, ToolCall,
+    ActionName, ActionType, CallId, CompiledWorld, ContentHash, Decision, ExecutionMode,
+    Provenance, Provider, RootAccess, SessionId, SideEffectClass, SourceChannel, Taint,
+    TaintContext, ToolCall,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,6 +36,13 @@ pub struct GateRequest {
     /// The proposed call's arguments. Maps to `ToolCall.arguments`.
     #[serde(default)]
     pub arguments: Value,
+    /// The action's resolved **absolute** target path, for path-scoped (`roots`)
+    /// governance. The *adapter* extracts it from the file-action arguments and does
+    /// the I/O of absolutizing it, keeping the gate pure. Absent ⇒ no path scope for
+    /// this call (structured file tools set it; Bash/etc. don't — Bash is undecidable
+    /// and stays OS-sandbox territory).
+    #[serde(default)]
+    pub path: Option<String>,
     /// Carried, host-owned context (taint, mode, session).
     #[serde(default)]
     pub context: GateContext,
@@ -118,20 +126,54 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         session_id: session.clone(),
     };
     let provenance = Provenance::from_channel(channel, session, ContentHash::new("gate"));
+    let mode = parse_mode(req.context.mode.as_deref());
     let ctx = EvalContext {
         taint: TaintContext::from_taint(inbound),
-        mode: parse_mode(req.context.mode.as_deref()),
+        mode,
         usage: BudgetUsage::default(),
         approval_granted: req.context.approval_token.is_some(),
     };
 
-    let (decision, rule) = match decide(world, &call, provenance, &ctx) {
+    let (mut decision, mut rule) = match decide(world, &call, provenance, &ctx) {
         KernelOutcome::UnknownToOntology { .. } => {
             (Decision::Absent, "unknown_to_ontology".to_string())
         }
         KernelOutcome::NotRepresentable { decision, rule, .. } => (decision, rule),
         KernelOutcome::Evaluated { disposition, .. } => (disposition.decision, disposition.rule),
     };
+
+    // Spatial scope (roots): when the world declares roots and the adapter resolved a
+    // target `path` for a file action, decide by *where* it lands. Path-scope can only
+    // TIGHTEN a kernel ALLOW (deny / ask / read-only) — never loosen a block. Bash and
+    // other tools without a single resolvable path carry no `path`, so they are exempt.
+    if decision == Decision::Allow {
+        if let (Some(path), Some(at)) = (req.path.as_deref(), world.action_type(&action)) {
+            if let Some(access) = world.classify_path(path) {
+                let is_write = matches!(at, ActionType::Write | ActionType::Patch);
+                match access {
+                    RootAccess::Deny => {
+                        decision = Decision::Deny;
+                        rule = "path_scope_denied".to_string();
+                    }
+                    RootAccess::Read if is_write => {
+                        decision = Decision::Deny;
+                        rule = "path_scope_readonly".to_string();
+                    }
+                    RootAccess::Ask => {
+                        // Fail closed in background (mirrors invariant 10 for approvals).
+                        if matches!(mode, ExecutionMode::Background) {
+                            decision = Decision::Deny;
+                            rule = "path_scope_ask_background".to_string();
+                        } else {
+                            decision = Decision::Ask;
+                            rule = "path_scope_ask".to_string();
+                        }
+                    }
+                    RootAccess::Read | RootAccess::ReadWrite => {}
+                }
+            }
+        }
+    }
 
     // Post-call taint escalation: monotonic join of the carried taint with the
     // taint this action's *output* introduces. Only an executed (ALLOW) call
@@ -140,6 +182,13 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
     if decision == Decision::Allow {
         if let Some(se) = world.side_effect(&action) {
             out_taint = out_taint.join(side_effect_taint(se));
+        }
+        // Path-aware read-taint: reading under a `taint_source` root taints the
+        // session (restores the D25/D37-deferred read-taint, now declared per path).
+        if let Some(path) = req.path.as_deref() {
+            if world.path_taints(path) {
+                out_taint = out_taint.join(Taint::Tainted);
+            }
         }
     }
 
@@ -236,6 +285,13 @@ fn reason_for(d: Decision, rule: &str) -> &'static str {
         }
         (Decision::Deny, "schema_violation") => "arguments violate the action's schema",
         (Decision::Deny, "descriptor_drift") => "the action descriptor changed since projection",
+        (Decision::Deny, "path_scope_denied") => "the target path is outside the allowed roots",
+        (Decision::Deny, "path_scope_readonly") => {
+            "the target path is read-only under the roots policy"
+        }
+        (Decision::Deny, "path_scope_ask_background") => {
+            "the target path needs approval, unavailable in background"
+        }
         (Decision::Deny, _) => "policy blocked a visible action",
         (Decision::Ask, _) => "human approval is required before this action",
         (Decision::Replan, _) => "over budget or too broad; propose a smaller step",
@@ -260,6 +316,7 @@ mod tests {
             v: ABI_VERSION,
             tool: tool.to_string(),
             arguments: serde_json::json!({}),
+            path: None,
             context: GateContext {
                 session_id: "s1".to_string(),
                 mode: None,
@@ -513,5 +570,131 @@ transition_policies:
                 assert_eq!(a, b, "gate must be deterministic for {tool}/{taint}");
             }
         }
+    }
+
+    // ---- roots / path-scope (spatial confinement) ----
+
+    /// A world with `roots` (absolute paths, so no env resolution is needed).
+    fn roots_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: roots-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Web] }
+base_actions:
+  - { name: read_file,  action_type: Read,  side_effect: Read }
+  - { name: write_file, action_type: Write, side_effect: FilesystemWrite }
+roots:
+  default: Ask
+  rules:
+    - { path: "/work",        access: ReadWrite }
+    - { path: "/work/inbox",  access: Read, taint_source: true }
+    - { path: "/etc",         access: Read }
+    - { path: "/etc/shadow",  access: Deny, class: Secret }
+    - { path: "/home/u/.ssh", access: Deny, class: Credential }
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    fn path_req(tool: &str, path: &str, taint: &str) -> GateRequest {
+        let mut r = req(tool, taint);
+        r.path = Some(path.to_string());
+        r
+    }
+
+    #[test]
+    fn in_root_write_is_allowed() {
+        let res = gate(
+            &roots_world(),
+            &path_req("write_file", "/work/src/x.rs", "clean"),
+        );
+        assert_eq!(res.decision, "ALLOW");
+    }
+
+    #[test]
+    fn out_of_root_defaults_to_ask() {
+        let res = gate(&roots_world(), &path_req("write_file", "/tmp/x", "clean"));
+        assert_eq!(res.decision, "ASK");
+        assert_eq!(res.rule.as_deref(), Some("path_scope_ask"));
+    }
+
+    #[test]
+    fn read_only_root_allows_read_denies_write() {
+        let w = roots_world();
+        assert_eq!(
+            gate(&w, &path_req("read_file", "/etc/passwd", "clean")).decision,
+            "ALLOW"
+        );
+        let write = gate(&w, &path_req("write_file", "/etc/passwd", "clean"));
+        assert_eq!(write.decision, "DENY");
+        assert_eq!(write.rule.as_deref(), Some("path_scope_readonly"));
+    }
+
+    #[test]
+    fn deny_rule_shadows_a_broader_allow_the_etc_shadow_probe() {
+        // The discovery's probe: /etc is Read, but /etc/shadow is a longer Deny rule.
+        let res = gate(
+            &roots_world(),
+            &path_req("read_file", "/etc/shadow", "clean"),
+        );
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("path_scope_denied"));
+    }
+
+    #[test]
+    fn write_to_ssh_is_denied_the_grant_mode_blast_radius_fix() {
+        let res = gate(
+            &roots_world(),
+            &path_req("write_file", "/home/u/.ssh/authorized_keys", "clean"),
+        );
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("path_scope_denied"));
+    }
+
+    #[test]
+    fn taint_source_root_taints_a_read() {
+        let res = gate(
+            &roots_world(),
+            &path_req("read_file", "/work/inbox/msg.txt", "clean"),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "tainted"); // read-taint restored, declared per path
+    }
+
+    #[test]
+    fn ordinary_in_root_read_does_not_taint() {
+        // /work is ReadWrite but not a taint_source, so a read stays clean.
+        let res = gate(
+            &roots_world(),
+            &path_req("read_file", "/work/src/x.rs", "clean"),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "clean");
+    }
+
+    #[test]
+    fn path_scope_ask_fails_closed_in_background() {
+        let mut r = path_req("write_file", "/tmp/x", "clean");
+        r.context.mode = Some("background".to_string());
+        let res = gate(&roots_world(), &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("path_scope_ask_background"));
+    }
+
+    #[test]
+    fn no_resolved_path_is_exempt_the_bash_analog() {
+        // A file action with no adapter-resolved path (path=None) is unaffected by
+        // roots — the Bash-exemption analog (Bash carries no single resolvable path).
+        let res = gate(&roots_world(), &req("read_file", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+    }
+
+    #[test]
+    fn roots_absent_means_no_path_scope() {
+        // The default world declares no roots: a resolved path never changes a verdict.
+        let res = gate(
+            &compile_default(),
+            &path_req("read_workspace", "/etc/shadow", "clean"),
+        );
+        assert_eq!(res.decision, "ALLOW"); // classify_path returns None -> unaffected
     }
 }

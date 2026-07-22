@@ -8,7 +8,9 @@ use crate::action::ActionType;
 use crate::decision::{Decision, EffectMode};
 use crate::descriptor::{Descriptor, SideEffectClass};
 use crate::ids::{ActionName, DescriptorHash, ManifestHash, WorldId};
-use crate::manifest::{Budget, CommandClassDef, ScopedCapabilityDef};
+use crate::manifest::{
+    Budget, CommandClassDef, RootAccess, RootRule, RootsDef, ScopedCapabilityDef,
+};
 use crate::provenance::{Taint, TrustLevel};
 
 /// A compiled taint-flow rule.
@@ -54,6 +56,11 @@ pub struct CompiledWorldParts {
     /// pre-D36 compiled worlds keep a stable serialized form.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub command_classes: Vec<CommandClassDef>,
+    /// Path-scoped capabilities (spatial confinement), with rule paths resolved to
+    /// absolute at compile time. `None` ⇒ no path scope. Skipped when absent so
+    /// pre-roots compiled worlds keep a stable serialized form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roots: Option<RootsDef>,
 }
 
 /// Immutable, hash-addressed runtime artifact. No setters; read-only after
@@ -132,6 +139,32 @@ impl CompiledWorld {
         &self.parts.command_classes
     }
 
+    /// Decide a filesystem `path` against the world's `roots` (spatial scope).
+    /// `None` when the world declares no roots (path-scope off). Otherwise the
+    /// access of the longest matching rule prefix, or the closed-world `default`
+    /// when none match. Pure prefix comparison — the caller supplies an absolute
+    /// path (the *adapter* did the I/O of resolving it, keeping the kernel pure).
+    pub fn classify_path(&self, path: &str) -> Option<RootAccess> {
+        let roots = self.parts.roots.as_ref()?;
+        Some(
+            best_root_rule(&roots.rules, path)
+                .map(|r| r.access)
+                .unwrap_or(roots.default),
+        )
+    }
+
+    /// Does reading `path` taint the session? True iff its longest-matching root
+    /// rule is a `taint_source`. Restores path-aware read-taint (D25/D37), now
+    /// declared per path rather than hard-coded.
+    pub fn path_taints(&self, path: &str) -> bool {
+        self.parts
+            .roots
+            .as_ref()
+            .and_then(|roots| best_root_rule(&roots.rules, path))
+            .map(|r| r.taint_source)
+            .unwrap_or(false)
+    }
+
     /// Resolve the **effective action** for a proposed call (DECISIONS D36): for
     /// the first classifier declared for `action`, read `arguments[arg]` as a
     /// string and return the first class's `to` whose any pattern matches at a
@@ -161,6 +194,22 @@ impl CompiledWorld {
         }
         action.clone()
     }
+}
+
+/// The longest-prefix root rule matching `path`, if any. A rule matches when
+/// `path` equals its (trailing-slash-trimmed) path or sits directly under it.
+fn best_root_rule<'a>(rules: &'a [RootRule], path: &str) -> Option<&'a RootRule> {
+    rules
+        .iter()
+        .filter(|r| path_under(path, &r.path))
+        .max_by_key(|r| r.path.trim_end_matches('/').len())
+}
+
+/// True iff `path` is `root` itself or a descendant of it (`root/…`).
+fn path_under(path: &str, root: &str) -> bool {
+    let root = root.trim_end_matches('/');
+    let path = path.trim_end_matches('/');
+    path == root || path.starts_with(&format!("{root}/"))
 }
 
 /// True iff `pat` occurs in `cmd` at a LEFT word boundary (an occurrence not

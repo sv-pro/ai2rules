@@ -24,7 +24,7 @@
 //!   uncompilable world — exits 0 with no output. A broken hook must never brick
 //!   a session. A process failure is never an outcome (see `host.rs`).
 
-use compiler::{compile, loader::load_yaml};
+use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
     gate, host_outcome, BlockKind, GateContext, GateRequest, HostOutcome, ABI_VERSION,
 };
@@ -56,6 +56,44 @@ fn emit(decision: &str, reason: &str) -> ! {
         }})
     );
     std::process::exit(0);
+}
+
+/// Extract and absolutize the target path of a file action, for path-scope (roots).
+/// Reads the common path arg keys; returns `None` for tools without one (Bash's
+/// `command` is not a path, so Bash is path-scope-exempt). Absolutization is lexical
+/// — relative paths resolve against the project `base`, `~` against `$HOME`, and
+/// `.`/`..` are normalized — matching the compiler's lexical rule resolution.
+/// Symlink resolution is a documented v1 gap (the symlink-TOCTOU caveat).
+fn resolve_action_path(args: &Value, base: &str, home: Option<&str>) -> Option<String> {
+    let raw = ["file_path", "path", "notebook_path"]
+        .iter()
+        .find_map(|k| args.get(*k).and_then(|v| v.as_str()))?;
+    let joined = if raw.starts_with('/') {
+        raw.to_string()
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        match home {
+            Some(h) => format!("{}/{}", h.trim_end_matches('/'), rest),
+            None => return Some(raw.to_string()),
+        }
+    } else {
+        format!("{}/{}", base.trim_end_matches('/'), raw)
+    };
+    Some(normalize_dots(&joined))
+}
+
+/// Lexically normalize `.`/`..`/empty segments of an absolute path (no FS access).
+fn normalize_dots(p: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for seg in p.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            s => out.push(s),
+        }
+    }
+    format!("/{}", out.join("/"))
 }
 
 /// Host-tool-name normalization — a *mapping*, not policy: use the exact host
@@ -100,20 +138,41 @@ pub fn run(
     let taint_file = state_dir.join(format!("taint-{}", sanitize(&sid)));
     let tainted = taint_file.exists();
 
-    // Compile the world and decide, in-process (D34).
+    // The project base (for resolving `.`/relative roots + the action path) and $HOME
+    // (for `~`), read at the I/O boundary so the compiler/kernel stay pure.
+    let base = std::env::var("CLAUDE_PROJECT_DIR").ok().or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string())
+    });
+    let home = std::env::var("HOME").ok();
+
+    // Compile the world and decide, in-process (D34). Roots paths are resolved to
+    // absolute here (env-dependent) before the pure compile.
     let world = match std::fs::read_to_string(world_path)
         .ok()
         .and_then(|c| load_yaml(&c).ok())
-        .and_then(|m| compile(&m).ok())
-    {
+        .and_then(|mut m| {
+            if let Some(r) = &m.roots {
+                m.roots = Some(resolve_root_paths(r, home.as_deref(), base.as_deref()));
+            }
+            compile(&m).ok()
+        }) {
         Some(w) => w,
         None => return 0, // fail-open
     };
+
+    // The action's absolute target path for path-scope (roots), if this tool carries
+    // one. Bash's `command` is not a path key, so Bash is path-scope-exempt.
+    let action_path = base
+        .as_deref()
+        .and_then(|b| resolve_action_path(&ti, b, home.as_deref()));
 
     let req = GateRequest {
         v: ABI_VERSION,
         tool: normalize(&world, tool),
         arguments: ti,
+        path: action_path,
         context: GateContext {
             session_id: sid,
             mode: Some(mode.to_string()),
@@ -164,5 +223,43 @@ pub fn run(
             kind: BlockKind::Replan,
             reason: _,
         } => 0, // no host channel for "smaller step" — fall through
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn normalize_dots_collapses_dot_and_dotdot() {
+        assert_eq!(normalize_dots("/a/./b/../c"), "/a/c");
+        assert_eq!(normalize_dots("/a//b/"), "/a/b");
+        assert_eq!(normalize_dots("/a/b/.."), "/a");
+    }
+
+    #[test]
+    fn resolve_action_path_reads_file_path_and_absolutizes() {
+        let rel = json!({"file_path": "src/x.rs"});
+        assert_eq!(
+            resolve_action_path(&rel, "/proj", None).as_deref(),
+            Some("/proj/src/x.rs")
+        );
+        let abs = json!({"file_path": "/etc/./shadow"});
+        assert_eq!(
+            resolve_action_path(&abs, "/proj", None).as_deref(),
+            Some("/etc/shadow")
+        );
+        let home = json!({"path": "~/.ssh/id_rsa"});
+        assert_eq!(
+            resolve_action_path(&home, "/proj", Some("/home/u")).as_deref(),
+            Some("/home/u/.ssh/id_rsa")
+        );
+    }
+
+    #[test]
+    fn resolve_action_path_is_none_for_non_path_tools() {
+        // Bash's `command` is not a path key -> None -> path-scope exempt.
+        let args = json!({"command": "rm -rf /"});
+        assert_eq!(resolve_action_path(&args, "/proj", None), None);
     }
 }
