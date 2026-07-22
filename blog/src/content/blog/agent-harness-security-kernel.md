@@ -2,6 +2,7 @@
 title: 'Your Agent Harness Is Already a Security Kernel'
 description: 'OpenAI showed how an engineered environment makes coding agents capable. The next step is to make that environment independently governable.'
 pubDate: 'Jul 22 2026'
+heroImage: '../../assets/agent-harness-security-kernel.jpg'
 ---
 
 OpenAI's essay [Harness engineering: leveraging Codex in an agent-first
