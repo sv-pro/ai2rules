@@ -2,6 +2,7 @@
 title: "Governed Is Not Confined"
 description: "We switched governance on for our own agent and assumed it was now fenced to the project. Then we asked it to read /etc/shadow. It said yes — exactly the way it says yes to reading our README. Here's why 'governed' and 'confined' are different axes, and which one a manifest actually covers."
 pubDate: 'Jul 22 2026'
+heroImage: '../../assets/governed-is-not-confined.jpg'
 ---
 
 We turned our governance on against our own agent — a live Claude Code session running
