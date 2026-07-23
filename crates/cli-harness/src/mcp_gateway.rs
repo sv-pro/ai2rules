@@ -49,7 +49,11 @@ fn binding_provenance(source: &str) -> Provenance {
         "generated" => SourceChannel::Generated,
         _ => SourceChannel::UserPrompt,
     };
-    Provenance::from_channel(channel, SessionId::new("mcp-gateway"), ContentHash::new("gate"))
+    Provenance::from_channel(
+        channel,
+        SessionId::new("mcp-gateway"),
+        ContentHash::new("gate"),
+    )
 }
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -384,7 +388,12 @@ pub fn run(
                                     "text": format!("ASK: {reason}; approval store error: {e}")}]}),
                                 Ok(mut store) => {
                                     if let Some(tid) = store.granted_token_id(
-                                        &action, &args, &wid, &dhash, &prov, GATEWAY_EFFECT_MODE,
+                                        &action,
+                                        &args,
+                                        &wid,
+                                        &dhash,
+                                        &prov,
+                                        GATEWAY_EFFECT_MODE,
                                     ) {
                                         // Approved out of band → forward exactly once.
                                         if verdict.context.taint == "tainted" {
@@ -399,14 +408,21 @@ pub fn run(
                                         }
                                         match forwarded {
                                             Ok(r) => r,
-                                            Err(e) => json!({"isError": true, "content": [{"type": "text",
-                                                "text": format!("upstream error: {e}")}]}),
+                                            Err(e) => {
+                                                json!({"isError": true, "content": [{"type": "text",
+                                                "text": format!("upstream error: {e}")}]})
+                                            }
                                         }
                                     } else {
                                         // Not yet approved: reuse an outstanding request
                                         // for this exact call, or mint a fresh one.
                                         let existing = store.pending_token_id(
-                                            &action, &args, &wid, &dhash, &prov, GATEWAY_EFFECT_MODE,
+                                            &action,
+                                            &args,
+                                            &wid,
+                                            &dhash,
+                                            &prov,
+                                            GATEWAY_EFFECT_MODE,
                                         );
                                         let minted = match existing {
                                             Some(tid) => Ok(tid),
@@ -427,10 +443,14 @@ pub fn run(
                                             }
                                         };
                                         match minted {
-                                            Ok(tid) => json!({"isError": true, "content": [{"type": "text",
-                                                "text": format!("ASK: {reason}; approval pending — a human must run `harness approvals approve {}`, then retry", tid.as_str())}]}),
-                                            Err(e) => json!({"isError": true, "content": [{"type": "text",
-                                                "text": format!("ASK: {reason}; could not record approval request: {e}")}]}),
+                                            Ok(tid) => {
+                                                json!({"isError": true, "content": [{"type": "text",
+                                                "text": format!("ASK: {reason}; approval pending — a human must run `harness approvals approve {}`, then retry", tid.as_str())}]})
+                                            }
+                                            Err(e) => {
+                                                json!({"isError": true, "content": [{"type": "text",
+                                                "text": format!("ASK: {reason}; could not record approval request: {e}")}]})
+                                            }
                                         }
                                     }
                                 }

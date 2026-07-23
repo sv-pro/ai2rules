@@ -107,8 +107,15 @@ impl ApprovalStore {
         provenance: &Provenance,
         effect_mode: EffectMode,
     ) -> bool {
-        self.granted_token_id(action, params, world_id, descriptor_hash, provenance, effect_mode)
-            .is_some()
+        self.granted_token_id(
+            action,
+            params,
+            world_id,
+            descriptor_hash,
+            provenance,
+            effect_mode,
+        )
+        .is_some()
     }
 
     /// The id of the **Approved** token binding to this exact call, if any — the

@@ -382,7 +382,9 @@ fn run_approvals(action: &ApprovalsAction) -> i32 {
             };
             match s.approve(&ApprovalTokenId::new(id.clone())) {
                 Ok(()) => {
-                    println!("approved {id} — the agent's retry of this exact call goes through once");
+                    println!(
+                        "approved {id} — the agent's retry of this exact call goes through once"
+                    );
                     0
                 }
                 Err(e) => {
