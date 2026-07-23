@@ -30,3 +30,35 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: Test
         run: cargo test --workspace
+
+  hero-mcp:
+    # TypeScript MCP tool under tools/hero-mcp (not a Cargo member); typecheck + unit
+    # tests only — the agy-backed generation needs auth and isn't run in CI.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/hero-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  blog:
+    # Build the Astro blog and guard that every post renders a hero image — a green
+    # build alone doesn't prove that (heroImage is optional), so check the built HTML.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: blog
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check:heroes

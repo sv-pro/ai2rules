@@ -2,7 +2,8 @@
 //! (PLAN.md E1.3, E1.5, E1.6).
 
 use harness_types::{
-    BackingIdentity, CompiledWorld, CompiledWorldParts, Descriptor, TaintRule, WorldManifest,
+    BackingIdentity, CompiledWorld, CompiledWorldParts, Descriptor, RootRule, RootsDef, TaintRule,
+    WorldManifest,
 };
 use serde_json::Value;
 
@@ -140,10 +141,61 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
     // gate call classifies identically — no adapter carries a pattern copy.
     parts.command_classes = manifest.command_classes.clone();
 
+    // Path-scoped capabilities (roots). Copied as authored — `compile` stays pure
+    // (no env reads). `~`/`.` expansion is the adapter's job via `resolve_root_paths`
+    // at the I/O boundary, so rule paths reaching here are already absolute.
+    parts.roots = manifest.roots.clone();
+
     parts.budget = manifest.budget.clone();
     parts.redaction = manifest.observability.redact.clone();
 
     Ok(CompiledWorld::new(parts))
+}
+
+/// Resolve `~`, `.`, and relative rule paths to absolute — the env-dependent step
+/// the *adapter* runs before `compile`, keeping `compile` itself pure. `home` and
+/// `base` (the project dir) are passed in explicitly so this function is pure too.
+/// Absolute rule paths are returned unchanged.
+pub fn resolve_root_paths(roots: &RootsDef, home: Option<&str>, base: Option<&str>) -> RootsDef {
+    RootsDef {
+        default: roots.default,
+        rules: roots
+            .rules
+            .iter()
+            .map(|r| RootRule {
+                path: expand_root_path(&r.path, home, base),
+                ..r.clone()
+            })
+            .collect(),
+    }
+}
+
+fn expand_root_path(p: &str, home: Option<&str>, base: Option<&str>) -> String {
+    let out = if p == "~" {
+        home.map(str::to_string).unwrap_or_else(|| p.to_string())
+    } else if let Some(rest) = p.strip_prefix("~/") {
+        match home {
+            Some(h) => format!("{}/{}", h.trim_end_matches('/'), rest),
+            None => p.to_string(),
+        }
+    } else if p.starts_with('/') {
+        p.to_string()
+    } else {
+        // relative (".", "./x", "x") -> under the project base
+        let rel = p.strip_prefix("./").unwrap_or(p);
+        match base {
+            Some(b) => {
+                let b = b.trim_end_matches('/');
+                if rel == "." {
+                    b.to_string()
+                } else {
+                    format!("{b}/{rel}")
+                }
+            }
+            None => p.to_string(),
+        }
+    };
+    out.trim_end_matches('/').to_string()
 }
 
 /// The bundled default CLI world manifest source (YAML), embedded at build time.
@@ -159,4 +211,58 @@ pub fn default_cli_world() -> WorldManifest {
 /// Compile the bundled default CLI world.
 pub fn compile_default() -> CompiledWorld {
     compile(&default_cli_world()).expect("bundled default world manifest must compile")
+}
+
+#[cfg(test)]
+mod roots_tests {
+    use super::*;
+    use harness_types::{RootAccess, RootRule, RootsDef};
+
+    fn r(path: &str) -> RootRule {
+        RootRule {
+            path: path.to_string(),
+            access: RootAccess::Read,
+            class: None,
+            taint_source: false,
+        }
+    }
+
+    #[test]
+    fn resolve_root_paths_expands_home_dot_and_relative() {
+        let roots = RootsDef {
+            default: RootAccess::Ask,
+            rules: vec![
+                r("~/.ssh"),
+                r("~"),
+                r("."),
+                r("./src"),
+                r("logs"),
+                r("/etc"),
+            ],
+        };
+        let out = resolve_root_paths(&roots, Some("/home/u"), Some("/proj"));
+        let paths: Vec<&str> = out.rules.iter().map(|x| x.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "/home/u/.ssh",
+                "/home/u",
+                "/proj",
+                "/proj/src",
+                "/proj/logs",
+                "/etc"
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_root_paths_is_pure_given_inputs() {
+        let roots = RootsDef {
+            default: RootAccess::Deny,
+            rules: vec![r("~/x")],
+        };
+        let a = resolve_root_paths(&roots, Some("/h"), Some("/b"));
+        let b = resolve_root_paths(&roots, Some("/h"), Some("/b"));
+        assert_eq!(a, b);
+    }
 }

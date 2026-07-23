@@ -14,7 +14,9 @@ pub mod error;
 pub mod hashing;
 pub mod loader;
 
-pub use compile::{compile, compile_default, default_cli_world, default_world_yaml};
+pub use compile::{
+    compile, compile_default, default_cli_world, default_world_yaml, resolve_root_paths,
+};
 pub use error::CompileError;
 pub use hashing::{hash_descriptor, hash_manifest, sha256_hex};
 pub use loader::{load_json, load_yaml, validate};

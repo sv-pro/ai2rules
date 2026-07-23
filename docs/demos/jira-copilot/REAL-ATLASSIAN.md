@@ -8,6 +8,25 @@ changes — only the *upstream* and the *manifest's tool names*.
 > browser when `mcp-remote` opens the consent page. Do this yourself — don't paste
 > tokens or credentials into the manifest or scripts.
 
+## Verify the shaping offline first (no Atlassian needed)
+
+Everything that *sells* this demo — the shaped surface, the ABSENT destructive tools, the
+taint floor — is decided at the gate **before** any call reaches Atlassian, so it's proven
+offline against a stand-in that speaks the real Rovo tool names:
+
+```bash
+cargo test -p cli-harness --test mcp_gateway_atlassian --offline
+```
+
+That test drives this exact manifest (`jira-atlassian.world.yaml`) through the gateway over
+`harness mock-jira --rovo` — which advertises the genuine Rovo names (`getJiraIssue`,
+`transitionJiraIssue`, `addCommentToJiraIssue`, …) plus a Confluence tool as noise — and
+asserts the exposed surface is exactly the **5** declared tools, that `transitionJiraIssue`
+and `getConfluencePage` are **ABSENT**, and that a **tainted** session severs the comment
+write. If Atlassian renames a tool and this manifest drifts, the test goes red — you find out
+in CI, not in front of an audience. Only the **positive forwarded read/write** below needs a
+real Atlassian; the refusal/absence/taint story is green with no creds.
+
 ## What's different from the mock path
 
 | | Mock (`jira-world.yaml`) | Real (`jira-atlassian.world.yaml`) |
@@ -82,10 +101,10 @@ arguments — including a **`cloudId`**. Get it first:
 ```
 
 > Hand-crafting args is fiddly. The schema-aware way to drive the ALLOW path is to wire
-> the governed gateway into a host (Claude Code: `hosts/claude-code.mcp.json`, pointing
-> `run-proxy.sh` with these env vars) and just ask in natural language. The host reads
-> each tool's real schema, so you don't guess argument names. The shaping/gating is
-> identical either way.
+> the governed gateway into a host (Claude Code: [`hosts/claude-code-atlassian.mcp.json`](hosts/claude-code-atlassian.mcp.json),
+> the real-name counterpart of the mock `claude-code.mcp.json` — same `run-proxy.sh`, with the
+> `MANIFEST` + `UPSTREAM` env vars set) and just ask in natural language. The host reads each
+> tool's real schema, so you don't guess argument names. The shaping/gating is identical either way.
 
 ## VS Code Copilot against real Atlassian
 

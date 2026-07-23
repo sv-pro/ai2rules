@@ -1,0 +1,89 @@
+# Starter WorldManifest for install-governance.sh — a generic, safe default that
+# governs Claude Code's native tools AND confines file actions to declared roots.
+# Copy into a project's .claude/cc-world.yaml and tune. This is NOT the ai2rules
+# dogfood manifest (.claude/cc-world.yaml) — it's the portable template new projects get.
+#
+# With `harness cc-hook --grant`, in-root file ops are granted silently while
+# out-of-root ones ask (soft jail) and sensitive paths are denied outright — so
+# "governed" finally also means "confined to this project".
+world_id: claude-code-starter
+
+actors:
+  - { name: developer, kind: User }
+  - { name: claude, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  # read-only (no taint escalation)
+  - { name: Read, action_type: Read, side_effect: Read }
+  - { name: Glob, action_type: Read, side_effect: Read }
+  - { name: Grep, action_type: Read, side_effect: Read }
+  # workspace writes
+  - { name: Edit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: NotebookEdit, action_type: Patch, side_effect: FilesystemWrite }
+  # network / egress (taint floor applies)
+  - { name: WebFetch, action_type: Web, side_effect: Network }
+  - { name: WebSearch, action_type: Web, side_effect: Network }
+  # shell, classified by the kernel (D36)
+  - { name: Bash, action_type: Command, side_effect: Process }
+  - { name: Bash_network, action_type: Command, side_effect: Network }
+  - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+
+command_classes:
+  - action: Bash
+    arg: command
+    classes:
+      - to: Bash_network
+        patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
+      - to: Bash_destructive
+        patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+
+# Path-scoped capabilities (spatial confinement). Longest-prefix match wins; a
+# longer Deny shadows a broader allow. `.` = the project dir, `~` = $HOME (both
+# resolved by the adapter at load time). `default: Ask` is a soft jail — file ops
+# outside every rule prompt rather than silently proceed; set `Deny` for a hard jail.
+roots:
+  default: Ask
+  rules:
+    - { path: ".", access: ReadWrite }                     # the project — read + write
+    - { path: "/tmp", access: ReadWrite }                  # scratch
+    - { path: "/usr", access: Read }                       # tools / libs, read-only
+    - { path: "/etc", access: Read }                       # system config, read-only
+    # sensitive paths — out of bounds even inside an allowed parent
+    - { path: "/etc/shadow", access: Deny, class: Secret }
+    - { path: "~/.ssh", access: Deny, class: Credential }
+    - { path: "~/.aws", access: Deny, class: Credential }
+    - { path: "~/.gnupg", access: Deny, class: Credential }
+    - { path: "~/.config/gcloud", access: Deny, class: Credential }
+    # untrusted inbound (uncomment + point at your ingest dir): reads here taint the session
+    # - { path: "./inbox", access: Read, taint_source: true }
+
+# The taint floor (invariant 7): tainted context cannot reach an effectful surface.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000
+
+observability:
+  redact:
+    - "env.*_TOKEN"
+    - "env.*_KEY"
+    - "**/.env"

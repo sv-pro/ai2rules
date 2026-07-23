@@ -170,6 +170,7 @@ fn govern(
         v: ABI_VERSION,
         tool: tool.to_string(),
         arguments: args.clone(),
+        path: None, // MCP tools are not file paths — path scope does not apply here
         context: GateContext {
             session_id: "mcp-gateway".to_string(),
             mode: Some(mode.to_string()),
@@ -310,6 +311,7 @@ pub fn run(
                         Vec::new()
                     }
                 };
+                let advertised = tools.len();
                 let exposed: Vec<Value> = tools
                     .into_iter()
                     .filter(|t| {
@@ -319,6 +321,14 @@ pub fn run(
                             .unwrap_or(false)
                     })
                     .collect();
+                // Surface-shaping ratio — the visible governability story: how much
+                // of the upstream's advertised surface the world actually exposes.
+                eprintln!(
+                    "[mcp-gateway] surface shaped: upstream advertised {advertised} tools, \
+                     exposing {} ({} ABSENT)",
+                    exposed.len(),
+                    advertised.saturating_sub(exposed.len())
+                );
                 json!({"tools": exposed})
             }
             "tools/call" => {

