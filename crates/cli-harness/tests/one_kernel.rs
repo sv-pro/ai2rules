@@ -221,8 +221,8 @@ fn every_entry_point_agrees_with_the_in_process_kernel() {
             "context": {
                 "session_id": name,
                 "mode": case_field(&case, &["request", "context", "mode"]),
-                "taint": if taint == "tainted" { json!("tainted") } else { Value::Null },
-                "source_channel": Value::Null,
+                "taint": if taint == "tainted" { json!("tainted") } else { json!("clean") },
+                "source_channel": "user_prompt",
                 "approval_token": Value::Null,
             },
         });
@@ -264,6 +264,45 @@ fn harness_gate_does_not_trust_request_supplied_approval_tokens() {
     assert_eq!(response["decision"], "ASK");
     assert_eq!(response["rule"], "approval_required");
     assert_eq!(response["approval"]["required"], true);
+}
+
+#[test]
+fn harness_gate_fails_closed_on_missing_or_malformed_context() {
+    for (name, context, rule) in [
+        (
+            "missing_taint",
+            json!({"session_id": "bad-context", "mode": "interactive", "source_channel": "user_prompt"}),
+            "missing_taint",
+        ),
+        (
+            "invalid_taint",
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean-ish", "source_channel": "user_prompt"}),
+            "invalid_taint",
+        ),
+        (
+            "missing_source",
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean"}),
+            "missing_source_channel",
+        ),
+        (
+            "invalid_source",
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean", "source_channel": "probably_user"}),
+            "invalid_source_channel",
+        ),
+    ] {
+        let request = json!({
+            "v": 1,
+            "tool": "jira_add_comment",
+            "arguments": { "issue_key": "DEMO-1", "body": name },
+            "context": context
+        });
+
+        let (code, stdout) = gate_cli(&request.to_string());
+        assert_eq!(code, 0, "{name}: gate CLI evaluates");
+        let response: Value = serde_json::from_str(&stdout).expect("gate CLI response json");
+        assert_eq!(response["decision"], "DENY", "{name}");
+        assert_eq!(response["rule"], rule, "{name}");
+    }
 }
 
 /// (c) The cc-hook PreToolUse contract: the kernel's verdict surfaces as the

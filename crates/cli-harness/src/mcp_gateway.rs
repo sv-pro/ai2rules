@@ -150,7 +150,7 @@ fn govern(
         context: GateContext {
             session_id: "mcp-gateway".to_string(),
             mode: Some(mode.to_string()),
-            taint: tainted.then(|| "tainted".to_string()),
+            taint: Some(if tainted { "tainted" } else { "clean" }.to_string()),
             source_channel: Some(source.to_string()),
             approval_token: None,
         },

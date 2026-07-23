@@ -106,7 +106,7 @@ enum Command {
         #[arg(long, default_value = "cli")]
         source: String,
         /// Initial carried session taint floor: `clean` (default) | `tainted`.
-        #[arg(long, default_value = "clean")]
+        #[arg(long, default_value = "clean", value_parser = ["clean", "tainted"])]
         taint: String,
         /// Execution mode threaded into every gate call. The kernel itself
         /// collapses ASK→DENY in background (invariant 10).
