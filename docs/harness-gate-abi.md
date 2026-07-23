@@ -83,7 +83,7 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
 | `v` | ✓ | ABI version (integer). v1. |
 | `tool` | ✓ | The action name **in the manifest's vocabulary** (the adapter has already mapped the host's tool name; for CC the manifest *uses* `Bash`/`Read`/…). → `ToolCall.action_name`. |
 | `arguments` | ✓ | The proposed call's arguments (object). → `ToolCall.arguments`. |
-| `path` |  | Adapter-resolved absolute path for path-scoped file actions. Required when roots are enabled and the effective action is a filesystem read/write/patch action; Bash and other non-file actions set `null`. |
+| `path` |  | Adapter-canonicalized absolute path for path-scoped file actions. Required when roots are enabled and the effective action is a filesystem read/write/patch action; Bash and other non-file actions set `null`. |
 | `context.session_id` | ✓ | Opaque host session id. → `SessionId`; trace correlation; taint sidecar key. |
 | `context.mode` | ✓ | `interactive` \| `background`. → `ExecutionMode` (drives ASK→DENY fail-closed). |
 | `context.taint` | ✓ | Monotonic state carried by the adapter: `clean` \| `tainted`. → `TaintContext`. |
@@ -150,8 +150,8 @@ Every host adapter, regardless of language, does exactly this:
 1. Receive the host's pre-tool intercept event.
 2. Restore monotonic taint for `session_id` from the sidecar (default `clean`).
 3. Build a `GateRequest` (map the host tool/args, set `mode`, attach explicit
-   `taint` + `source_channel`, and attach an absolute `path` for path-scoped
-   file actions).
+   `taint` + `source_channel`, and attach a symlink-aware canonical absolute
+   `path` for path-scoped file actions).
 4. Run `harness gate --world <W>` with the request on stdin; read the response.
 5. Persist `response.context.taint` back to the sidecar (monotonic; never lowers).
 6. Map `response.decision` → the host's decision shape; fail-open/closed on `≠0`.
