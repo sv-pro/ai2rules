@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use harness_types::WorldManifest;
+use harness_types::{SourceChannel, WorldManifest};
 
 use crate::error::CompileError;
 
@@ -21,6 +21,22 @@ pub fn load_json(text: &str) -> Result<WorldManifest, CompileError> {
 pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
     if manifest.world_id.as_str().is_empty() {
         return Err(CompileError::EmptyWorldId);
+    }
+
+    let mut channels = BTreeSet::new();
+    for channel in &manifest.channels {
+        let Some(source_channel) = SourceChannel::from_name(&channel.name) else {
+            return Err(CompileError::Invalid(format!(
+                "unknown channel {}",
+                channel.name
+            )));
+        };
+        if !channels.insert(source_channel) {
+            return Err(CompileError::Invalid(format!(
+                "duplicate channel {}",
+                channel.name
+            )));
+        }
     }
 
     let mut base_names: BTreeSet<&str> = BTreeSet::new();

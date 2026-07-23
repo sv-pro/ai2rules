@@ -69,9 +69,9 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **cli-harness** | `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate` |
 
 **Test counts (all passing, native):**
-harness-types 5 · world-kernel 41 · compiler 17 · executor 12 · trace-store 13 ·
-provider-adapters 5 · agent-core 16 · harness-preview 41 · cli-harness 29 ·
-harness-wasm 0 · **total 179** (plus the harness-wasm Node smoke tests, run via
+harness-types 5 · world-kernel 41 · compiler 18 · executor 12 · trace-store 13 ·
+provider-adapters 5 · agent-core 16 · harness-preview 42 · cli-harness 29 ·
+harness-wasm 0 · **total 181** (plus the harness-wasm Node smoke tests, run via
 wasm-pack)
 
 ---
