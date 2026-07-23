@@ -6,6 +6,8 @@
 
 use serde_json::{json, Value};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -20,23 +22,35 @@ fn run_hook(state: &Path, event: &Value) -> String {
 
 /// As [`run_hook`], with extra CLI args (e.g. `--grant`).
 fn run_hook_args(state: &Path, event: &Value, extra: &[&str]) -> String {
+    run_hook_with_world_env(&world(), state, event, extra, &[])
+}
+
+/// As [`run_hook_args`], with an explicit world and environment overrides.
+fn run_hook_with_world_env(
+    world: &Path,
+    state: &Path,
+    event: &Value,
+    extra: &[&str],
+    env: &[(&str, &Path)],
+) -> String {
     let bin = env!("CARGO_BIN_EXE_harness");
-    let w = world();
     let mut args = vec![
         "cc-hook",
         "--world",
-        w.to_str().unwrap(),
+        world.to_str().unwrap(),
         "--state",
         state.to_str().unwrap(),
     ];
     args.extend_from_slice(extra);
-    let mut child = Command::new(bin)
-        .args(&args)
+    let mut cmd = Command::new(bin);
+    cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn cc-hook");
+        .stderr(Stdio::null());
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let mut child = cmd.spawn().expect("spawn cc-hook");
     child
         .stdin
         .take()
@@ -54,6 +68,33 @@ fn decision(out: &str) -> Option<String> {
     v["hookSpecificOutput"]["permissionDecision"]
         .as_str()
         .map(String::from)
+}
+
+#[cfg(unix)]
+fn write_roots_world(path: &Path) {
+    std::fs::write(
+        path,
+        r#"
+world_id: native-root-symlink-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Write] }
+base_actions:
+  - name: Read
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        file_path: { type: string }
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+roots:
+  default: Ask
+  rules:
+    - { path: ".", access: ReadWrite }
+    - { path: "~/.ssh", access: Deny, class: Credential }
+"#,
+    )
+    .expect("write roots world");
 }
 
 #[test]
@@ -129,4 +170,50 @@ fn grant_mode_still_denies_tainted_egress() {
         &["--grant"],
     );
     assert_eq!(decision(&out).as_deref(), Some("deny"));
+}
+
+#[cfg(unix)]
+#[test]
+fn grant_mode_denies_write_through_project_symlink_to_denied_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let project = dir.path().join("project");
+    let state = dir.path().join("state");
+    let world = dir.path().join("world.yaml");
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(home.join(".ssh/config"), "secret").unwrap();
+    symlink(home.join(".ssh"), project.join("link")).unwrap();
+    write_roots_world(&world);
+
+    let out = run_hook_with_world_env(
+        &world,
+        &state,
+        &json!({"tool_name":"Write","tool_input":{"file_path":"link/config"},"session_id":"symlink"}),
+        &["--grant"],
+        &[("CLAUDE_PROJECT_DIR", &project), ("HOME", &home)],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
+}
+
+#[cfg(unix)]
+#[test]
+fn grant_mode_allows_new_file_under_real_project_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let project = dir.path().join("project");
+    let state = dir.path().join("state");
+    let world = dir.path().join("world.yaml");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    write_roots_world(&world);
+
+    let out = run_hook_with_world_env(
+        &world,
+        &state,
+        &json!({"tool_name":"Write","tool_input":{"file_path":"src/new.txt"},"session_id":"in-root"}),
+        &["--grant"],
+        &[("CLAUDE_PROJECT_DIR", &project), ("HOME", &home)],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
 }

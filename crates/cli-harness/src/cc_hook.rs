@@ -28,10 +28,10 @@ use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
     gate, host_outcome, BlockKind, GateContext, GateRequest, HostOutcome, ABI_VERSION,
 };
-use harness_types::ActionName;
+use harness_types::{ActionName, RootsDef};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn sanitize(s: &str) -> String {
     s.chars()
@@ -60,25 +60,23 @@ fn emit(decision: &str, reason: &str) -> ! {
 
 /// Extract and absolutize the target path of a file action, for path-scope (roots).
 /// Reads the common path arg keys; returns `None` for tools without one (Bash's
-/// `command` is not a path, so Bash is path-scope-exempt). Absolutization is lexical
-/// — relative paths resolve against the project `base`, `~` against `$HOME`, and
-/// `.`/`..` are normalized — matching the compiler's lexical rule resolution.
-/// Symlink resolution is a documented v1 gap (the symlink-TOCTOU caveat).
+/// `command` is not a path, so Bash is path-scope-exempt). Relative paths resolve
+/// against the project `base`, `~` against `$HOME`, and the result is canonicalized
+/// through the filesystem so project-local symlinks cannot choose their own root.
 fn resolve_action_path(args: &Value, base: &str, home: Option<&str>) -> Option<String> {
     let raw = ["file_path", "path", "notebook_path"]
         .iter()
         .find_map(|k| args.get(*k).and_then(|v| v.as_str()))?;
-    let joined = if raw.starts_with('/') {
-        raw.to_string()
+    let path = if raw.starts_with('/') {
+        PathBuf::from(raw)
+    } else if raw == "~" {
+        PathBuf::from(home?)
     } else if let Some(rest) = raw.strip_prefix("~/") {
-        match home {
-            Some(h) => format!("{}/{}", h.trim_end_matches('/'), rest),
-            None => return Some(raw.to_string()),
-        }
+        PathBuf::from(home?).join(rest)
     } else {
-        format!("{}/{}", base.trim_end_matches('/'), raw)
+        Path::new(base).join(raw)
     };
-    Some(normalize_dots(&joined))
+    canonicalize_action_path(&path).map(path_to_string)
 }
 
 /// Lexically normalize `.`/`..`/empty segments of an absolute path (no FS access).
@@ -94,6 +92,43 @@ fn normalize_dots(p: &str) -> String {
         }
     }
     format!("/{}", out.join("/"))
+}
+
+/// Canonicalize an action target for root policy. Existing files/directories are
+/// resolved directly; new file writes are classified by a canonicalized existing
+/// parent plus the proposed leaf name. If the parent cannot be resolved, return
+/// `None` so roots-enabled file actions fail closed as `missing_path`.
+fn canonicalize_action_path(path: &Path) -> Option<PathBuf> {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return Some(canonical);
+    }
+    let parent = path.parent()?;
+    let leaf = path.file_name()?;
+    let parent = std::fs::canonicalize(parent).ok()?;
+    Some(parent.join(leaf))
+}
+
+/// Canonicalize manifest roots at the same adapter boundary as action paths.
+/// Missing roots stay lexical, preserving portable manifests for paths that may
+/// not exist yet while still resolving real symlinked roots such as `.` and `~/.ssh`.
+fn canonicalize_root_paths(roots: &RootsDef) -> RootsDef {
+    let mut out = roots.clone();
+    for rule in &mut out.rules {
+        rule.path = std::fs::canonicalize(&rule.path)
+            .map(path_to_string)
+            .unwrap_or_else(|_| {
+                if rule.path.starts_with('/') {
+                    normalize_dots(&rule.path)
+                } else {
+                    rule.path.clone()
+                }
+            });
+    }
+    out
+}
+
+fn path_to_string(path: PathBuf) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 /// Host-tool-name normalization — a *mapping*, not policy: use the exact host
@@ -154,7 +189,8 @@ pub fn run(
         .and_then(|c| load_yaml(&c).ok())
         .and_then(|mut m| {
             if let Some(r) = &m.roots {
-                m.roots = Some(resolve_root_paths(r, home.as_deref(), base.as_deref()));
+                let roots = resolve_root_paths(r, home.as_deref(), base.as_deref());
+                m.roots = Some(canonicalize_root_paths(&roots));
             }
             compile(&m).ok()
         }) {
@@ -239,20 +275,33 @@ mod path_tests {
 
     #[test]
     fn resolve_action_path_reads_file_path_and_absolutizes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("proj");
+        let home_dir = tmp.path().join("home");
+        std::fs::create_dir_all(proj.join("src")).unwrap();
+        std::fs::create_dir_all(home_dir.join(".ssh")).unwrap();
+        let base = proj.to_str().unwrap();
+        let home_path = home_dir.to_str().unwrap();
+
         let rel = json!({"file_path": "src/x.rs"});
         assert_eq!(
-            resolve_action_path(&rel, "/proj", None).as_deref(),
-            Some("/proj/src/x.rs")
+            resolve_action_path(&rel, base, None).as_deref(),
+            Some(proj.join("src/x.rs").to_str().unwrap())
         );
-        let abs = json!({"file_path": "/etc/./shadow"});
+
+        let abs_parent = tmp.path().join("etc");
+        std::fs::create_dir_all(&abs_parent).unwrap();
+        let abs_path = abs_parent.join("./shadow");
+        let abs = json!({"file_path": abs_path.to_str().unwrap()});
         assert_eq!(
-            resolve_action_path(&abs, "/proj", None).as_deref(),
-            Some("/etc/shadow")
+            resolve_action_path(&abs, base, None).as_deref(),
+            Some(abs_parent.join("shadow").to_str().unwrap())
         );
+
         let home = json!({"path": "~/.ssh/id_rsa"});
         assert_eq!(
-            resolve_action_path(&home, "/proj", Some("/home/u")).as_deref(),
-            Some("/home/u/.ssh/id_rsa")
+            resolve_action_path(&home, base, Some(home_path)).as_deref(),
+            Some(home_dir.join(".ssh/id_rsa").to_str().unwrap())
         );
     }
 
