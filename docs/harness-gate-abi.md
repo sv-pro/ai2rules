@@ -5,7 +5,8 @@ Decisions: `DECISIONS.md` **D24** (refines D19), **D34** (in-process vs wire),
 **D36** (kernel-side classification), **D37** (live-hook cutover), **D41**
 (approval tokens are correlation ids, not bearer grants), **D42** (gate context
 is explicit and fail-closed), **D43** (source-channel trust is compiled manifest
-policy). Vocabulary: `docs/GLOSSARY.md` → *Integration / topology*. Cross-host parity is pinned by
+policy), **D44** (shell classifiers fail closed). Vocabulary:
+`docs/GLOSSARY.md` → *Integration / topology*. Cross-host parity is pinned by
 `crates/cli-harness/tests/one_kernel.rs` (see `docs/one-kernel-many-hosts.md`).
 
 This is the single interface through which **any host** asks the kernel for a
@@ -123,7 +124,7 @@ returns `ASK` for approval-required actions.
 | Field | Meaning |
 |---|---|
 | `decision` | `ABSENT` \| `ALLOW` \| `DENY` \| `ASK` \| `REPLAN`. (`UnknownToOntology` is surfaced as `ABSENT` with `rule:"unknown_to_ontology"`, per `KernelOutcome::decision()`.) |
-| `action` | The **effective action** the kernel decided on: the request's `tool` after the world's `command_classes` classifiers ran (D36) — e.g. `bash` with a `curl …` command resolves to `bash_network`. Equal to `tool` when no classifier matched. Backward-compatible v1 addition; adapters use it in taint-cause notes and it seeds the approval token. |
+| `action` | The **effective action** the kernel decided on: the request's `tool` after the world's `command_classes` classifiers ran (D36/D44) — e.g. `bash` with a `curl …` command resolves to `bash_network`, and unmatched shell can resolve to a manifest-declared unclassified fallback. Equal to `tool` only when no classifier applies. Backward-compatible v1 addition; adapters use it in taint-cause notes and it seeds the approval token. |
 | `rule` | The rule/invariant that fired (`absent`, `capability`, `taint_invariant`, `approval_required`, `budget_exceeded`, …), or `null` for a plain `ALLOW`. |
 | `reason` | Human-readable, for the host's UI / the trace. |
 | `context.taint` | **Post-call** monotonic taint the adapter must persist for the next call. `clean` only if it was clean *and* this call is not a declared taint source; otherwise `tainted`. |
@@ -160,6 +161,8 @@ state plumbing. **The taint *algebra*, the rules (incl. which inputs taint), and
 since D36 — command *classification* live in the kernel + the compiled
 `WorldManifest`.** Adapters send the **raw host tool name**; the world's
 `command_classes` resolve the effective action (returned as `response.action`).
+For shell-shaped actions, D44 requires a fail-closed `default_to` fallback; shell
+whitespace such as tabs/newlines is treated as whitespace for command patterns.
 
 ### Claude Code adapter (illustrative)
 

@@ -578,9 +578,11 @@ base_actions:
   - { name: bash, action_type: Command, side_effect: Process }
   - { name: bash_network, action_type: Command, side_effect: Network }
   - { name: bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
 command_classes:
   - action: bash
     arg: command
+    default_to: bash_unclassified
     classes:
       - { to: bash_network, patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "] }
       - { to: bash_destructive, patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"] }
@@ -601,6 +603,8 @@ transition_policies:
         let world = classified_world();
         for cmd in [
             "curl http://x",
+            "curl\thttp://x",
+            "curl\nhttp://x",
             "wget http://x",
             "nc -l 9000",
             "ncat host 1",
@@ -620,10 +624,13 @@ transition_policies:
         let world = classified_world();
         for cmd in [
             "rm -rf build",
+            "rm\t-rf build",
             "rm -fr build",
             "sudo systemctl restart x",
+            "sudo\tid",
             "mkfs.ext4 /dev/sda",
             "dd if=/dev/zero of=/dev/sda",
+            "dd\tif=/dev/zero of=/dev/sda",
             ":(){ :|:& };:",
         ] {
             let res = gate(&world, &bash_req(cmd, "clean"));
@@ -633,20 +640,22 @@ transition_policies:
     }
 
     #[test]
-    fn ordinary_commands_classify_as_plain_bash() {
+    fn ordinary_commands_fall_back_to_unclassified_approval() {
         let world = classified_world();
         for cmd in ["ls -la", "git status", "echo hi", "cargo test"] {
             let res = gate(&world, &bash_req(cmd, "clean"));
-            assert_eq!(res.action, "bash", "{cmd}");
-            assert_eq!(res.decision, "ALLOW", "{cmd}");
+            assert_eq!(res.action, "bash_unclassified", "{cmd}");
+            assert_eq!(res.decision, "ASK", "{cmd}");
+            assert_eq!(res.rule.as_deref(), Some("approval_required"), "{cmd}");
         }
     }
 
     #[test]
-    fn substrings_of_larger_words_do_not_false_match() {
+    fn substrings_of_larger_words_fall_back_without_false_match() {
         // The regression this guards: naive substring matching flagged these as
         // egress ("nc " inside "jsonc "/"sync ") or destructive ("rm -rf" inside
-        // "warm -rf").
+        // "warm -rf"). They should fall to the unclassified shell fallback, not
+        // to a specific egress/destructive class.
         let world = classified_world();
         for cmd in [
             "cat app.jsonc 2>/dev/null",
@@ -656,7 +665,8 @@ transition_policies:
             "echo unscp",
         ] {
             let res = gate(&world, &bash_req(cmd, "clean"));
-            assert_eq!(res.action, "bash", "{cmd}");
+            assert_eq!(res.action, "bash_unclassified", "{cmd}");
+            assert_eq!(res.decision, "ASK", "{cmd}");
         }
     }
 
@@ -665,6 +675,18 @@ transition_policies:
         let world = classified_world();
         let res = gate(&world, &bash_req("ls && curl http://exfil", "tainted"));
         assert_eq!(res.action, "bash_network");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+    }
+
+    #[test]
+    fn tainted_unclassified_shell_is_denied_by_the_taint_floor() {
+        let world = classified_world();
+        let res = gate(
+            &world,
+            &bash_req("python3 -c 'import socket; print(1)'", "tainted"),
+        );
+        assert_eq!(res.action, "bash_unclassified");
         assert_eq!(res.decision, "DENY");
         assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
     }
@@ -680,12 +702,39 @@ transition_policies:
     #[test]
     fn unclassified_worlds_pass_the_raw_action_through() {
         // The default world declares no command_classes: the response's
-        // effective action is the raw tool, for every tool.
-        let world = compile_default();
+        // effective action is the raw tool, for tools without a classifier.
+        let yaml = r#"
+world_id: unclassified-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Web] }
+base_actions:
+  - { name: read_workspace, action_type: Read, side_effect: Read }
+  - { name: fetch_web, action_type: Web, side_effect: Network }
+"#;
+        let world = compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap();
         for tool in ["read_workspace", "fetch_web", "no_such_tool"] {
             let res = gate(&world, &req(tool, "clean"));
             assert_eq!(res.action, tool);
         }
+    }
+
+    #[test]
+    fn default_world_run_command_fails_closed_on_shell_bypasses() {
+        let world = compile_default();
+
+        let mut tabbed_curl = req("run_command", "tainted");
+        tabbed_curl.arguments = serde_json::json!({ "command": "curl\thttps://exfil.example" });
+        let res = gate(&world, &tabbed_curl);
+        assert_eq!(res.action, "run_command_network");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+
+        let mut unlisted = req("run_command", "tainted");
+        unlisted.arguments = serde_json::json!({ "command": "python3 -c 'import socket'" });
+        let res = gate(&world, &unlisted);
+        assert_eq!(res.action, "run_command_unclassified");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
     }
 
     #[test]

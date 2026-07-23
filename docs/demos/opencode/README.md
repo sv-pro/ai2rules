@@ -22,8 +22,9 @@ first slice), the seam is open and extensible — not a vendor gate you must wai
 `.opencode/plugin/ai2rules-gate.ts` hooks `tool.execute.before` on every OpenCode tool call:
 
 1. Sends the **raw** OpenCode tool name — since **D36** the *kernel* classifies `bash`
-   by command shape into `bash` / `bash_network` / `bash_destructive` from the world's
-   `command_classes` block (no pattern lists live in the plugin); everything else maps 1:1.
+   by command shape into `bash_network` / `bash_destructive` / `bash_unclassified`
+   from the world's `command_classes` block (no pattern lists live in the plugin);
+   everything else maps 1:1.
 2. Builds a `GateRequest` and shells to `harness gate --world opencode-world.yaml` (the wire
    ABI — D34: non-Rust hosts use the subprocess). `AI2RULES_MODE=background` threads
    `context.mode` so the kernel collapses ASK→DENY unattended.
@@ -46,6 +47,7 @@ action names the plugin sends:
   edit               tainted  -> ALLOW                        ← workspace writes aren't egress
   bash_destructive   clean    -> ASK    approval_required     ← rm -rf / sudo / mkfs …
   bash_network       tainted  -> DENY   taint_invariant       ← curl / wget / ssh … after taint
+  bash_unclassified  clean    -> ASK    approval_required     ← unmatched shell fails closed
   task               clean    -> ALLOW
   <unknown tool>     clean    -> ABSENT unknown_to_ontology   ← not in this world
 ```

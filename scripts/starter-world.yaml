@@ -39,10 +39,12 @@ base_actions:
   - { name: Bash, action_type: Command, side_effect: Process }
   - { name: Bash_network, action_type: Command, side_effect: Network }
   - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: Bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
 
 command_classes:
   - action: Bash
     arg: command
+    default_to: Bash_unclassified
     classes:
       - to: Bash_network
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
@@ -70,6 +72,7 @@ roots:
     # - { path: "./inbox", access: Read, taint_source: true }
 
 # The taint floor (invariant 7): tainted context cannot reach an effectful surface.
+# Tainted WebFetch/WebSearch/Bash_network/Bash_unclassified all DENY here.
 transition_policies:
   - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
   - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }

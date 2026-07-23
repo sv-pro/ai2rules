@@ -443,6 +443,9 @@ Base actions:
 - `write_workspace`
 - `apply_patch`
 - `run_command`
+- `run_command_network`
+- `run_command_destructive`
+- `run_command_unclassified`
 - `start_pty`
 - `call_mcp_tool`
 - `fetch_web`
@@ -456,6 +459,11 @@ Scoped capabilities:
 - `cargo_check` / `npm_test` / `pytest`: command-specific wrappers
 - `git_status`, `git_diff`, `git_commit`: constrained git verbs
 - `call_known_mcp_tool`: MCP call pinned to server profile and descriptor hash
+
+Raw `run_command` is classified by world data before decision. Known egress and
+destructive forms route to their specific actions; unmatched raw shell routes to
+an approval-required, network-effectful unclassified action. Scoped literal
+commands stay structured and do not depend on shell-string allowlisting.
 
 Scoped capabilities should:
 

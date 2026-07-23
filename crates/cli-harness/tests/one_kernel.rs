@@ -489,7 +489,7 @@ fn malformed_gate_request_is_a_process_error_not_a_deny() {
 }
 
 /// D36 classifier consistency: the `command_classes` pattern lists are
-/// byte-identical across the three host manifests (the class targets differ
+/// byte-identical across the host manifests (the class/default targets differ
 /// only in the hosts' action-name casing).
 #[test]
 fn command_class_patterns_are_identical_across_host_manifests() {
@@ -497,8 +497,10 @@ fn command_class_patterns_are_identical_across_host_manifests() {
         "docs/demos/one-kernel/demo-world.yaml",
         ".claude/cc-world.yaml",
         "docs/demos/opencode/opencode-world.yaml",
+        "scripts/starter-world.yaml",
     ];
     let mut pattern_sets: Vec<Vec<Vec<String>>> = Vec::new();
+    let mut default_targets: Vec<String> = Vec::new();
     for rel in manifests {
         let text = std::fs::read_to_string(repo_path(rel)).expect("read manifest");
         let manifest = compiler::loader::load_yaml(&text).expect("parse manifest");
@@ -509,6 +511,18 @@ fn command_class_patterns_are_identical_across_host_manifests() {
         );
         let def = &manifest.command_classes[0];
         assert_eq!(def.arg, "command", "{rel}: classifies the `command` arg");
+        let default_to = def
+            .default_to
+            .as_ref()
+            .expect("shell classifier default_to");
+        assert!(
+            default_to
+                .as_str()
+                .to_ascii_lowercase()
+                .ends_with("_unclassified"),
+            "{rel}: default_to must be an unclassified shell fallback"
+        );
+        default_targets.push(default_to.as_str().to_ascii_lowercase());
         pattern_sets.push(
             def.classes
                 .iter()
@@ -523,5 +537,13 @@ fn command_class_patterns_are_identical_across_host_manifests() {
     assert_eq!(
         pattern_sets[0], pattern_sets[2],
         "demo-world vs opencode-world pattern drift"
+    );
+    assert_eq!(
+        pattern_sets[0], pattern_sets[3],
+        "demo-world vs starter-world pattern drift"
+    );
+    assert!(
+        default_targets.iter().all(|d| d.ends_with("_unclassified")),
+        "all shell classifiers fail closed to an unclassified fallback"
     );
 }

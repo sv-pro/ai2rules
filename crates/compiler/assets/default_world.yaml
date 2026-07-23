@@ -62,6 +62,29 @@ base_actions:
       type: object
       properties:
         command: { type: string, description: "Shell command string to run" }
+  - name: run_command_network
+    action_type: Command
+    side_effect: Network
+    schema:
+      type: object
+      properties:
+        command: { type: string, description: "Shell command string to run" }
+  - name: run_command_destructive
+    action_type: Command
+    side_effect: Process
+    approval_required: true
+    schema:
+      type: object
+      properties:
+        command: { type: string, description: "Shell command string to run" }
+  - name: run_command_unclassified
+    action_type: Command
+    side_effect: Network
+    approval_required: true
+    schema:
+      type: object
+      properties:
+        command: { type: string, description: "Shell command string to run" }
   - name: start_pty
     action_type: Pty
     side_effect: Process
@@ -127,6 +150,16 @@ scoped_capabilities:
     base_action: call_mcp_tool
     args:
       query: ActorInput
+
+command_classes:
+  - action: run_command
+    arg: command
+    default_to: run_command_unclassified
+    classes:
+      - to: run_command_network
+        patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
+      - to: run_command_destructive
+        patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
 
 # Taint containment: tainted data cannot reach externally-effectful surfaces.
 transition_policies:

@@ -72,6 +72,14 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
                 def.action
             )));
         }
+        if let Some(default_to) = &def.default_to {
+            if !base_names.contains(default_to.as_str()) {
+                return Err(CompileError::Invalid(format!(
+                    "command classifier for {} defaults to unknown action {}",
+                    def.action, default_to
+                )));
+            }
+        }
         for class in &def.classes {
             if !base_names.contains(class.to.as_str()) {
                 return Err(CompileError::Invalid(format!(
