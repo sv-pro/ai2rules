@@ -20,13 +20,37 @@ use compiler::{compile, loader::load_yaml};
 use harness_preview::{
     gate, host_outcome, GateContext, GateRequest, GateResponse, HostOutcome, ABI_VERSION,
 };
-use harness_types::CompiledWorld;
+use harness_types::{
+    ActionName, ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, EffectMode, Provenance,
+    SessionId, SourceChannel,
+};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
+use trace_store::{params_hash, ApprovalStore};
+
+/// The gateway forwards approved calls as real upstream calls; the binding's
+/// effect mode is fixed so mint and the retry check agree.
+const GATEWAY_EFFECT_MODE: EffectMode = EffectMode::Execute;
+
+/// Deterministic provenance for an approval binding — mirrors how `gate()` derives
+/// provenance for the decision (same channel/session/hash), so the token records
+/// the real evaluation context and is computed identically at mint and at retry.
+fn binding_provenance(source: &str) -> Provenance {
+    let channel = match source {
+        "workspace_file" => SourceChannel::WorkspaceFile,
+        "shell_output" => SourceChannel::ShellOutput,
+        "mcp_output" => SourceChannel::McpOutput,
+        "web" => SourceChannel::Web,
+        "memory" => SourceChannel::Memory,
+        "generated" => SourceChannel::Generated,
+        _ => SourceChannel::UserPrompt,
+    };
+    Provenance::from_channel(channel, SessionId::new("mcp-gateway"), ContentHash::new("gate"))
+}
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
@@ -180,6 +204,7 @@ fn rpc_result(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     world_path: &Path,
     upstream: &[String],
@@ -187,6 +212,7 @@ pub fn run(
     initial_taint: bool,
     mode: &str,
     audit_path: Option<&Path>,
+    approvals_path: Option<&Path>,
 ) -> i32 {
     let content = match std::fs::read_to_string(world_path) {
         Ok(c) => c,
@@ -222,6 +248,15 @@ pub fn run(
         .projected_actions()
         .map(|a| a.as_str().to_string())
         .collect();
+
+    // Ensure the approvals store's directory exists so the first mint can append.
+    if let Some(apath) = approvals_path {
+        if let Some(parent) = apath.parent() {
+            if !parent.as_os_str().is_empty() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
+    }
 
     let mut up = match Upstream::spawn(upstream) {
         Ok(u) => u,
@@ -322,8 +357,76 @@ pub fn run(
                                 "content": [{"type": "text", "text": format!("upstream error: {e}")}]}),
                         }
                     }
-                    HostOutcome::NeedsApproval { reason } => json!({"isError": true,
-                        "content": [{"type": "text", "text": format!("ASK: {reason}")}]}),
+                    HostOutcome::NeedsApproval { reason } => match approvals_path {
+                        // No approval channel wired → ASK is a non-forwarded block
+                        // (an automated agent cannot self-approve).
+                        None => json!({"isError": true,
+                            "content": [{"type": "text", "text": format!("ASK: {reason}")}]}),
+                        // Out-of-band approval (E18.2): re-open the store each time so a
+                        // human's `harness approvals approve` (a separate process) is seen.
+                        Some(apath) => {
+                            let action = ActionName::new(&verdict.action);
+                            let dhash = world.descriptor_hash(&action).cloned().unwrap_or_default();
+                            let prov = binding_provenance(source);
+                            let wid = world.world_id().clone();
+                            match ApprovalStore::open(apath) {
+                                Err(e) => json!({"isError": true, "content": [{"type": "text",
+                                    "text": format!("ASK: {reason}; approval store error: {e}")}]}),
+                                Ok(mut store) => {
+                                    if let Some(tid) = store.granted_token_id(
+                                        &action, &args, &wid, &dhash, &prov, GATEWAY_EFFECT_MODE,
+                                    ) {
+                                        // Approved out of band → forward exactly once.
+                                        if verdict.context.taint == "tainted" {
+                                            session_taint = true;
+                                        }
+                                        let forwarded = up.call_tool(&name, &args);
+                                        // Single-use: consume the approval once the RPC
+                                        // reached upstream (a transport failure leaves it
+                                        // approved so the agent can retry).
+                                        if forwarded.is_ok() {
+                                            let _ = store.mark_executed(&tid);
+                                        }
+                                        match forwarded {
+                                            Ok(r) => r,
+                                            Err(e) => json!({"isError": true, "content": [{"type": "text",
+                                                "text": format!("upstream error: {e}")}]}),
+                                        }
+                                    } else {
+                                        // Not yet approved: reuse an outstanding request
+                                        // for this exact call, or mint a fresh one.
+                                        let existing = store.pending_token_id(
+                                            &action, &args, &wid, &dhash, &prov, GATEWAY_EFFECT_MODE,
+                                        );
+                                        let minted = match existing {
+                                            Some(tid) => Ok(tid),
+                                            None => {
+                                                let ts = SystemTime::now()
+                                                    .duration_since(UNIX_EPOCH)
+                                                    .map(|d| d.as_nanos())
+                                                    .unwrap_or(0);
+                                                store.mint(ApprovalToken::pending(
+                                                    ApprovalTokenId::new(format!("appr-{ts:x}")),
+                                                    action.clone(),
+                                                    params_hash(&args),
+                                                    wid.clone(),
+                                                    dhash.clone(),
+                                                    prov.clone(),
+                                                    GATEWAY_EFFECT_MODE,
+                                                ))
+                                            }
+                                        };
+                                        match minted {
+                                            Ok(tid) => json!({"isError": true, "content": [{"type": "text",
+                                                "text": format!("ASK: {reason}; approval pending — a human must run `harness approvals approve {}`, then retry", tid.as_str())}]}),
+                                            Err(e) => json!({"isError": true, "content": [{"type": "text",
+                                                "text": format!("ASK: {reason}; could not record approval request: {e}")}]}),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
                     HostOutcome::Block { kind, reason } => json!({"isError": true,
                         "content": [{"type": "text",
                                      "text": format!("{}: {reason}", kind.label())}]}),
