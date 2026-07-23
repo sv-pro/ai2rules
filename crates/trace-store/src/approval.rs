@@ -57,6 +57,11 @@ impl ApprovalStore {
         self.tokens.get(id)
     }
 
+    /// Every token currently known, in id order — for review/listing (E18.1).
+    pub fn all(&self) -> impl Iterator<Item = &ApprovalToken> {
+        self.tokens.values()
+    }
+
     /// Persist a freshly-minted pending token.
     pub fn mint(&mut self, token: ApprovalToken) -> io::Result<ApprovalTokenId> {
         let id = token.id.clone();
@@ -102,16 +107,90 @@ impl ApprovalStore {
         provenance: &Provenance,
         effect_mode: EffectMode,
     ) -> bool {
+        self.granted_token_id(
+            action,
+            params,
+            world_id,
+            descriptor_hash,
+            provenance,
+            effect_mode,
+        )
+        .is_some()
+    }
+
+    /// The id of the **Approved** token binding to this exact call, if any — the
+    /// same match `is_granted` performs, but returning the token so a caller (the
+    /// MCP gateway) can `mark_executed` it after forwarding (E18.2).
+    #[allow(clippy::too_many_arguments)]
+    pub fn granted_token_id(
+        &self,
+        action: &ActionName,
+        params: &Value,
+        world_id: &WorldId,
+        descriptor_hash: &DescriptorHash,
+        provenance: &Provenance,
+        effect_mode: EffectMode,
+    ) -> Option<ApprovalTokenId> {
+        self.find_bound(
+            ApprovalState::Approved,
+            action,
+            params,
+            world_id,
+            descriptor_hash,
+            provenance,
+            effect_mode,
+        )
+    }
+
+    /// The id of a **Pending** token binding to this exact call, if any — lets a
+    /// caller reuse an outstanding request instead of minting a duplicate (E18.2).
+    #[allow(clippy::too_many_arguments)]
+    pub fn pending_token_id(
+        &self,
+        action: &ActionName,
+        params: &Value,
+        world_id: &WorldId,
+        descriptor_hash: &DescriptorHash,
+        provenance: &Provenance,
+        effect_mode: EffectMode,
+    ) -> Option<ApprovalTokenId> {
+        self.find_bound(
+            ApprovalState::Pending,
+            action,
+            params,
+            world_id,
+            descriptor_hash,
+            provenance,
+            effect_mode,
+        )
+    }
+
+    /// The id of a token in `state` that binds to this exact call (E6.4 drift
+    /// rule: action + params + world + descriptor + provenance + effect mode).
+    #[allow(clippy::too_many_arguments)]
+    fn find_bound(
+        &self,
+        state: ApprovalState,
+        action: &ActionName,
+        params: &Value,
+        world_id: &WorldId,
+        descriptor_hash: &DescriptorHash,
+        provenance: &Provenance,
+        effect_mode: EffectMode,
+    ) -> Option<ApprovalTokenId> {
         let ph = params_hash(params);
-        self.tokens.values().any(|t| {
-            t.state == ApprovalState::Approved
-                && t.action == *action
-                && t.params_hash == ph
-                && t.world_id == *world_id
-                && t.descriptor_hash == *descriptor_hash
-                && t.provenance == *provenance
-                && t.effect_mode == effect_mode
-        })
+        self.tokens
+            .values()
+            .find(|t| {
+                t.state == state
+                    && t.action == *action
+                    && t.params_hash == ph
+                    && t.world_id == *world_id
+                    && t.descriptor_hash == *descriptor_hash
+                    && t.provenance == *provenance
+                    && t.effect_mode == effect_mode
+            })
+            .map(|t| t.id.clone())
     }
 
     fn transition(
