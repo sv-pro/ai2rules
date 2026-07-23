@@ -38,6 +38,7 @@ base_actions:
     side_effect: Read
     schema:
       type: object
+      required: [path]
       properties:
         path: { type: string, description: "Path to read" }
   - name: write_workspace
@@ -45,6 +46,7 @@ base_actions:
     side_effect: FilesystemWrite
     schema:
       type: object
+      required: [path, content]
       properties:
         path: { type: string, description: "Path to write" }
         content: { type: string, description: "File contents" }
@@ -53,13 +55,16 @@ base_actions:
     side_effect: FilesystemWrite
     schema:
       type: object
+      required: [path, contents]
       properties:
-        patch: { type: string, description: "Unified diff/patch content" }
+        path: { type: string, description: "Path to write" }
+        contents: { type: string, description: "Full file contents" }
   - name: run_command
     action_type: Command
     side_effect: Process
     schema:
       type: object
+      required: [command]
       properties:
         command: { type: string, description: "Shell command string to run" }
   - name: run_command_network
@@ -67,6 +72,7 @@ base_actions:
     side_effect: Network
     schema:
       type: object
+      required: [command]
       properties:
         command: { type: string, description: "Shell command string to run" }
   - name: run_command_destructive
@@ -75,6 +81,7 @@ base_actions:
     approval_required: true
     schema:
       type: object
+      required: [command]
       properties:
         command: { type: string, description: "Shell command string to run" }
   - name: run_command_unclassified
@@ -83,6 +90,7 @@ base_actions:
     approval_required: true
     schema:
       type: object
+      required: [command]
       properties:
         command: { type: string, description: "Shell command string to run" }
   - name: start_pty
@@ -102,6 +110,7 @@ base_actions:
     side_effect: Network
     schema:
       type: object
+      required: [url]
       properties:
         url: { type: string, description: "URL to fetch" }
     # PACT L2 (arXiv:2605.11039): `url` is the authority-bearing destination.
@@ -115,6 +124,7 @@ base_actions:
     side_effect: Memory
     schema:
       type: object
+      required: [key, value]
       properties:
         key: { type: string }
         value: { type: string }
@@ -127,7 +137,8 @@ scoped_capabilities:
   - name: apply_workspace_patch
     base_action: apply_patch
     args:
-      patch: ActorInput
+      path: ActorInput
+      contents: ActorInput
   - name: run_tests
     base_action: run_command
     args:

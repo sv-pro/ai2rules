@@ -101,7 +101,7 @@
   const BASE = [
     { id: 'read_workspace',  eff: 'Read',           extra: ['action_type: Read',    'side_effect: Read',           'schema: { type: object, properties: { path: { type: string } } }'] },
     { id: 'write_workspace', eff: 'FilesystemWrite', extra: ['action_type: Write',   'side_effect: FilesystemWrite', 'schema: { type: object, properties: { path: { type: string }, content: { type: string } } }'] },
-    { id: 'apply_patch',     eff: 'FilesystemWrite', extra: ['action_type: Patch',   'side_effect: FilesystemWrite', 'schema: { type: object, properties: { patch: { type: string } } }'] },
+    { id: 'apply_patch',     eff: 'FilesystemWrite', extra: ['action_type: Patch',   'side_effect: FilesystemWrite', 'schema: { type: object, required: [path, contents], properties: { path: { type: string }, contents: { type: string } } }'] },
     { id: 'run_command',     eff: 'Process',         extra: ['action_type: Command', 'side_effect: Process',         'schema: { type: object, properties: { command: { type: string } } }'] },
     { id: 'start_pty',       eff: 'Process',         extra: ['action_type: Pty',     'side_effect: Process',         'approval_required: true'] },
     { id: 'call_mcp_tool',   eff: 'External',        extra: ['action_type: Mcp',     'side_effect: External',        'backing: !McpServer { server: docs, tool: search }', 'schema: { type: object, properties: { query: { type: string } } }'] },
@@ -111,7 +111,7 @@
 
   const SCOPED = [
     { id: 'read_repo_file',      base: 'read_workspace', args: ['path: ActorInput'] },
-    { id: 'apply_workspace_patch', base: 'apply_patch',  args: ['patch: ActorInput'] },
+    { id: 'apply_workspace_patch', base: 'apply_patch',  args: ['path: ActorInput', 'contents: ActorInput'] },
     { id: 'run_tests',           base: 'run_command',    args: ['command: !Literal pytest'] },
     { id: 'git_status',          base: 'run_command',    args: ['command: !Literal "git status"'] },
     { id: 'git_diff',            base: 'run_command',    args: ['command: !Literal "git diff"'] },

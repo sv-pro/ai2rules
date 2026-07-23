@@ -368,7 +368,7 @@ A first useful manifest for a coding agent is small. Base actions:
 Scoped capabilities over those base actions (literal-arg injection):
 
 - `run_tests` → `run_command` with fixed argv prefix, network disabled
-- `apply_workspace_patch` → `apply_patch` limited to writable roots
+- `apply_workspace_patch` → `apply_patch` full-file write (`path`, `contents`) limited to writable roots
 - `read_repo_file` → `read_file` limited to workspace roots
 - `git_commit` → `run_command` with `git commit` verb only
 - `call_known_mcp_tool` → `call_mcp_tool` pinned to a server + descriptor hash
