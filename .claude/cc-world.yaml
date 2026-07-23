@@ -22,8 +22,8 @@ actors:
 
 data_classes: [Public, Workspace, Secret, Credential, Generated, External]
 
-# Channel trust is taken from the kernel's `SourceChannel` enum at gate time; this
-# section documents the intended provenance model for authoring/preview tools.
+# Channel trust is compiled into the runtime world and enforced by `harness gate`;
+# these rows are policy, not documentation.
 channels:
   - { name: user_cli, trust: Trusted, taint: false }
   - { name: workspace_files, trust: SemiTrusted, taint: true }

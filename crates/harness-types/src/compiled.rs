@@ -11,7 +11,7 @@ use crate::ids::{ActionName, DescriptorHash, ManifestHash, WorldId};
 use crate::manifest::{
     Budget, CommandClassDef, RootAccess, RootRule, RootsDef, ScopedCapabilityDef,
 };
-use crate::provenance::{Taint, TrustLevel};
+use crate::provenance::{SourceChannel, Taint, TrustLevel};
 
 /// A compiled taint-flow rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +29,14 @@ pub struct EffectRule {
     pub effect_mode: EffectMode,
 }
 
+/// The runtime policy for one manifest-declared source channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelPolicy {
+    pub channel: SourceChannel,
+    pub trust: TrustLevel,
+    pub taint: Taint,
+}
+
 /// The plain, fully-owned parts a compiler assembles. Consumed by
 /// [`CompiledWorld::new`], after which the world is immutable.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -41,6 +49,7 @@ pub struct CompiledWorldParts {
     pub projected: BTreeSet<ActionName>,
     pub descriptors: BTreeMap<ActionName, Descriptor>,
     pub descriptor_hashes: BTreeMap<ActionName, DescriptorHash>,
+    pub channel_policies: BTreeMap<SourceChannel, ChannelPolicy>,
     pub capability_matrix: BTreeMap<TrustLevel, BTreeSet<ActionType>>,
     pub action_types: BTreeMap<ActionName, ActionType>,
     pub side_effects: BTreeMap<ActionName, SideEffectClass>,
@@ -106,6 +115,16 @@ impl CompiledWorld {
     }
     pub fn side_effect(&self, action: &ActionName) -> Option<SideEffectClass> {
         self.parts.side_effects.get(action).copied()
+    }
+    /// Resolve a wire source-channel label through this world's compiled
+    /// channel table. Aliases such as `cli`/`user_cli` share the manifest row's
+    /// policy; undeclared or unknown names resolve to `None`.
+    pub fn channel_policy(&self, name: &str) -> Option<ChannelPolicy> {
+        let channel = SourceChannel::from_name(name)?;
+        self.parts.channel_policies.get(&channel).copied()
+    }
+    pub fn channel_policies(&self) -> &BTreeMap<SourceChannel, ChannelPolicy> {
+        &self.parts.channel_policies
     }
     /// Does `trust` grant capability for `action_type`?
     pub fn can_perform(&self, trust: TrustLevel, action_type: ActionType) -> bool {

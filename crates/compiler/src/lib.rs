@@ -177,6 +177,36 @@ base_actions:
     }
 
     #[test]
+    fn validate_rejects_unknown_or_duplicate_channel_names() {
+        for (yaml, what) in [
+            (
+                r#"
+world_id: w
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: unreviewed_pdf, trust: Untrusted, taint: true }
+"#,
+                "unknown channel name",
+            ),
+            (
+                r#"
+world_id: w
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: user_prompt, trust: Trusted, taint: false }
+"#,
+                "duplicate canonical channel",
+            ),
+        ] {
+            let manifest = load_yaml(yaml).expect("parses");
+            assert!(
+                matches!(compile(&manifest), Err(CompileError::Invalid(_))),
+                "{what} must be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn validate_rejects_duplicate_base_action() {
         let yaml = r#"
 world_id: w

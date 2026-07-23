@@ -466,6 +466,10 @@ Scoped capabilities should:
 
 Default channel trust:
 
+At runtime, channel trust and channel-introduced taint come from the compiled
+manifest `channels:` table. The defaults below are the authoring baseline for
+worlds that do not declare channels.
+
 | Channel | Default |
 |---|---|
 | direct user prompt | trusted, traced |

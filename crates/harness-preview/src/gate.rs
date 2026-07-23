@@ -13,8 +13,8 @@
 //! [`preview`]: crate::preview
 
 use harness_types::{
-    ActionName, ActionType, CallId, CompiledWorld, ContentHash, Decision, ExecutionMode,
-    Provenance, Provider, RootAccess, SessionId, SideEffectClass, SourceChannel, Taint,
+    ActionName, ActionType, CallId, ChannelPolicy, CompiledWorld, ContentHash, Decision,
+    ExecutionMode, Provenance, Provider, RootAccess, SessionId, SideEffectClass, Taint,
     TaintContext, ToolCall,
 };
 use serde::{Deserialize, Serialize};
@@ -119,10 +119,11 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         Ok(t) => t,
         Err(rule) => return denied_response(world, &action, rule, Taint::Tainted),
     };
-    let channel = match parse_channel(req.context.source_channel.as_deref()) {
+    let channel = match parse_channel(world, req.context.source_channel.as_deref()) {
         Ok(c) => c,
         Err(rule) => return denied_response(world, &action, rule, inbound),
     };
+    let inbound = inbound.join(channel.taint);
     let session = SessionId::new(&req.context.session_id);
 
     let call = ToolCall {
@@ -133,7 +134,12 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         source_perceptions: vec![],
         session_id: session.clone(),
     };
-    let provenance = Provenance::from_channel(channel, session, ContentHash::new("gate"));
+    let provenance = Provenance::from_channel_with_trust(
+        channel.channel,
+        channel.trust,
+        session,
+        ContentHash::new("gate"),
+    );
     let mode = parse_mode(req.context.mode.as_deref());
     let ctx = EvalContext {
         taint: TaintContext::from_taint(inbound),
@@ -291,20 +297,14 @@ fn descriptor_has_path_arg(world: &CompiledWorld, action: &ActionName) -> bool {
         .any(|key| properties.contains_key(*key))
 }
 
-/// Map the wire `source_channel` to a kernel channel. The field is explicit so
-/// thin adapters cannot accidentally upgrade an unknown proposer to trusted.
-fn parse_channel(s: Option<&str>) -> Result<SourceChannel, &'static str> {
-    match s {
-        Some("user_prompt" | "user_cli" | "cli") => Ok(SourceChannel::UserPrompt),
-        Some("workspace_file" | "workspace_files") => Ok(SourceChannel::WorkspaceFile),
-        Some("shell_output") => Ok(SourceChannel::ShellOutput),
-        Some("mcp_output") => Ok(SourceChannel::McpOutput),
-        Some("web" | "web_fetch") => Ok(SourceChannel::Web),
-        Some("memory") => Ok(SourceChannel::Memory),
-        Some("generated") => Ok(SourceChannel::Generated),
-        Some(_) => Err("invalid_source_channel"),
-        None => Err("missing_source_channel"),
-    }
+/// Resolve the wire `source_channel` through the compiled world's manifest
+/// channel table. The field is explicit so thin adapters cannot accidentally
+/// upgrade an unknown proposer to trusted.
+fn parse_channel(world: &CompiledWorld, s: Option<&str>) -> Result<ChannelPolicy, &'static str> {
+    let Some(name) = s else {
+        return Err("missing_source_channel");
+    };
+    world.channel_policy(name).ok_or("invalid_source_channel")
 }
 
 /// The taint an action's *output* introduces, by side-effect class. v1 policy:
@@ -477,6 +477,19 @@ mod tests {
         let res = gate(&world, &r);
         assert_eq!(res.decision, "ABSENT");
         assert_eq!(res.rule.as_deref(), Some("capability"));
+    }
+
+    #[test]
+    fn manifest_channel_policy_controls_trust_and_taint() {
+        // The default manifest declares workspace_files as Untrusted + tainting.
+        // It must not inherit the legacy enum's SemiTrusted workspace default.
+        let world = compile_default();
+        let mut r = req("run_command", "clean");
+        r.context.source_channel = Some("workspace_files".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "ABSENT");
+        assert_eq!(res.rule.as_deref(), Some("capability"));
+        assert_eq!(res.context.taint, "tainted");
     }
 
     #[test]
