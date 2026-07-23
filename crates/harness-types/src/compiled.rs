@@ -192,9 +192,10 @@ impl CompiledWorld {
     /// Resolve the **effective action** for a proposed call (DECISIONS D36): for
     /// the first classifier declared for `action`, read `arguments[arg]` as a
     /// string and return the first class's `to` whose any pattern matches at a
-    /// left word boundary. Everything else — including actions without a
-    /// classifier — resolves to the raw action. Classification is pure world
-    /// data; no adapter may carry its own copy.
+    /// left word boundary. If no class matches, or the command argument is
+    /// missing/malformed, `default_to` is used when the classifier declares one.
+    /// Actions without a classifier resolve to the raw action. Classification
+    /// is pure world data; no adapter may carry its own copy.
     pub fn classify_command(
         &self,
         action: &ActionName,
@@ -208,15 +209,16 @@ impl CompiledWorld {
         else {
             return action.clone();
         };
+        let fallback = || def.default_to.clone().unwrap_or_else(|| action.clone());
         let Some(cmd) = arguments.get(&def.arg).and_then(|c| c.as_str()) else {
-            return action.clone();
+            return fallback();
         };
         for class in &def.classes {
             if class.patterns.iter().any(|p| left_word_match(cmd, p)) {
                 return class.to.clone();
             }
         }
-        action.clone()
+        fallback()
     }
 }
 
@@ -237,23 +239,66 @@ fn path_under(path: &str, root: &str) -> bool {
 }
 
 /// True iff `pat` occurs in `cmd` at a LEFT word boundary (an occurrence not
-/// preceded by `[A-Za-z0-9_]`). Patterns carry their own right boundary (a
-/// trailing space or `=`), so `"nc "` matches `"; nc x"` but not `"jsonc x"`,
-/// and `"rm -rf"` does not match inside `"warm -rf"`.
+/// preceded by `[A-Za-z0-9_]`). ASCII whitespace in a pattern matches one or
+/// more shell whitespace bytes in the command, so `"curl "` matches
+/// `"curl\thost"` and `"rm -rf"` matches `"rm\n-rf"` while still preserving the
+/// left-boundary guard (`"nc "` does not match `"jsonc x"`).
 fn left_word_match(cmd: &str, pat: &str) -> bool {
     if pat.is_empty() {
         return false;
     }
     let bytes = cmd.as_bytes();
     let mut start = 0;
-    while let Some(i) = cmd[start..].find(pat) {
+    while start < bytes.len() {
+        let Some(first) = pat.as_bytes().first().copied() else {
+            return false;
+        };
+        let Some(i) = cmd.as_bytes()[start..].iter().position(|b| *b == first) else {
+            return false;
+        };
         let at = start + i;
         let boundary =
             at == 0 || !matches!(bytes[at - 1], b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_');
-        if boundary {
+        if boundary && pattern_matches_at(&cmd.as_bytes()[at..], pat.as_bytes()) {
             return true;
         }
         start = at + 1;
     }
     false
+}
+
+fn pattern_matches_at(mut cmd: &[u8], mut pat: &[u8]) -> bool {
+    while let Some((&p, rest)) = pat.split_first() {
+        if p.is_ascii_whitespace() {
+            let mut pat_rest = rest;
+            while let Some((&next, next_rest)) = pat_rest.split_first() {
+                if !next.is_ascii_whitespace() {
+                    break;
+                }
+                pat_rest = next_rest;
+            }
+            let mut consumed = false;
+            while let Some((&c, cmd_rest)) = cmd.split_first() {
+                if !c.is_ascii_whitespace() {
+                    break;
+                }
+                consumed = true;
+                cmd = cmd_rest;
+            }
+            if !consumed {
+                return false;
+            }
+            pat = pat_rest;
+        } else {
+            let Some((&c, cmd_rest)) = cmd.split_first() else {
+                return false;
+            };
+            if c != p {
+                return false;
+            }
+            cmd = cmd_rest;
+            pat = rest;
+        }
+    }
+    true
 }

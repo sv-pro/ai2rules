@@ -96,6 +96,20 @@ cases:
       taint: tainted
       action: bash_network
 
+  # Unknown shell shape is not ambient `Process`: D44 routes it to the
+  # unclassified fallback, which is network-effectful and approval-required.
+  # In a tainted session, the hard taint floor denies before approval.
+  - name: tainted_unclassified_shell_is_denied
+    request:
+      tool: bash
+      arguments: { command: "python3 -c 'import socket'" }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: bash_unclassified
+
   # Monotonicity: an allowed read in a tainted session stays tainted — taint
   # never decreases.
   - name: post_call_taint_never_decreases

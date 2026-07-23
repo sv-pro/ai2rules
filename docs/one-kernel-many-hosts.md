@@ -33,7 +33,8 @@ host event → thin host adapter → GateRequest → harness_preview::gate()
   `ABSENT`/`DENY`/`REPLAN` kept distinct, unknown verdicts fail closed).
 - **The compiled `WorldManifest`** — actions, side effects, approval flags,
   transition policies, **and `command_classes`** (D36): the bash-shape pattern
-  lists are world *data*, byte-identical across hosts (pinned by test).
+  lists and fail-closed fallback are world *data*, byte-identical across hosts
+  (pinned by test).
 
 ## What stays host-specific (all of it shape, none of it policy)
 

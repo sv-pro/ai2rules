@@ -70,8 +70,8 @@ harness-types (foundation — language-neutral contracts, pure data)
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 41 · compiler 18 · executor 12 · trace-store 13 ·
-provider-adapters 5 · agent-core 16 · harness-preview 42 · cli-harness 29 ·
-harness-wasm 0 · **total 181** (plus the harness-wasm Node smoke tests, run via
+provider-adapters 5 · agent-core 16 · harness-preview 44 · cli-harness 29 ·
+harness-wasm 0 · **total 183** (plus the harness-wasm Node smoke tests, run via
 wasm-pack)
 
 ---
@@ -126,7 +126,7 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
-  contains 8 base actions + 4 scoped capabilities. Changes to it affect
+  contains 11 base actions + 7 scoped capabilities. Changes to it affect
   `compile_default()` and the embedded WASM artifact.
 - **WASM artifact** is committed to `blog/public/vendor/harness-wasm/` as a
   release build (480 KB optimised). Rebuild with `wasm-pack build --target web

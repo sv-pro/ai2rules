@@ -41,6 +41,9 @@ mod tests {
             "write_workspace",
             "apply_patch",
             "run_command",
+            "run_command_network",
+            "run_command_destructive",
+            "run_command_unclassified",
             "start_pty",
             "call_mcp_tool",
             "fetch_web",
@@ -166,6 +169,10 @@ base_actions:
             (
                 "command_classes:\n  - { action: bash, classes: [ { to: bash_network, patterns: [\"\"] } ] }\n",
                 "empty pattern",
+            ),
+            (
+                "command_classes:\n  - { action: bash, default_to: ghost, classes: [ { to: bash_network, patterns: [\"curl \"] } ] }\n",
+                "unknown default action",
             ),
         ] {
             let manifest = load_yaml(&format!("{base}{fragment}")).expect("parses");

@@ -94,14 +94,18 @@ pub struct CommandClassRule {
 
 /// A manifest-declared command classifier (DECISIONS D36): for calls proposed
 /// as `action`, inspect the string argument named `arg` (default `command`) and
-/// reclassify to the first matching class's `to` action. Classification is world
-/// *data* compiled into `CompiledWorld` — never adapter code — so every host
-/// shares byte-identical classification.
+/// reclassify to the first matching class's `to` action. `default_to` is the
+/// optional fail-closed fallback when no pattern matches or the command argument
+/// is missing/malformed. Classification is world *data* compiled into
+/// `CompiledWorld` — never adapter code — so every host shares byte-identical
+/// classification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandClassDef {
     pub action: ActionName,
     #[serde(default = "default_command_arg")]
     pub arg: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_to: Option<ActionName>,
     #[serde(default)]
     pub classes: Vec<CommandClassRule>,
 }

@@ -8,10 +8,11 @@
 # The host adapter (`harness cc-hook`, D37) maps Claude Code's native tools onto
 # these action names 1:1 and holds no governance logic. `Bash` is classified by
 # the KERNEL from the `command_classes` block below (D25 → D36): plain `Bash`
-# (Process), `Bash_network` (egress: curl/wget/nc/ssh/…), or `Bash_destructive`
-# (rm -rf/sudo/mkfs/… → approval). Classification is world data, so every host
-# shares byte-identical classification; the *policy* for each action is declared
-# in `base_actions` / `transition_policies`.
+# (Process), `Bash_network` (egress: curl/wget/nc/ssh/…), `Bash_destructive`
+# (rm -rf/sudo/mkfs/… → approval), or `Bash_unclassified` (unmatched shell →
+# ask/taint-floor). Classification is world data, so every host shares
+# byte-identical classification; the *policy* for each action is declared in
+# `base_actions` / `transition_policies`.
 world_id: claude-code-default
 
 actors:
@@ -54,6 +55,7 @@ base_actions:
   - { name: Bash, action_type: Command, side_effect: Process }
   - { name: Bash_network, action_type: Command, side_effect: Network }
   - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: Bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
 
 # Kernel-side command classification (D36): the shared pattern lists — keep
 # byte-identical with docs/demos/opencode/opencode-world.yaml and
@@ -61,6 +63,7 @@ base_actions:
 command_classes:
   - action: Bash
     arg: command
+    default_to: Bash_unclassified
     classes:
       - to: Bash_network
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
@@ -68,7 +71,7 @@ command_classes:
         patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
 
 # Tainted data cannot reach externally-effectful surfaces (the taint floor,
-# invariant 7). Tainted WebFetch/WebSearch/Bash_network all DENY here.
+# invariant 7). Tainted WebFetch/WebSearch/Bash_network/Bash_unclassified all DENY here.
 transition_policies:
   - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
   - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
