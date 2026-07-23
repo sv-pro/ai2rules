@@ -454,7 +454,7 @@ Base actions:
 Scoped capabilities:
 
 - `read_repo_file`: `read_workspace` limited to configured roots
-- `apply_workspace_patch`: `apply_patch` limited to writable roots
+- `apply_workspace_patch`: `apply_patch` full-file write (`path`, `contents`) limited to writable roots
 - `run_tests`: `run_command` with fixed argv prefix and network disabled
 - `cargo_check` / `npm_test` / `pytest`: command-specific wrappers
 - `git_status`, `git_diff`, `git_commit`: constrained git verbs

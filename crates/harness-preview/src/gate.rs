@@ -381,12 +381,12 @@ mod tests {
     use compiler::compile_default;
 
     /// Build a request for `tool` with the given carried taint, interactive,
-    /// user-prompt provenance, empty args.
+    /// user-prompt provenance, and valid default args for the bundled world.
     fn req(tool: &str, taint: &str) -> GateRequest {
         GateRequest {
             v: ABI_VERSION,
             tool: tool.to_string(),
-            arguments: serde_json::json!({}),
+            arguments: default_arguments(tool),
             path: None,
             context: GateContext {
                 session_id: "s1".to_string(),
@@ -395,6 +395,19 @@ mod tests {
                 source_channel: Some("user_prompt".to_string()),
                 approval_token: None,
             },
+        }
+    }
+
+    fn default_arguments(tool: &str) -> serde_json::Value {
+        match tool {
+            "read_workspace" => serde_json::json!({ "path": "Cargo.toml" }),
+            "write_workspace" => serde_json::json!({ "path": "out.txt", "content": "x" }),
+            "apply_patch" => serde_json::json!({ "path": "out.txt", "contents": "x" }),
+            "run_command" => serde_json::json!({ "command": "echo ok" }),
+            "fetch_web" => serde_json::json!({ "url": "https://docs.example/guide" }),
+            "call_mcp_tool" => serde_json::json!({ "query": "guide" }),
+            "update_memory" => serde_json::json!({ "key": "k", "value": "v" }),
+            _ => serde_json::json!({}),
         }
     }
 

@@ -86,11 +86,11 @@ fn describe_arg(source: &ArgSource) -> Value {
 }
 
 /// The kernel's verdict for a projected action under a trusted, interactive
-/// context with the given inbound taint and empty arguments.
+/// context with the given inbound taint and minimal sample arguments.
 fn verdict(world: &CompiledWorld, action: &ActionName, taint: Taint) -> Value {
     let call = ToolCall {
         action_name: action.clone(),
-        arguments: json!({}),
+        arguments: sample_arguments(world, action),
         provider: Provider::CliNative,
         call_id: CallId::new("preview"),
         source_perceptions: vec![],
@@ -117,6 +117,59 @@ fn verdict(world: &CompiledWorld, action: &ActionName, taint: Taint) -> Value {
         }
     };
     json!({ "decision": decision, "rule": rule })
+}
+
+fn sample_arguments(world: &CompiledWorld, action: &ActionName) -> Value {
+    if let Some(cap) = world.scoped_capability(action) {
+        return Value::Object(
+            cap.args
+                .iter()
+                .filter(|(_, source)| matches!(source, ArgSource::ActorInput))
+                .map(|(name, _)| (name.clone(), sample_value(name, None)))
+                .collect(),
+        );
+    }
+    let Some(descriptor) = world.descriptor(action) else {
+        return json!({});
+    };
+    let Some(props) = descriptor
+        .schema
+        .get("properties")
+        .and_then(Value::as_object)
+    else {
+        return json!({});
+    };
+    Value::Object(
+        props
+            .iter()
+            .map(|(name, spec)| {
+                (
+                    name.clone(),
+                    sample_value(name, spec.get("type").and_then(Value::as_str)),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn sample_value(name: &str, ty: Option<&str>) -> Value {
+    match name {
+        "path" => json!("Cargo.toml"),
+        "url" => json!("https://docs.example/guide"),
+        "command" => json!("echo ok"),
+        "content" | "contents" | "value" => json!("x"),
+        "query" => json!("guide"),
+        "key" => json!("k"),
+        _ => match ty {
+            Some("number") => json!(1.0),
+            Some("integer") => json!(1),
+            Some("boolean") => json!(true),
+            Some("array") => json!([]),
+            Some("object") => json!({}),
+            Some("null") => Value::Null,
+            _ => json!("x"),
+        },
+    }
 }
 
 #[cfg(test)]

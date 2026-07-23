@@ -255,6 +255,19 @@ mod tests {
         }
     }
 
+    fn valid_default_args(action: &str) -> Value {
+        match action {
+            "read_workspace" => json!({ "path": "Cargo.toml" }),
+            "write_workspace" => json!({ "path": "out.txt", "content": "x" }),
+            "apply_patch" => json!({ "path": "out.txt", "contents": "x" }),
+            "run_command" => json!({ "command": "echo ok" }),
+            "fetch_web" => json!({ "url": "https://docs.example/guide" }),
+            "call_mcp_tool" => json!({ "query": "guide" }),
+            "update_memory" => json!({ "key": "k", "value": "v" }),
+            _ => json!({}),
+        }
+    }
+
     fn from_channel(ch: SourceChannel) -> Provenance {
         Provenance::from_channel(ch, SessionId::new("s1"), ContentHash::new("h"))
     }
@@ -264,7 +277,7 @@ mod tests {
         let world = compile_default();
         let outcome = decide(
             &world,
-            &default_call("read_workspace", json!({})),
+            &default_call("read_workspace", valid_default_args("read_workspace")),
             from_channel(SourceChannel::UserPrompt),
             &EvalContext::interactive_clean(),
         );
@@ -305,7 +318,7 @@ mod tests {
         for action in ["fetch_web", "call_mcp_tool", "update_memory"] {
             let outcome = decide(
                 &world,
-                &default_call(action, json!({})),
+                &default_call(action, valid_default_args(action)),
                 from_channel(SourceChannel::UserPrompt),
                 &EvalContext::interactive_clean()
                     .with_taint(TaintContext::from_taint(Taint::Tainted)),
@@ -454,7 +467,7 @@ mod tests {
         });
         let outcome = decide(
             &world,
-            &default_call("run_command", json!({})),
+            &default_call("run_command", valid_default_args("run_command")),
             from_channel(SourceChannel::UserPrompt),
             &ctx,
         );
@@ -473,7 +486,7 @@ mod tests {
         let builder = IRBuilder::new(&world);
         let ir = builder
             .build(
-                &default_call("read_workspace", json!({})),
+                &default_call("read_workspace", valid_default_args("read_workspace")),
                 prior_session,
                 &TaintContext::from_taint(Taint::Tainted),
             )
