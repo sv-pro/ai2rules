@@ -120,15 +120,21 @@ write_manifest(){
 # --- per project: merge the PreToolUse hook (idempotent) --------------------------
 merge_settings(){
   local s="$TARGET/.claude/settings.json"
+  local command='bash "$CLAUDE_PROJECT_DIR/.claude/hooks/world-gate.sh"'
   local entry='{"matcher":"*","hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/world-gate.sh\"","timeout":10}]}'
   if ! command -v jq >/dev/null 2>&1; then
     say "jq not found — add this PreToolUse hook to $s by hand:"; echo "  $entry"; return
   fi
   local cur='{}'; [ -f "$s" ] && cur="$(cat "$s")"
-  echo "$cur" | jq --argjson e "$entry" '
+  echo "$cur" | jq --arg command "$command" --argjson e "$entry" '
     .hooks.PreToolUse = (
       (.hooks.PreToolUse // []) as $p
-      | if ([ $p[].hooks[]?.command // empty ] | any(test("world-gate")))
+      | if ([
+          $p[]?
+          | select(.matcher == "*")
+          | .hooks[]?
+          | select(.type == "command" and .command == $command and .timeout == 10)
+        ] | length > 0)
         then $p else $p + [$e] end
     )
   ' > "$s.tmp" && mv "$s.tmp" "$s"
