@@ -1,8 +1,9 @@
 # `harness gate` — the host-neutral governance ABI
 
-Status: **shipped (v1 + the D36 `action` addition)**, updated 2026-07-12.
+Status: **shipped (v1 + the D36 `action` addition)**, updated 2026-07-23.
 Decisions: `DECISIONS.md` **D24** (refines D19), **D34** (in-process vs wire),
-**D36** (kernel-side classification), **D37** (live-hook cutover). Vocabulary:
+**D36** (kernel-side classification), **D37** (live-hook cutover), **D41**
+(approval tokens are correlation ids, not bearer grants). Vocabulary:
 `docs/GLOSSARY.md` → *Integration / topology*. Cross-host parity is pinned by
 `crates/cli-harness/tests/one_kernel.rs` (see `docs/one-kernel-many-hosts.md`).
 
@@ -83,10 +84,17 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
 | `context.mode` | ✓ | `interactive` \| `background`. → `ExecutionMode` (drives ASK→DENY fail-closed). |
 | `context.taint` | ✓ | Monotonic state carried by the adapter: `clean` \| `tainted`. → `TaintContext`. |
 | `context.source_channel` |  | Provenance of this call's trigger: `user_prompt` (default) \| `web` \| `workspace_file` \| `mcp_output` \| … → `SourceChannel` (trust). |
-| `context.approval_token` |  | A token previously minted by an `ASK` and now granted, when re-submitting. → `EvalContext.approval_granted`. |
+| `context.approval_token` |  | Optional correlation id from a prior `ASK`. The pure gate ignores request-supplied tokens; it never maps this field to `EvalContext.approval_granted`. |
 
 Unknown fields are ignored (forward-compatible). Budgets/usage are a v1.x addition
 to `context` (kernel already supports `BudgetUsage`); v1 assumes fresh usage.
+
+`context.approval_token` is not a bearer credential. A host that supports
+approval resumption must validate a durable approval-store binding at a trusted
+adapter/orchestrator boundary (action, params, world, descriptor, provenance, and
+effect mode) before setting `EvalContext.approval_granted`. The public
+`harness gate` ABI has no verifier or store access, so a non-null token still
+returns `ASK` for approval-required actions.
 
 ## 4. `GateResponse` (stdout)
 
@@ -110,7 +118,7 @@ to `context` (kernel already supports `BudgetUsage`); v1 assumes fresh usage.
 | `rule` | The rule/invariant that fired (`absent`, `capability`, `taint_invariant`, `approval_required`, `budget_exceeded`, …), or `null` for a plain `ALLOW`. |
 | `reason` | Human-readable, for the host's UI / the trace. |
 | `context.taint` | **Post-call** monotonic taint the adapter must persist for the next call. `clean` only if it was clean *and* this call is not a declared taint source; otherwise `tainted`. |
-| `approval` | On `ASK`: `{ "token": "<id>", "required": true }`. Else `null`. The adapter surfaces the host's approval UI; on grant it re-submits with `context.approval_token`. |
+| `approval` | On `ASK`: `{ "token": "<id>", "required": true }`. Else `null`. The token is a correlation id for the adapter's approval UI/store, not a grant credential. |
 | `manifest_hash` | First 12 hex of the compiled manifest hash — drift correlation + trace join. |
 
 ## 5. Exit codes (process-level, **not** the verdict)

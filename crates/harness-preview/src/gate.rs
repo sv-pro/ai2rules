@@ -65,7 +65,8 @@ pub struct GateContext {
     /// to `user_prompt`. The inbound taint *floor* is driven by `taint`, not this.
     #[serde(default)]
     pub source_channel: Option<String>,
-    /// A granted approval token, when re-submitting a previously `ASK`ed call.
+    /// Optional host correlation id from a prior `ASK`. The pure gate cannot
+    /// verify approval stores, so this field is never treated as a grant.
     #[serde(default)]
     pub approval_token: Option<String>,
 }
@@ -99,8 +100,9 @@ pub struct GateResponseContext {
     pub taint: String,
 }
 
-/// Approval handshake returned on `ASK` (§4). The token is a correlation id;
-/// durable binding/validation is the host adapter's `ApprovalStore` (deferred).
+/// Approval handshake returned on `ASK` (§4). The token is a correlation id,
+/// not a bearer credential; durable binding/validation belongs to a trusted
+/// host adapter approval store outside this pure ABI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateApproval {
     pub token: String,
@@ -131,7 +133,10 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         taint: TaintContext::from_taint(inbound),
         mode,
         usage: BudgetUsage::default(),
-        approval_granted: req.context.approval_token.is_some(),
+        // The gate ABI is intentionally pure and has no verifier callback or
+        // store access. A request-supplied token is untrusted input, so it must
+        // never grant approval at this boundary.
+        approval_granted: false,
     };
 
     let (mut decision, mut rule) = match decide(world, &call, provenance, &ctx) {
@@ -387,12 +392,14 @@ mod tests {
     }
 
     #[test]
-    fn granted_approval_token_allows() {
+    fn request_supplied_approval_token_does_not_grant_access() {
         let world = compile_default();
         let mut r = req("start_pty", "clean");
         r.context.approval_token = Some("s1:start_pty".to_string());
         let res = gate(&world, &r);
-        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.decision, "ASK");
+        assert_eq!(res.rule.as_deref(), Some("approval_required"));
+        assert!(res.approval.is_some());
     }
 
     #[test]
