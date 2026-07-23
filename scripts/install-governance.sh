@@ -109,8 +109,12 @@ SHIM
 write_manifest(){
   local dst="$TARGET/.claude/cc-world.yaml"
   if [ -f "$dst" ]; then say "manifest exists — keeping it: .claude/cc-world.yaml"; return; fi
-  cp "$SOURCE/.claude/cc-world.yaml" "$dst"
-  say "starter manifest -> .claude/cc-world.yaml (tune it for this project)"
+  # Prefer the dedicated, portable starter (governs native tools + confines file
+  # actions to declared roots). Fall back to the dogfood manifest if it's absent.
+  local src="$SOURCE/scripts/starter-world.yaml"
+  [ -f "$src" ] || src="$SOURCE/.claude/cc-world.yaml"
+  cp "$src" "$dst"
+  say "starter manifest -> .claude/cc-world.yaml (roots-confined; tune it for this project)"
 }
 
 # --- per project: merge the PreToolUse hook (idempotent) --------------------------
