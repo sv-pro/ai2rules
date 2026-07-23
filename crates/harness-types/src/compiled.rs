@@ -139,6 +139,11 @@ impl CompiledWorld {
         &self.parts.command_classes
     }
 
+    /// Whether this world enables path-scoped root policy.
+    pub fn has_roots(&self) -> bool {
+        self.parts.roots.is_some()
+    }
+
     /// Decide a filesystem `path` against the world's `roots` (spatial scope).
     /// `None` when the world declares no roots (path-scope off). Otherwise the
     /// access of the longest matching rule prefix, or the closed-world `default`

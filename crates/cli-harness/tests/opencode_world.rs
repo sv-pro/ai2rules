@@ -25,7 +25,12 @@ fn gate(action: &str, taint: Option<&str>, mode: Option<&str>) -> Value {
         "v": 1,
         "tool": action,
         "arguments": {},
-        "context": { "session_id": "oc", "mode": mode, "taint": taint },
+        "context": {
+            "session_id": "oc",
+            "mode": mode.unwrap_or("interactive"),
+            "taint": taint.unwrap_or("clean"),
+            "source_channel": "user_prompt"
+        },
     });
     let mut child = Command::new(bin)
         .args(["gate", "--world", world().to_str().unwrap()])

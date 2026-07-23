@@ -3,8 +3,9 @@
 Status: **shipped (v1 + the D36 `action` addition)**, updated 2026-07-23.
 Decisions: `DECISIONS.md` **D24** (refines D19), **D34** (in-process vs wire),
 **D36** (kernel-side classification), **D37** (live-hook cutover), **D41**
-(approval tokens are correlation ids, not bearer grants). Vocabulary:
-`docs/GLOSSARY.md` → *Integration / topology*. Cross-host parity is pinned by
+(approval tokens are correlation ids, not bearer grants), **D42** (gate context
+is explicit and fail-closed). Vocabulary: `docs/GLOSSARY.md` → *Integration /
+topology*. Cross-host parity is pinned by
 `crates/cli-harness/tests/one_kernel.rs` (see `docs/one-kernel-many-hosts.md`).
 
 This is the single interface through which **any host** asks the kernel for a
@@ -65,6 +66,7 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
   "v": 1,
   "tool": "Bash",
   "arguments": { "command": "rm -rf /tmp/x" },
+  "path": null,
   "context": {
     "session_id": "cc-9f3a",
     "mode": "interactive",
@@ -80,14 +82,21 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
 | `v` | ✓ | ABI version (integer). v1. |
 | `tool` | ✓ | The action name **in the manifest's vocabulary** (the adapter has already mapped the host's tool name; for CC the manifest *uses* `Bash`/`Read`/…). → `ToolCall.action_name`. |
 | `arguments` | ✓ | The proposed call's arguments (object). → `ToolCall.arguments`. |
+| `path` |  | Adapter-resolved absolute path for path-scoped file actions. Required when roots are enabled and the effective action is a filesystem read/write/patch action; Bash and other non-file actions set `null`. |
 | `context.session_id` | ✓ | Opaque host session id. → `SessionId`; trace correlation; taint sidecar key. |
 | `context.mode` | ✓ | `interactive` \| `background`. → `ExecutionMode` (drives ASK→DENY fail-closed). |
 | `context.taint` | ✓ | Monotonic state carried by the adapter: `clean` \| `tainted`. → `TaintContext`. |
-| `context.source_channel` |  | Provenance of this call's trigger: `user_prompt` (default) \| `web` \| `workspace_file` \| `mcp_output` \| … → `SourceChannel` (trust). |
+| `context.source_channel` | ✓ | Provenance of this call's trigger: `user_prompt` \| `cli` \| `web` \| `workspace_file` \| `workspace_files` \| `mcp_output` \| … → `SourceChannel` (trust). |
 | `context.approval_token` |  | Optional correlation id from a prior `ASK`. The pure gate ignores request-supplied tokens; it never maps this field to `EvalContext.approval_granted`. |
 
 Unknown fields are ignored (forward-compatible). Budgets/usage are a v1.x addition
 to `context` (kernel already supports `BudgetUsage`); v1 assumes fresh usage.
+
+The gate fails closed on missing or malformed security context: omitted/invalid
+taint, omitted/invalid source channel, or an omitted `path` for a roots-scoped
+file action returns `DENY` with a specific rule. This is an evaluated verdict
+(exit `0`), not a malformed-process error, so every host handles it through the
+same verdict channel.
 
 `context.approval_token` is not a bearer credential. A host that supports
 approval resumption must validate a durable approval-store binding at a trusted
@@ -139,7 +148,9 @@ Every host adapter, regardless of language, does exactly this:
 
 1. Receive the host's pre-tool intercept event.
 2. Restore monotonic taint for `session_id` from the sidecar (default `clean`).
-3. Build a `GateRequest` (map the host tool/args, set `mode`, attach `taint`).
+3. Build a `GateRequest` (map the host tool/args, set `mode`, attach explicit
+   `taint` + `source_channel`, and attach an absolute `path` for path-scoped
+   file actions).
 4. Run `harness gate --world <W>` with the request on stdin; read the response.
 5. Persist `response.context.taint` back to the sidecar (monotonic; never lowers).
 6. Map `response.decision` → the host's decision shape; fail-open/closed on `≠0`.

@@ -38,9 +38,9 @@ pub struct GateRequest {
     pub arguments: Value,
     /// The action's resolved **absolute** target path, for path-scoped (`roots`)
     /// governance. The *adapter* extracts it from the file-action arguments and does
-    /// the I/O of absolutizing it, keeping the gate pure. Absent ⇒ no path scope for
-    /// this call (structured file tools set it; Bash/etc. don't — Bash is undecidable
-    /// and stays OS-sandbox territory).
+    /// the I/O of absolutizing it, keeping the gate pure. When roots are enabled,
+    /// path-scoped file actions fail closed if this is absent. Bash/etc. do not
+    /// carry a single resolvable path and stay OS-sandbox territory.
     #[serde(default)]
     pub path: Option<String>,
     /// Carried, host-owned context (taint, mode, session).
@@ -58,11 +58,11 @@ pub struct GateContext {
     /// `interactive` (default) | `background`. Drives ASK→DENY fail-closed.
     #[serde(default)]
     pub mode: Option<String>,
-    /// Monotonic carried taint: `clean` (default) | `tainted`.
+    /// Monotonic carried taint: `clean` | `tainted`.
     #[serde(default)]
     pub taint: Option<String>,
-    /// Provenance of this call's trigger (the proposing actor's trust). Defaults
-    /// to `user_prompt`. The inbound taint *floor* is driven by `taint`, not this.
+    /// Provenance of this call's trigger (the proposing actor's trust). The
+    /// inbound taint *floor* is driven by `taint`, not this.
     #[serde(default)]
     pub source_channel: Option<String>,
     /// Optional host correlation id from a prior `ASK`. The pure gate cannot
@@ -115,8 +115,14 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
     // The effective action: the world's own command classifiers run first
     // (D36), so classification is kernel data, identical for every host.
     let action = world.classify_command(&ActionName::new(&req.tool), &req.arguments);
-    let inbound = parse_taint(req.context.taint.as_deref());
-    let channel = parse_channel(req.context.source_channel.as_deref());
+    let inbound = match parse_taint(req.context.taint.as_deref()) {
+        Ok(t) => t,
+        Err(rule) => return denied_response(world, &action, rule, Taint::Tainted),
+    };
+    let channel = match parse_channel(req.context.source_channel.as_deref()) {
+        Ok(c) => c,
+        Err(rule) => return denied_response(world, &action, rule, inbound),
+    };
     let session = SessionId::new(&req.context.session_id);
 
     let call = ToolCall {
@@ -147,34 +153,41 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         KernelOutcome::Evaluated { disposition, .. } => (disposition.decision, disposition.rule),
     };
 
-    // Spatial scope (roots): when the world declares roots and the adapter resolved a
-    // target `path` for a file action, decide by *where* it lands. Path-scope can only
-    // TIGHTEN a kernel ALLOW (deny / ask / read-only) — never loosen a block. Bash and
-    // other tools without a single resolvable path carry no `path`, so they are exempt.
+    // Spatial scope (roots): when the world declares roots, path-scoped file
+    // actions must include the adapter-resolved target `path`; otherwise a thin
+    // adapter could bypass roots by omission. Path-scope can only TIGHTEN a kernel
+    // ALLOW (deny / ask / read-only) — never loosen a block. Bash and other non-file
+    // tools without a single resolvable path carry no `path`, so they are exempt.
     if decision == Decision::Allow {
-        if let (Some(path), Some(at)) = (req.path.as_deref(), world.action_type(&action)) {
-            if let Some(access) = world.classify_path(path) {
-                let is_write = matches!(at, ActionType::Write | ActionType::Patch);
-                match access {
-                    RootAccess::Deny => {
-                        decision = Decision::Deny;
-                        rule = "path_scope_denied".to_string();
-                    }
-                    RootAccess::Read if is_write => {
-                        decision = Decision::Deny;
-                        rule = "path_scope_readonly".to_string();
-                    }
-                    RootAccess::Ask => {
-                        // Fail closed in background (mirrors invariant 10 for approvals).
-                        if matches!(mode, ExecutionMode::Background) {
+        if let Some(at) = world.action_type(&action) {
+            let path_scoped_file_action = requires_resolved_path(world, &action, at);
+            if world.has_roots() && path_scoped_file_action && req.path.is_none() {
+                decision = Decision::Deny;
+                rule = "missing_path".to_string();
+            } else if let Some(path) = req.path.as_deref() {
+                if let Some(access) = world.classify_path(path) {
+                    let is_write = matches!(at, ActionType::Write | ActionType::Patch);
+                    match access {
+                        RootAccess::Deny => {
                             decision = Decision::Deny;
-                            rule = "path_scope_ask_background".to_string();
-                        } else {
-                            decision = Decision::Ask;
-                            rule = "path_scope_ask".to_string();
+                            rule = "path_scope_denied".to_string();
                         }
+                        RootAccess::Read if is_write => {
+                            decision = Decision::Deny;
+                            rule = "path_scope_readonly".to_string();
+                        }
+                        RootAccess::Ask => {
+                            // Fail closed in background (mirrors invariant 10 for approvals).
+                            if matches!(mode, ExecutionMode::Background) {
+                                decision = Decision::Deny;
+                                rule = "path_scope_ask_background".to_string();
+                            } else {
+                                decision = Decision::Ask;
+                                rule = "path_scope_ask".to_string();
+                            }
+                        }
+                        RootAccess::Read | RootAccess::ReadWrite => {}
                     }
-                    RootAccess::Read | RootAccess::ReadWrite => {}
                 }
             }
         }
@@ -221,10 +234,32 @@ fn default_version() -> u32 {
     ABI_VERSION
 }
 
-fn parse_taint(s: Option<&str>) -> Taint {
+fn denied_response(
+    world: &CompiledWorld,
+    action: &ActionName,
+    rule: &'static str,
+    out_taint: Taint,
+) -> GateResponse {
+    GateResponse {
+        v: ABI_VERSION,
+        decision: decision_str(Decision::Deny).to_string(),
+        action: action.as_str().to_string(),
+        rule: Some(rule.to_string()),
+        reason: reason_for(Decision::Deny, rule).to_string(),
+        context: GateResponseContext {
+            taint: taint_str(out_taint).to_string(),
+        },
+        approval: None,
+        manifest_hash: short_hash(world),
+    }
+}
+
+fn parse_taint(s: Option<&str>) -> Result<Taint, &'static str> {
     match s {
-        Some("tainted") => Taint::Tainted,
-        _ => Taint::Clean,
+        Some("clean") => Ok(Taint::Clean),
+        Some("tainted") => Ok(Taint::Tainted),
+        Some(_) => Err("invalid_taint"),
+        None => Err("missing_taint"),
     }
 }
 
@@ -235,18 +270,40 @@ fn parse_mode(s: Option<&str>) -> ExecutionMode {
     }
 }
 
-/// Map the wire `source_channel` to a kernel channel. An absent or unrecognized
-/// value defaults to `UserPrompt` (the proposing actor); the security-critical
-/// inbound floor is carried by `taint`, not this field.
-fn parse_channel(s: Option<&str>) -> SourceChannel {
+fn requires_resolved_path(world: &CompiledWorld, action: &ActionName, at: ActionType) -> bool {
+    matches!(at, ActionType::Write | ActionType::Patch)
+        || (matches!(at, ActionType::Read) && descriptor_has_path_arg(world, action))
+}
+
+fn descriptor_has_path_arg(world: &CompiledWorld, action: &ActionName) -> bool {
+    let Some(descriptor) = world.descriptor(action) else {
+        return false;
+    };
+    let Some(properties) = descriptor
+        .schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+    else {
+        return false;
+    };
+    ["path", "file_path", "notebook_path"]
+        .iter()
+        .any(|key| properties.contains_key(*key))
+}
+
+/// Map the wire `source_channel` to a kernel channel. The field is explicit so
+/// thin adapters cannot accidentally upgrade an unknown proposer to trusted.
+fn parse_channel(s: Option<&str>) -> Result<SourceChannel, &'static str> {
     match s {
-        Some("workspace_file") => SourceChannel::WorkspaceFile,
-        Some("shell_output") => SourceChannel::ShellOutput,
-        Some("mcp_output") => SourceChannel::McpOutput,
-        Some("web") => SourceChannel::Web,
-        Some("memory") => SourceChannel::Memory,
-        Some("generated") => SourceChannel::Generated,
-        _ => SourceChannel::UserPrompt,
+        Some("user_prompt" | "user_cli" | "cli") => Ok(SourceChannel::UserPrompt),
+        Some("workspace_file" | "workspace_files") => Ok(SourceChannel::WorkspaceFile),
+        Some("shell_output") => Ok(SourceChannel::ShellOutput),
+        Some("mcp_output") => Ok(SourceChannel::McpOutput),
+        Some("web" | "web_fetch") => Ok(SourceChannel::Web),
+        Some("memory") => Ok(SourceChannel::Memory),
+        Some("generated") => Ok(SourceChannel::Generated),
+        Some(_) => Err("invalid_source_channel"),
+        None => Err("missing_source_channel"),
     }
 }
 
@@ -297,6 +354,15 @@ fn reason_for(d: Decision, rule: &str) -> &'static str {
         (Decision::Deny, "path_scope_ask_background") => {
             "the target path needs approval, unavailable in background"
         }
+        (Decision::Deny, "missing_path") => {
+            "path-scoped file action is missing its resolved target path"
+        }
+        (Decision::Deny, "missing_taint") => "gate request is missing required taint context",
+        (Decision::Deny, "invalid_taint") => "gate request has invalid taint context",
+        (Decision::Deny, "missing_source_channel") => {
+            "gate request is missing required source channel"
+        }
+        (Decision::Deny, "invalid_source_channel") => "gate request has invalid source channel",
         (Decision::Deny, _) => "policy blocked a visible action",
         (Decision::Ask, _) => "human approval is required before this action",
         (Decision::Replan, _) => "over budget or too broad; propose a smaller step",
@@ -326,7 +392,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 mode: None,
                 taint: Some(taint.to_string()),
-                source_channel: None,
+                source_channel: Some("user_prompt".to_string()),
                 approval_token: None,
             },
         }
@@ -414,7 +480,49 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_from_wire_json_with_defaults() {
+    fn missing_taint_fails_closed() {
+        let world = compile_default();
+        let mut r = req("fetch_web", "clean");
+        r.context.taint = None;
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_taint"));
+        assert_eq!(res.context.taint, "tainted");
+    }
+
+    #[test]
+    fn malformed_taint_fails_closed() {
+        let world = compile_default();
+        let mut r = req("fetch_web", "clean");
+        r.context.taint = Some("definitely-clean".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("invalid_taint"));
+        assert_eq!(res.context.taint, "tainted");
+    }
+
+    #[test]
+    fn missing_source_channel_fails_closed() {
+        let world = compile_default();
+        let mut r = req("write_workspace", "clean");
+        r.context.source_channel = None;
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_source_channel"));
+    }
+
+    #[test]
+    fn malformed_source_channel_fails_closed() {
+        let world = compile_default();
+        let mut r = req("write_workspace", "clean");
+        r.context.source_channel = Some("probably_user".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("invalid_source_channel"));
+    }
+
+    #[test]
+    fn deserializes_from_wire_json_but_missing_context_fails_closed() {
         // Minimal request: only `tool`. Everything else defaults.
         let r: GateRequest = serde_json::from_str(r#"{"tool":"read_workspace"}"#).unwrap();
         assert_eq!(r.v, ABI_VERSION);
@@ -423,7 +531,8 @@ mod tests {
 
         let world = compile_default();
         let res = gate(&world, &r);
-        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_taint"));
     }
 
     #[test]
@@ -588,8 +697,15 @@ world_id: roots-test
 capabilities:
   - { trust: Trusted, actions: [Read, Write, Patch, Command, Web] }
 base_actions:
-  - { name: read_file,  action_type: Read,  side_effect: Read }
+  - name: read_file
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        path: { type: string }
   - { name: write_file, action_type: Write, side_effect: FilesystemWrite }
+  - { name: bash,       action_type: Command, side_effect: Process }
 roots:
   default: Ask
   rules:
@@ -688,10 +804,16 @@ roots:
     }
 
     #[test]
-    fn no_resolved_path_is_exempt_the_bash_analog() {
-        // A file action with no adapter-resolved path (path=None) is unaffected by
-        // roots — the Bash-exemption analog (Bash carries no single resolvable path).
+    fn missing_path_for_file_action_fails_closed_when_roots_are_enabled() {
         let res = gate(&roots_world(), &req("read_file", "clean"));
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_path"));
+    }
+
+    #[test]
+    fn no_resolved_path_is_exempt_for_non_file_actions() {
+        // Bash carries no single resolvable path, so roots cannot path-scope it.
+        let res = gate(&roots_world(), &req("bash", "clean"));
         assert_eq!(res.decision, "ALLOW");
     }
 
