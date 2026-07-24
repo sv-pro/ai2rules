@@ -6,7 +6,7 @@ mod patch;
 mod read;
 mod web;
 
-pub use command::CommandHandler;
+pub use command::{CommandHandler, Confinement};
 pub use mcp::McpHandler;
 pub use patch::PatchHandler;
 pub use read::ReadHandler;

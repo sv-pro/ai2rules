@@ -55,6 +55,11 @@ pub enum ExecError {
     Timeout { timeout_ms: u64 },
     /// The effect mode is not implemented in this epic (Proxy/Sanitize/Defer).
     UnsupportedEffectMode(EffectMode),
+    /// A command was asked to `Execute` but no OS sandbox is active to enforce
+    /// its network/filesystem policy and the caller did not accept unconfined
+    /// execution — fail closed rather than run a subprocess unconstrained
+    /// (finding #10 / D46). `Simulate` is unaffected.
+    SandboxRequired { action: ActionName },
     /// The operation payload did not match what the handler expected.
     BadOperation(String),
     /// An underlying I/O failure.
@@ -87,6 +92,12 @@ impl std::fmt::Display for ExecError {
             ExecError::UnsupportedEffectMode(mode) => {
                 write!(f, "effect mode {mode:?} is not supported yet")
             }
+            ExecError::SandboxRequired { action } => write!(
+                f,
+                "refusing to Execute command {action} unconfined: no OS sandbox \
+                 enforces its network/filesystem policy (see D46; use an \
+                 unconfined-acknowledged handler or Simulate)"
+            ),
             ExecError::BadOperation(detail) => write!(f, "bad operation: {detail}"),
             ExecError::Io(detail) => write!(f, "io error: {detail}"),
         }
