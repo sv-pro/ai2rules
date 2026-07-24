@@ -573,7 +573,9 @@ mod tests {
             .register(
                 ActionName::new("run_command"),
                 hash("run_command"),
-                Box::new(CommandHandler),
+                // Test helper: commands run in a throwaway sandbox, so opt into
+                // unconfined execution (D46) to exercise real command mechanics.
+                Box::new(CommandHandler::unconfined()),
             )
             .build()
     }

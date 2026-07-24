@@ -16,7 +16,9 @@ mod handlers;
 mod transport;
 
 pub use handler::{ExecError, ExecOutput, Handler};
-pub use handlers::{CommandHandler, McpHandler, PatchHandler, ReadHandler, WebHandler};
+pub use handlers::{
+    CommandHandler, Confinement, McpHandler, PatchHandler, ReadHandler, WebHandler,
+};
 pub use transport::{McpTransport, MockMcpTransport, MockWebFetcher, WebFetcher};
 
 use std::collections::BTreeMap;
@@ -327,7 +329,7 @@ mod tests {
             .register(
                 ActionName::new("run_command"),
                 DescriptorHash::new(HASH),
-                Box::new(CommandHandler),
+                Box::new(CommandHandler::unconfined()),
             )
             .build();
         let s = spec(
@@ -358,7 +360,7 @@ mod tests {
             .register(
                 ActionName::new("run_command"),
                 DescriptorHash::new(HASH),
-                Box::new(CommandHandler),
+                Box::new(CommandHandler::unconfined()),
             )
             .build();
         let s = spec(
@@ -372,6 +374,72 @@ mod tests {
             50,
         );
         assert!(matches!(exec.run(&s), Err(ExecError::Timeout { .. })));
+    }
+
+    // Regression for finding #10 (D46): with the fail-closed default handler and
+    // no OS sandbox, a command must NOT Execute — the executor can't confine a
+    // subprocess's network/filesystem access, so it refuses before spawning.
+    #[test]
+    fn command_execute_without_sandbox_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let escaped = outside.path().join("pwned.txt");
+
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("run_command"),
+                DescriptorHash::new(HASH),
+                Box::new(CommandHandler::new()), // fail-closed default
+            )
+            .build();
+        // A command that WOULD write outside the writable root if it ran.
+        let s = spec(
+            "run_command",
+            Operation::Argv(vec![
+                "sh".into(),
+                "-c".into(),
+                format!("echo pwned > {}", escaped.display()),
+            ]),
+            root.path(),
+            vec![root.path().to_path_buf()],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            1_000,
+        );
+        assert!(matches!(
+            exec.run(&s),
+            Err(ExecError::SandboxRequired { .. })
+        ));
+        assert!(!escaped.exists(), "fail-closed command must spawn nothing");
+    }
+
+    // The sandbox gate must never block `Simulate` — it spawns nothing, so
+    // confinement is irrelevant to it. Even the fail-closed default simulates.
+    #[test]
+    fn command_simulate_is_allowed_when_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("run_command"),
+                DescriptorHash::new(HASH),
+                Box::new(CommandHandler::new()),
+            )
+            .build();
+        let s = spec(
+            "run_command",
+            Operation::Argv(vec!["echo".into(), "hi".into()]),
+            dir.path(),
+            vec![],
+            vec![],
+            HASH,
+            EffectMode::Simulate,
+            1_000,
+        );
+        assert!(matches!(
+            exec.run(&s).unwrap().value,
+            ExecOutput::Simulated(_)
+        ));
     }
 
     #[test]

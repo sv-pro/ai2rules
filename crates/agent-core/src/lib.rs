@@ -98,7 +98,16 @@ fn register_local(builder: ExecutorBuilder, world: &CompiledWorld) -> ExecutorBu
         "git_diff",
         "git_commit",
     ] {
-        b = b.register(ActionName::new(cmd), hash(cmd), Box::new(CommandHandler));
+        // Explicit unconfined acknowledgment (D46): no OS sandbox (E8) exists yet
+        // to enforce a subprocess's network/filesystem policy, so command Execute
+        // runs with host authority. Fail-closed is the handler default; this is
+        // the one place that opts in, and it should become operator-configurable
+        // (and retire once E8 provides a real sandbox posture).
+        b = b.register(
+            ActionName::new(cmd),
+            hash(cmd),
+            Box::new(CommandHandler::unconfined()),
+        );
     }
     b
 }
