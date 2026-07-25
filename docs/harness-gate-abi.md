@@ -5,7 +5,8 @@ Decisions: `DECISIONS.md` **D24** (refines D19), **D34** (in-process vs wire),
 **D36** (kernel-side classification), **D37** (live-hook cutover), **D41**
 (approval tokens are correlation ids, not bearer grants), **D42** (gate context
 is explicit and fail-closed), **D43** (source-channel trust is compiled manifest
-policy), **D44** (shell classifiers fail closed). Vocabulary:
+policy), **D44** (shell classifiers fail closed), **D46** (trusted harness
+resolution). Vocabulary:
 `docs/GLOSSARY.md` → *Integration / topology*. Cross-host parity is pinned by
 `crates/cli-harness/tests/one_kernel.rs` (see `docs/one-kernel-many-hosts.md`).
 
@@ -83,7 +84,7 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
 | `v` | ✓ | ABI version (integer). v1. |
 | `tool` | ✓ | The action name **in the manifest's vocabulary** (the adapter has already mapped the host's tool name; for CC the manifest *uses* `Bash`/`Read`/…). → `ToolCall.action_name`. |
 | `arguments` | ✓ | The proposed call's arguments (object). → `ToolCall.arguments`. |
-| `path` |  | Adapter-resolved absolute path for path-scoped file actions. Required when roots are enabled and the effective action is a filesystem read/write/patch action; Bash and other non-file actions set `null`. |
+| `path` |  | Adapter-canonicalized absolute path for path-scoped file actions. Required when roots are enabled and the effective action is a filesystem read/write/patch action; Bash and other non-file actions set `null`. |
 | `context.session_id` | ✓ | Opaque host session id. → `SessionId`; trace correlation; taint sidecar key. |
 | `context.mode` | ✓ | `interactive` \| `background`. → `ExecutionMode` (drives ASK→DENY fail-closed). |
 | `context.taint` | ✓ | Monotonic state carried by the adapter: `clean` \| `tainted`. → `TaintContext`. |
@@ -150,8 +151,8 @@ Every host adapter, regardless of language, does exactly this:
 1. Receive the host's pre-tool intercept event.
 2. Restore monotonic taint for `session_id` from the sidecar (default `clean`).
 3. Build a `GateRequest` (map the host tool/args, set `mode`, attach explicit
-   `taint` + `source_channel`, and attach an absolute `path` for path-scoped
-   file actions).
+   `taint` + `source_channel`, and attach a symlink-aware canonical absolute
+   `path` for path-scoped file actions).
 4. Run `harness gate --world <W>` with the request on stdin; read the response.
 5. Persist `response.context.taint` back to the sidecar (monotonic; never lowers).
 6. Map `response.decision` → the host's decision shape; fail-open/closed on `≠0`.
@@ -172,7 +173,7 @@ link `gate()` in-process; the wire ABI serves out-of-process/non-Rust hosts):
 
 ```bash
 # .claude/hooks/world-gate.sh (bootstrap only — no governance logic)
-BIN=…locate harness ($HARNESS_BIN → target/{release,debug}/harness → PATH)…
+BIN=…locate harness (absolute $HARNESS_BIN/$AI2RULES_HARNESS or installed absolute path)…
 [ -z "$BIN" ] && exit 0   # fail-open: no kernel binary, fall through
 exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state"
 ```

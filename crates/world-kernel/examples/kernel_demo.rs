@@ -193,7 +193,7 @@ fn build_executor(world: &CompiledWorld) -> Executor {
         .register(
             ActionName::new("run_command"),
             hash("run_command"),
-            // Demo only; opt into unconfined execution (D46) — no OS sandbox here.
+            // Demo only; opt into unconfined execution (D47) — no OS sandbox here.
             Box::new(CommandHandler::unconfined()),
         )
         .build()

@@ -5,7 +5,7 @@
 //! killed; killing an entire process group (kill-tree) is an OS-level concern
 //! deferred to E8.
 //!
-//! **Confinement (finding #10 / D46).** The spec carries a `NetworkPolicy` and a
+//! **Confinement (finding #10 / D47).** The spec carries a `NetworkPolicy` and a
 //! `FilesystemPolicy`, but this handler cannot enforce either on a *subprocess* —
 //! a child can open sockets and write anywhere the host user can, and nothing
 //! here (short of an OS sandbox) constrains it. That enforcement is E8's job
@@ -29,7 +29,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 /// Whether an OS-level sandbox confines a command's subprocess. The executor
 /// cannot itself enforce a subprocess's network/filesystem policy; see the
-/// module docs and D46.
+/// module docs and D47.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Confinement {
     /// No sandbox, and the caller has not accepted unconfined execution:
@@ -49,14 +49,14 @@ pub struct CommandHandler {
 
 impl CommandHandler {
     /// A fail-closed handler: `Execute` is refused (`SandboxRequired`) because no
-    /// OS sandbox enforces the subprocess's network/filesystem policy (D46).
+    /// OS sandbox enforces the subprocess's network/filesystem policy (D47).
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Opt into running commands **unconfined** — an explicit, audited
     /// acknowledgment that the subprocess runs with host authority, used until
-    /// the E8 OS sandbox exists (D46).
+    /// the E8 OS sandbox exists (D47).
     pub fn unconfined() -> Self {
         Self {
             confinement: Confinement::Unconfined,
@@ -68,7 +68,7 @@ impl Handler for CommandHandler {
     fn execute(&self, spec: &ExecutionSpec) -> Result<ExecOutput, ExecError> {
         // Fail closed: without a sandbox (or an explicit unconfined opt-in) the
         // handler cannot honor the spec's network/filesystem policy, so it must
-        // not spawn the subprocess at all (D46). Checked before argv parsing so
+        // not spawn the subprocess at all (D47). Checked before argv parsing so
         // nothing about the command runs.
         if self.confinement == Confinement::Required {
             return Err(ExecError::SandboxRequired {

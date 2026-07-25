@@ -58,7 +58,7 @@ pub enum ExecError {
     /// A command was asked to `Execute` but no OS sandbox is active to enforce
     /// its network/filesystem policy and the caller did not accept unconfined
     /// execution — fail closed rather than run a subprocess unconstrained
-    /// (finding #10 / D46). `Simulate` is unaffected.
+    /// (finding #10 / D47). `Simulate` is unaffected.
     SandboxRequired { action: ActionName },
     /// The operation payload did not match what the handler expected.
     BadOperation(String),
@@ -95,7 +95,7 @@ impl std::fmt::Display for ExecError {
             ExecError::SandboxRequired { action } => write!(
                 f,
                 "refusing to Execute command {action} unconfined: no OS sandbox \
-                 enforces its network/filesystem policy (see D46; use an \
+                 enforces its network/filesystem policy (see D47; use an \
                  unconfined-acknowledged handler or Simulate)"
             ),
             ExecError::BadOperation(detail) => write!(f, "bad operation: {detail}"),

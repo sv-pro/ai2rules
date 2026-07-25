@@ -228,7 +228,7 @@ fn build_executor(world: &CompiledWorld) -> Executor {
             ActionName::new("run_command"),
             hash("run_command"),
             // Demo runs in a throwaway tempdir; opt into unconfined execution
-            // (D46) since no OS sandbox is present.
+            // (D47) since no OS sandbox is present.
             Box::new(CommandHandler::unconfined()),
         )
         .build()
