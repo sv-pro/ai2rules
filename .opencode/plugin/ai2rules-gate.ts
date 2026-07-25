@@ -23,14 +23,15 @@
  *
  * Env:
  *   AI2RULES_WORLD    WorldManifest path (default docs/demos/opencode/opencode-world.yaml)
- *   AI2RULES_HARNESS  harness binary (default: target/release|debug/harness, then PATH)
+ *   AI2RULES_HARNESS  explicit absolute harness binary override
  *   AI2RULES_MODE     "interactive" (default) | "background" -> context.mode
  *                     (the kernel collapses ASK->DENY in background)
  *   AI2RULES_DISABLE  "1" to bypass governance entirely
  */
 import type { Plugin } from "@opencode-ai/plugin";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { accessSync, constants, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, dirname, isAbsolute } from "node:path";
 
 export const Ai2rulesGate: Plugin = async ({ directory, $ }) => {
   const world =
@@ -38,13 +39,28 @@ export const Ai2rulesGate: Plugin = async ({ directory, $ }) => {
   const statePath = join(directory, ".opencode", "ai2rules-state.json");
   const mode = process.env.AI2RULES_MODE === "background" ? "background" : "interactive";
 
-  const harness = (() => {
-    if (process.env.AI2RULES_HARNESS) return process.env.AI2RULES_HARNESS;
-    for (const c of ["target/release/harness", "target/debug/harness"]) {
-      const p = join(directory, c);
-      if (existsSync(p)) return p;
+  const isExecutable = (path: string): boolean => {
+    if (!isAbsolute(path)) return false;
+    try {
+      accessSync(path, constants.X_OK);
+      return true;
+    } catch {
+      return false;
     }
-    return "harness"; // on PATH
+  };
+
+  const harness = (() => {
+    if (process.env.AI2RULES_HARNESS) {
+      return isExecutable(process.env.AI2RULES_HARNESS) ? process.env.AI2RULES_HARNESS : undefined;
+    }
+    for (const p of [
+      join(homedir(), ".local", "bin", "harness"),
+      "/usr/local/bin/harness",
+      "/opt/ai2rules/bin/harness",
+    ]) {
+      if (isExecutable(p)) return p;
+    }
+    return undefined;
   })();
 
   const loadTaint = (): Record<string, string> => {
@@ -66,6 +82,7 @@ export const Ai2rulesGate: Plugin = async ({ directory, $ }) => {
   return {
     "tool.execute.before": async (input, output) => {
       if (process.env.AI2RULES_DISABLE === "1") return;
+      if (!harness) return;
       try {
         const state = loadTaint();
         const tainted = state[input.sessionID] === "tainted";

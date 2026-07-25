@@ -55,18 +55,17 @@ fn read_settings(target: &Path) -> Value {
 }
 
 fn run_installer(source: &Path, target: &Path, bin_dir: &Path) {
+    // Pre-stage the trusted binary at the installer-owned absolute path so
+    // `ensure_harness` skips the cargo build (the fake `source` has no manifest).
+    // Post-D46 the installer only honours `--bin-dir`, never PATH.
     write_executable(&bin_dir.join("harness"), "#!/usr/bin/env bash\nexit 0\n");
-    let path = format!(
-        "{}:{}",
-        bin_dir.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
     let output = Command::new("bash")
         .arg(repo_root().join("scripts/install-governance.sh"))
         .arg("--source")
         .arg(source)
+        .arg("--bin-dir")
+        .arg(bin_dir)
         .arg(target)
-        .env("PATH", path)
         .output()
         .expect("run installer");
     assert!(
