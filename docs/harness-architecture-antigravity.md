@@ -1,5 +1,12 @@
 # Antigravity CLI Harness Architecture: Deterministic Virtualization for CLI Agents
 
+> **⚠️ Naming collision — read first.** "Antigravity" here is an early *codename for this
+> project itself*, from before Google Antigravity shipped. This document is **not** about
+> the `agy` CLI. For the actual Antigravity host — the `harness agy-hook` adapter, its
+> verified hook contract, and the `.agents/` wiring — see
+> [`docs/demos/antigravity/README.md`](demos/antigravity/README.md) and **D48**.
+> (Renaming this file is a separate call; it is cited under the old name.)
+
 This document presents the architectural proposition for the **CLI-Agent Harness** (codenamed **Antigravity Harness**). It is built on the shared principles of `agent-hypervisor` and `safe-mcp-proxy`, adapting their virtualization-first security model specifically for the execution dynamics of CLI-based developer agents (e.g., Claude Code, Gemini CLI, Aider).
 
 ---

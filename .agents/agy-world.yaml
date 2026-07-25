@@ -1,0 +1,118 @@
+# Antigravity CLI (`agy`) world for the host-neutral gate ABI (DECISIONS D24 / D34 / D48).
+#
+# A REAL WorldManifest — compiled by the same compiler as Claude Code's
+# .claude/cc-world.yaml and OpenCode's opencode-world.yaml — governed per
+# Antigravity tool call by `harness agy-hook`, wired through .agents/hooks.json.
+#
+# The adapter maps Antigravity's native tool names onto these actions 1:1 and
+# holds no governance logic. It does perform one *shape* translation the other
+# hosts don't need: Antigravity spells tool arguments in PascalCase
+# (`CommandLine`, `AbsolutePath`, `TargetFile`), so the adapter aliases those
+# into the neutral vocabulary this manifest and the kernel read (`command`,
+# `path`). Originals are preserved; see crates/cli-harness/src/agy_hook.rs.
+#
+# `run_command` is classified by the KERNEL from the `command_classes` block
+# below (D25 -> D36) into plain `run_command` (Process), `run_command_network`
+# (egress: curl/wget/nc/ssh/...), `run_command_destructive` (rm -rf/sudo/mkfs/...
+# -> approval), or `run_command_unclassified` (unmatched shell -> ask/taint-floor).
+# Classification is world data, so every host shares byte-identical
+# classification; the *policy* for each action is declared in `base_actions` /
+# `transition_policies`.
+#
+# Tool names and argument keys below were captured from a live `agy` session via
+# a PreToolUse probe, not inferred from the binary's step-type enum — many
+# CORTEX_STEP_TYPE_* values are internal steps that never surface as tools.
+world_id: antigravity-default
+
+actors:
+  - { name: developer, kind: User }
+  - { name: antigravity, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: workspace_files, trust: SemiTrusted, taint: true }
+  - { name: shell_output, trust: SemiTrusted, taint: true }
+  - { name: mcp_output, trust: Untrusted, taint: true }
+  - { name: web_fetch, trust: Untrusted, taint: true }
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  # --- read-only (no taint escalation) ---
+  - { name: view_file, action_type: Read, side_effect: Read }
+  - { name: view_file_outline, action_type: Read, side_effect: Read }
+  - { name: view_code_item, action_type: Read, side_effect: Read }
+  - { name: list_directory, action_type: Read, side_effect: Read }
+  - { name: grep_search, action_type: Read, side_effect: Read }
+  - { name: find, action_type: Read, side_effect: Read }
+  - { name: code_search, action_type: Read, side_effect: Read }
+  - { name: read_terminal, action_type: Read, side_effect: Read }
+  # Antigravity's own permission surface — reading it is inert; asking is the
+  # host's approval UX, not an effect of ours.
+  - { name: list_permissions, action_type: Read, side_effect: Read }
+  - { name: ask_permission, action_type: Read, side_effect: Read }
+  # --- workspace writes (FilesystemWrite: not under the taint floor, matching
+  #     cc-world — only PersistentWrite is denied when tainted) ---
+  - { name: write_to_file, action_type: Write, side_effect: FilesystemWrite }
+  - { name: propose_code, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: edit_notebook, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: move, action_type: Patch, side_effect: FilesystemWrite }
+  # --- network / egress (taint floor: tainted context -> DENY no_tainted_network) ---
+  - { name: search_web, action_type: Web, side_effect: Network }
+  - { name: read_url_content, action_type: Web, side_effect: Network }
+  - { name: open_browser_url, action_type: Web, side_effect: Network }
+  # --- MCP (taint floor: External) ---
+  - { name: mcp_tool, action_type: Mcp, side_effect: External }
+  # --- subagent spawn ---
+  - { name: invoke_subagent, action_type: Command, side_effect: Process }
+  # --- shell, classified by the KERNEL (D36) ---
+  - { name: run_command, action_type: Command, side_effect: Process }
+  - { name: run_command_network, action_type: Command, side_effect: Network }
+  - { name: run_command_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: run_command_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+
+# Kernel-side command classification (D36): the shared pattern lists — keep
+# byte-identical with .claude/cc-world.yaml, docs/demos/opencode/opencode-world.yaml
+# and docs/demos/one-kernel/demo-world.yaml (pinned by tests/one_kernel.rs).
+#
+# NB: `arg: command` is the NEUTRAL key. Antigravity sends `CommandLine`; the
+# adapter aliases it before gating. Do not "fix" this to `CommandLine` — that
+# would fork D36 world data per host, which is exactly what D36 exists to prevent.
+command_classes:
+  - action: run_command
+    arg: command
+    default_to: run_command_unclassified
+    classes:
+      - to: run_command_network
+        patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
+      - to: run_command_destructive
+        patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+
+# Tainted data cannot reach externally-effectful surfaces (the taint floor,
+# invariant 7). Tainted search_web / read_url_content / mcp_tool /
+# run_command_network / run_command_unclassified all DENY here.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000
+
+observability:
+  redact:
+    - "env.*_TOKEN"
+    - "env.*_KEY"
+    - "**/.env"

@@ -24,26 +24,14 @@
 //!   uncompilable world — exits 0 with no output. A broken hook must never brick
 //!   a session. A process failure is never an outcome (see `host.rs`).
 
+use crate::hostkit::{canonicalize_root_paths, normalize_tool, resolve_action_path, sanitize};
 use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
     gate, host_outcome, BlockKind, GateContext, GateRequest, HostOutcome, ABI_VERSION,
 };
-use harness_types::{ActionName, RootsDef};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-
-fn sanitize(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || "_.-".contains(c) {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
+use std::path::Path;
 
 /// Emit a PreToolUse decision (`deny`/`ask`, or `allow` in `--grant` mode) and exit 0.
 fn emit(decision: &str, reason: &str) -> ! {
@@ -56,93 +44,6 @@ fn emit(decision: &str, reason: &str) -> ! {
         }})
     );
     std::process::exit(0);
-}
-
-/// Extract and absolutize the target path of a file action, for path-scope (roots).
-/// Reads the common path arg keys; returns `None` for tools without one (Bash's
-/// `command` is not a path, so Bash is path-scope-exempt). Relative paths resolve
-/// against the project `base`, `~` against `$HOME`, and the result is canonicalized
-/// through the filesystem so project-local symlinks cannot choose their own root.
-fn resolve_action_path(args: &Value, base: &str, home: Option<&str>) -> Option<String> {
-    let raw = ["file_path", "path", "notebook_path"]
-        .iter()
-        .find_map(|k| args.get(*k).and_then(|v| v.as_str()))?;
-    let path = if raw.starts_with('/') {
-        PathBuf::from(raw)
-    } else if raw == "~" {
-        PathBuf::from(home?)
-    } else if let Some(rest) = raw.strip_prefix("~/") {
-        PathBuf::from(home?).join(rest)
-    } else {
-        Path::new(base).join(raw)
-    };
-    canonicalize_action_path(&path).map(path_to_string)
-}
-
-/// Lexically normalize `.`/`..`/empty segments of an absolute path (no FS access).
-fn normalize_dots(p: &str) -> String {
-    let mut out: Vec<&str> = Vec::new();
-    for seg in p.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                out.pop();
-            }
-            s => out.push(s),
-        }
-    }
-    format!("/{}", out.join("/"))
-}
-
-/// Canonicalize an action target for root policy. Existing files/directories are
-/// resolved directly; new file writes are classified by a canonicalized existing
-/// parent plus the proposed leaf name. If the parent cannot be resolved, return
-/// `None` so roots-enabled file actions fail closed as `missing_path`.
-fn canonicalize_action_path(path: &Path) -> Option<PathBuf> {
-    if let Ok(canonical) = std::fs::canonicalize(path) {
-        return Some(canonical);
-    }
-    let parent = path.parent()?;
-    let leaf = path.file_name()?;
-    let parent = std::fs::canonicalize(parent).ok()?;
-    Some(parent.join(leaf))
-}
-
-/// Canonicalize manifest roots at the same adapter boundary as action paths.
-/// Missing roots stay lexical, preserving portable manifests for paths that may
-/// not exist yet while still resolving real symlinked roots such as `.` and `~/.ssh`.
-fn canonicalize_root_paths(roots: &RootsDef) -> RootsDef {
-    let mut out = roots.clone();
-    for rule in &mut out.rules {
-        rule.path = std::fs::canonicalize(&rule.path)
-            .map(path_to_string)
-            .unwrap_or_else(|_| {
-                if rule.path.starts_with('/') {
-                    normalize_dots(&rule.path)
-                } else {
-                    rule.path.clone()
-                }
-            });
-    }
-    out
-}
-
-fn path_to_string(path: PathBuf) -> String {
-    path.to_string_lossy().into_owned()
-}
-
-/// Host-tool-name normalization — a *mapping*, not policy: use the exact host
-/// tool name if the world's ontology declares it; else its lowercase form if
-/// that is declared; else unchanged (the kernel will report it ABSENT).
-fn normalize(world: &harness_types::CompiledWorld, tool: &str) -> String {
-    if world.in_ontology(&ActionName::new(tool)) {
-        return tool.to_string();
-    }
-    let lower = tool.to_lowercase();
-    if world.in_ontology(&ActionName::new(&lower)) {
-        return lower;
-    }
-    tool.to_string()
 }
 
 pub fn run(
@@ -206,7 +107,7 @@ pub fn run(
 
     let req = GateRequest {
         v: ABI_VERSION,
-        tool: normalize(&world, tool),
+        tool: normalize_tool(&world, tool),
         arguments: ti,
         path: action_path,
         context: GateContext {
@@ -259,56 +160,5 @@ pub fn run(
             kind: BlockKind::Replan,
             reason: _,
         } => 0, // no host channel for "smaller step" — fall through
-    }
-}
-
-#[cfg(test)]
-mod path_tests {
-    use super::*;
-
-    #[test]
-    fn normalize_dots_collapses_dot_and_dotdot() {
-        assert_eq!(normalize_dots("/a/./b/../c"), "/a/c");
-        assert_eq!(normalize_dots("/a//b/"), "/a/b");
-        assert_eq!(normalize_dots("/a/b/.."), "/a");
-    }
-
-    #[test]
-    fn resolve_action_path_reads_file_path_and_absolutizes() {
-        let tmp = tempfile::tempdir().unwrap();
-        let proj = tmp.path().join("proj");
-        let home_dir = tmp.path().join("home");
-        std::fs::create_dir_all(proj.join("src")).unwrap();
-        std::fs::create_dir_all(home_dir.join(".ssh")).unwrap();
-        let base = proj.to_str().unwrap();
-        let home_path = home_dir.to_str().unwrap();
-
-        let rel = json!({"file_path": "src/x.rs"});
-        assert_eq!(
-            resolve_action_path(&rel, base, None).as_deref(),
-            Some(proj.join("src/x.rs").to_str().unwrap())
-        );
-
-        let abs_parent = tmp.path().join("etc");
-        std::fs::create_dir_all(&abs_parent).unwrap();
-        let abs_path = abs_parent.join("./shadow");
-        let abs = json!({"file_path": abs_path.to_str().unwrap()});
-        assert_eq!(
-            resolve_action_path(&abs, base, None).as_deref(),
-            Some(abs_parent.join("shadow").to_str().unwrap())
-        );
-
-        let home = json!({"path": "~/.ssh/id_rsa"});
-        assert_eq!(
-            resolve_action_path(&home, base, Some(home_path)).as_deref(),
-            Some(home_dir.join(".ssh/id_rsa").to_str().unwrap())
-        );
-    }
-
-    #[test]
-    fn resolve_action_path_is_none_for_non_path_tools() {
-        // Bash's `command` is not a path key -> None -> path-scope exempt.
-        let args = json!({"command": "rm -rf /"});
-        assert_eq!(resolve_action_path(&args, "/proj", None), None);
     }
 }

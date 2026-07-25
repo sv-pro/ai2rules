@@ -52,7 +52,8 @@ harness-types (foundation — language-neutral contracts, pure data)
     ├─ harness-preview   pure preview: manifest → surface + decision matrix
     │       └─ shared by both harness-wasm and cli-harness serve
     ├─ harness-wasm      cdylib/rlib compiled to WebAssembly (wasm-bindgen)
-    └─ cli-harness       binary `harness` — REPL, serve, gate subcommands
+    └─ cli-harness       binary `harness` — REPL, serve, gate, host adapters
+                         (cc-hook / agy-hook), shared shape helpers in `hostkit`
 ```
 
 | Crate | Primary public API |
@@ -66,12 +67,12 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
-| **cli-harness** | `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate` |
+| **cli-harness** | `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 46 · compiler 18 · executor 16 · trace-store 13 ·
-provider-adapters 5 · agent-core 16 · harness-preview 44 · cli-harness 37 ·
-harness-wasm 0 · **total 200** (plus the harness-wasm Node smoke tests, run via
+provider-adapters 5 · agent-core 16 · harness-preview 44 · cli-harness 58 ·
+harness-wasm 0 · **total 221** (plus the harness-wasm Node smoke tests, run via
 wasm-pack)
 
 ---
@@ -173,7 +174,10 @@ CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
 | `docs/demos/jira-copilot/` | E16 JIRA MCP demo runbook |
 | `.claude/cc-world.yaml` | Live `WorldManifest` governing Claude Code (dogfood), incl. D36 `command_classes` |
 | `.claude/hooks/world-gate.sh` | PreToolUse bootstrap shim → `harness cc-hook` (the real kernel; D37) |
-| `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37) |
+| `.agents/agy-world.yaml` | Live `WorldManifest` governing Antigravity CLI (`agy`) (dogfood; D48) |
+| `.agents/hooks.json` + `.agents/hooks/world-gate.sh` | Antigravity PreToolUse wiring → `harness agy-hook` (D48) |
+| `docs/demos/antigravity/` | Antigravity host runbook + the verified hook contract |
+| `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
 | `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source) |
 | `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
 
@@ -208,6 +212,32 @@ contract tests) before committing.
 
 ---
 
+## Antigravity CLI (`agy`) integration (dogfooding)
+
+The `.agents/` directory does for Antigravity what `.claude/` does for Claude
+Code — same kernel, same case set, a different host envelope (D48):
+
+- **`agy-world.yaml`** — the `WorldManifest` governing `agy` sessions here. Its
+  `command_classes` patterns are byte-identical to every other host manifest
+  (pinned by `tests/one_kernel.rs`).
+- **`hooks.json`** — the `PreToolUse` wiring (`matcher: ""` = all tools) calling
+  the shim. Antigravity discovers this by walking cwd → repo root, so it applies
+  to the whole repository.
+- **`hooks/world-gate.sh`** — the bootstrap shim: locates the `harness` binary
+  and `exec`s `harness agy-hook`. Fail-open, and note it must **print `{}`** on
+  the fail-open path — Antigravity parses stdout, so silence is not a
+  passthrough (unlike Claude Code). No governance logic lives in the shim.
+
+Two host quirks worth knowing before debugging a "hook never fired":
+
+- Hook commands run with the **working directory set to `.agents/`** (the
+  directory containing `hooks.json`), not the project root.
+- In print mode (`agy -p`), the workspace is a scratch directory unless you pass
+  `--add-dir <repo>`, so project-local `.agents/` is never discovered. The log
+  line `loaded 0 named hooks from 0 hooks.json file(s)` is the tell.
+
+---
+
 ## Per-assistant setup
 
 These instructions are shared by reference, not by copy — keep the content here
@@ -216,7 +246,8 @@ and let each tool point at it:
 - **Codex** and **Google Antigravity** read this `AGENTS.md` at the repo root
   natively; no extra file is needed. (Antigravity also supports workspace rules
   under `.agents/rules/` and global rules at `~/.gemini/GEMINI.md` if you want
-  machine- or user-scoped additions.)
+  machine- or user-scoped additions.) Antigravity is additionally **governed**
+  here, not merely documented for — see the `.agents/` section above (D48).
 - **Claude Code** reads `CLAUDE.md`, which imports this file via `@AGENTS.md`.
 
 When updating project conventions, edit **this file**; the per-assistant pointers

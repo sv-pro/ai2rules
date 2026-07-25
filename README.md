@@ -174,18 +174,19 @@ via an `mcp-remote` OAuth bridge with no kernel change — and its shaping is pr
 offline (no creds) by `harness mock-jira --rovo`, which advertises the genuine Rovo
 tool names (see [`docs/demos/jira-copilot/REAL-ATLASSIAN.md`](docs/demos/jira-copilot/REAL-ATLASSIAN.md)).
 
-**One kernel, many hosts (shipped — D36/D37, `docs/one-kernel-many-hosts.md`):**
-Claude Code, OpenCode, and the MCP gateway all decide through the one Rust kernel
+**One kernel, many hosts (shipped — D36/D37/D48, `docs/one-kernel-many-hosts.md`):**
+Claude Code, OpenCode, Antigravity CLI, and the MCP gateway all decide through the one Rust kernel
 via thin adapters that hold no policy, no taint algebra, and no command
 classification — bash shapes are classified by the *kernel* from the manifest's
 `command_classes` (D36), and verdict→host mapping is the shared `host_outcome()`
 layer (ABSENT stays distinct from DENY everywhere):
 
 ```
-Claude Code ─┐
-OpenCode    ─┼─→ thin adapter → GateRequest → one Rust kernel
-MCP Gateway ─┘                        ↓
-                                 GateResponse
+Claude Code    ─┐
+OpenCode       ─┤
+Antigravity CLI ┼─→ thin adapter → GateRequest → one Rust kernel
+MCP Gateway    ─┘                        ↓
+                                    GateResponse
 ```
 
 The parity guarantee — same manifest + same request ⇒ same decision / rule /
@@ -203,7 +204,15 @@ OpenCode (E17 / DECISIONS D35) is dogfooded the same way: the
 `permission` rules) calls the same `harness gate` wire ABI, sending raw tool
 names — see `docs/demos/opencode/`.
 
-Builds clean offline with `clippy -D warnings`; **200 tests** green.
+**Antigravity CLI (`agy`, DECISIONS D48)** is the third live host: `.agents/hooks.json`
+runs a bootstrap shim that `exec`s **`harness agy-hook`**, which links `gate()`
+in-process like `cc-hook`. Its hook ABI is not vendor-published — the contract was
+extracted from the shipped binary and then verified against a live session — so the
+adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
+argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
+shared `command_classes` reads. See `docs/demos/antigravity/`.
+
+Builds clean offline with `clippy -D warnings`; **221 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -222,7 +231,7 @@ crates/               the harness implementation
   trace-store/        append-only audit, redaction, replay (E4)
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
-  cli-harness/        terminal entrypoint + `serve`/`gate`/`mcp-gateway`/`cc-hook`/`mock-jira` (binary `harness`) (E9, E11, E16)
+  cli-harness/        terminal entrypoint + `serve`/`gate`/`mcp-gateway`/`cc-hook`/`agy-hook`/`mock-jira` (binary `harness`) (E9, E11, E16, D48)
   harness-preview/    pure design-time preview + runtime gate() ABI, shared by serve + wasm + `harness gate` (E11/E14, D24)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
 docs/                 architecture (harness-architecture.md is canonical; one-kernel-many-hosts.md = cross-host parity)
