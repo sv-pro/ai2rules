@@ -3,7 +3,7 @@
 # ai2rules harness (a WorldManifest enforced via a Claude Code PreToolUse hook).
 #
 # One command does both halves:
-#   * per machine: ensure the `harness` binary is available on PATH
+#   * per machine: ensure the `harness` binary is installed at a trusted absolute path
 #   * per project: drop the .claude/ shim + starter manifest, merge settings.json
 #
 # Usage:
@@ -14,14 +14,14 @@
 #     --source DIR   an ai2rules checkout (templates + binary/build). Auto-detected
 #                    when this script lives in <checkout>/scripts/.
 #     --bin-dir DIR  where to install harness (default: ~/.local/bin)
-#     --force        reinstall the binary even if one is already on PATH
+#     --force        reinstall the binary even if one is already in --bin-dir
 #     -h, --help     this help
 #
 # Rollback in the governed project: `touch .claude/gate-off` (off, next call, no
 # restart) or `~/.claude/gate-off` (panic, everywhere); `rm` to re-enable.
 set -euo pipefail
 
-GRANT=0; FORCE=0; TARGET=""; BIN_DIR="${HOME}/.local/bin"; SOURCE=""
+GRANT=0; FORCE=0; TARGET=""; BIN_DIR="${HOME}/.local/bin"; SOURCE=""; TRUSTED_HARNESS=""
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 while [ $# -gt 0 ]; do
@@ -48,29 +48,31 @@ if [ -z "$SOURCE" ] || [ ! -f "$SOURCE/.claude/cc-world.yaml" ]; then
   exit 1
 fi
 
-# --- per machine: ensure `harness` on PATH ---------------------------------------
+# --- per machine: ensure `harness` at a trusted absolute path ---------------------
 ensure_harness(){
-  if [ "$FORCE" -eq 0 ] && command -v harness >/dev/null 2>&1; then
-    say "harness already on PATH: $(command -v harness)"; return
-  fi
   mkdir -p "$BIN_DIR"
+  BIN_DIR="$(cd "$BIN_DIR" && pwd)"
+  TRUSTED_HARNESS="$BIN_DIR/harness"
+  if [ "$FORCE" -eq 0 ] && [ -x "$TRUSTED_HARNESS" ]; then
+    say "harness already installed: $TRUSTED_HARNESS"; return
+  fi
   if [ -x "$SOURCE/target/release/harness" ]; then
     say "installing harness from the checkout's release build -> $BIN_DIR"
-    install -m 0755 "$SOURCE/target/release/harness" "$BIN_DIR/harness"
+    install -m 0755 "$SOURCE/target/release/harness" "$TRUSTED_HARNESS"
   elif command -v cargo >/dev/null 2>&1; then
     say "building harness (cargo release) — one-time ..."
     cargo build --release --manifest-path "$SOURCE/Cargo.toml" -p cli-harness
-    install -m 0755 "$SOURCE/target/release/harness" "$BIN_DIR/harness"
+    install -m 0755 "$SOURCE/target/release/harness" "$TRUSTED_HARNESS"
   else
     echo "error: no prebuilt harness and no cargo to build one." >&2
     echo "  On a Rust machine: cargo install --path <checkout>/crates/cli-harness" >&2
-    echo "  Or download a prebuilt release binary and put it on PATH." >&2
+    echo "  Or download a prebuilt release binary and put it in --bin-dir." >&2
     exit 1
   fi
-  say "installed: $BIN_DIR/harness"
+  say "installed: $TRUSTED_HARNESS"
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *) say "NOTE: $BIN_DIR is not on PATH — add it, or rely on the shim's own lookup." ;;
+    *) say "NOTE: $BIN_DIR is not on PATH; installed shims still use the baked absolute path." ;;
   esac
 }
 
@@ -79,26 +81,31 @@ write_shim(){
   mkdir -p "$TARGET/.claude/hooks"
   local dst="$TARGET/.claude/hooks/world-gate.sh" grant_flag=""
   [ "$GRANT" -eq 1 ] && grant_flag=" --grant"
+  local trusted_bin_quoted
+  trusted_bin_quoted="$(printf '%q' "$TRUSTED_HARNESS")"
   cat > "$dst" <<SHIM
 #!/usr/bin/env bash
 # ai2rules governance shim (installed by install-governance.sh). Execs the Rust
 # kernel's PreToolUse adapter; no governance logic lives here. Fail-open: no binary
 # -> exit 0 (the tool call falls through to Claude Code's normal flow).
+#
+# The governed project is untrusted. Never resolve harness from \$PD/target; use
+# HARNESS_BIN only when it is an explicit absolute executable, otherwise use the
+# installer-owned binary baked into this shim.
 set -u
 PD="\${CLAUDE_PROJECT_DIR:-\$(pwd)}"
+TRUSTED_BIN=$trusted_bin_quoted
 # Instant kill-switch, no restart: touch .claude/gate-off (this project) or
 # ~/.claude/gate-off (panic, everywhere) to disable governance on the NEXT call; rm
 # to re-enable. The shim runs per call, so the toggle is immediate.
 if [ -f "\$PD/.claude/gate-off" ] || [ -f "\$HOME/.claude/gate-off" ]; then exit 0; fi
 BIN="\${HARNESS_BIN:-}"
-if [ -z "\$BIN" ] || [ ! -x "\$BIN" ]; then
-  BIN=""
-  for c in "\$PD/target/release/harness" "\$PD/target/debug/harness"; do
-    [ -x "\$c" ] && { BIN="\$c"; break; }
-  done
+if [ -n "\$BIN" ]; then
+  case "\$BIN" in /*) [ -x "\$BIN" ] || exit 0 ;; *) exit 0 ;; esac
+else
+  BIN="\$TRUSTED_BIN"
 fi
-[ -z "\$BIN" ] && BIN="\$(command -v harness 2>/dev/null || true)"
-[ -z "\$BIN" ] && exit 0  # fail-open: no kernel, normal permissions
+[ -x "\$BIN" ] || exit 0  # fail-open: no trusted kernel, normal permissions
 exec "\$BIN" cc-hook${grant_flag} --world "\$PD/.claude/cc-world.yaml" --state "\$PD/.claude/state"
 SHIM
   chmod +x "$dst"

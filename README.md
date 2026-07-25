@@ -203,7 +203,7 @@ OpenCode (E17 / DECISIONS D35) is dogfooded the same way: the
 `permission` rules) calls the same `harness gate` wire ABI, sending raw tool
 names — see `docs/demos/opencode/`.
 
-Builds clean offline with `clippy -D warnings`; **188 tests** green.
+Builds clean offline with `clippy -D warnings`; **192 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

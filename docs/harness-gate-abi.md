@@ -5,7 +5,8 @@ Decisions: `DECISIONS.md` **D24** (refines D19), **D34** (in-process vs wire),
 **D36** (kernel-side classification), **D37** (live-hook cutover), **D41**
 (approval tokens are correlation ids, not bearer grants), **D42** (gate context
 is explicit and fail-closed), **D43** (source-channel trust is compiled manifest
-policy), **D44** (shell classifiers fail closed). Vocabulary:
+policy), **D44** (shell classifiers fail closed), **D46** (trusted harness
+resolution). Vocabulary:
 `docs/GLOSSARY.md` → *Integration / topology*. Cross-host parity is pinned by
 `crates/cli-harness/tests/one_kernel.rs` (see `docs/one-kernel-many-hosts.md`).
 
@@ -172,7 +173,7 @@ link `gate()` in-process; the wire ABI serves out-of-process/non-Rust hosts):
 
 ```bash
 # .claude/hooks/world-gate.sh (bootstrap only — no governance logic)
-BIN=…locate harness ($HARNESS_BIN → target/{release,debug}/harness → PATH)…
+BIN=…locate harness (absolute $HARNESS_BIN/$AI2RULES_HARNESS or installed absolute path)…
 [ -z "$BIN" ] && exit 0   # fail-open: no kernel binary, fall through
 exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state"
 ```
