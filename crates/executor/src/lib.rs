@@ -249,6 +249,97 @@ mod tests {
         ));
     }
 
+    // Regression for the dangling-symlink escape (security finding #9): a symlink
+    // *inside* a writable root whose target is missing used to pass containment as
+    // an "in-root new file", after which `fs::write` followed the link and created
+    // the outside target. It must now fail closed with nothing written outside.
+    #[cfg(unix)]
+    #[test]
+    fn dangling_symlink_leaf_inside_root_cannot_escape_write() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_target = outside.path().join("pwned.txt");
+        assert!(!outside_target.exists());
+
+        // Dangling symlink inside the root pointing at the missing outside file.
+        let link = root.path().join("link.txt");
+        symlink(&outside_target, &link).unwrap();
+
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("apply_patch"),
+                DescriptorHash::new(HASH),
+                Box::new(PatchHandler),
+            )
+            .build();
+        let s = spec(
+            "apply_patch",
+            Operation::Structured(json!({"path": link.to_str().unwrap(), "contents": "pwned"})),
+            root.path(),
+            vec![root.path().to_path_buf()],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            1_000,
+        );
+
+        assert!(matches!(
+            exec.run(&s),
+            Err(ExecError::WriteOutsideRoots { .. })
+        ));
+        assert!(
+            !outside_target.exists(),
+            "dangling symlink leaf must not let fs::write create the outside target"
+        );
+    }
+
+    // Companion: a *resolvable* symlink leaf pointing outside was already denied
+    // (canonicalize follows it, containment rejects the real target). Lock that
+    // branch so a future refactor of `resolve` cannot regress it.
+    #[cfg(unix)]
+    #[test]
+    fn resolvable_symlink_leaf_pointing_outside_is_denied() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_target = outside.path().join("secret.txt");
+        std::fs::write(&outside_target, "original").unwrap();
+
+        let link = root.path().join("link.txt");
+        symlink(&outside_target, &link).unwrap();
+
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("apply_patch"),
+                DescriptorHash::new(HASH),
+                Box::new(PatchHandler),
+            )
+            .build();
+        let s = spec(
+            "apply_patch",
+            Operation::Structured(json!({"path": link.to_str().unwrap(), "contents": "pwned"})),
+            root.path(),
+            vec![root.path().to_path_buf()],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            1_000,
+        );
+
+        assert!(matches!(
+            exec.run(&s),
+            Err(ExecError::WriteOutsideRoots { .. })
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&outside_target).unwrap(),
+            "original",
+            "the outside file behind the symlink must be untouched"
+        );
+    }
+
     #[test]
     fn simulated_write_has_no_side_effect() {
         let dir = tempfile::tempdir().unwrap();
