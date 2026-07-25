@@ -11,6 +11,9 @@
 //!   (d) OpenCode-shaped GateRequests — the exact wire shape the plugin sends
 //!   (e) `harness mcp-gateway` over `harness mock-jira` for the jira cases
 //!       (tools/list shaping + isError decision labels)
+//!   (f) `harness agy-hook` — the Antigravity CLI PreToolUse contract, fed the
+//!       host's real payload shape (camelCase envelope + PascalCase argument
+//!       keys), so the adapter's shape translation is inside the parity claim
 //!
 //! Plus the classifier-consistency test pinning the D36 `command_classes`
 //! pattern lists byte-identical across the three host manifests.
@@ -114,6 +117,67 @@ fn hook_decision(out: &str) -> Option<(String, String)> {
             .to_string(),
         v["hookSpecificOutput"]["permissionDecisionReason"]
             .as_str()
+            .unwrap_or("")
+            .to_string(),
+    ))
+}
+
+/// (f) `harness agy-hook`: an Antigravity PreToolUse payload on stdin; stdout.
+fn agy_hook(state: &Path, event: &Value, mode: &str, enforce_absent: bool) -> String {
+    let bin = env!("CARGO_BIN_EXE_harness");
+    let mut args = vec![
+        "agy-hook".to_string(),
+        "--world".to_string(),
+        demo_world().to_str().unwrap().to_string(),
+        "--state".to_string(),
+        state.to_str().unwrap().to_string(),
+        "--mode".to_string(),
+        mode.to_string(),
+    ];
+    if enforce_absent {
+        args.push("--enforce-absent".to_string());
+    }
+    let mut child = Command::new(bin)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn agy-hook");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(event.to_string().as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().expect("wait agy-hook");
+    assert!(out.status.success(), "agy-hook must exit 0 (fail-open)");
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// Spell a case's neutral arguments the way Antigravity actually sends them
+/// (PascalCase), so the conformance run exercises the adapter's alias step
+/// rather than bypassing it. The kernel must still reach the same verdict.
+fn agy_args(arguments: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for (k, v) in arguments.as_object().cloned().unwrap_or_default() {
+        let host_key = match k.as_str() {
+            "command" => "CommandLine",
+            "file_path" | "path" | "notebook_path" => "AbsolutePath",
+            other => other,
+        };
+        out.insert(host_key.to_string(), v);
+    }
+    Value::Object(out)
+}
+
+/// The Antigravity decision channel: `{}` (no `decision`) is the passthrough.
+fn agy_decision(out: &str) -> Option<(String, String)> {
+    let v: Value = serde_json::from_str(out.trim()).ok()?;
+    Some((
+        v.get("decision")?.as_str()?.to_string(),
+        v.get("reason")
+            .and_then(|r| r.as_str())
             .unwrap_or("")
             .to_string(),
     ))
@@ -370,6 +434,78 @@ fn cc_hook_contract_matches_the_case_set() {
     }
 }
 
+/// (f) The agy-hook PreToolUse contract: the same case set, sent in
+/// Antigravity's real payload shape, must produce the same kernel verdict —
+/// mapped onto Antigravity's decision vocabulary (`force_ask` for ASK, because
+/// its plain `ask` respects cached "Always Allow" grants) — and the same
+/// post-call taint. This puts the adapter's envelope + PascalCase translation
+/// inside the one-kernel parity claim (D48).
+#[test]
+fn agy_hook_contract_matches_the_case_set() {
+    for case in cases() {
+        let name = case["name"].as_str().unwrap();
+        let request = &case["request"];
+        let expect = &case["expect"];
+        let decision = expect["decision"].as_str().unwrap();
+        let mode = case_field(&case, &["request", "context", "mode"])
+            .as_str()
+            .unwrap_or("interactive");
+        let inbound_tainted = case_field(&case, &["request", "context", "taint"]) == "tainted";
+
+        let dir = tempfile::tempdir().unwrap();
+        let sid = name; // one conversation per case
+        if inbound_tainted {
+            std::fs::write(dir.path().join(format!("taint-{sid}")), "seed\n").unwrap();
+        }
+        let arguments = request.get("arguments").cloned().unwrap_or(json!({}));
+        let event = json!({
+            "conversationId": sid,
+            "stepIdx": 1,
+            "workspacePaths": [],
+            "toolCall": { "name": request["tool"], "args": agy_args(&arguments) },
+        });
+        // --enforce-absent for the ABSENT cases: the deny channel is the only
+        // way a PreToolUse hook can surface "does not exist".
+        let out = agy_hook(dir.path(), &event, mode, decision == "ABSENT");
+
+        match decision {
+            "ALLOW" => {
+                let v: Value = serde_json::from_str(out.trim())
+                    .unwrap_or_else(|e| panic!("{name}: agy expects JSON, got {out:?} ({e})"));
+                assert!(
+                    v.get("decision").is_none(),
+                    "{name}: ALLOW passes through as the no-decision no-op, got {out:?}"
+                );
+            }
+            "ASK" => {
+                let (d, _) = agy_decision(&out).expect("ASK emits a decision");
+                assert_eq!(d, "force_ask", "{name}: ASK uses the strict channel");
+            }
+            "DENY" => {
+                let (d, _) = agy_decision(&out).expect("DENY emits a decision");
+                assert_eq!(d, "deny", "{name}");
+            }
+            "ABSENT" => {
+                let (d, reason) = agy_decision(&out).expect("--enforce-absent emits a deny");
+                assert_eq!(d, "deny", "{name}");
+                assert!(
+                    reason.starts_with("ABSENT: "),
+                    "{name}: ABSENT stays distinguishable from DENY, got {reason:?}"
+                );
+            }
+            other => panic!("{name}: unexpected expected decision {other}"),
+        }
+
+        // Post-call taint: the sidecar must exist iff the kernel says tainted.
+        let expect_tainted = expect["taint"] == "tainted";
+        assert_eq!(
+            dir.path().join(format!("taint-{sid}")).exists(),
+            expect_tainted,
+            "{name}: sidecar tracks the kernel's post-call taint"
+        );
+    }
+}
+
 /// (e) The gateway over mock-jira: shaping (ABSENT tools never offered) and
 /// per-call verdicts with distinguishable labels, for the jira-flagged cases.
 #[test]
@@ -498,6 +634,7 @@ fn command_class_patterns_are_identical_across_host_manifests() {
         ".claude/cc-world.yaml",
         "docs/demos/opencode/opencode-world.yaml",
         "scripts/starter-world.yaml",
+        ".agents/agy-world.yaml",
     ];
     let mut pattern_sets: Vec<Vec<Vec<String>>> = Vec::new();
     let mut default_targets: Vec<String> = Vec::new();
@@ -541,6 +678,10 @@ fn command_class_patterns_are_identical_across_host_manifests() {
     assert_eq!(
         pattern_sets[0], pattern_sets[3],
         "demo-world vs starter-world pattern drift"
+    );
+    assert_eq!(
+        pattern_sets[0], pattern_sets[4],
+        "demo-world vs agy-world pattern drift"
     );
     assert!(
         default_targets.iter().all(|d| d.ends_with("_unclassified")),

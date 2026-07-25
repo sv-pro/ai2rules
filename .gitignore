@@ -17,6 +17,9 @@ crates/harness-wasm/pkg-web/
 # OpenCode plugin runtime state (E17 governance adapter taint sidecar)
 .opencode/ai2rules-state.json
 
+# Antigravity CLI (`agy`) runtime state (D48 governance adapter taint sidecar)
+.agents/state/
+
 # Python bytecode (the .claude/hooks/*.py gate hooks generate this)
 __pycache__/
 *.pyc

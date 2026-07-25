@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use trace_store::{ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
+mod agy_hook;
 mod cc_hook;
+mod hostkit;
 mod mcp_gateway;
 mod mock_jira;
 mod serve;
@@ -95,6 +97,41 @@ enum Command {
         /// even on a hook `allow`). Default off: ALLOW stays a silent passthrough.
         #[arg(long)]
         grant: bool,
+    },
+    /// Antigravity CLI (`agy`) PreToolUse adapter, in Rust (D48): read an
+    /// Antigravity `PreToolUse` payload on stdin, govern it with the kernel
+    /// in-process, and emit a deny/force_ask decision — or, in `--grant`/replace
+    /// mode, an explicit `allow` that grants (skips the host's prompt). Additive
+    /// by default (never auto-allows); fail-open. The agy sibling of `cc-hook`.
+    AgyHook {
+        /// Path to the world manifest (YAML/JSON) that governs this session.
+        #[arg(long)]
+        world: PathBuf,
+        /// Directory for the per-conversation taint sidecar.
+        #[arg(long, default_value = ".agents/state")]
+        state: PathBuf,
+        /// Execution mode threaded into every gate call. The kernel itself
+        /// collapses ASK->DENY in background (invariant 10).
+        #[arg(long, default_value = "interactive", value_parser = ["interactive", "background"])]
+        mode: String,
+        /// Enforce ABSENT: deny tools the world does not declare (reason
+        /// prefixed "ABSENT: "). Default is passthrough — additive dogfooding,
+        /// since a PreToolUse hook cannot remove native tools and denying
+        /// everything outside the manifest would brick the host.
+        #[arg(long)]
+        enforce_absent: bool,
+        /// Replace mode: emit an explicit `allow` on ALLOW verdicts, which
+        /// *grants* — Antigravity skips its permission prompt — so the manifest
+        /// is the authoritative allowlist, not an additive overlay. Default off:
+        /// ALLOW stays a silent passthrough.
+        #[arg(long)]
+        grant: bool,
+        /// Map kernel ASK verdicts onto Antigravity's cache-respecting `ask`
+        /// instead of `force_ask`. Default is `force_ask`, so a cached
+        /// "Always Allow" grant can never silently satisfy an approval the
+        /// kernel required.
+        #[arg(long)]
+        soft_ask: bool,
     },
     /// Front a real upstream MCP server with the kernel: shape its `tools/list`
     /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
@@ -216,6 +253,25 @@ fn main() {
     }) = &cli.command
     {
         std::process::exit(cc_hook::run(world, state, mode, *enforce_absent, *grant));
+    }
+
+    if let Some(Command::AgyHook {
+        world,
+        state,
+        mode,
+        enforce_absent,
+        grant,
+        soft_ask,
+    }) = &cli.command
+    {
+        std::process::exit(agy_hook::run(
+            world,
+            state,
+            mode,
+            *enforce_absent,
+            *grant,
+            *soft_ask,
+        ));
     }
 
     if let Some(Command::McpGateway {
