@@ -82,8 +82,9 @@ Disable temporarily with `AI2RULES_DISABLE=1 opencode`. Point at a different man
 > `opencode.jsonc`: `{ "plugin": ["./.opencode/plugin/ai2rules-gate.ts"] }`.
 
 **To govern another repo:** copy `.opencode/plugin/ai2rules-gate.ts` and an
-`opencode-world.yaml` into it (set `AI2RULES_WORLD` if the path differs), and make `harness`
-reachable (on `PATH` or via `AI2RULES_HARNESS`).
+`opencode-world.yaml` into it (set `AI2RULES_WORLD` if the path differs), and install `harness`
+at `~/.local/bin/harness`, `/usr/local/bin/harness`, `/opt/ai2rules/bin/harness`, or set
+`AI2RULES_HARNESS` to an explicit absolute executable path.
 
 ## Defense-in-depth: OpenCode `permission` rules (E17.4)
 
