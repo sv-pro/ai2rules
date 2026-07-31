@@ -154,6 +154,39 @@ Also worth reading in `tools_demo`: `run_tests` proposed with
 `command: "rm -rf /"` lowers to argv `["pytest"]`. The dangerous argument isn't
 detected and rejected — it's *not representable*, so it's dropped on the way down.
 
+### Two crates, two different jobs
+
+This is the stop where people conflate `world-kernel` and `agent-core`, because
+both are Rust and both just ran deterministically. They are not peers.
+
+|  | `world-kernel` | `agent-core` |
+|---|---|---|
+| Is | a decision function | a loop that calls it |
+| Entry point | `decide(intent, context, world)` | `run(SessionConfig)` |
+| Depends on | `harness-types` + two pure helpers. No I/O, no clock, no network | the kernel *plus* compiler, executor, trace-store, provider-adapters |
+| Deterministic | **by construction** — this is the property everything else rests on | **only here**, because a `ScriptedModel` is plugged into its model seam |
+| Can build an `ExecutionSpec` | yes — it is the only thing that can | no; it has to ask the kernel |
+
+The determinism you just watched is two different things wearing one word. The
+kernel's is architectural: same inputs, same verdict, in a hook or in the browser
+— that's what makes stop 3's replay and stop 0's playground possible. The loop's
+is a **test fixture**: `agent-core`'s `ModelClient` is the seam a real LLM plugs
+into, and `ScriptedModel` (48 lines in
+[`crates/agent-core/src/model.rs`](../crates/agent-core/src/model.rs)) is a canned
+stand-in so these examples run offline. Swap in a live model and the loop stops
+being deterministic — while every verdict in it stays exactly as deterministic as
+before. That gap is the whole design.
+
+So only the stub stands in for an LLM. The kernel isn't a stand-in for anything —
+it exists so no model is ever asked to be the judge. A model may legitimately
+produce `agent-core`'s *proposals*; nothing but the kernel may produce a *verdict*.
+That's enforced by the crate graph, not by discipline: `agent-core` cannot
+construct an `ExecutionSpec`, so it has to go through `decide()` to get anything
+done at all.
+
+Which raises the obvious question — what happens when the loop isn't ours? That's
+the next stop.
+
 ---
 
 ## Stop 5 — One kernel, many hosts (5 min)
@@ -177,6 +210,13 @@ OpenCode shape    : DENY rule=taint_invariant taint=tainted action=bash_network 
 **What it proves:** hosts translate shapes; they never hold policy. The matching
 `manifest_hash` is the load-bearing part — both hosts decided against the byte-identical
 compiled world.
+
+And note what is *absent* from that path: `agent-core`. When Claude Code or
+Antigravity runs the loop, our loop isn't in the picture at all — the host goes
+straight to `harness_preview::gate()` → `world_kernel::decide()`. Grep the
+workspace for `agent_core` and you'll find exactly one importer,
+`cli-harness/src/main.rs`, the interactive REPL. `agent-core` is the in-house loop
+for when the harness hosts the agent itself; the kernel is what every host needs.
 
 ### Drive the gate yourself
 
