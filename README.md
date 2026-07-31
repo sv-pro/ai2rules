@@ -24,6 +24,10 @@ and the audit/replay layer are all in place — a proposed tool call flows all t
 way to a real or simulated result, and every decision is logged, redacted, and
 replayable. See [Status](#status).
 
+> **New here? Take the tour: [`docs/TUTORIAL.md`](docs/TUTORIAL.md).** Nine stops,
+> ~45 minutes, all offline and credential-free — from the five verdicts, to one
+> kernel deciding for four different hosts, to governing a project of your own.
+
 ---
 
 ## Why
@@ -284,6 +288,9 @@ git tag v0.1.0 && git push gh v0.1.0   # → cross-OS binaries on the v0.1.0 Rel
 ```
 
 ### See the kernel decide
+
+The demos below are the raw list; [`docs/TUTORIAL.md`](docs/TUTORIAL.md) walks the
+same ground in a deliberate order, with what each one is meant to prove.
 
 For a quick noninteractive demo, run the kernel plus the execution boundary. It
 compiles the default world, feeds it a handful of
