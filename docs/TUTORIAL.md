@@ -14,15 +14,17 @@ into a project you choose, and tells you how to remove it. Stop 8 is a local web
 
 > **What you are looking at.** One Rust kernel decides every verdict in this
 > tutorial. The decision is a pure function of *(what was proposed, the context it
-> was proposed in, the compiled world)* — no model is on the path, at any stop. The
+> was proposed in, the compiled world)* — no model is on the *decision* path, at any
+> stop. A model may legitimately propose (that's stop 4); none may ever adjudicate. The
 > design behind it: [`docs/harness-architecture.md`](harness-architecture.md); the
 > thesis it serves: [`docs/THESIS.md`](THESIS.md); the vocabulary
 > (ALLOW / ASK / DENY / ABSENT / REPLAN, taint, world, manifest):
 > [`docs/GLOSSARY.md`](GLOSSARY.md).
 
-**Prerequisites for stops 1–8:** a stable Rust toolchain (developed against 1.87),
-`python3` and `jq` for the pretty-printing in two of the scripts, and a clone of
-this repo. Build once:
+**Prerequisites for stops 1–8:** a stable Rust toolchain (developed against 1.87) and
+a clone of this repo. Also `python3`, which `demo-one-kernel-many-hosts.sh` uses to
+pretty-print (stop 5), and `jq`, which the tutorial's own commands use at stops 5
+and 7. Build once:
 
 ```bash
 cargo build --workspace          # first build takes a few minutes; after that, seconds
@@ -97,6 +99,7 @@ cargo run -p world-kernel --example execution_demo
 • Stale descriptor (rug-pull) blocked before the handler
     REFUSED  : descriptor drift — handler never ran
 • Command that overruns its timeout is killed
+    REFUSED  : killed after 200ms
 ```
 
 **What it proves:** the executor refuses on its own — it re-checks the spec instead
@@ -394,6 +397,17 @@ So you don't mistake a demo for a guarantee:
 - **MCP and web transports in the crate examples are mocks.** The real MCP path is
   the `mcp-gateway` (stop 5) and the Atlassian skin in
   [`docs/demos/jira-copilot/`](demos/jira-copilot/).
+- **The MCP gateway speaks an older protocol than the current spec.** It declares
+  protocol version `2024-11-05` and does not implement `server/discover` or the
+  required `resultType` — legal, because the spec's backward-compatibility rules
+  accommodate older servers, but it is a legacy server by choice, not a current one.
+  The gap that matters: revision `2026-07-28` introduced **MRTR**, where a server
+  answers a tool call with a result that *demands* input (an elicitation, or an LLM
+  completion) which the client must supply before retrying. The gateway forwards such
+  a result unexamined, and the kernel has no verdict shape for "the result asked for
+  something." Nothing in the loop can produce one today — there is no modern upstream
+  — so this is design debt, not a live hole. See `DECISIONS.md` **D49** and
+  [issue #40](https://github.com/sv-pro/ai2rules/issues/40).
 - **Trust pins were consciously dropped** in the Rust cutover (D29) until they land
   as typed manifest fields.
 
