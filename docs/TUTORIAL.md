@@ -6,7 +6,7 @@ Most stops are a single command; stops 4, 5 and 7 are a short sequence.
 
 Stops 1–8 run **offline** — no API key, no credentials, no network, no containers.
 Stop 0 is the exception, and the opposite: it's a hosted web page and needs nothing
-installed at all.
+installed at all. Between stops 4 and 5 there's a short interlude with nothing to run.
 
 Stops 1–6 change nothing outside a temp directory (stop 2 works inside a throwaway
 sandbox, stop 3 writes a trace — both `tempfile::tempdir()`). Stop 7 installs a hook
@@ -129,7 +129,7 @@ Try that with a policy that an LLM adjudicates.
 
 ---
 
-## Stop 4 — A model driving the loop (8 min)
+## Stop 4 — A model driving the loop (5 min)
 
 Three examples, increasingly pointed. All use a scripted stand-in for the model, so
 they're deterministic and offline.
@@ -162,10 +162,14 @@ Also worth reading in `tools_demo`: `run_tests` proposed with
 `command: "rm -rf /"` lowers to argv `["pytest"]`. The dangerous argument isn't
 detected and rejected — it's *not representable*, so it's dropped on the way down.
 
-### Two crates, two different jobs
+---
 
-This is the stop where people conflate `world-kernel` and `agent-core`, because
-both are Rust and both just ran deterministically. They are not peers.
+## Interlude — two crates, two different jobs
+
+*Nothing to run here. Two minutes of reading, between the loop and the hosts.*
+
+Stop 4 is where people conflate `world-kernel` and `agent-core`, because both are
+Rust and both just ran deterministically. They are not peers.
 
 |  | `world-kernel` | `agent-core` |
 |---|---|---|
