@@ -49,7 +49,7 @@ its documented fail-open/fail-closed strategy.
 | `harness cc-hook` (Rust, in-process `gate()`) | PreToolUse JSON ↔ `permissionDecision`; tool-name normalization (exact ontology name, else lowercase, else unchanged); taint sidecar `.claude/state/taint-<sid>`; `--mode`; `--enforce-absent` |
 | `.opencode/plugin/ai2rules-gate.ts` (TS, wire ABI `harness gate`) | `tool.execute.before` ↔ throw-to-block; taint in `.opencode/ai2rules-state.json`; `AI2RULES_MODE` |
 | `harness agy-hook` (Rust, in-process `gate()`) | Antigravity `PreToolUse` payload ↔ `decision`; protojson camelCase envelope (`toolCall{name,args}`, `conversationId`); **PascalCase→neutral argument aliasing** (`CommandLine`→`command`, `AbsolutePath`/`TargetFile`→`path`); project base from `workspacePaths`; taint sidecar `.agents/state/taint-<cid>`; `--mode`; `--enforce-absent`; `--grant`; `--soft-ask` |
-| `harness mcp-gateway` (Rust, in-process `gate()`) | MCP `tools/list` shaping (ABSENT never offered) + `tools/call` ↔ `isError` with the decision label; in-process monotonic session taint; `--mode` |
+| `harness mcp-gateway` (Rust, in-process `gate()`) | MCP `tools/list` shaping (ABSENT never offered; each survivor re-issued from the *world's* descriptor, D51) + `tools/call` ↔ `isError` with the decision label; in-process monotonic session taint; `--mode` |
 | `harness gate` (CLI) | stdin/stdout JSON marshalling only |
 
 ## Duplication survey (before → after this increment)
