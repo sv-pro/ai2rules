@@ -1,13 +1,16 @@
 # Tutorial — see it decide, then let it govern your project
 
 A guided tour of what actually works today, in the order that makes it make sense.
-Nine stops, about **45 minutes** end to end; each one is a single command with a
-verdict you can read. Everything below runs **offline** — no API key, no
-credentials, no network, no containers.
+Nine stops, about **45 minutes** end to end, each ending in a verdict you can read.
+Most stops are a single command; stops 4, 5 and 7 are a short sequence.
 
-Stops 1–6 are read-only demos: nothing on your machine changes. Stop 7 installs a
-hook into a throwaway project (and tells you how to remove it). Stop 8 is a local
-web UI. Stop 0 needs no install at all.
+Stops 1–8 run **offline** — no API key, no credentials, no network, no containers.
+Stop 0 is the exception, and the opposite: it's a hosted web page and needs nothing
+installed at all.
+
+Stops 1–6 change nothing outside a temp directory (stop 2 works inside a throwaway
+sandbox, stop 3 writes a trace — both `tempfile::tempdir()`). Stop 7 installs a hook
+into a project you choose, and tells you how to remove it. Stop 8 is a local web UI.
 
 > **What you are looking at.** One Rust kernel decides every verdict in this
 > tutorial. The decision is a pure function of *(what was proposed, the context it
@@ -63,6 +66,11 @@ You'll see six proposed calls and what the kernel does with each:
 • Agent runs one command past its budget
     verdict  : REPLAN  (rule: max_commands_per_task)
 ```
+
+Six calls, five verdicts: `UNKNOWN_TO_ONTOLOGY` is `ABSENT`'s stricter sibling. The
+kernel keeps it a distinct outcome so "this action was never defined" stays
+separable from "this actor may not have it" (invariant 3), but it renders as ABSENT
+— the model is told the same thing either way.
 
 **What it proves:** these are five *different* answers, not one blocklist. The
 interesting one is `ABSENT` — untrusted content asking to write doesn't get
@@ -121,7 +129,7 @@ Try that with a policy that an LLM adjudicates.
 
 ---
 
-## Stop 4 — A model driving the loop (5 min)
+## Stop 4 — A model driving the loop (8 min)
 
 Three examples, increasingly pointed. All use a scripted stand-in for the model, so
 they're deterministic and offline.
@@ -195,11 +203,12 @@ the next stop.
 bash scripts/demo-one-kernel-many-hosts.sh
 ```
 
-Seven beats. The first three shape an MCP server's tool list — a real `tools/list`
-goes from 7 tools to 4, so the three destructive ones are never offered to the
-model at all. Then the same `rm -rf` gets `ASK` interactively and `DENY` in
-background, a tainted `curl` is denied, and the last beat sends the *same* request
-in Claude Code's shape and OpenCode's shape:
+Eight blocks, numbered 1 to 7 (step 6 splits in two). The first three shape an MCP
+server's tool list — a real `tools/list` goes from 7 tools to 4, so the three
+destructive ones are never offered to the model at all. Then the same `rm -rf` gets
+`ASK` interactively and `DENY` in background; a tainted `curl` is denied (6a) and so
+is a tainted MCP call through the gateway (6b); and the last beat sends the *same*
+request in Claude Code's shape and OpenCode's shape:
 
 ```
 Claude Code shape : DENY rule=taint_invariant taint=tainted action=bash_network hash=5858b1229ac3
@@ -277,7 +286,7 @@ This is the one that changes something on your machine. Use a scratch project fi
 
 ```bash
 mkdir -p /tmp/toyproj && cd /tmp/toyproj && git init -q
-bash ~/path/to/ai2rules/scripts/install-governance.sh .
+bash /path/to/ai2rules/scripts/install-governance.sh .    # your checkout
 ```
 
 It does two things: installs the `harness` binary at a trusted absolute path
@@ -285,10 +294,10 @@ It does two things: installs the `harness` binary at a trusted absolute path
 the project:
 
 ```
-.claude/hooks/world-gate.sh   # 20-line shim; execs the kernel, holds no policy
+.claude/hooks/world-gate.sh   # 23-line shim; execs the kernel, holds no policy
 .claude/cc-world.yaml         # the starter manifest — this is your policy
 .claude/settings.json         # registers the PreToolUse hook
-.gitignore                    # ignores .claude/state/ and .claude/gate-off
+.gitignore                    # appends .claude/state/ and .claude/gate-off
 ```
 
 The install is *additive* by default: the manifest can add `deny`/`ask`, never
@@ -331,8 +340,12 @@ would just prompt you.
 touch .claude/gate-off        # off for this project, next call, no restart
 touch ~/.claude/gate-off      # panic switch, everywhere
 rm .claude/gate-off           # back on
-rm -rf .claude .gitignore     # full uninstall from the scratch project
+rm -rf .claude                # full uninstall
 ```
+
+Note the installer **appends** to `.gitignore` rather than owning it, so uninstalling
+means deleting the two lines it added (`.claude/state/`, `.claude/gate-off`) — not
+the file.
 
 The kill switch is checked per call, which is what makes it safe to try this on
 something you care about.
