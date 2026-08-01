@@ -14,6 +14,8 @@
 //!   (finding #14).
 //! - `tools/call` → `gate()` decides; the call is forwarded **only on ALLOW**;
 //!   DENY / ABSENT / ASK come back as an MCP tool error.
+//! - an upstream result that *demands* input instead of answering (MCP `2026-07-28`
+//!   MRTR `input_required`) is **refused, not relayed** — the D49 interim deny.
 //! - every decision is appended to an optional JSONL audit log.
 //!
 //! It is pure plumbing around the kernel — no policy logic lives here. MCP over
@@ -226,6 +228,14 @@ fn project_tool(world: &CompiledWorld, upstream: &Value) -> Option<(Value, bool)
     Some((tool, changed))
 }
 
+/// Does this upstream result *demand* something rather than answer (MCP
+/// `2026-07-28` MRTR)? Checks both the declared `resultType` and a bare
+/// `inputRequests`, so a server that half-implements the shape is still caught.
+fn demands_input(result: &Value) -> bool {
+    result.get("resultType").and_then(|v| v.as_str()) == Some("input_required")
+        || result.get("inputRequests").is_some()
+}
+
 fn rpc_result(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
@@ -388,12 +398,14 @@ pub fn run(
                     .cloned()
                     .unwrap_or_else(|| json!({}));
                 let verdict = govern(&world, &name, &args, source, session_taint, mode);
+                let action = verdict.action.clone();
+                let manifest_hash = verdict.manifest_hash.clone();
                 audit(
                     audit_path,
-                    json!({"tool": name, "action": verdict.action,
+                    json!({"tool": name, "action": action, "stage": "call",
                            "decision": verdict.decision,
                            "rule": verdict.rule.clone().unwrap_or_default(),
-                           "manifest_hash": verdict.manifest_hash, "mode": mode,
+                           "manifest_hash": manifest_hash, "mode": mode,
                            "source": source, "taint_in": session_taint}),
                 );
                 // The gateway is fail-closed by design: an unevaluated or
@@ -407,6 +419,32 @@ pub fn run(
                             session_taint = true;
                         }
                         match up.call_tool(&name, &args, params.get("_meta")) {
+                            Ok(r) if demands_input(&r) => {
+                                // D49 interim deny (issue #40). The upstream answered
+                                // with a *demand* rather than a result. Note what this
+                                // does and does not do: the call already happened, so
+                                // this protects the host from the demand, not the
+                                // upstream from the call.
+                                audit(
+                                    audit_path,
+                                    json!({"tool": name, "action": action, "stage": "result",
+                                           "decision": "DENY",
+                                           "rule": "mrtr_input_required_interim",
+                                           "manifest_hash": manifest_hash, "mode": mode,
+                                           "source": source, "taint_in": session_taint}),
+                                );
+                                eprintln!(
+                                    "[mcp-gateway] refused an input_required result from \
+                                     `{name}` (D49 interim deny)"
+                                );
+                                json!({"isError": true, "content": [{"type": "text", "text":
+                                    "REFUSED (gateway, interim): the upstream answered with an MCP \
+                                     `input_required` result — a demand that the host gather input \
+                                     (an elicitation or an LLM completion) and resend. The kernel has \
+                                     no verdict shape for a demand, so the gateway refuses to relay \
+                                     one rather than pass it to the model unexamined. See D49 and \
+                                     sv-pro/ai2rules#40."}]})
+                            }
                             Ok(r) => r,
                             Err(e) => json!({"isError": true,
                                 "content": [{"type": "text", "text": format!("upstream error: {e}")}]}),
