@@ -218,8 +218,8 @@ is a tainted MCP call through the gateway (6b); and the last beat sends the *sam
 request in Claude Code's shape and OpenCode's shape:
 
 ```
-Claude Code shape : DENY rule=taint_invariant taint=tainted action=bash_network hash=5858b1229ac3
-OpenCode shape    : DENY rule=taint_invariant taint=tainted action=bash_network hash=5858b1229ac3
+Claude Code shape : DENY rule=taint_invariant taint=tainted action=bash_network hash=e765a236c5fd
+OpenCode shape    : DENY rule=taint_invariant taint=tainted action=bash_network hash=e765a236c5fd
 ✅ decision/rule/taint/action/manifest_hash identical — one kernel, many hosts
 ```
 

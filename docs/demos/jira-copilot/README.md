@@ -66,6 +66,7 @@ cargo test -p cli-harness --test cc_hook     --offline   # native seam (Claude C
 | Copilot sees the full JIRA MCP surface incl. `jira_delete_issue`, `jira_bulk_create_issues`, transitions | Copilot sees only reads + `jira_add_comment`; destructive tools **do not appear** |
 | "Clean up old issues" can delete | "delete this issue" → the tool doesn't exist (ABSENT) |
 | A tainted/untrusted context can still drive a write | Tainted session → `jira_add_comment` **DENIED** (taint floor) |
+| Data read from the MCP server is treated as trustworthy once it's in the session | The read itself taints: `jira_get_issue` ALLOWs, and the `jira_add_comment` after it is **DENIED** — remote ingress is untrusted whatever the tool is named |
 | On Claude Code, a tainted session can still `curl` out / `rm -rf` | `cc-hook` **denies** tainted egress, **asks** before destructive Bash |
 | No record | Append-only audit log of every ALLOW/DENY/ABSENT |
 

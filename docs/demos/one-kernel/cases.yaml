@@ -30,13 +30,16 @@ cases:
       context: { taint: clean, mode: interactive, source_channel: user_prompt }
     expect: { decision: ABSENT, rule: unknown_to_ontology, taint: clean }
 
-  - name: clean_jira_read_is_allowed
+  # An MCP-backed read is remote ingress: the ALLOW is correct, and the session
+  # it hands back is TAINTED (finding #13). This case previously expected
+  # `taint: clean`, which pinned the vulnerability across every entry point.
+  - name: clean_jira_read_is_allowed_and_taints
     gateway: true
     request:
       tool: jira_get_issue
       arguments: { issue_key: DEMO-1 }
       context: { taint: clean, mode: interactive, source_channel: user_prompt }
-    expect: { decision: ALLOW, rule: null, taint: clean }
+    expect: { decision: ALLOW, rule: null, taint: tainted }
 
   # An External output ingests external data: the ALLOW escalates the session
   # taint for the NEXT call (monotonic join).

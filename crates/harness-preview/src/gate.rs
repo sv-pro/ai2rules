@@ -13,8 +13,8 @@
 //! [`preview`]: crate::preview
 
 use harness_types::{
-    ActionName, ActionType, CallId, ChannelPolicy, CompiledWorld, ContentHash, Decision,
-    ExecutionMode, Provenance, Provider, RootAccess, SessionId, SideEffectClass, Taint,
+    ActionName, ActionType, BackingIdentity, CallId, ChannelPolicy, CompiledWorld, ContentHash,
+    Decision, ExecutionMode, Provenance, Provider, RootAccess, SessionId, SideEffectClass, Taint,
     TaintContext, ToolCall,
 };
 use serde::{Deserialize, Serialize};
@@ -206,6 +206,18 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
     if decision == Decision::Allow {
         if let Some(se) = world.side_effect(&action) {
             out_taint = out_taint.join(side_effect_taint(se));
+        }
+        // Remote ingress (finding #13). An action served by an MCP server returns
+        // bytes from another process we do not trust — whatever side effect the
+        // world declared for it. Keying this on the *backing* rather than the
+        // side-effect class means a manifest cannot describe a remote fetch as a
+        // clean local read, by accident or otherwise; the three jira demo worlds
+        // all did exactly that, and the session stayed clean across a read.
+        if matches!(
+            world.descriptor(&action).map(|d| &d.backing),
+            Some(BackingIdentity::McpServer { .. })
+        ) {
+            out_taint = out_taint.join(Taint::Tainted);
         }
         // Path-aware read-taint: reading under a `taint_source` root taints the
         // session (restores the D25/D37-deferred read-taint, now declared per path).
@@ -514,6 +526,25 @@ mod tests {
         assert_eq!(res.decision, "DENY");
         assert_eq!(res.rule.as_deref(), Some("missing_taint"));
         assert_eq!(res.context.taint, "tainted");
+    }
+
+    /// Finding #13: an MCP-backed action returns bytes from a process we do not
+    /// trust, so an ALLOW hands back a tainted session — keyed on the *backing*,
+    /// not the declared side-effect class, so a manifest cannot describe a remote
+    /// fetch as a clean local read. `call_mcp_tool` in the default world is
+    /// `side_effect: External` (already tainting); this pins the backing rule
+    /// itself, which is what covers a world that declares `side_effect: Read`.
+    #[test]
+    fn mcp_backed_action_taints_the_session_on_allow() {
+        let world = compile_default();
+        let res = gate(&world, &req("call_mcp_tool", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "tainted");
+
+        // A locally-backed read of the same declared side-effect class does not.
+        let res = gate(&world, &req("read_workspace", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "clean");
     }
 
     #[test]

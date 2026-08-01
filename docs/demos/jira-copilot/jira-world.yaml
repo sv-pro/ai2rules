@@ -33,6 +33,7 @@ base_actions:
   - name: jira_get_issue
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: jira, tool: get_issue }
     schema:
       type: object
       properties:
@@ -40,6 +41,7 @@ base_actions:
   - name: jira_search_issues_using_jql
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: jira, tool: search_issues_using_jql }
     schema:
       type: object
       properties:
@@ -47,6 +49,7 @@ base_actions:
   - name: jira_get_project
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: jira, tool: get_project }
     schema:
       type: object
       properties:
