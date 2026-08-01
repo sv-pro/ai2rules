@@ -100,20 +100,38 @@ impl Upstream {
         Ok(())
     }
 
-    fn list_tools(&mut self) -> std::io::Result<Vec<Value>> {
+    /// The upstream's **whole** `tools/list` result, not just its `tools` array.
+    /// The gateway shapes the array in place and passes every sibling field
+    /// through: rebuilding the result would silently drop fields the gateway does
+    /// not model (`_meta`, and since protocol version 2026-07-28 the required
+    /// `ttlMs` / `cacheScope`). Shaping the surface is policy; discarding
+    /// protocol fields is data loss.
+    fn list_result(&mut self) -> std::io::Result<Value> {
         let resp = self.rpc("tools/list", json!({}))?;
-        Ok(resp
-            .get("result")
-            .and_then(|r| r.get("tools"))
-            .and_then(|t| t.as_array())
-            .cloned()
-            .unwrap_or_default())
+        Ok(resp.get("result").cloned().unwrap_or_else(|| json!({})))
     }
 
     /// Returns the upstream's `result` object (already an MCP tool result), or an
     /// `isError` result wrapping a JSON-RPC error.
-    fn call_tool(&mut self, name: &str, arguments: &Value) -> std::io::Result<Value> {
-        let resp = self.rpc("tools/call", json!({"name": name, "arguments": arguments}))?;
+    ///
+    /// `meta` is the inbound request's `params._meta`, forwarded verbatim. Since
+    /// protocol version 2026-07-28 that field carries the client's protocol
+    /// version, identity, capabilities, log level and OpenTelemetry trace context;
+    /// a proxy that drops it makes the upstream request non-conformant and severs
+    /// trace propagation. Forwarding it widens nothing: `_meta` is set by the
+    /// *host*, not proposed by the model — the kernel still governs only the tool
+    /// name and its arguments.
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: &Value,
+        meta: Option<&Value>,
+    ) -> std::io::Result<Value> {
+        let mut params = json!({"name": name, "arguments": arguments});
+        if let (Some(meta), Some(obj)) = (meta, params.as_object_mut()) {
+            obj.insert("_meta".to_string(), meta.clone());
+        }
+        let resp = self.rpc("tools/call", params)?;
         if let Some(result) = resp.get("result") {
             Ok(result.clone())
         } else if let Some(err) = resp.get("error") {
@@ -269,13 +287,18 @@ pub fn run(
                 "capabilities": {"tools": {}}
             }),
             "tools/list" => {
-                let tools = match up.list_tools() {
-                    Ok(t) => t,
+                let mut result = match up.list_result() {
+                    Ok(r) => r,
                     Err(e) => {
                         eprintln!("[mcp-gateway] upstream tools/list failed: {e}");
-                        Vec::new()
+                        json!({})
                     }
                 };
+                let tools: Vec<Value> = result
+                    .get("tools")
+                    .and_then(|t| t.as_array())
+                    .cloned()
+                    .unwrap_or_default();
                 let advertised = tools.len();
                 let exposed: Vec<Value> = tools
                     .into_iter()
@@ -294,7 +317,15 @@ pub fn run(
                     exposed.len(),
                     advertised.saturating_sub(exposed.len())
                 );
-                json!({"tools": exposed})
+                // Replace only the `tools` array; every sibling field the upstream
+                // sent rides through untouched.
+                match result.as_object_mut() {
+                    Some(obj) => {
+                        obj.insert("tools".to_string(), json!(exposed));
+                        result
+                    }
+                    None => json!({"tools": exposed}),
+                }
             }
             "tools/call" => {
                 let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -326,7 +357,7 @@ pub fn run(
                         if verdict.context.taint == "tainted" {
                             session_taint = true;
                         }
-                        match up.call_tool(&name, &args) {
+                        match up.call_tool(&name, &args, params.get("_meta")) {
                             Ok(r) => r,
                             Err(e) => json!({"isError": true,
                                 "content": [{"type": "text", "text": format!("upstream error: {e}")}]}),

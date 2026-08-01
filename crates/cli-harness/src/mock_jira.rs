@@ -139,7 +139,14 @@ pub fn run(rovo: bool) -> i32 {
                 "serverInfo": {"name": if rovo { "mock-jira-rovo" } else { "mock-jira" }, "version": "0.1.0"},
                 "capabilities": {"tools": {}}
             }),
-            "tools/list" => json!({"tools": tools(rovo)}),
+            // The `_meta` sibling is deliberate: a gateway that *rebuilds* this
+            // result instead of filtering its `tools` array would silently drop
+            // every field it does not model. Since protocol version 2026-07-28
+            // that set includes the required `ttlMs` / `cacheScope`.
+            "tools/list" => json!({
+                "tools": tools(rovo),
+                "_meta": {"mock-jira/note": "sibling field — a proxy must pass this through"}
+            }),
             "tools/call" => {
                 let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
                 let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -147,7 +154,16 @@ pub fn run(rovo: bool) -> i32 {
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                json!({"content": [{"type": "text", "text": call_tool(name, &args).to_string()}]})
+                let mut result = json!({"content": [{"type": "text", "text": call_tool(name, &args).to_string()}]});
+                // Echo the request's `_meta` back, so a proxy that drops it on the
+                // way upstream is detectable from the client side.
+                if let (Some(meta), Some(obj)) = (params.get("_meta"), result.as_object_mut()) {
+                    obj.insert(
+                        "_meta".to_string(),
+                        json!({"mock-jira/echoedRequestMeta": meta.clone()}),
+                    );
+                }
+                result
             }
             other => {
                 let err = json!({"jsonrpc": "2.0", "id": id,

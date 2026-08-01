@@ -105,6 +105,42 @@ fn clean_session_allows_read_and_comment_but_destructive_is_absent() {
     assert!(text(&r[&5]).contains("ABSENT"));
 }
 
+/// The gateway shapes the `tools` array; every *other* field the upstream sent has
+/// to survive. Rebuilding the result instead of filtering it would silently drop
+/// `_meta` — and, against a 2026-07-28 upstream, the required `ttlMs`/`cacheScope`.
+#[test]
+fn tools_list_passes_upstream_sibling_fields_through() {
+    let r = scenario("clean", &requests());
+    assert_eq!(
+        r[&2]["result"]["_meta"]["mock-jira/note"].as_str(),
+        Some("sibling field — a proxy must pass this through")
+    );
+    // ...while still shaping the surface it is there to shape.
+    assert!(r[&2]["result"]["tools"].as_array().unwrap().len() < 7);
+}
+
+/// `params._meta` carries the client's protocol version, identity, capabilities and
+/// OpenTelemetry trace context (2026-07-28). The gateway governs the *call*; it must
+/// not eat the metadata on the way upstream. `mock-jira` echoes back what it got.
+#[test]
+fn tools_call_forwards_request_meta_upstream() {
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    });
+    let reqs = vec![
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize"}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+            "name":"jira_get_issue","arguments":{"issue_key":"DEMO-1"},"_meta": meta}}),
+    ];
+    let r = scenario("clean", &reqs);
+    assert!(!is_error(&r[&2])); // ALLOW — so it was actually forwarded
+    assert_eq!(
+        r[&2]["result"]["_meta"]["mock-jira/echoedRequestMeta"],
+        meta
+    );
+}
+
 #[test]
 fn tainted_session_severs_the_external_write() {
     let r = scenario("tainted", &requests());
