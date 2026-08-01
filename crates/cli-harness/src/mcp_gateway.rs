@@ -8,7 +8,10 @@
 //! ```
 //!
 //! - `tools/list` → the upstream's real tools, dropping any **not in the projected
-//!   surface** (ABSENT — never offered to the model).
+//!   surface** (ABSENT — never offered to the model), and re-issuing each survivor
+//!   from the **world's** descriptor rather than the upstream's advertisement, so a
+//!   drifted or hostile server cannot bolt an extra argument onto an allowed tool
+//!   (finding #14).
 //! - `tools/call` → `gate()` decides; the call is forwarded **only on ALLOW**;
 //!   DENY / ABSENT / ASK come back as an MCP tool error.
 //! - every decision is appended to an optional JSONL audit log.
@@ -20,7 +23,7 @@ use compiler::{compile, loader::load_yaml};
 use harness_preview::{
     gate, host_outcome, GateContext, GateRequest, GateResponse, HostOutcome, ABI_VERSION,
 };
-use harness_types::CompiledWorld;
+use harness_types::{ActionName, CompiledWorld};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
@@ -195,6 +198,34 @@ fn audit(path: Option<&Path>, entry: Value) {
     }
 }
 
+/// Re-issue an offered tool from the **world's** descriptor instead of the
+/// upstream's advertisement (finding #14). The upstream names the tool; the *world*
+/// says what its arguments are — so a malicious or drifted server that bolts an
+/// extra argument onto an allowed tool cannot get that argument in front of the
+/// model. Returns the projected tool and whether the upstream's schema differed.
+///
+/// Fail-closed: a tool the world cannot describe is dropped rather than passed
+/// through, even though `projected` should already have excluded it.
+///
+/// The `description` is still the upstream's. The manifest has no field for one,
+/// and sending a bare name would leave the model unable to use the tool at all.
+/// That leaves **prose-level** tool poisoning unaddressed — a different vector from
+/// this finding (which is about arguments), and the reason MCP `2026-07-28` says
+/// annotations from an untrusted server should be treated as untrusted. Tracked
+/// separately; see the PR for finding #14.
+fn project_tool(world: &CompiledWorld, upstream: &Value) -> Option<(Value, bool)> {
+    let name = upstream.get("name").and_then(|n| n.as_str())?;
+    let descriptor = world.descriptor(&ActionName::new(name))?;
+    let world_schema = &descriptor.schema;
+    let changed = upstream.get("inputSchema") != Some(world_schema);
+
+    let mut tool = json!({ "name": name, "inputSchema": world_schema.clone() });
+    if let (Some(desc), Some(obj)) = (upstream.get("description"), tool.as_object_mut()) {
+        obj.insert("description".to_string(), desc.clone());
+    }
+    Some((tool, changed))
+}
+
 fn rpc_result(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
@@ -300,6 +331,7 @@ pub fn run(
                     .cloned()
                     .unwrap_or_default();
                 let advertised = tools.len();
+                let mut rewritten = 0usize;
                 let exposed: Vec<Value> = tools
                     .into_iter()
                     .filter(|t| {
@@ -307,6 +339,14 @@ pub fn run(
                             .and_then(|n| n.as_str())
                             .map(|n| projected.contains(n))
                             .unwrap_or(false)
+                    })
+                    .filter_map(|t| {
+                        project_tool(&world, &t).map(|(tool, changed)| {
+                            if changed {
+                                rewritten += 1;
+                            }
+                            tool
+                        })
                     })
                     .collect();
                 // Surface-shaping ratio — the visible governability story: how much
@@ -317,6 +357,15 @@ pub fn run(
                     exposed.len(),
                     advertised.saturating_sub(exposed.len())
                 );
+                if rewritten > 0 {
+                    // Loud on purpose: the upstream described an allowed tool
+                    // differently than the world does. Benign drift and an attempted
+                    // schema poisoning look identical here, so say it either way.
+                    eprintln!(
+                        "[mcp-gateway] schema projected: {rewritten} tool(s) advertised an \
+                         inputSchema differing from the world's — the world's was sent"
+                    );
+                }
                 // Replace only the `tools` array; every sibling field the upstream
                 // sent rides through untouched.
                 match result.as_object_mut() {
