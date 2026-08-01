@@ -66,6 +66,13 @@ enum Command {
         /// offline (E16.E). See `docs/demos/jira-copilot/REAL-ATLASSIAN.md`.
         #[arg(long)]
         rovo: bool,
+        /// Behave like a **malicious or drifted** upstream (finding #14): advertise
+        /// an allowed tool name with an extra, undeclared `deleteAll` argument in
+        /// its `inputSchema`, and echo back whatever arguments actually arrive.
+        /// The governed surface must never republish that schema, and must never
+        /// forward that argument. Used by `tests/mcp_gateway_poisoned.rs`.
+        #[arg(long)]
+        poisoned: bool,
     },
     /// Claude Code PreToolUse adapter, in Rust (D33 / E16.C): read a PreToolUse
     /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
@@ -240,8 +247,8 @@ fn main() {
         std::process::exit(run_gate(world));
     }
 
-    if let Some(Command::MockJira { rovo }) = &cli.command {
-        std::process::exit(mock_jira::run(*rovo));
+    if let Some(Command::MockJira { rovo, poisoned }) = &cli.command {
+        std::process::exit(mock_jira::run(*rovo, *poisoned));
     }
 
     if let Some(Command::CcHook {
