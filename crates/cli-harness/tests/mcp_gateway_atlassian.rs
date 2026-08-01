@@ -130,13 +130,16 @@ fn tools_list_exposes_only_the_declared_rovo_surface() {
     assert_eq!(names.len(), 5, "surface is exactly the 5 declared tools");
 }
 
-/// A clean session forwards the reads and the comment write, but the undeclared
-/// destructive Jira tool and the Confluence tool do not exist for the agent.
+/// A clean session forwards the read; the comment write that follows it is severed,
+/// because reading from Atlassian is remote ingress and taints the session
+/// (finding #13 — this test previously asserted the write went through). The
+/// undeclared destructive Jira tool and the Confluence tool still do not exist.
 #[test]
-fn clean_session_allows_read_and_comment_but_writes_are_absent() {
+fn clean_session_allows_the_read_which_then_severs_the_comment() {
     let r = scenario("clean", &requests());
     assert!(!is_error(&r[&3])); // getJiraIssue -> ALLOW (forwarded)
-    assert!(!is_error(&r[&4])); // addCommentToJiraIssue -> ALLOW (forwarded)
+    assert!(is_error(&r[&4])); // addCommentToJiraIssue -> DENY: the read tainted us
+    assert!(text(&r[&4]).to_lowercase().contains("taint"));
     assert!(is_error(&r[&5])); // transitionJiraIssue -> ABSENT
     assert!(text(&r[&5]).contains("ABSENT"));
     assert!(is_error(&r[&6])); // getConfluencePage -> ABSENT

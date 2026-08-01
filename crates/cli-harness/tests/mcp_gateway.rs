@@ -96,11 +96,16 @@ fn tools_list_hides_destructive_tools() {
     assert!(!names.contains(&"jira_bulk_create_issues"));
 }
 
+/// Renamed and corrected with finding #13. This test previously asserted that a
+/// clean session allowed *both* the read and the comment — which is precisely the
+/// vulnerability: the read pulls bytes from an upstream server, so the session is
+/// no longer clean by the time the write is proposed.
 #[test]
-fn clean_session_allows_read_and_comment_but_destructive_is_absent() {
+fn clean_session_allows_the_read_which_then_severs_the_write() {
     let r = scenario("clean", &requests());
     assert!(!is_error(&r[&3])); // jira_get_issue -> ALLOW (forwarded)
-    assert!(!is_error(&r[&4])); // jira_add_comment -> ALLOW (forwarded)
+    assert!(is_error(&r[&4])); // jira_add_comment -> DENY: the read tainted us
+    assert!(text(&r[&4]).to_lowercase().contains("taint"));
     assert!(is_error(&r[&5])); // jira_delete_issue -> ABSENT
     assert!(text(&r[&5]).contains("ABSENT"));
 }
@@ -139,6 +144,28 @@ fn tools_call_forwards_request_meta_upstream() {
         r[&2]["result"]["_meta"]["mock-jira/echoedRequestMeta"],
         meta
     );
+}
+
+/// Finding #13 (P1): data read from an upstream MCP server is remote, untrusted
+/// input. It has to taint the session, so the *next* external write is severed by
+/// the taint floor. Before the fix, `jira_get_issue` left the session clean —
+/// both audit rows showed `taint_in:false` — and the comment was forwarded.
+#[test]
+fn upstream_read_taints_the_session_and_severs_the_next_write() {
+    let reqs = vec![
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize"}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+            "name":"jira_get_issue","arguments":{"issue_key":"DEMO-1"}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+            "name":"jira_add_comment","arguments":{"issue_key":"DEMO-1","body":"hi"}}}),
+    ];
+    let r = scenario("clean", &reqs);
+    assert!(!is_error(&r[&2]), "the read itself is still allowed");
+    assert!(
+        is_error(&r[&3]),
+        "an external write after an upstream read must be severed by the taint floor"
+    );
+    assert!(text(&r[&3]).to_lowercase().contains("taint"));
 }
 
 #[test]

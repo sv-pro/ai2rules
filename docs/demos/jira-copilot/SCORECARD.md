@@ -75,7 +75,7 @@ cargo build --offline                     # builds the `harness` binary
 **MCP seam — shaped JIRA surface (all three hosts):**
 
 ```bash
-# destructive tools are ABSENT; reads + comment ALLOW; tainted comment DENIED
+# destructive tools are ABSENT; the read ALLOWs and taints; the comment after it is DENIED
 cargo test -p cli-harness --test mcp_gateway --offline
 # or drive it by hand:
 printf '%s\n' \
@@ -141,10 +141,13 @@ disabled, not denied — they *do not appear*. Ask the agent to delete an issue
 (`jira-world.yaml`), two hosts, same governed surface.
 
 **5. Taint floor — untrusted context can't drive an external write (1 min)**
-Run with `TAINT=tainted` (simulates a context that read from an untrusted source).
-`jira_add_comment` — which was ALLOW — is now **DENY**. The taint floor severs the
-write: the MCP surface is shaped by the manifest, but the *session context* also
-gates each call. Show the audit log entry.
+Two ways to show it, and the first is the stronger one since finding #13 was fixed:
+**just read first.** `jira_get_issue` is served by a remote MCP server, so its result
+is untrusted ingress and the ALLOW hands back a *tainted* session — the
+`jira_add_comment` that follows is then **DENY**, in an ordinary clean session with
+nothing simulated. Or force it directly with `TAINT=tainted`. Either way the
+manifest shapes the *surface* while the *session context* gates each call. Show the
+audit log entry.
 
 **6. Going deeper — native shell on Claude Code only (1 min)**
 Enable the `cc-hook` PreToolUse hook. Fetch a web page (taints the session).
