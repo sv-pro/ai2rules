@@ -31,6 +31,18 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  demos:
+    # Guard what the demos *print*. The unit tests cover the kernel; they stayed
+    # green twice while a hardening change silently hollowed out a demo (the
+    # source_channel drift in demo-one-kernel-many-hosts.sh, and execution_demo's
+    # third refusal going unrepresentable after D45). Both exited 0 throughout.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Demos still say what they claim
+        run: bash scripts/check-demos.sh
+
   hero-mcp:
     # TypeScript MCP tool under tools/hero-mcp (not a Cargo member); typecheck + unit
     # tests only — the agy-backed generation needs auth and isn't run in CI.

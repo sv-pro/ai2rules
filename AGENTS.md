@@ -157,6 +157,13 @@ CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
 - `agent_loop` — full model loop with ScriptedModel
 - `approvals_demo`, `tools_demo`, `poisoned_knowledge_demo`
 
+**When you change the kernel, run `bash scripts/check-demos.sh`.** It runs every
+example and demo script and asserts the verdict lines each one claims to show
+(CI job `demos`). This exists because the test suite stayed green twice while a
+hardening change silently hollowed out a demo — a demo that stops teaching does
+not fail, it just gets shorter. If a marker legitimately changes, update the
+marker in the same commit as the kernel change.
+
 ---
 
 ## Key reference files
