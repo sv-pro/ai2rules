@@ -1268,7 +1268,12 @@ implementation waits for a real modern upstream.
      presence as taint-carrying. **Recorded as a residual risk, not a solved one.**
 - **Interim default until the above ships: deny any `input_required` result.** Fail-closed
   and honest about the gap. It is the default, not the design — see the rejected alternative
-  below.
+  below. **Implemented 2026-08-01** (issue #40): `harness mcp-gateway` refuses to relay a result
+  carrying `resultType: "input_required"` — or a bare `inputRequests`, so a server that
+  half-implements the shape is still caught — audits it with `stage: "result"`, and labels it a
+  *gateway* interim deny rather than a kernel verdict, because that is what it is. **Note the
+  bound:** the upstream call already happened, so this protects the host from the demand, not the
+  upstream from the call. Closing that second gap needs the post-call verdict above.
 - **Where the spec moved toward the thesis** (evidence, not comfort): the security section
   still concedes that *"MCP itself cannot enforce these security principles at the protocol
   level"* and hands consent and authorization to the host — the thesis premise in the

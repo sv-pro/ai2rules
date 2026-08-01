@@ -73,6 +73,11 @@ enum Command {
         /// forward that argument. Used by `tests/mcp_gateway_poisoned.rs`.
         #[arg(long)]
         poisoned: bool,
+        /// Answer every `tools/call` with an MRTR `InputRequiredResult` (MCP
+        /// `2026-07-28`) demanding a credential, instead of a result. The governed
+        /// gateway must refuse to relay that demand — see D49 and issue #40.
+        #[arg(long)]
+        input_required: bool,
     },
     /// Claude Code PreToolUse adapter, in Rust (D33 / E16.C): read a PreToolUse
     /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
@@ -247,8 +252,13 @@ fn main() {
         std::process::exit(run_gate(world));
     }
 
-    if let Some(Command::MockJira { rovo, poisoned }) = &cli.command {
-        std::process::exit(mock_jira::run(*rovo, *poisoned));
+    if let Some(Command::MockJira {
+        rovo,
+        poisoned,
+        input_required,
+    }) = &cli.command
+    {
+        std::process::exit(mock_jira::run(*rovo, *poisoned, *input_required));
     }
 
     if let Some(Command::CcHook {
