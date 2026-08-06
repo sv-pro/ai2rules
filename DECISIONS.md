@@ -1650,11 +1650,16 @@ over depth), and THESIS §3.
   tainted; `ALLOW Bash_network` when clean), manifest hash `8629c6be6c12`. **Not
   verified:** any end-to-end artifact, because none exists yet. Manifest verification is
   local-only — that repo's CI does not build Rust, by design.
-- **Known residual: nothing is published.** The repo is local, has no remote and no
-  LICENSE. An outbound instrument that is not outbound is not yet doing its job, and a
-  repo whose point is that people copy things out of it is unusable without a license.
-  Both are open calls, not oversights; the license one is cluster-wide (`ai2rules` and
-  `ai-detector-bench` carry none either).
+- **Known residual: nothing is published.** *(Amended 2026-08-06, hours after this entry
+  landed — the original text said "the repo is local, has no remote".)* It now has one:
+  `sv-pro/agentic-coding-lab`, **private**, `origin` only, no GitLab mirror — matching
+  `ai-detector-bench` rather than this repo's dual-remote setup. Private is not published,
+  so the residual stands rather than closes: **an outbound instrument that is not outbound
+  is not yet doing its job.** It still has no LICENSE, and a repo whose point is that
+  people copy things out of it is unusable without one. Both remain open calls, not
+  oversights; the license one is cluster-wide (`ai2rules` and `ai-detector-bench` carry
+  none either). The two come due together — going public is the gate that forces the
+  license question, and the first verified artifact is the event that should trigger it.
 - **Known residual: this is a *seventh* live thing in a cluster that archived eight repos
   to stop exactly this.** So the kill condition is stated up front, per D52's practice:
   **if there is no verified artifact and no published experiment by 2027-02-06, archive it**
