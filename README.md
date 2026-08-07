@@ -422,4 +422,8 @@ Speculative, research-grade directions that aren't committed work (e.g. a cross-
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0.
+MIT — see [`LICENSE`](LICENSE). This replaces the `MIT OR Apache-2.0` that
+`Cargo.toml` had declared since E0 without either license file ever being present;
+the cluster settled on a single license on 2026-08-08, and the sibling repos
+([`ai-detector-bench`](https://github.com/sv-pro/ai-detector-bench),
+[`agentic-coding-lab`](https://github.com/sv-pro/agentic-coding-lab)) carry the same one.
