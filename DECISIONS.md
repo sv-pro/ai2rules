@@ -1660,6 +1660,26 @@ over depth), and THESIS §3.
   oversights; the license one is cluster-wide (`ai2rules` and `ai-detector-bench` carry
   none either). The two come due together — going public is the gate that forces the
   license question, and the first verified artifact is the event that should trigger it.
+- **✅ Residual closed 2026-08-08. Both halves, together, as this entry predicted — but the
+  trigger was not the one named.** `sv-pro/agentic-coding-lab` is **public**, and all three
+  repos carry **MIT** (`ai2rules` `44d6b0c`, `ai-detector-bench` `c97956f`,
+  `agentic-coding-lab` `6b49c18`; copyright Sergey Vlasov). The event that forced it was
+  **D55**, not a verified artifact: the Governability Index shipped publicly one day earlier
+  with its *Contributing a measurement* section pointing at procedures inside a private repo.
+  That is not a broken link — **it is D55's conflict-of-interest firewall failing in
+  practice**, since the index's entire defence is that a stranger can check it without our
+  tooling, and no stranger could read the procedures at all. Verified after the change: an
+  unauthenticated fetch of the probe README returns 200.
+  **Two things worth keeping from how this closed.** First, D54 and D55 landed a day apart
+  and *neither noticed that the second made the first's open residual load-bearing* — an
+  entry can convert another entry's known gap into a live defect without either author
+  seeing it, which is an argument for reconciling the decision log against the artifacts, not
+  only against itself. Second, licensing was never the small half: `ai2rules` had declared
+  `MIT OR Apache-2.0` in `Cargo.toml` since E0, inherited by all ten crates, **with neither
+  license file ever in the tree** — a grant asserted in metadata with no text to accept.
+  Settling on MIT narrows the declared terms (an Apache-2.0 patent grant is no longer
+  selectable); that was cheap today at version 0.0.1 with nothing published, and would not
+  have been in six months.
 - **Known residual: this is a *seventh* live thing in a cluster that archived eight repos
   to stop exactly this.** So the kill condition is stated up front, per D52's practice:
   **if there is no verified artifact and no published experiment by 2027-02-06, archive it**
