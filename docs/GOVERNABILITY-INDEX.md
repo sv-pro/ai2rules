@@ -135,14 +135,18 @@ listed as a question rather than guessed.
 | | Claude Code | Claude Desktop | Antigravity CLI | Codex CLI | Copilot |
 |---|---|---|---|---|---|
 | **G1** pre-execution intercept | **yes** ✓ | **no** ? | **yes** ○ | ? | ? |
-| **G2** can deny | **yes** ○ | n/a | **yes** ○ | ? | ? |
+| **G2** can deny | **yes** ✓ | n/a | **yes** ○ | ? | ? |
 | **G3** can grant | **yes** ○ | n/a | **yes** ○ | ? | ? |
 | **G4** covers MCP + native | **yes** ✓ | n/a | ? | ? | ? |
 | **G5** approval cache-satisfiable ⚠ | ? | ? | **yes** ✓ | ? | ? |
-| **G6** capability can be absent | **MCP seam only** ○ | ? | ? | ? | ? |
-| **G7** post-execution observation | ? | ? | ? | ? | ? |
-| **G8** config file-based | **partial** ✓ | **no** ○ | ? | ? | ? |
+| **G6** capability can be absent | **MCP seam only** ✓ | ? | ? | ? | ? |
+| **G7** post-execution observation | **yes** ✓ | ? | ? | ? | ? |
+| **G8** config file-based | **no** ✓ | **no** ○ | ? | ? | ? |
 | **G9** live config reload | **yes** ✓ | ? | ? | ? | ? |
+
+*Claude Code cells dated 2026-08-06 (G1, G4, G9) and **2026-08-08 on 2.1.223** (G2, G6, G7,
+G8). Seven of nine now measured; G3 and G5 are **blocked, not merely unmeasured** — see
+their notes.*
 
 ### Notes on specific cells
 
@@ -151,13 +155,46 @@ listed as a question rather than guessed.
   live, not snapshotted at session start.
 - **Claude Code G4 ✓** — one `PreToolUse` matcher receives both native tools and MCP tools;
   MCP calls arrive as `mcp__<server>__<tool>`.
-- **Claude Code G6 "MCP seam only"** — a pre-execution hook cannot *remove* a native tool,
-  only refuse it; `harness cc-hook --enforce-absent`'s own help says so. Absence is
-  reachable for MCP tools, where the advertised `tools/list` can be shaped, and we
-  measured a 7-tool server shaped to 4 with 3 absent. Native tools: denial only.
-- **Claude Code G8 "partial"** — hooks, permissions and project MCP servers are files.
-  Whether every connector is file-visible is not established, which is why this is
-  `partial` and not `yes`.
+- **Claude Code G2 ✓ (2026-08-08, 2.1.223)** — a `PreToolUse` hook emitting
+  `permissionDecision: "deny"` stopped the call, and `permissionDecisionReason` was
+  surfaced verbatim to the assistant, so a denial is a message to the model and not just a
+  log line. Verified by control: with the hook removed, the identical command ran.
+- **Claude Code G6 "MCP seam only" ✓ (native seam measured 2026-08-08)** — previously
+  inferred, now tested against two mechanisms. `permissions.deny` **refuses** a built-in
+  (the call returns a permission error, so the tool is still present and callable);
+  `disallowedTools` in `settings.json` did **nothing at all** — the call succeeded. Absence
+  stays reachable only at the MCP seam, where the advertised `tools/list` can be shaped (a
+  7-tool server measured down to 4, 3 absent). **Bound:** the `--disallowedTools` *launch
+  flag* could not be tested from inside a running session, so this measures configuration
+  files only.
+- **Claude Code G7 ✓ (2026-08-08)** — `PostToolUse` fires, installed mid-session, and its
+  payload carries `tool_response` and `duration_ms`, which is what makes it an outcome
+  point rather than a second intent point. The pre/post gap was measured against three
+  denied calls: pre `+4`, post `+1`, with the refused three appearing in no post line. **On
+  this host, what a governance layer stops is directly countable.**
+- **Claude Code G8 "no" ✓ (2026-08-08) — changed from `partial`, and it went the other
+  way.** Six MCP namespaces were live in the session; **exactly one** (`hero`) was declared
+  in a configuration file. Four appear only inside `claudeAiMcpEverConnected` in
+  `~/.claude.json`, which is a *history* array and not configuration — it lists a connector
+  that was not active, and editing it changes nothing about what loads. One
+  (`claude-in-chrome`) left no trace on disk at all. `mcpServers` was empty at every scope.
+  Two corroborating findings: the session's **effective prompting policy was not
+  determinable from any settings file**, and `disallowedTools` was accepted silently while
+  doing nothing. Scope, stated plainly: this is measured at the MCP and permissions
+  surfaces — hooks, permissions and project MCP servers genuinely are files, so "no" here
+  means "not fully", not "nothing is on disk".
+- **Claude Code G3 stays `○`, and a live attempt on 2026-08-08 failed to confirm it.** A
+  hook returning `"allow"` was installed and the call ran without a prompt — but so did the
+  control with no hook, so there was no contrast and nothing was demonstrated. The blocker
+  is that **no action could be made to prompt**: an unlisted Bash command, the same with
+  the sandbox disabled, and a write outside every permitted working directory all executed
+  silently. **Reader beware of the `○` here:** its basis is *our own* `replace-permissions`
+  demo, which verifies that our hook *emits* `allow` offline — not that the host honours
+  it. Under this index's own rule that `○` means vendor documentation, that is a weak `○`
+  and arguably a `?`; it is left as `○` pending a session where prompting demonstrably
+  works.
+- **Claude Code G5 `?` — blocked, not unexamined.** Same root cause as G3: step 2 requires
+  clicking an "always allow" option, which requires a prompt.
 - **Antigravity G5 ✓ (the bad answer)** — with the kernel returning "ask", the host could
   satisfy the request from its own cache of prior "always allow" answers. This is the
   finding behind `force_ask`; see `DECISIONS.md` D48.
