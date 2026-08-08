@@ -136,7 +136,7 @@ listed as a question rather than guessed.
 |---|---|---|---|---|---|
 | **G1** pre-execution intercept | **yes** ✓ | **no** ? | **yes** ○ | ? | ? |
 | **G2** can deny | **yes** ✓ | n/a | **yes** ○ | ? | ? |
-| **G3** can grant | **yes** ○ | n/a | **yes** ○ | ? | ? |
+| **G3** can grant | ? | n/a | **yes** ○ | ? | ? |
 | **G4** covers MCP + native | **yes** ✓ | n/a | ? | ? | ? |
 | **G5** approval cache-satisfiable ⚠ | ? | ? | **yes** ✓ | ? | ? |
 | **G6** capability can be absent | **MCP seam only** ✓ | ? | ? | ? | ? |
@@ -183,18 +183,30 @@ their notes.*
   doing nothing. Scope, stated plainly: this is measured at the MCP and permissions
   surfaces — hooks, permissions and project MCP servers genuinely are files, so "no" here
   means "not fully", not "nothing is on disk".
-- **Claude Code G3 stays `○`, and a live attempt on 2026-08-08 failed to confirm it.** A
-  hook returning `"allow"` was installed and the call ran without a prompt — but so did the
-  control with no hook, so there was no contrast and nothing was demonstrated. The blocker
-  is that **no action could be made to prompt**: an unlisted Bash command, the same with
-  the sandbox disabled, and a write outside every permitted working directory all executed
-  silently. **Reader beware of the `○` here:** its basis is *our own* `replace-permissions`
-  demo, which verifies that our hook *emits* `allow` offline — not that the host honours
-  it. Under this index's own rule that `○` means vendor documentation, that is a weak `○`
-  and arguably a `?`; it is left as `○` pending a session where prompting demonstrably
-  works.
+- **Claude Code G3 `?` — downgraded from `yes ○` on 2026-08-08, and the downgrade is the
+  point.** The `○` rested on *our own* `replace-permissions` demo, which verifies that
+  **our hook emits** `allow` in an offline run. It does not show that the host **honours**
+  it. This index defines `○` as vendor documentation or a tool's own help output, so our
+  demo never qualified, and the cell was overstated from publication until this correction.
+  A live attempt the same day could not rescue it: a hook returning `"allow"` was installed
+  and the call ran with no prompt, but **the control with no hook also ran with no prompt**,
+  so there was no contrast and nothing was demonstrated. The blocker is that **no action
+  could be made to prompt** — an unlisted Bash command, the same with the sandbox disabled,
+  and a write outside every permitted working directory all executed silently.
+  **Why this is written up at length for a cell that now says nothing:** an index whose
+  author's own product benefits from a `yes` here is exactly where a generous reading slips
+  in. The COI disclosure at the top of this file is the promise; downgrading our own
+  strongest cell is what it costs.
 - **Claude Code G5 `?` — blocked, not unexamined.** Same root cause as G3: step 2 requires
   clicking an "always allow" option, which requires a prompt.
+- **Antigravity G3 `yes ○` is flagged, not yet downgraded.** Its basis is the verdict-mapping
+  table in `docs/demos/antigravity/README.md`, which — like the Claude Code case above —
+  describes what **our hook emits** under `--grant` rather than what the host honours. D48
+  live-verified the agy hook ABI and the cached-approval behaviour behind G5, but nothing on
+  record verifies that an emitted `allow` suppresses agy's own prompt. **This cell probably
+  deserves the same downgrade and has not been given it**, because doing so on inference
+  alone would repeat the error being corrected in the row above, in the other direction.
+  Resolve it by running G3 against `agy`, not by reasoning about it.
 - **Antigravity G5 ✓ (the bad answer)** — with the kernel returning "ask", the host could
   satisfy the request from its own cache of prior "always allow" answers. This is the
   finding behind `force_ask`; see `DECISIONS.md` D48.
