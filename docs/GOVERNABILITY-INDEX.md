@@ -197,8 +197,15 @@ their notes.*
   author's own product benefits from a `yes` here is exactly where a generous reading slips
   in. The COI disclosure at the top of this file is the promise; downgrading our own
   strongest cell is what it costs.
-- **Claude Code G5 `?` — blocked, not unexamined.** Same root cause as G3: step 2 requires
-  clicking an "always allow" option, which requires a prompt.
+- **Claude Code G5 `?` — attempted 2026-08-08 with an operator standing by; no prompt ever
+  appeared, so there was nothing to measure.** A hook returned `ask` for a command that
+  already had a stored approval in `permissions.allow` — reusing an existing cached answer
+  rather than installing a new one, which avoids the hazard the procedure warns about. The
+  command ran with no prompt. **That looks like a `yes` and it is not**: the control, the
+  same hook returning `ask` for a command in *no* allow-rule, also ran with no prompt. `ask`
+  raises no prompt here regardless of what is cached, so the cache explains nothing and G5 is
+  untested on this host. Same root cause as G3: the prompting path is not reachable in this
+  session's configuration.
 - **Antigravity G3 `no (headless)` ✓ — was `yes ○`, and the run reversed it.** Measured
   2026-08-08 on **agy 1.1.10**, headless (`agy -p`), with a `PreToolUse` hook emitting the
   canonical shape `{"decision": "allow", "reason": …}` — the same shape `harness agy-hook`
