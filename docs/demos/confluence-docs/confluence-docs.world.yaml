@@ -1,0 +1,128 @@
+# Scoped World for GOVERNED Confluence doc authoring — the SAME harness mcp-gateway
+# (D33 / E16 skin), a different world. It grants an AI agent only enough of the
+# Atlassian Rovo MCP surface to write documentation into ONE space, and to revise
+# ONE page behind an approval. Every other tool the Rovo server advertises (all 13
+# Jira tools, the other Confluence tools, Compass/Teamwork-Graph, admin) is simply
+# not declared → ABSENT (does not exist for the agent).
+#
+# ┌─ Design-time stochastic, runtime deterministic (PLAN principle 7): an LLM may
+# │  DRAFT this manifest; a human reviews it; the compiler freezes it. The runtime
+# │  gate that enforces it is the pure kernel — no LLM on the enforcement path.
+# └─
+#
+# Run it exactly like the JIRA skin, only pointing MANIFEST here:
+#   MANIFEST=docs/demos/confluence-docs/confluence-docs.world.yaml \
+#   UPSTREAM="npx -y mcp-remote https://mcp.atlassian.com/v1/mcp/authv2" \
+#   bash docs/demos/jira-copilot/run-proxy.sh
+#
+# INSTANCE-SPECIFIC IDS: the two arg-locks below pin a space and a page by numeric
+# id. Replace REPLACE_WITH_SPACE_ID / REPLACE_WITH_PAGE_ID with your own (resolve
+# them with the getConfluenceSpaces read, then getPagesInConfluenceSpace). See
+# README.md for a fully worked, live-validated example.
+world_id: confluence-docs-authoring
+
+actors:
+  - { name: author, kind: User }
+  - { name: agent, kind: Model }
+  - { name: confluence, kind: McpServer }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: mcp_output, trust: Untrusted, taint: true }
+  - { name: web_fetch, trust: Untrusted, taint: true }
+
+capabilities:
+  - trust: Trusted
+    actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory]
+  - trust: SemiTrusted
+    actions: [Read, Write, Patch, Command]
+  - trust: Untrusted
+    actions: [Read]
+  - trust: Derived
+    actions: [Read]
+
+base_actions:
+  # --- Allowed: Confluence reads (navigate + read pages, resolve cloudId/space) ---
+  - name: getAccessibleAtlassianResources
+    action_type: Read
+    side_effect: Read
+    schema: { type: object, properties: {} }
+  - name: getConfluenceSpaces
+    action_type: Read
+    side_effect: Read
+    schema: { type: object, properties: { cloudId: { type: string } } }
+  - name: getPagesInConfluenceSpace
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties: { cloudId: { type: string }, spaceId: { type: string } }
+  - name: getConfluencePage
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties: { cloudId: { type: string }, pageId: { type: string } }
+  - name: searchConfluenceUsingCql
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties: { cloudId: { type: string }, cql: { type: string } }
+
+  # --- Allowed write: create a page, ARG-LOCKED to one space. External side-effect
+  #     => taint-floored. The gate DENYs (SchemaViolation) any create whose spaceId
+  #     is missing or != the pinned value, so the agent cannot author elsewhere. ---
+  - name: createConfluencePage
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: confluence, tool: createConfluencePage }
+    schema:
+      type: object
+      required: [cloudId, spaceId, body]
+      properties:
+        cloudId: { type: string }
+        spaceId: { type: string }
+        title: { type: string }
+        body: { type: string }
+    arg_constraints:
+      spaceId: { const: "REPLACE_WITH_SPACE_ID" }
+
+  # --- Governed update: an OBJECT-CAPABILITY grant to ONE page. `pageId` carries no
+  #     space, so instead of a space lock we pin the page itself: the gate DENYs any
+  #     update whose pageId != the pinned value. `approval_required` makes every
+  #     update an ASK — the human's explicit per-update consent (E6). In the
+  #     mcp-gateway path ASK is surfaced as a non-forwarded block, so an automated
+  #     agent cannot self-approve. Pin (which page) + ASK (may I, now) + Confluence's
+  #     own version concurrency (don't clobber a manual edit) compose. ---
+  - name: updateConfluencePage
+    action_type: Mcp
+    side_effect: External
+    approval_required: true
+    backing: !McpServer { server: confluence, tool: updateConfluencePage }
+    schema:
+      type: object
+      required: [cloudId, pageId, body]
+      properties:
+        cloudId: { type: string }
+        pageId: { type: string }
+        title: { type: string }
+        body: { type: string }
+    arg_constraints:
+      pageId: { const: "REPLACE_WITH_PAGE_ID" }
+
+# DELIBERATELY ABSENT (not declared): every Jira tool, the Confluence comment tools,
+# getConfluencePageDescendants/children, Compass/Teamwork-Graph, admin. They do not
+# exist for the agent.
+
+# Taint floor: an untrusted (tainted) context cannot drive a create or update.
+transition_policies:
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 50
+  command_timeout_ms: 60000
