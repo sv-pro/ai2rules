@@ -1692,11 +1692,15 @@ over depth), and THESIS §3.
   not provide and Apache-2.0 does. **A licensing choice is a distribution choice, so it should
   follow the topology rather than be applied uniformly for tidiness.** Uniformity was the whole
   argument for MIT-everywhere, and it was the wrong axis.
-  **Known cost, recorded because it will look like a regression:** GitHub detects a single
-  root `LICENSE` cleanly and reports a dual `LICENSE-MIT` + `LICENSE-APACHE` pair as
-  `NOASSERTION` — the repo page shows "View license" instead of an "MIT" badge. That is a
-  display consequence of the convention, not a defect in the grant, and it is not a reason to
-  collapse back to one file.
+  **Known cost, measured rather than predicted, because it will look like a regression:**
+  GitHub resolves the pair to **`Apache-2.0`** — its API returns that single SPDX id, sourced
+  from `LICENSE-APACHE`, and the repo page reports "Apache-2.0, MIT licenses found". So the
+  badge *understates* the grant by naming the stricter option and hiding the MIT one. **This
+  is the ecosystem-standard outcome, not a misconfiguration: `rust-lang/rust` resolves
+  identically** (verified 2026-08-08 — same SPDX id, same source file). A first draft of this
+  entry predicted `NOASSERTION`; that was a guess and it was wrong, which is recorded here
+  because the number of times this project has been bitten by an unverified assumption is now
+  its own pattern. Not a reason to collapse back to one file.
 - **Known residual: this is a *seventh* live thing in a cluster that archived eight repos
   to stop exactly this.** So the kill condition is stated up front, per D52's practice:
   **if there is no verified artifact and no published experiment by 2027-02-06, archive it**
