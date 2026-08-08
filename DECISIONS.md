@@ -1677,9 +1677,26 @@ over depth), and THESIS §3.
   only against itself. Second, licensing was never the small half: `ai2rules` had declared
   `MIT OR Apache-2.0` in `Cargo.toml` since E0, inherited by all ten crates, **with neither
   license file ever in the tree** — a grant asserted in metadata with no text to accept.
-  Settling on MIT narrows the declared terms (an Apache-2.0 patent grant is no longer
-  selectable); that was cheap today at version 0.0.1 with nothing published, and would not
-  have been in six months.
+  *(Amended later the same day — the first pass narrowed this to MIT-only to match the
+  siblings; see the correction below.)*
+- **Correction, 2026-08-08: `ai2rules` keeps the dual grant. The cluster is not
+  single-licensed, and that asymmetry is the decision.** The MIT-only narrowing was reverted
+  on the owner's call: `Cargo.toml` declares `MIT OR Apache-2.0` again, and the repo now ships
+  **both texts** — `LICENSE-MIT` and `LICENSE-APACHE` — per the Rust ecosystem convention that
+  the metadata always implied. The siblings stay **MIT-only**, deliberately.
+  **The split follows the roles D52 and D54 already assigned.** The outbound instruments are
+  content and tools meant to be *copied out of*, where one permissive license with a minimal
+  attribution burden is the entire point; two license files at the root of a recipe repo is
+  friction against its only job. `ai2rules` is the one artifact someone might build a product
+  **on top of**, and that reader is the one who needs an explicit patent grant — which MIT does
+  not provide and Apache-2.0 does. **A licensing choice is a distribution choice, so it should
+  follow the topology rather than be applied uniformly for tidiness.** Uniformity was the whole
+  argument for MIT-everywhere, and it was the wrong axis.
+  **Known cost, recorded because it will look like a regression:** GitHub detects a single
+  root `LICENSE` cleanly and reports a dual `LICENSE-MIT` + `LICENSE-APACHE` pair as
+  `NOASSERTION` — the repo page shows "View license" instead of an "MIT" badge. That is a
+  display consequence of the convention, not a defect in the grant, and it is not a reason to
+  collapse back to one file.
 - **Known residual: this is a *seventh* live thing in a cluster that archived eight repos
   to stop exactly this.** So the kill condition is stated up front, per D52's practice:
   **if there is no verified artifact and no published experiment by 2027-02-06, archive it**

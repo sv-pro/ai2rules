@@ -422,8 +422,18 @@ Speculative, research-grade directions that aren't committed work (e.g. a cross-
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). This replaces the `MIT OR Apache-2.0` that
-`Cargo.toml` had declared since E0 without either license file ever being present;
-the cluster settled on a single license on 2026-08-08, and the sibling repos
-([`ai-detector-bench`](https://github.com/sv-pro/ai-detector-bench),
-[`agentic-coding-lab`](https://github.com/sv-pro/agentic-coding-lab)) carry the same one.
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE))
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT))
+
+at your option. This is the Rust ecosystem convention and the terms `Cargo.toml` has
+declared since E0 — the license *files* were missing until 2026-08-08, which meant the
+grant was asserted in metadata with no text to accept. Apache-2.0 is the option to take
+if you need an explicit patent grant.
+
+The sibling repos ([`ai-detector-bench`](https://github.com/sv-pro/ai-detector-bench),
+[`agentic-coding-lab`](https://github.com/sv-pro/agentic-coding-lab)) are MIT-only: they
+are content and instruments meant to be copied from, where a single permissive license
+with a minimal attribution burden is the whole point. This repo is the one someone might
+build a product on top of, which is where the patent grant earns its extra file.
