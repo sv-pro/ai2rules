@@ -136,7 +136,7 @@ listed as a question rather than guessed.
 |---|---|---|---|---|---|
 | **G1** pre-execution intercept | **yes** ✓ | **no** ? | **yes** ○ | ? | ? |
 | **G2** can deny | **yes** ✓ | n/a | **yes** ○ | ? | ? |
-| **G3** can grant | ? | n/a | **yes** ○ | ? | ? |
+| **G3** can grant | ? | n/a | **no** (headless) ✓ | ? | ? |
 | **G4** covers MCP + native | **yes** ✓ | n/a | ? | ? | ? |
 | **G5** approval cache-satisfiable ⚠ | ? | ? | **yes** ✓ | ? | ? |
 | **G6** capability can be absent | **MCP seam only** ✓ | ? | ? | ? | ? |
@@ -199,14 +199,27 @@ their notes.*
   strongest cell is what it costs.
 - **Claude Code G5 `?` — blocked, not unexamined.** Same root cause as G3: step 2 requires
   clicking an "always allow" option, which requires a prompt.
-- **Antigravity G3 `yes ○` is flagged, not yet downgraded.** Its basis is the verdict-mapping
-  table in `docs/demos/antigravity/README.md`, which — like the Claude Code case above —
-  describes what **our hook emits** under `--grant` rather than what the host honours. D48
-  live-verified the agy hook ABI and the cached-approval behaviour behind G5, but nothing on
-  record verifies that an emitted `allow` suppresses agy's own prompt. **This cell probably
-  deserves the same downgrade and has not been given it**, because doing so on inference
-  alone would repeat the error being corrected in the row above, in the other direction.
-  Resolve it by running G3 against `agy`, not by reasoning about it.
+- **Antigravity G3 `no (headless)` ✓ — was `yes ○`, and the run reversed it.** Measured
+  2026-08-08 on **agy 1.1.10**, headless (`agy -p`), with a `PreToolUse` hook emitting the
+  canonical shape `{"decision": "allow", "reason": …}` — the same shape `harness agy-hook`
+  itself emits, so a malformed-payload explanation is ruled out.
+
+  | Run | Hook emits | Outcome |
+  |---|---|---|
+  | control | `{}` (no decision) | auto-denied — *"a tool required the `command` permission that headless mode cannot prompt for"* |
+  | test | `{"decision":"allow"}` | **auto-denied, identical message** |
+  | deny control (with `--dangerously-skip-permissions`) | `{"decision":"deny"}` | **blocked**, and agy reported *"the execution was blocked by a system hook"*, quoting the reason |
+
+  The deny control is what makes this a result rather than a null: **hook decisions are
+  honoured in this mode** — `deny` stops the call and its reason reaches the model — so the
+  hook is being consulted and obeyed. `allow` simply does not satisfy the host's own
+  permission requirement. That is the precise thing G3 asks: this hook is an **overlay**, able
+  to add friction, not an **authority** able to remove it.
+
+  **Bound, and it is why the cell is qualified rather than a bare `no`:** headless never
+  prompts, it auto-denies. Whether `allow` suppresses an *interactive* approval prompt is
+  untested, and agy's interactive path demonstrably differs — that is what G5 `✓` on this
+  same host records. Do not read this cell as covering interactive use.
 - **Antigravity G5 ✓ (the bad answer)** — with the kernel returning "ask", the host could
   satisfy the request from its own cache of prior "always allow" answers. This is the
   finding behind `force_ask`; see `DECISIONS.md` D48.

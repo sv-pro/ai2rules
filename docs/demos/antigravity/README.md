@@ -83,7 +83,7 @@ Observed tool vocabulary (lowercased step type; captured live, since many
 
 | kernel | agy | note |
 |---|---|---|
-| ALLOW | *(no decision)* — or `allow` with `--grant` | additive by default |
+| ALLOW | *(no decision)* — or `allow` with `--grant` | additive by default; **`--grant` does not grant in headless — see below** |
 | ASK | `force_ask` — or `ask` with `--soft-ask` | strict by default, see below |
 | DENY | `deny` | |
 | ABSENT | *(no decision)* — or `deny` with `ABSENT:` prefix under `--enforce-absent` | a PreToolUse hook cannot un-offer a native tool |
@@ -93,6 +93,24 @@ Observed tool vocabulary (lowercased step type; captured live, since many
 stored "Always Allow" grant. A kernel ASK means *a human must decide this time*;
 letting a past click answer it would void the approval guarantee. `--soft-ask`
 opts back into the friendlier behaviour.
+
+**`--grant` does not grant in headless mode — measured 2026-08-08, agy 1.1.10.**
+This table previously implied it did, and that was never tested. Running `agy -p`
+with a hook emitting `{"decision":"allow"}` — the exact shape `emit()` produces —
+the call was **still auto-denied**, with agy reporting *"a tool required the
+`command` permission that headless mode cannot prompt for"*, identical to the
+run with no decision at all. The control that makes this conclusive: the same
+hook emitting `{"decision":"deny"}` **did** stop a call, and agy told the model
+*"blocked by a system hook"* with our reason string. So agy consults and obeys the
+hook — `deny` is authoritative and `allow` is not.
+
+Practical consequence: **in headless, `cc-hook`'s overlay-vs-replace distinction
+has no agy equivalent.** `--grant` buys nothing there; the host's own permission
+list still decides, and a headless run needs `permissions.allow` rules (or
+`--dangerously-skip-permissions`) regardless of what the manifest says. Whether
+`--grant` suppresses an *interactive* prompt is still untested — do not assume it
+from this, in either direction. Tracked as G3 in
+[`docs/GOVERNABILITY-INDEX.md`](../../GOVERNABILITY-INDEX.md).
 
 ## Try it offline (no agy run needed)
 
