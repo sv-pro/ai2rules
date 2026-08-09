@@ -277,3 +277,126 @@ fn the_written_manifest_actually_compiles() {
     let manifest = compiler::loader::load_yaml(&yaml).expect("starter manifest loads");
     compiler::compile(&manifest).expect("starter manifest compiles");
 }
+
+// ---------------------------------------------------------------------------
+// Regressions from the 2026-08-09 review of this feature. Both were found by
+// running the shipped binary, not by reading it, and both passed the original
+// test suite.
+// ---------------------------------------------------------------------------
+
+/// **The bad one.** Matching idempotence on the hook `command` alone meant a
+/// pre-existing entry under a narrow matcher made `init` report "already
+/// present", exit 0, and leave every tool except that one ungoverned — while
+/// telling the operator they were covered. Silent under-coverage in a governance
+/// tool is worse than a loud failure.
+#[test]
+fn a_narrow_matcher_does_not_satisfy_init() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    fs::create_dir_all(target.join(".claude")).expect("mkdir");
+    fs::write(
+        target.join(".claude/settings.json"),
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command",
+           "command":"bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/world-gate.sh\"","timeout":10}]}]}}"#,
+    )
+    .expect("write settings");
+
+    let out = init(target, &[]);
+    assert!(out.status.success(), "init failed: {out:?}");
+
+    let matchers: Vec<String> = pretooluse(&settings(target))
+        .iter()
+        .map(|e| e["matcher"].as_str().unwrap_or("").to_string())
+        .collect();
+    assert!(
+        matchers.iter().any(|m| m == "*"),
+        "no `*` entry — governance covers only {matchers:?}, but init reported success"
+    );
+
+    // …and the duplicate has to be surfaced, not silently tolerated: it makes the
+    // kernel run twice for Bash.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Bash"),
+        "the narrower duplicate was not reported to the operator:\n{stdout}"
+    );
+}
+
+/// Already-correct installs must still be left alone, or "fix the narrow-matcher
+/// bug" becomes "append a duplicate on every run".
+#[test]
+fn a_star_matcher_still_satisfies_init() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+    assert!(init(target, &[]).status.success());
+    assert_eq!(pretooluse(&settings(target)).len(), 1);
+}
+
+/// `init` runs inside a directory this codebase calls untrusted (D37). A
+/// checked-in symlink must not redirect a write outside the project — clone a
+/// hostile repo, run `init`, and it writes where the repo chose.
+#[test]
+fn init_refuses_to_write_through_a_symlink() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path().join("proj");
+    fs::create_dir_all(target.join(".claude")).expect("mkdir");
+
+    let victim = tmp.path().join("victim.json");
+    fs::write(&victim, "{\"untouched\":true}\n").expect("victim");
+    std::os::unix::fs::symlink(&victim, target.join(".claude/settings.json")).expect("symlink");
+
+    let out = init(&target, &[]);
+    assert!(!out.status.success(), "init wrote through a symlink");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("symlink"), "unhelpful error:\n{stderr}");
+    assert_eq!(
+        fs::read_to_string(&victim).expect("victim"),
+        "{\"untouched\":true}\n",
+        "the symlink target was modified"
+    );
+}
+
+/// A symlinked `.claude/` redirects all four files at once, so the check has to
+/// cover ancestors and not just the leaf.
+#[test]
+fn init_refuses_a_symlinked_claude_directory() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path().join("proj");
+    fs::create_dir_all(&target).expect("mkdir proj");
+    let elsewhere = tmp.path().join("elsewhere");
+    fs::create_dir_all(&elsewhere).expect("mkdir elsewhere");
+    std::os::unix::fs::symlink(&elsewhere, target.join(".claude")).expect("symlink dir");
+
+    let out = init(&target, &[]);
+    assert!(
+        !out.status.success(),
+        "init wrote through a symlinked .claude/"
+    );
+    assert!(
+        fs::read_dir(&elsewhere).expect("read").next().is_none(),
+        "files were written into the symlink target"
+    );
+}
+
+/// The refusal must happen before anything lands, or a hostile symlink becomes a
+/// way to leave projects half-configured.
+#[test]
+fn symlink_refusal_writes_nothing_at_all() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path().join("proj");
+    fs::create_dir_all(target.join(".claude")).expect("mkdir");
+    let victim = tmp.path().join("victim.json");
+    fs::write(&victim, "{}\n").expect("victim");
+    std::os::unix::fs::symlink(&victim, target.join(".claude/settings.json")).expect("symlink");
+
+    assert!(!init(&target, &[]).status.success());
+    assert!(
+        !target.join(".claude/cc-world.yaml").exists(),
+        "manifest was written despite the refusal"
+    );
+    assert!(
+        !target.join(".claude/hooks/world-gate.sh").exists(),
+        "shim was written despite the refusal"
+    );
+}

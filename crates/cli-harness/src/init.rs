@@ -69,6 +69,40 @@ fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// Refuse to write through a symlink.
+///
+/// `init` runs inside a project directory this codebase treats as **untrusted**
+/// (D37), and a checked-in `.claude/settings.json` symlink would otherwise make
+/// `fs::write` land outside the project entirely — you clone a repo, run `init`,
+/// and it writes somewhere you did not choose. Checked for the leaf *and* every
+/// ancestor below the target, because a symlinked `.claude/` redirects all four
+/// files at once.
+///
+/// Same class as the fixes in #36 (canonicalize hook roots) and #37 (reject
+/// dangling symlink leaves); this is the third place it has come up, which is why
+/// the check refuses rather than resolving. Resolving a symlink silently obeys
+/// whoever planted it.
+fn refuse_symlinks(root: &Path, path: &Path) -> Result<(), String> {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    let mut cur = root.to_path_buf();
+    for part in rel.components() {
+        cur.push(part);
+        match fs::symlink_metadata(&cur) {
+            Ok(md) if md.file_type().is_symlink() => {
+                return Err(format!(
+                    "{} is a symlink.\n\
+                     `init` will not write through it — the governed project is untrusted input, and\n\
+                     following it would write outside {}. Remove or replace the symlink and re-run.",
+                    cur.display(),
+                    root.display()
+                ));
+            }
+            _ => {} // absent is fine: we are about to create it
+        }
+    }
+    Ok(())
+}
+
 fn shim_body(harness_bin: &str, grant: bool) -> String {
     let grant_flag = if grant { " --grant" } else { "" };
     format!(
@@ -101,12 +135,34 @@ exec "$BIN" cc-hook{grant_flag} --world "$PD/.claude/cc-world.yaml" --state "$PD
     )
 }
 
+/// What merging did, so the caller can report it accurately rather than
+/// guessing.
+pub enum Merge {
+    /// A `"*"` entry with our command was already there. Nothing to do.
+    AlreadyGoverned,
+    /// The entry was added.
+    Added,
+    /// The entry was added, **and** our command also appears under narrower
+    /// matchers, which will now run the kernel twice for those tools.
+    AddedAlongsideNarrow(Vec<String>),
+}
+
 /// Merge the PreToolUse entry into an existing `settings.json` value.
 ///
-/// Idempotent by `command`: if an entry with our command already exists under a
-/// `"*"` matcher it is left alone, so running `init` twice does not stack hooks.
+/// Idempotent on the pair `(matcher == "*", command)` — **not on command
+/// alone**. That distinction is the whole point: matching on command alone made
+/// `init` see our hook under a narrow matcher like `"Bash"`, report "already
+/// present", exit 0, and leave Read, Write, WebFetch and every MCP tool
+/// ungoverned while telling the user they were covered. A governance tool must
+/// never finish a successful run with less coverage than was asked for.
+///
+/// So when the command is present but only under narrower matchers, the `"*"`
+/// entry is **added anyway** and the duplicates are reported. That fails toward
+/// more governance; the cost is the kernel running twice for those tools, which
+/// is a nuisance the caller is told about rather than a silent hole.
+///
 /// Any other hooks the user has are preserved untouched — this file is theirs.
-pub fn merge_settings(existing: Option<&str>) -> Result<(String, bool), String> {
+pub fn merge_settings(existing: Option<&str>) -> Result<(String, Merge), String> {
     let mut root: Value = match existing {
         Some(text) if !text.trim().is_empty() => serde_json::from_str(text)
             .map_err(|e| format!("settings.json is not valid JSON: {e}"))?,
@@ -130,7 +186,7 @@ pub fn merge_settings(existing: Option<&str>) -> Result<(String, bool), String> 
         .as_array_mut()
         .ok_or("settings.json `hooks.PreToolUse` is not an array")?;
 
-    let already = arr.iter().any(|entry| {
+    let carries_our_command = |entry: &Value| -> bool {
         entry
             .get("hooks")
             .and_then(Value::as_array)
@@ -140,18 +196,40 @@ pub fn merge_settings(existing: Option<&str>) -> Result<(String, bool), String> 
                     .any(|h| h.get("command").and_then(Value::as_str) == Some(HOOK_COMMAND))
             })
             .unwrap_or(false)
-    });
+    };
 
-    if !already {
+    let governed_everywhere = arr
+        .iter()
+        .any(|e| carries_our_command(e) && e.get("matcher").and_then(Value::as_str) == Some("*"));
+
+    // Narrower matchers carrying our command: real coverage gaps if we stopped
+    // here, and duplicate work once we add the `*` entry. Either way the user
+    // needs to be told they exist.
+    let narrow: Vec<String> = arr
+        .iter()
+        .filter(|e| carries_our_command(e))
+        .filter_map(|e| e.get("matcher").and_then(Value::as_str))
+        .filter(|m| *m != "*")
+        .map(str::to_string)
+        .collect();
+
+    let outcome = if governed_everywhere {
+        Merge::AlreadyGoverned
+    } else {
         arr.push(json!({
             "matcher": "*",
             "hooks": [{ "type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT }]
         }));
-    }
+        if narrow.is_empty() {
+            Merge::Added
+        } else {
+            Merge::AddedAlongsideNarrow(narrow)
+        }
+    };
 
     let mut out = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
     out.push('\n');
-    Ok((out, !already))
+    Ok((out, outcome))
 }
 
 fn merge_gitignore(existing: Option<&str>) -> Option<String> {
@@ -225,15 +303,23 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
     // 3. settings.json
     let settings_path = target.join(".claude/settings.json");
     let current = fs::read_to_string(&settings_path).ok();
-    let (merged, added) = merge_settings(current.as_deref())?;
+    let (merged, outcome) = merge_settings(current.as_deref())?;
     writes.push((settings_path, merged));
     steps.push(Step {
         verb: "write",
         path: ".claude/settings.json".into(),
-        note: if added {
-            "PreToolUse hook added".into()
-        } else {
-            "PreToolUse hook already present — left as is".to_string()
+        note: match &outcome {
+            Merge::AlreadyGoverned => {
+                "PreToolUse hook already covers all tools — left as is".into()
+            }
+            Merge::Added => "PreToolUse hook added".into(),
+            Merge::AddedAlongsideNarrow(m) => format!(
+                "PreToolUse hook added for ALL tools — note: also present under {}, \
+                 which will now run the kernel twice for those; remove the narrow entr{} \
+                 unless you meant it",
+                m.join(", "),
+                if m.len() == 1 { "y" } else { "ies" }
+            ),
         },
     });
 
@@ -246,6 +332,13 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
             path: ".gitignore".into(),
             note: "ignore .claude/state/ and .claude/gate-off".into(),
         });
+    }
+
+    // Nothing is written through a symlink — checked here rather than at write
+    // time so `--dry-run` reports it and a refusal never leaves a half-written
+    // project behind.
+    for (path, _) in &writes {
+        refuse_symlinks(target, path)?;
     }
 
     Ok(Plan { steps, writes })
@@ -303,16 +396,29 @@ pub fn run(target: &Path, grant: bool, force: bool, dry_run: bool) -> i32 {
                 return 1;
             }
         }
-        if let Err(e) = fs::write(path, body) {
-            eprintln!("harness init: cannot write {}: {e}", path.display());
+        // Write-then-rename. `settings.json` is the user's own config and a
+        // truncating write that dies midway corrupts it; the shell installer this
+        // replaces used `> tmp && mv` for the same reason, so a direct write was a
+        // regression rather than a new risk.
+        let tmp = path.with_extension(format!(
+            "{}.harness-tmp",
+            path.extension().and_then(|e| e.to_str()).unwrap_or("")
+        ));
+        if let Err(e) = fs::write(&tmp, body) {
+            eprintln!("harness init: cannot write {}: {e}", tmp.display());
             return 1;
         }
         if path.extension().and_then(|e| e.to_str()) == Some("sh") {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o755));
+                let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755));
             }
+        }
+        if let Err(e) = fs::rename(&tmp, path) {
+            let _ = fs::remove_file(&tmp);
+            eprintln!("harness init: cannot write {}: {e}", path.display());
+            return 1;
         }
     }
 
