@@ -1,0 +1,36 @@
+{
+  "name": "@ai2rules/harness",
+  "version": "0.0.1",
+  "description": "Deterministic governance for local CLI coding agents. `npx @ai2rules/harness init` governs a project in one command.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sv-pro/ai2rules.git",
+    "directory": "npm"
+  },
+  "homepage": "https://github.com/sv-pro/ai2rules#govern-a-project-in-one-command",
+  "bugs": "https://github.com/sv-pro/ai2rules/issues",
+  "keywords": [
+    "ai",
+    "agent",
+    "governance",
+    "claude-code",
+    "prompt-injection",
+    "permissions",
+    "security"
+  ],
+  "bin": {
+    "harness": "bin/harness.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/harness.js",
+    "install.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

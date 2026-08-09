@@ -30,6 +30,53 @@ replayable. See [Status](#status).
 
 ---
 
+## Govern a project in one command
+
+```bash
+harness init            # additive: adds deny/ask on top of the host's permissions
+harness init --grant    # replace: the manifest becomes the allowlist
+harness init --dry-run  # print the plan, write nothing
+```
+
+That is the whole install. No checkout, no `cargo`, no `jq` — the starter manifest
+is compiled into the binary, and the shim bakes the absolute path of the executable
+you just ran. It writes four things and is safe to run twice:
+
+```
+.claude/cc-world.yaml         the manifest   (kept if you have tuned one; --force to replace)
+.claude/hooks/world-gate.sh   the PreToolUse shim, kill-switch baked in
+.claude/settings.json         the hook entry, merged — your other hooks are untouched
+.gitignore                    .claude/state/, .claude/gate-off
+```
+
+**Prove it is real in five seconds**, without starting an agent session — ask the
+kernel directly:
+
+```bash
+echo '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd"}}' \
+  | CLAUDE_PROJECT_DIR=$PWD bash .claude/hooks/world-gate.sh
+# {"hookSpecificOutput":{…,"permissionDecision":"deny",
+#   "permissionDecisionReason":"the target path is read-only under the roots policy (path_scope_readonly)"}}
+```
+
+The same write *inside* the project stays silent. That is the roots policy doing
+what no allowlist of command strings can do — it is about where the path is, not
+what the command looks like.
+
+**Turning it off is one file**, effective on the very next call, no restart:
+
+```bash
+touch .claude/gate-off        # this project
+touch ~/.claude/gate-off      # panic switch, everywhere
+```
+
+The manifest is compiled by the real compiler *before* anything is written, so what
+lands in your project is known to build. `init` supersedes the per-project half of
+[`scripts/install-governance.sh`](scripts/install-governance.sh), which is still
+there for the per-machine half (putting a binary on `PATH` from a checkout).
+
+---
+
 ## Why
 
 A local CLI agent inherits the developer's full ambient authority — credentials,
@@ -216,7 +263,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **230 tests** green.
+Builds clean offline with `clippy -D warnings`; **239 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

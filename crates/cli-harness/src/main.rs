@@ -16,6 +16,7 @@ use world_kernel::ExecEnv;
 mod agy_hook;
 mod cc_hook;
 mod hostkit;
+mod init;
 mod mcp_gateway;
 mod mock_jira;
 mod serve;
@@ -42,6 +43,32 @@ struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {
+    /// Govern the project in this directory: write a starter manifest, the
+    /// PreToolUse shim, and the host settings entry — with nothing but this
+    /// binary. No ai2rules checkout, no `cargo`, no `jq`.
+    ///
+    /// The starter manifest is compiled into this executable and is compiled
+    /// (by the real compiler) before anything is written. The shim bakes the
+    /// absolute path of *this* binary, so there is no separate install step.
+    /// Safe to re-run: a tuned manifest is kept unless `--force`, and the
+    /// settings hook is merged idempotently.
+    Init {
+        /// Project directory to govern.
+        #[arg(default_value = ".")]
+        target: PathBuf,
+        /// Replace mode: the manifest becomes the authoritative allowlist and
+        /// ALLOW verdicts *grant* (the host skips its own prompt). Default is
+        /// additive — deny/ask overlay only, which can never lock you out.
+        #[arg(long)]
+        grant: bool,
+        /// Overwrite an existing `.claude/cc-world.yaml`. Off by default: a
+        /// tuned manifest is the valuable artifact here, not the template.
+        #[arg(long)]
+        force: bool,
+        /// Print the plan and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Launch the World Authoring Tool: a local browser editor for world
     /// manifests, backed by the real compiler + kernel (E11).
     Serve {
@@ -239,6 +266,16 @@ fn ask_approval(call: &ToolCall, _world: &CompiledWorld, _provenance: &Provenanc
 
 fn main() {
     let cli = Cli::parse();
+
+    if let Some(Command::Init {
+        target,
+        grant,
+        force,
+        dry_run,
+    }) = &cli.command
+    {
+        std::process::exit(init::run(target, *grant, *force, *dry_run));
+    }
 
     if let Some(Command::Serve { port }) = cli.command {
         if let Err(e) = serve::run(port) {

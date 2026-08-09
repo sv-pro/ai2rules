@@ -1797,3 +1797,62 @@ all) and by D52's referee discipline, which this entry extends to a second sport
   D52 (referee discipline; no composite score), D53, D54; THESIS §6; `STRATEGY.md` (bet 2);
   [`docs/GOVERNABILITY-INDEX.md`](docs/GOVERNABILITY-INDEX.md);
   <https://github.com/sv-pro/agentic-coding-lab>
+
+## D56 — `harness init`: the binary carries its own templates, so adoption needs no checkout
+
+**Date:** 2026-08-09. **Executes `STRATEGY.md`'s first ranked bet** (the productization
+wedge), deferred five times. Constrained by D37 (the shim holds no governance logic; the
+governed project is untrusted) and by the `roots` primitive (#27, #28), which is what makes
+a *generic* starter manifest worth installing at all.
+
+- **Context.** `scripts/install-governance.sh` already governed a project in one command,
+  and almost nobody could run it. It needed an **ai2rules checkout** for `--source`
+  (templates), **`cargo` or a prebuilt binary** to install a kernel, and **`jq`** to merge
+  `settings.json`. Those are three prerequisites in front of a pitch whose entire claim is
+  *"kill one concrete fear in five minutes"*. The script is fine; the distribution was the
+  product problem, and the strategy has said so since 2026-07-23.
+- **Decision.** `harness init [TARGET]` is a first-class subcommand that governs a project
+  using **nothing but the binary being invoked**. Three choices carry it, and each removes
+  exactly one prerequisite:
+  1. **The starter manifest is `include_str!`-ed into the executable.** No checkout.
+  2. **The shim bakes `std::env::current_exe()`.** No separate install step — the trusted
+     absolute path D37 requires is simply the binary the user just ran.
+  3. **The settings merge is `serde_json`.** No `jq`.
+  Flags: `--grant` (replace mode), `--force` (replace a tuned manifest), `--dry-run`.
+- **The manifest is compiled before it is written, and this is not a nicety.** `init` runs
+  the real compiler over the embedded template and writes nothing if it fails. A project
+  whose thesis is that governance must be *checkable* does not get to install a manifest it
+  never checked; shipping an unbuildable one to a stranger would be the exact failure this
+  repo spends its time naming in other people's tools.
+- **Idempotence is a security property here, not a convenience.** A duplicated `PreToolUse`
+  entry runs the kernel twice per call and doubles latency, which is how a governance tool
+  becomes the reason someone disables governance. Merging is keyed on the hook's `command`
+  string, foreign hooks and unrelated settings keys are preserved untouched, and a tuned
+  `cc-world.yaml` is never replaced without `--force` — losing that file is the worst thing
+  this command could do, because it is the only artifact in a governed project that
+  represents human judgement.
+- **Alternatives rejected.**
+  - *Keep improving the shell script.* It cannot remove its own prerequisites: the
+    templates live in the checkout by construction, and installing a binary is a separate
+    step no matter how the script is written.
+  - *Fetch templates from GitHub at init time.* Rejected on the thesis. A governance tool
+    that downloads its policy at install time makes the network a trust dependency of the
+    trust boundary, and an offline machine is exactly where this should still work.
+  - *Generate the manifest from the project (language detection, etc.).* Rejected for now:
+    inference is how a deterministic tool acquires a stochastic dependency. A fixed,
+    roots-confined starter that the user then tunes keeps the judgement human and visible.
+  - *Have `init` install the binary onto `PATH` too.* Rejected — that is the per-machine
+    half and belongs to the packaging layer (npm, brew, releases), not to a project-scoped
+    command. `install-governance.sh` keeps that half.
+- **Known residual: the second half of the wedge is packaging, and it is not done.**
+  `init` removes the checkout requirement but a stranger still has to *get* a binary.
+  `npm/` in this repo carries the `@ai2rules/harness` wrapper — platform detection and a
+  `postinstall` that resolves a prebuilt release asset — and **nothing has been published to
+  any registry**, deliberately: publishing a name is a one-way door, and it should not
+  happen as a side effect of a feature commit. Until a release workflow produces the
+  binaries the wrapper expects, the honest install path is still "build it, then
+  `harness init`".
+- **Related:** D24 (host-neutral gate ABI), D33/D37 (the cc-hook seam and the untrusted
+  project directory), D47, `scripts/starter-world.yaml`, `docs/TUTORIAL.md`, `STRATEGY.md`
+  (bet 1), and `crates/cli-harness/tests/init.rs` (nine tests, including that the embedded
+  manifest cannot drift from the shipped one).

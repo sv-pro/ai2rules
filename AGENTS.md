@@ -67,12 +67,12 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
-| **cli-harness** | `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
+| **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 46 · compiler 18 · executor 16 · trace-store 13 ·
-provider-adapters 5 · agent-core 16 · harness-preview 45 · cli-harness 66 ·
-harness-wasm 0 · **total 230** (plus the harness-wasm Node smoke tests, run via
+provider-adapters 5 · agent-core 16 · harness-preview 45 · cli-harness 75 ·
+harness-wasm 0 · **total 239** (plus the harness-wasm Node smoke tests, run via
 wasm-pack)
 
 ---

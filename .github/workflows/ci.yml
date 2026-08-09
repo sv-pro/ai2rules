@@ -43,6 +43,26 @@ jobs:
       - name: Demos still say what they claim
         run: bash scripts/check-demos.sh
 
+  npm-wrapper:
+    # The `@ai2rules/harness` wrapper (D56) is how a stranger gets a binary, and
+    # nothing else in CI touches it. Two cheap checks: it parses, and its platform
+    # map still matches what release.yml publishes. Drift between those two files
+    # fails silently — a wrong target 404s on a URL nobody tested, and only ever
+    # on someone else's machine.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax
+        run: |
+          node --check npm/install.js
+          node --check npm/bin/harness.js
+          node --check npm/verify-targets.js
+      - name: Platform map matches the release matrix
+        run: node npm/verify-targets.js
+
   hero-mcp:
     # TypeScript MCP tool under tools/hero-mcp (not a Cargo member); typecheck + unit
     # tests only — the agy-backed generation needs auth and isn't run in CI.
