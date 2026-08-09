@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agent-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compiler",
  "executor",
@@ -135,7 +135,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli-harness"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "agent-core",
  "clap",
@@ -160,7 +160,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "compiler"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "harness-types",
  "serde_json",
@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "executor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "harness-types",
  "serde_json",
@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "harness-preview"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compiler",
  "harness-types",
@@ -345,7 +345,7 @@ dependencies = [
 
 [[package]]
 name = "harness-types"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "harness-wasm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compiler",
  "harness-preview",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "provider-adapters"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "harness-types",
  "serde_json",
@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "trace-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compiler",
  "harness-types",
@@ -889,7 +889,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "world-kernel"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "compiler",
  "executor",

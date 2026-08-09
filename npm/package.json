@@ -1,6 +1,6 @@
 {
   "name": "@ai2rules/harness",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deterministic governance for local CLI coding agents. `npx @ai2rules/harness init` governs a project in one command.",
   "license": "MIT OR Apache-2.0",
   "repository": {
