@@ -3,18 +3,22 @@
 **Govern a local coding agent in one command.**
 
 ```bash
-npx ai2rules-harness init
+npm install -g ai2rules-harness
+harness init
 ```
 
 That writes a governance manifest, a `PreToolUse` shim, and the host settings entry
 into the current project. It is safe to run twice, it never replaces a manifest you
 have tuned, and turning it off is one file.
 
-> **Not on npm yet.** The prebuilt binaries this wrapper downloads **do** exist —
-> `v0.1.1`, four platforms, each with a published checksum — but the package
-> itself has not been pushed to the registry. Until it is:
-> `cargo install --git https://github.com/sv-pro/ai2rules cli-harness`, then
-> `harness init`. See `DECISIONS.md` D56.
+> **Try it without installing:** `npx ai2rules-harness init` works and is the
+> fastest way to see a verdict — but **prefer the global install for real use.**
+> The shim records the absolute path of the binary that ran `init`, and under
+> `npx` that path is inside npm's transient `_npx` cache. When the cache is
+> cleaned or evicted the binary disappears, and the shim **fails open** — your
+> tool calls go back to the host's normal permissions with no error. That is the
+> correct behaviour for a missing kernel and the wrong place to be surprised by
+> it. After a global install, re-run `harness init` to re-bake the stable path.
 
 ## What it does
 

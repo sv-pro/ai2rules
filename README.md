@@ -33,10 +33,21 @@ replayable. See [Status](#status).
 ## Govern a project in one command
 
 ```bash
-harness init            # additive: adds deny/ask on top of the host's permissions
-harness init --grant    # replace: the manifest becomes the allowlist
-harness init --dry-run  # print the plan, write nothing
+npm install -g ai2rules-harness   # or: cargo install --git https://github.com/sv-pro/ai2rules cli-harness
+harness init                      # additive: adds deny/ask on top of the host's permissions
+harness init --grant              # replace: the manifest becomes the allowlist
+harness init --dry-run            # print the plan, write nothing
 ```
+
+Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
+no dependencies; the postinstall fetches a checksum-verified prebuilt binary for
+your platform from [the releases](https://github.com/sv-pro/ai2rules/releases).
+
+> `npx ai2rules-harness init` also works and is the quickest way to see a verdict,
+> but **prefer the global install for real use.** The shim records the absolute
+> path of the binary that ran `init`; under `npx` that lives in npm's transient
+> `_npx` cache, and when the cache is cleaned the shim **fails open** — you are
+> back to the host's normal permissions with no error.
 
 That is the whole install. No checkout, no `cargo`, no `jq` — the starter manifest
 is compiled into the binary, and the shim bakes the absolute path of the executable

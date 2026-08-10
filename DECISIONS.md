@@ -1844,15 +1844,31 @@ a *generic* starter manifest worth installing at all.
   - *Have `init` install the binary onto `PATH` too.* Rejected — that is the per-machine
     half and belongs to the packaging layer (npm, brew, releases), not to a project-scoped
     command. `install-governance.sh` keeps that half.
-- **Known residual: the second half of the wedge is packaging, and it is not done.**
-  `init` removes the checkout requirement but a stranger still has to *get* a binary.
-  `npm/` in this repo carries the `ai2rules-harness` wrapper — platform detection and a
-  `postinstall` that resolves a prebuilt release asset — and **nothing has been published to
-  any registry**, deliberately: publishing a name is a one-way door, and it should not
-  happen as a side effect of a feature commit. Until a release workflow produces the
-  binaries the wrapper expects, the honest install path is still "build it, then
-  `harness init`".
+- **✅ Residual closed 2026-08-10: the packaging half shipped.**
+  [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) **`0.1.1`** is on the
+  public registry — unscoped, zero dependencies, with a `postinstall` that resolves a
+  checksum-verified prebuilt from the `v0.1.1` GitHub release. Verified cold from the
+  registry: `npx ai2rules-harness init` governs a fresh directory and returns a deny verdict
+  for a write outside it. **The agent did not publish it** — a package name is a one-way
+  door, so the `npm publish` was left to a human even after everything else was staged and
+  the login was in place.
+  **Unscoped rather than `@ai2rules/harness`, decided at publish time:** the `@ai2rules`
+  org did not exist on npm, so the scoped name would have failed *after* login rather than
+  before it, and creating an org to hold one package buys nothing. `npx ai2rules-harness
+  init` reads the same.
+- **New residual, found by running the published package: under `npx`, the shim bakes a
+  path that can disappear.** `init` records the absolute path of the binary that ran it
+  (that is what makes the trusted-path requirement of D37 free). Under `npx` that path is
+  inside npm's transient `_npx` cache; when the cache is cleaned the binary is gone and the
+  shim **fails open** — the host silently returns to its own permissions with no error.
+  Fail-open is the correct behaviour for a missing kernel (D37) and this does not change it,
+  but it makes `npx` the wrong *durable* install, so both READMEs now recommend
+  `npm install -g` and describe `npx` as the way to try it. **The real fix, if this bites
+  anyone: have the shim report a missing kernel once instead of failing silently** — but
+  that trades a silent hole for a possible per-call warning, which is a design call and not
+  a bug fix.
 - **Related:** D24 (host-neutral gate ABI), D33/D37 (the cc-hook seam and the untrusted
   project directory), D47, `scripts/starter-world.yaml`, `docs/TUTORIAL.md`, `STRATEGY.md`
-  (bet 1), and `crates/cli-harness/tests/init.rs` (nine tests, including that the embedded
-  manifest cannot drift from the shipped one).
+  (bet 1), and `crates/cli-harness/tests/init.rs` (14 tests — including that the embedded
+  manifest cannot drift from the shipped one, and five regressions from the 2026-08-09
+  review, each verified to fail against the pre-fix code).
