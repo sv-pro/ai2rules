@@ -224,10 +224,17 @@ fn shim_carries_the_kill_switch_and_fails_open() {
     assert!(init(target, &[]).status.success());
     let body = fs::read_to_string(target.join(".claude/hooks/world-gate.sh")).expect("shim");
 
-    assert!(body.contains(".claude/gate-off"), "no project kill-switch");
+    // Assert against the *active* line, not the whole file. The shim carries a
+    // comment explaining the old in-project switch, and a `contains` over the
+    // body passes on that comment while the behaviour underneath it changed —
+    // which is exactly what this test did until 2026-08-10.
+    let switch_line = body
+        .lines()
+        .find(|l| l.trim_start().starts_with("if [ -f"))
+        .expect("no kill-switch line in the shim");
     assert!(
-        body.contains("$HOME/.claude/gate-off"),
-        "no panic kill-switch"
+        switch_line.contains("$HOME/.claude/gate-off"),
+        "no panic kill-switch: {switch_line}"
     );
     assert!(
         body.contains(r#"[ -x "$BIN" ] || exit 0"#),
@@ -398,5 +405,112 @@ fn symlink_refusal_writes_nothing_at_all() {
     assert!(
         !target.join(".claude/hooks/world-gate.sh").exists(),
         "shim was written despite the refusal"
+    );
+}
+
+/// Drive the shim the way a host does: JSON on stdin, verdict on stdout.
+fn ask_shim(target: &Path, file_path: &str) -> String {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new("bash")
+        .arg(target.join(".claude/hooks/world-gate.sh"))
+        .env("CLAUDE_PROJECT_DIR", target)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn shim");
+    let payload = format!(r#"{{"tool_name":"Write","tool_input":{{"file_path":"{file_path}"}}}}"#);
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(payload.as_bytes())
+        .expect("write payload");
+    let out = child.wait_with_output().expect("shim output");
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// Pull the per-project off-file path back out of the shim.
+fn off_file_of(target: &Path) -> String {
+    let body = fs::read_to_string(target.join(".claude/hooks/world-gate.sh")).expect("shim");
+    body.lines()
+        .find(|l| l.trim_start().starts_with("if [ -f"))
+        .expect("no kill-switch line")
+        .split('\'')
+        .nth(1)
+        .expect("no quoted off-file path")
+        .to_string()
+}
+
+/// The exploit that motivated the change: a real Claude Code session was asked to
+/// create `.claude/gate-off` and did, in one turn, with no denial — switching off
+/// its own governance. **A switch the subject can reach is not a switch.**
+#[test]
+fn an_in_project_gate_off_file_no_longer_disables_governance() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+
+    assert!(ask_shim(target, "/etc/passwd").contains("deny"), "baseline");
+
+    // Exactly what the agent did.
+    fs::create_dir_all(target.join(".claude")).expect("mkdir");
+    fs::write(target.join(".claude/gate-off"), "").expect("decoy");
+
+    assert!(
+        ask_shim(target, "/etc/passwd").contains("deny"),
+        "an in-project gate-off file disabled governance — the exploit is back"
+    );
+}
+
+/// Nothing the shim actually tests may live under the governed project.
+#[test]
+fn the_kill_switch_paths_are_outside_the_project() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+    let body = fs::read_to_string(target.join(".claude/hooks/world-gate.sh")).expect("shim");
+    let switch_line = body
+        .lines()
+        .find(|l| l.trim_start().starts_with("if [ -f"))
+        .expect("no kill-switch line");
+
+    assert!(
+        !switch_line.contains("$PD/"),
+        "kill-switch reads a path inside the project: {switch_line}"
+    );
+    assert!(
+        !switch_line.contains(&*target.to_string_lossy()),
+        "kill-switch reads a path inside the project: {switch_line}"
+    );
+    let home = std::env::var("HOME").unwrap_or_default();
+    assert!(
+        off_file_of(target).starts_with(&home),
+        "per-project off-file is not under HOME"
+    );
+}
+
+/// …and it still has to work for the human it belongs to.
+#[test]
+fn the_out_of_project_kill_switch_still_works() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+    let off = off_file_of(target);
+    let off = Path::new(&off);
+
+    assert!(ask_shim(target, "/etc/passwd").contains("deny"), "baseline");
+
+    fs::create_dir_all(off.parent().expect("parent")).expect("mkdir");
+    fs::write(off, "").expect("throw the switch");
+    let disabled = ask_shim(target, "/etc/passwd");
+    fs::remove_file(off).ok();
+
+    assert!(
+        disabled.trim().is_empty(),
+        "the human kill-switch did not disable governance: {disabled:?}"
+    );
+    assert!(
+        ask_shim(target, "/etc/passwd").contains("deny"),
+        "removing the switch did not restore governance"
     );
 }

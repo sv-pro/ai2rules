@@ -58,10 +58,12 @@ looks like.
 Effective on the very next tool call, no restart:
 
 ```bash
-touch .claude/gate-off      # this project
-touch ~/.claude/gate-off    # everywhere
+touch ~/.claude/ai2rules/off/<your-project>   # this project
+touch ~/.claude/gate-off                      # everywhere
 ```
 
+`harness init` prints the exact per-project path. Both live **outside** the
+governed project on purpose: a switch inside it is one the agent can throw itself.
 Delete the file to re-enable. The shim runs per call, so the toggle is immediate.
 
 ## Honest boundaries

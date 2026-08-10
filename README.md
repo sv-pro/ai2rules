@@ -57,7 +57,7 @@ you just ran. It writes four things and is safe to run twice:
 .claude/cc-world.yaml         the manifest   (kept if you have tuned one; --force to replace)
 .claude/hooks/world-gate.sh   the PreToolUse shim, kill-switch baked in
 .claude/settings.json         the hook entry, merged — your other hooks are untouched
-.gitignore                    .claude/state/, .claude/gate-off
+.gitignore                    .claude/state/   (the runtime taint state)
 ```
 
 **Prove it is real in five seconds**, without starting an agent session — ask the
@@ -74,11 +74,14 @@ The same write *inside* the project stays silent. That is the roots policy doing
 what no allowlist of command strings can do — it is about where the path is, not
 what the command looks like.
 
-**Turning it off is one file**, effective on the very next call, no restart:
+**Turning it off is one file**, effective on the very next call, no restart. Both
+paths live **outside** the governed project, because a switch the agent can reach
+is a switch the agent can throw — `harness init` prints the exact path for your
+project:
 
 ```bash
-touch .claude/gate-off        # this project
-touch ~/.claude/gate-off      # panic switch, everywhere
+touch ~/.claude/ai2rules/off/<your-project>   # this project
+touch ~/.claude/gate-off                      # panic switch, everywhere
 ```
 
 The manifest is compiled by the real compiler *before* anything is written, so what

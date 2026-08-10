@@ -22,7 +22,7 @@
 //! .claude/cc-world.yaml          the manifest (never clobbered without --force)
 //! .claude/hooks/world-gate.sh    the PreToolUse shim, kill-switch baked in
 //! .claude/settings.json          the hook entry, merged idempotently
-//! .gitignore                     .claude/state/, .claude/gate-off
+//! .gitignore                     .claude/state/
 //! ```
 //!
 //! **The manifest is compiled before it is written.** `init` runs the real
@@ -47,7 +47,7 @@ const HOOK_TIMEOUT: u64 = 10;
 
 /// Lines added to `.gitignore`: runtime state and the kill-switch are per-machine,
 /// never per-repo.
-const GITIGNORE_LINES: [&str; 2] = [".claude/state/", ".claude/gate-off"];
+const GITIGNORE_LINES: [&str; 1] = [".claude/state/"];
 
 /// One thing `init` did or would do. Collected rather than printed inline so
 /// `--dry-run` and the real run share a single code path — the plan is the
@@ -103,7 +103,27 @@ fn refuse_symlinks(root: &Path, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn shim_body(harness_bin: &str, grant: bool) -> String {
+/// Where this project's kill-switch lives — **outside the project**, under the
+/// user's home directory.
+///
+/// Derived from the project's absolute path so each governed project gets its own
+/// switch, and readable rather than hashed so a human can find it with `ls`. The
+/// governed project cannot write here: out-of-root writes are denied or held for
+/// approval by the very kernel this switch disables, which is the property that
+/// makes the switch trustworthy.
+fn off_file_for(target: &Path) -> PathBuf {
+    let slug: String = target
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home).join(".claude/ai2rules/off").join(slug)
+}
+
+fn shim_body(harness_bin: &str, off_file: &str, grant: bool) -> String {
     let grant_flag = if grant { " --grant" } else { "" };
     format!(
         r#"#!/usr/bin/env bash
@@ -117,10 +137,16 @@ fn shim_body(harness_bin: &str, grant: bool) -> String {
 set -u
 PD="${{CLAUDE_PROJECT_DIR:-$(pwd)}}"
 TRUSTED_BIN={bin}
-# Instant kill-switch, no restart: touch .claude/gate-off (this project) or
-# ~/.claude/gate-off (panic, everywhere) to disable governance on the NEXT call;
+# Instant kill-switch, no restart. Both paths live OUTSIDE the governed project,
+# and that is the whole point: a switch inside the project is one the agent can
+# throw itself. It was `$PD/.claude/gate-off` until 2026-08-10, when a real Claude
+# Code session was asked to create that file and did, in one turn, with no denial —
+# disabling its own governance. Writes outside the project root are governed
+# (deny/ask), so these two require a human.
+#   this project : touch {off_file}
+#   everywhere   : touch $HOME/.claude/gate-off
 # rm to re-enable. The shim runs per call, so the toggle is immediate.
-if [ -f "$PD/.claude/gate-off" ] || [ -f "$HOME/.claude/gate-off" ]; then exit 0; fi
+if [ -f {off_file_q} ] || [ -f "$HOME/.claude/gate-off" ]; then exit 0; fi
 BIN="${{HARNESS_BIN:-}}"
 if [ -n "$BIN" ]; then
   case "$BIN" in /*) [ -x "$BIN" ] || exit 0 ;; *) exit 0 ;; esac
@@ -131,6 +157,8 @@ fi
 exec "$BIN" cc-hook{grant_flag} --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state"
 "#,
         bin = sh_quote(harness_bin),
+        off_file = off_file,
+        off_file_q = sh_quote(off_file),
         grant_flag = grant_flag,
     )
 }
@@ -286,9 +314,10 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
 
     // 2. shim — always rewritten: it encodes the binary path and the mode, both
     //    of which are properties of *this* invocation, not of the project.
+    let off_file = off_file_for(target);
     writes.push((
         target.join(".claude/hooks/world-gate.sh"),
-        shim_body(harness_bin, grant),
+        shim_body(harness_bin, &off_file.to_string_lossy(), grant),
     ));
     steps.push(Step {
         verb: "write",
@@ -330,7 +359,7 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
         steps.push(Step {
             verb: "write",
             path: ".gitignore".into(),
-            note: "ignore .claude/state/ and .claude/gate-off".into(),
+            note: "ignore the runtime taint state".into(),
         });
     }
 
@@ -428,6 +457,7 @@ pub fn run(target: &Path, grant: bool, force: bool, dry_run: bool) -> i32 {
         "additive (overlay)"
     };
     let t = target.display();
+    let off = off_file_for(&target).display().to_string();
     println!(
         "\nGoverned in {mode} mode.
 
@@ -445,8 +475,11 @@ Then the one worth seeing in a real session:
   2) then fetch or curl again    -> DENIED (taint_invariant)
      An ungoverned session would just prompt. That deny is the proof.
 
-Kill-switch, effective on the next call, no restart:
-  touch {t}/.claude/gate-off     (rm to re-enable)"
+Kill-switch, effective on the next call, no restart. It lives OUTSIDE this
+project on purpose — a switch the agent can reach is a switch the agent can throw:
+  touch {off}                    (this project)
+  touch $HOME/.claude/gate-off   (everywhere)
+  rm the file to re-enable."
     );
     0
 }
