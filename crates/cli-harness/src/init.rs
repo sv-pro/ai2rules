@@ -442,7 +442,7 @@ Prove it in five seconds, without starting a session — ask the kernel directly
 
 Then the one worth seeing in a real session:
   1) fetch any web page          -> taints the session
-  2) then fetch or curl again    -> DENIED (no_tainted_external)
+  2) then fetch or curl again    -> DENIED (taint_invariant)
      An ungoverned session would just prompt. That deny is the proof.
 
 Kill-switch, effective on the next call, no restart:

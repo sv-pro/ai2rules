@@ -168,7 +168,7 @@ cat <<DONE
 
 [install] Done. Verify it's actually governing (in a Claude Code session in the target):
   1) WebFetch any page             -> taints the session
-  2) then curl / WebFetch again    -> should be DENIED (no_tainted_external)
+  2) then curl / WebFetch again    -> should be DENIED (taint_invariant)
      A plain, ungoverned Claude would just prompt. That deny is the proof.
 Kill-switch: touch "$TARGET/.claude/gate-off"   (off, next call; rm to re-enable)
 DONE
