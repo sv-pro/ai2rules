@@ -44,7 +44,7 @@ jobs:
         run: bash scripts/check-demos.sh
 
   npm-wrapper:
-    # The `@ai2rules/harness` wrapper (D56) is how a stranger gets a binary, and
+    # The `ai2rules-harness` wrapper (D56) is how a stranger gets a binary, and
     # nothing else in CI touches it. Two cheap checks: it parses, and its platform
     # map still matches what release.yml publishes. Drift between those two files
     # fails silently — a wrong target 404s on a URL nobody tested, and only ever

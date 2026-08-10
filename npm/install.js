@@ -44,7 +44,7 @@ const TARGETS = {
 
 function hint(reason) {
   console.error(`
-@ai2rules/harness: ${reason}
+ai2rules-harness: ${reason}
 
 No prebuilt binary was installed. You can still build one:
 
@@ -97,7 +97,7 @@ async function main() {
       hint(`AI2RULES_HARNESS points at ${override}, which does not exist.`);
       return;
     }
-    console.log(`@ai2rules/harness: using AI2RULES_HARNESS=${override}`);
+    console.log(`ai2rules-harness: using AI2RULES_HARNESS=${override}`);
     return;
   }
 
@@ -132,7 +132,7 @@ async function main() {
     await fs.promises.copyFile(unpacked, path.join(VENDOR, EXE));
     if (process.platform !== 'win32') await fs.promises.chmod(path.join(VENDOR, EXE), 0o755);
 
-    console.log(`@ai2rules/harness: installed ${spec.target} (sha256 ${actual.slice(0, 12)}…)`);
+    console.log(`ai2rules-harness: installed ${spec.target} (sha256 ${actual.slice(0, 12)}…)`);
   } catch (err) {
     await fs.promises.rm(VENDOR, { recursive: true, force: true }).catch(() => {});
     hint(`could not install a prebuilt binary: ${err.message}`);

@@ -1,17 +1,18 @@
-# @ai2rules/harness
+# ai2rules-harness
 
 **Govern a local coding agent in one command.**
 
 ```bash
-npx @ai2rules/harness init
+npx ai2rules-harness init
 ```
 
 That writes a governance manifest, a `PreToolUse` shim, and the host settings entry
 into the current project. It is safe to run twice, it never replaces a manifest you
 have tuned, and turning it off is one file.
 
-> **Not published yet.** This directory is the packaging wrapper; no version has
-> been pushed to npm and the release assets it expects do not exist. Until then:
+> **Not on npm yet.** The prebuilt binaries this wrapper downloads **do** exist —
+> `v0.1.1`, four platforms, each with a published checksum — but the package
+> itself has not been pushed to the registry. Until it is:
 > `cargo install --git https://github.com/sv-pro/ai2rules cli-harness`, then
 > `harness init`. See `DECISIONS.md` D56.
 

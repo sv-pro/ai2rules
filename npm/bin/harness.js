@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Thin launcher: exec the real Rust binary, pass through argv, exit with its code.
 //
-// No logic lives here. This file exists so `npx @ai2rules/harness init` works, and
+// No logic lives here. This file exists so `npx ai2rules-harness init` works, and
 // so a missing binary produces one clear sentence instead of a stack trace.
 
 const fs = require('fs');
@@ -17,7 +17,7 @@ const vendored = path.join(
 const bin = process.env.AI2RULES_HARNESS || vendored;
 
 if (!fs.existsSync(bin)) {
-  console.error(`@ai2rules/harness: no binary at ${bin}
+  console.error(`ai2rules-harness: no binary at ${bin}
 
 The postinstall step did not install one for ${process.platform}-${process.arch}.
 Build it, or point at an existing binary:
@@ -30,7 +30,7 @@ Build it, or point at an existing binary:
 
 const res = spawnSync(bin, process.argv.slice(2), { stdio: 'inherit' });
 if (res.error) {
-  console.error(`@ai2rules/harness: cannot execute ${bin}: ${res.error.message}`);
+  console.error(`ai2rules-harness: cannot execute ${bin}: ${res.error.message}`);
   process.exit(126);
 }
 process.exit(res.status === null ? 1 : res.status);

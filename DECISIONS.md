@@ -1846,7 +1846,7 @@ a *generic* starter manifest worth installing at all.
     command. `install-governance.sh` keeps that half.
 - **Known residual: the second half of the wedge is packaging, and it is not done.**
   `init` removes the checkout requirement but a stranger still has to *get* a binary.
-  `npm/` in this repo carries the `@ai2rules/harness` wrapper — platform detection and a
+  `npm/` in this repo carries the `ai2rules-harness` wrapper — platform detection and a
   `postinstall` that resolves a prebuilt release asset — and **nothing has been published to
   any registry**, deliberately: publishing a name is a one-way door, and it should not
   happen as a side effect of a feature commit. Until a release workflow produces the
