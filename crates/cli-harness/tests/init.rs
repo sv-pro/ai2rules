@@ -626,3 +626,85 @@ fn an_older_hook_entry_is_upgraded_not_duplicated() {
         "the stale command survived the upgrade"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The control plane. Until 2026-08-11 an agent could rewrite the policy binding
+// it: `.claude/` sat inside the project's own writable root, the write drew no
+// approval at all, and the shim recompiles the manifest on every call — so a
+// flipped rule took effect on the NEXT tool call, not the next session.
+// ---------------------------------------------------------------------------
+
+fn verdict(target: &Path, tool: &str, file: &str) -> String {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new("bash")
+        .arg(target.join(".claude/hooks/world-gate.sh"))
+        .env("CLAUDE_PROJECT_DIR", target)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn shim");
+    let payload = format!(r#"{{"tool_name":"{tool}","tool_input":{{"file_path":"{file}"}}}}"#);
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(payload.as_bytes())
+        .expect("write");
+    let out = child.wait_with_output().expect("output");
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// The agent may not rewrite the rules it is running under — via any structured
+/// file tool, and for any file in the control plane.
+#[test]
+fn the_agent_cannot_write_the_policy_that_governs_it() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+
+    for file in [
+        ".claude/cc-world.yaml",       // the policy
+        ".claude/hooks/world-gate.sh", // the shim that enforces it
+        ".claude/settings.json",       // the registration that invokes the shim
+    ] {
+        let path = target.join(file);
+        let path = path.to_string_lossy();
+        for tool in ["Write", "Edit"] {
+            let v = verdict(target, tool, &path);
+            assert!(
+                v.contains("deny"),
+                "{tool} {file} was not denied — the agent can rewrite its own governance: {v:?}"
+            );
+        }
+    }
+}
+
+/// Read must stay allowed. An agent that cannot see its own rules cannot explain
+/// a denial or propose a sensible change to them, and opacity is not a security
+/// property here — the manifest is committed to the repo anyway.
+#[test]
+fn the_agent_can_still_read_the_policy() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+    let manifest = target.join(".claude/cc-world.yaml");
+    let v = verdict(target, "Read", &manifest.to_string_lossy());
+    assert!(
+        v.trim().is_empty(),
+        "reading the manifest should pass through silently, got: {v:?}"
+    );
+}
+
+/// Locking the control plane must not lock the project: ordinary work continues.
+#[test]
+fn ordinary_project_files_are_still_writable() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+    fs::write(target.join("main.rs"), "// work\n").expect("seed file");
+    let v = verdict(target, "Write", &target.join("main.rs").to_string_lossy());
+    assert!(
+        v.trim().is_empty(),
+        "an ordinary project write was blocked by the control-plane rule: {v:?}"
+    );
+}

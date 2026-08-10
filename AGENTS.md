@@ -71,8 +71,8 @@ harness-types (foundation — language-neutral contracts, pure data)
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 46 · compiler 18 · executor 16 · trace-store 13 ·
-provider-adapters 5 · agent-core 16 · harness-preview 45 · cli-harness 86 ·
-harness-wasm 0 · **total 250** (plus the harness-wasm Node smoke tests, run via
+provider-adapters 5 · agent-core 16 · harness-preview 45 · cli-harness 89 ·
+harness-wasm 0 · **total 253** (plus the harness-wasm Node smoke tests, run via
 wasm-pack)
 
 ---
@@ -173,7 +173,7 @@ marker in the same commit as the kernel change.
 | `README.md` | Project overview, milestone table, build/run instructions |
 | `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D55+; consult before choosing alternatives |
+| `DECISIONS.md` | ADR-lite log D1–D57+; consult before choosing alternatives |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |

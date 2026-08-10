@@ -62,6 +62,15 @@ roots:
     - { path: "/tmp", access: ReadWrite }                  # scratch
     - { path: "/usr", access: Read }                       # tools / libs, read-only
     - { path: "/etc", access: Read }                       # system config, read-only
+    # THE CONTROL PLANE — readable, never writable.
+    # `.claude/` holds the manifest that governs this session, the shim the host
+    # invokes, and the hook registration. All three sat inside the project's own
+    # writable root until 2026-08-11, which meant the agent could rewrite the policy
+    # binding it: flipping one rule here took effect on the very NEXT tool call,
+    # because the shim runs a fresh `cc-hook` per call and recompiles each time.
+    # Read stays allowed on purpose — an agent should be able to see the rules it is
+    # under, and it needs to in order to propose a change to them.
+    - { path: "./.claude", access: Read }
     # sensitive paths — out of bounds even inside an allowed parent
     - { path: "/etc/shadow", access: Deny, class: Secret }
     - { path: "~/.ssh", access: Deny, class: Credential }
