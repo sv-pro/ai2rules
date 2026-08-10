@@ -82,9 +82,10 @@ fn init_governs_an_empty_directory_with_nothing_but_the_binary() {
     let hooks = pretooluse(&settings(target));
     assert_eq!(hooks.len(), 1, "expected exactly one PreToolUse entry");
     assert_eq!(hooks[0]["matcher"], "*");
+    let cmd = hooks[0]["hooks"][0]["command"].as_str().expect("command");
     assert_eq!(
-        hooks[0]["hooks"][0]["command"],
-        r#"bash "$CLAUDE_PROJECT_DIR/.claude/hooks/world-gate.sh""#
+        cmd,
+        format!("bash '{}/.claude/hooks/world-gate.sh'", target.display())
     );
 }
 
@@ -512,5 +513,116 @@ fn the_out_of_project_kill_switch_still_works() {
     assert!(
         ask_shim(target, "/etc/passwd").contains("deny"),
         "removing the switch did not restore governance"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Cross-host: GitHub Copilot reads this same .claude/settings.json but executes
+// the command through PowerShell on Windows, never sets $CLAUDE_PROJECT_DIR, and
+// runs hooks from cwd `/` — then fails CLOSED when the hook errors, blocking
+// every tool call (github/copilot-cli#4001). Reported from real use.
+// ---------------------------------------------------------------------------
+
+/// The command must survive a shell that does not expand `$VAR` the way bash does
+/// and a cwd that is not the project.
+#[test]
+fn the_hook_command_makes_no_assumptions_about_shell_env_or_cwd() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+    let cmd = settings(target)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .expect("command")
+        .to_string();
+
+    assert!(
+        !cmd.contains("$CLAUDE_PROJECT_DIR"),
+        "command depends on an env var Copilot never sets: {cmd}"
+    );
+    assert!(
+        !cmd.contains('"'),
+        "double quotes interpolate in PowerShell; use single quotes: {cmd}"
+    );
+    assert!(cmd.contains('\''), "path is not single-quoted: {cmd}");
+    assert!(
+        !cmd.contains('\\'),
+        "backslashes are not usable by the bash these hosts invoke: {cmd}"
+    );
+    let quoted = cmd.split('\'').nth(1).expect("quoted path");
+    assert!(
+        Path::new(quoted).is_absolute(),
+        "hook path is relative, but hooks run from `/` on some hosts: {cmd}"
+    );
+}
+
+/// The end-to-end version of the same thing: run the shim with the variable
+/// unset and the cwd somewhere else entirely, and it must still govern.
+#[test]
+fn the_shim_governs_without_claude_project_dir_and_from_a_foreign_cwd() {
+    use std::io::Write as _;
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+
+    let mut child = std::process::Command::new("bash")
+        .arg(target.join(".claude/hooks/world-gate.sh"))
+        .current_dir("/") // Copilot runs hooks from `/`
+        .env_remove("CLAUDE_PROJECT_DIR") // …and never sets this
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn shim");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(br#"{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd"}}"#)
+        .expect("write");
+    let out = child.wait_with_output().expect("output");
+    let verdict = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        verdict.contains("deny"),
+        "shim failed to govern without CLAUDE_PROJECT_DIR from cwd `/`: {verdict:?}"
+    );
+}
+
+/// An install from an older version must be upgraded in place. Appending instead
+/// would run the kernel twice per call — the duplicate-hook failure this suite
+/// already guards against, arriving by a different route.
+#[test]
+fn an_older_hook_entry_is_upgraded_not_duplicated() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    fs::create_dir_all(target.join(".claude")).expect("mkdir");
+    fs::write(
+        target.join(".claude/settings.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "hooks": { "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    // the shape `init` wrote before 2026-08-11
+                    "command": r#"bash "$CLAUDE_PROJECT_DIR/.claude/hooks/world-gate.sh""#,
+                    "timeout": 10
+                }]
+            }]}
+        }))
+        .expect("serialize old settings"),
+    )
+    .expect("write old settings");
+
+    assert!(init(target, &[]).status.success());
+    let hooks = pretooluse(&settings(target));
+    assert_eq!(
+        hooks.len(),
+        1,
+        "old entry was duplicated rather than upgraded"
+    );
+    assert!(
+        !hooks[0]["hooks"][0]["command"]
+            .as_str()
+            .expect("command")
+            .contains("$CLAUDE_PROJECT_DIR"),
+        "the stale command survived the upgrade"
     );
 }

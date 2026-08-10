@@ -40,10 +40,35 @@ use std::path::{Path, PathBuf};
 /// disagree about what a new project gets; `tests/init.rs` pins that.
 pub const STARTER_WORLD: &str = include_str!("../../../scripts/starter-world.yaml");
 
-/// The exact `command` string the hook entry carries. Matched on merge so a
-/// second `init` updates in place instead of appending a duplicate.
-const HOOK_COMMAND: &str = r#"bash "$CLAUDE_PROJECT_DIR/.claude/hooks/world-gate.sh""#;
+/// Substring identifying *our* hook entry in someone's `settings.json`, whatever
+/// form it currently takes. Matching on this rather than on an exact string means
+/// a re-run upgrades an older entry in place instead of appending a second one.
+const HOOK_MARKER: &str = "world-gate.sh";
 const HOOK_TIMEOUT: u64 = 10;
+
+/// The `command` the host runs.
+///
+/// **Single-quoted, absolute, forward slashes** — each of those fixes a real
+/// cross-host failure rather than being a style choice:
+///
+/// * *Single quotes* are literal in **both** bash and PowerShell. GitHub Copilot
+///   reads this same `.claude/settings.json` but executes the command through
+///   PowerShell on Windows, where `"$CLAUDE_PROJECT_DIR/..."` expands to an empty
+///   variable and the hook errors — and Copilot fails **closed**, blocking every
+///   tool call (github/copilot-cli#4001).
+/// * *Absolute* because Copilot runs hooks from cwd `/`, so nothing relative
+///   resolves.
+/// * *Forward slashes* because bash on Windows (Git Bash) cannot take a
+///   backslashed path, and that is the bash these hosts invoke.
+///
+/// The path is machine-specific, which is not a new constraint: the shim it points
+/// at already bakes an absolute binary path, so `.claude/` was never portable
+/// across machines. A teammate runs `harness init` and gets their own.
+fn hook_command(target: &Path) -> String {
+    let script = target.join(".claude/hooks/world-gate.sh");
+    let path = script.to_string_lossy().replace('\\', "/");
+    format!("bash '{path}'")
+}
 
 /// Lines added to `.gitignore`: runtime state and the kill-switch are per-machine,
 /// never per-repo.
@@ -135,7 +160,14 @@ fn shim_body(harness_bin: &str, off_file: &str, grant: bool) -> String {
 # HARNESS_BIN only when it is an explicit absolute executable, otherwise use the
 # binary baked in below — the one that ran `harness init`.
 set -u
-PD="${{CLAUDE_PROJECT_DIR:-$(pwd)}}"
+# Project root from THIS SCRIPT's location (.claude/hooks/world-gate.sh -> up two),
+# with $CLAUDE_PROJECT_DIR only as an override. Neither the environment nor the cwd
+# is trustworthy across hosts: GitHub Copilot reads this same settings.json but
+# never sets $CLAUDE_PROJECT_DIR and runs hooks from `/` (github/copilot-cli#4001),
+# so both the variable and $(pwd) resolve to the wrong place there. The agy shim
+# has derived the root this way since D48 for the same reason.
+SD="$(cd "$(dirname "${{BASH_SOURCE[0]:-$0}}")" 2>/dev/null && pwd)" || exit 0
+PD="${{CLAUDE_PROJECT_DIR:-$(cd "$SD/../.." 2>/dev/null && pwd)}}" || exit 0
 TRUSTED_BIN={bin}
 # Instant kill-switch, no restart. Both paths live OUTSIDE the governed project,
 # and that is the whole point: a switch inside the project is one the agent can
@@ -190,7 +222,7 @@ pub enum Merge {
 /// is a nuisance the caller is told about rather than a silent hole.
 ///
 /// Any other hooks the user has are preserved untouched — this file is theirs.
-pub fn merge_settings(existing: Option<&str>) -> Result<(String, Merge), String> {
+pub fn merge_settings(existing: Option<&str>, command: &str) -> Result<(String, Merge), String> {
     let mut root: Value = match existing {
         Some(text) if !text.trim().is_empty() => serde_json::from_str(text)
             .map_err(|e| format!("settings.json is not valid JSON: {e}"))?,
@@ -214,17 +246,42 @@ pub fn merge_settings(existing: Option<&str>) -> Result<(String, Merge), String>
         .as_array_mut()
         .ok_or("settings.json `hooks.PreToolUse` is not an array")?;
 
+    // Ours is anything invoking the shim, in whatever form a previous version
+    // wrote it — an exact-string match would append a second entry every time the
+    // command shape changed, which is how a governance hook ends up running twice.
     let carries_our_command = |entry: &Value| -> bool {
         entry
             .get("hooks")
             .and_then(Value::as_array)
             .map(|hooks| {
-                hooks
-                    .iter()
-                    .any(|h| h.get("command").and_then(Value::as_str) == Some(HOOK_COMMAND))
+                hooks.iter().any(|h| {
+                    h.get("command")
+                        .and_then(Value::as_str)
+                        .is_some_and(|c| c.contains(HOOK_MARKER))
+                })
             })
             .unwrap_or(false)
     };
+
+    // Upgrade any of our entries that carry an outdated command, in place.
+    let mut upgraded = false;
+    for entry in arr.iter_mut() {
+        if !carries_our_command(entry) {
+            continue;
+        }
+        if let Some(hooks) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
+            for h in hooks.iter_mut() {
+                let stale = h
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|c| c.contains(HOOK_MARKER) && c != command);
+                if stale {
+                    h["command"] = json!(command);
+                    upgraded = true;
+                }
+            }
+        }
+    }
 
     let governed_everywhere = arr
         .iter()
@@ -242,11 +299,15 @@ pub fn merge_settings(existing: Option<&str>) -> Result<(String, Merge), String>
         .collect();
 
     let outcome = if governed_everywhere {
-        Merge::AlreadyGoverned
+        if upgraded {
+            Merge::Added // the entry existed but its command was rewritten
+        } else {
+            Merge::AlreadyGoverned
+        }
     } else {
         arr.push(json!({
             "matcher": "*",
-            "hooks": [{ "type": "command", "command": HOOK_COMMAND, "timeout": HOOK_TIMEOUT }]
+            "hooks": [{ "type": "command", "command": command, "timeout": HOOK_TIMEOUT }]
         }));
         if narrow.is_empty() {
             Merge::Added
@@ -332,7 +393,7 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
     // 3. settings.json
     let settings_path = target.join(".claude/settings.json");
     let current = fs::read_to_string(&settings_path).ok();
-    let (merged, outcome) = merge_settings(current.as_deref())?;
+    let (merged, outcome) = merge_settings(current.as_deref(), &hook_command(target))?;
     writes.push((settings_path, merged));
     steps.push(Step {
         verb: "write",
