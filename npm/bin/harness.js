@@ -21,7 +21,8 @@ const PKG = {
   'linux-x64': 'ai2rules-harness-linux-x64',
   'darwin-x64': 'ai2rules-harness-darwin-x64',
   'darwin-arm64': 'ai2rules-harness-darwin-arm64',
-  'win32-x64': 'ai2rules-harness-win32-x64',
+  'win32-x64': 'ai2rules-harness-windows-x64', // `win32` in an unscoped
+  // package name is rejected by npm's spam filter; the platform key is unchanged
 };
 
 function resolveBinary() {
