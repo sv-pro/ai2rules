@@ -196,15 +196,38 @@ jobs:
             echo "  $(basename "$d") <- $target ($(stat -c%s "$d/$exe") bytes)"
           done
 
+      # Idempotent: skip any package+version already on the registry. A partial
+      # publish is the normal failure here — v0.2.0 got three of four through
+      # before npm's spam filter rejected the fourth name — and without this a
+      # retry dies on "cannot publish over existing version" before reaching the
+      # package that actually needs publishing.
       - name: Publish the platform packages
         run: |
           set -euo pipefail
-          for d in npm/platforms/*/; do (cd "$d" && npm publish --provenance --access public); done
+          for d in npm/platforms/*/; do
+            name=$(node -p "require('./$d/package.json').name")
+            ver=$(node -p "require('./$d/package.json').version")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "  $name@$ver already published — skipping"
+            else
+              (cd "$d" && npm publish --provenance --access public)
+            fi
+          done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Last, so the wrapper is never resolvable before the binaries it points at.
+      # That ordering is what kept v0.2.0's partial failure harmless: three
+      # platform packages existed but no consumer could reach them, because the
+      # wrapper that names them had not shipped.
       - name: Publish the wrapper
-        run: cd npm && npm publish --provenance --access public
+        run: |
+          set -euo pipefail
+          ver=$(node -p "require('./npm/package.json').version")
+          if npm view "ai2rules-harness@$ver" version >/dev/null 2>&1; then
+            echo "  wrapper @$ver already published — skipping"
+          else
+            cd npm && npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
