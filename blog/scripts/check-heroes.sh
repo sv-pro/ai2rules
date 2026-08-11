@@ -18,6 +18,13 @@ fail=0
 for post in src/content/blog/*.md src/content/blog/*.mdx; do
   [ -e "$post" ] || continue
   slug="$(basename "$post")"; slug="${slug%.*}"
+  # Drafts are deliberately not built (`draft: true`), so requiring a page for
+  # them would fail this guard on exactly the posts that are not finished yet.
+  # Matched on the frontmatter block only, so the word cannot leak in from prose.
+  if awk '/^---$/{n++; next} n==1' "$post" | grep -qE '^draft:[[:space:]]*true[[:space:]]*$'; then
+    echo "check:heroes: skip $slug (draft)"
+    continue
+  fi
   html="$DIST/$slug/index.html"
   if [ ! -f "$html" ]; then
     echo "check:heroes: FAIL $slug — no built page at $html" >&2; fail=1; continue
