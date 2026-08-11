@@ -93,3 +93,6 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run check:heroes
+      # A draft that reaches the build is worse than a published post: it looks
+      # hidden while being fully reachable at its URL.
+      - run: npm run check:drafts

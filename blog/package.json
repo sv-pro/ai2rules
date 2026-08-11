@@ -10,7 +10,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "check:heroes": "bash scripts/check-heroes.sh",
-    "astro": "astro"
+    "astro": "astro",
+    "check:drafts": "bash scripts/check-drafts.sh"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.0",
