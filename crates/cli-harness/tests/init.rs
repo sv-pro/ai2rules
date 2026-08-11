@@ -708,3 +708,46 @@ fn ordinary_project_files_are_still_writable() {
         "an ordinary project write was blocked by the control-plane rule: {v:?}"
     );
 }
+
+/// A kernel inside the project it governs is a kernel the agent can replace.
+/// Measured on a local npm install: `Write` to `node_modules/…/harness` returns
+/// ALLOW, and swapping in a no-op makes every verdict disappear — the same shape
+/// as the in-project kill-switch, arriving through the package manager.
+#[test]
+fn init_refuses_a_kernel_that_lives_inside_the_project() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    let inside = target.join("node_modules/ai2rules-harness-linux-x64");
+    fs::create_dir_all(&inside).expect("mkdir");
+    let planted = inside.join("harness");
+    fs::copy(harness_bin(), &planted).expect("copy binary into the project");
+
+    let out = std::process::Command::new(&planted)
+        .arg("init")
+        .arg(target)
+        .output()
+        .expect("run planted binary");
+    assert!(
+        !out.status.success(),
+        "init accepted a kernel inside the governed project"
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("inside the project"),
+        "unhelpful refusal:\n{err}"
+    );
+    assert!(
+        !target.join(".claude").exists(),
+        "refusal still wrote into the project"
+    );
+
+    // --force is the deliberate override, for anyone protecting the binary
+    // another way (immutable image, read-only mount).
+    let out = std::process::Command::new(&planted)
+        .arg("init")
+        .arg(target)
+        .arg("--force")
+        .output()
+        .expect("run with --force");
+    assert!(out.status.success(), "--force did not override the refusal");
+}

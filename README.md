@@ -40,14 +40,16 @@ harness init --dry-run            # print the plan, write nothing
 ```
 
 Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
-no dependencies; the postinstall fetches a checksum-verified prebuilt binary for
-your platform from [the releases](https://github.com/sv-pro/ai2rules/releases).
+**no dependencies and no install script.** The binary ships in a per-platform
+package that npm resolves by `os`/`cpu`, so installing performs no network access,
+no shell execution and no chmod, and the binary is covered by the integrity hash
+npm writes into your lockfile.
 
-> `npx ai2rules-harness init` also works and is the quickest way to see a verdict,
-> but **prefer the global install for real use.** The shim records the absolute
-> path of the binary that ran `init`; under `npx` that lives in npm's transient
-> `_npx` cache, and when the cache is cleaned the shim **fails open** — you are
-> back to the host's normal permissions with no error.
+> **Install globally, not into a project.** `harness init` **refuses** when the
+> binary sits inside the project it would govern — a local `node_modules` install
+> puts the kernel in the agent's own writable root, where replacing one file turns
+> governance off silently. `npx ai2rules-harness init` is fine; its cache is
+> outside your project.
 
 That is the whole install. No checkout, no `cargo`, no `jq` — the starter manifest
 is compiled into the binary, and the shim bakes the absolute path of the executable
@@ -277,7 +279,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **253 tests** green.
+Builds clean offline with `clippy -D warnings`; **254 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

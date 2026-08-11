@@ -82,10 +82,11 @@ jobs:
           Copy-Item "README.md" "dist/$name/" -ErrorAction SilentlyContinue
           Compress-Archive -Path "dist/$name" -DestinationPath "$name.zip"
 
-      # Checksum beside every archive. `npm/install.js` treats a missing or
-      # mismatched digest as a hard failure and refuses to install, so this step
-      # is load-bearing for the npm path rather than decorative: an unverified
-      # security binary is worse than no binary.
+      # Checksum beside every archive, for anyone downloading a release asset
+      # directly. The npm path no longer depends on it — since 0.2.0 the binary
+      # ships inside a platform package and is covered by npm's own integrity
+      # hash, which is stronger: a digest fetched from the same host as the
+      # artifact proves it arrived intact, not that it is the right artifact.
       - name: Checksum
         shell: bash
         run: |
@@ -135,3 +136,65 @@ jobs:
             harness-${{ matrix.target }}.${{ matrix.archive }}
             harness-${{ matrix.target }}.${{ matrix.archive }}.sha256
           fail_on_unmatched_files: true
+
+  npm:
+    # Publish the five npm packages: four platform packages, each holding one
+    # prebuilt binary, plus the wrapper that lists them as optionalDependencies.
+    # There is no install script anywhere in that set — npm resolves the right
+    # platform by os/cpu, so installing performs no network access, no shell
+    # execution and no chmod. The binary is then covered by the integrity hash npm
+    # writes into the consumer's lockfile, rather than by a checksum this project
+    # fetched from the same host as the artifact it was verifying.
+    #
+    # --provenance signs the tarballs against this workflow and commit. It is the
+    # strongest supply-chain claim npm offers, and it is the reason this job runs
+    # in CI rather than on a laptop.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for --provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v4
+        with: { merge-multiple: true, path: dist }
+
+      # Fails the release if versions have drifted across the five packages, or if
+      # an install script has reappeared. Both are silent failures otherwise.
+      - name: Layout guard
+        run: node npm/verify-packages.js
+
+      - name: Fill each platform package with its binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in npm/platforms/*/; do
+            target="$(cat "$d/TARGET")"
+            case "$target" in
+              *windows*) exe=harness.exe; ar="dist/harness-$target.zip" ;;
+              *)         exe=harness;     ar="dist/harness-$target.tar.gz" ;;
+            esac
+            tar -xf "$ar" -C dist
+            cp "dist/harness-$target/$exe" "$d/$exe"
+            cp LICENSE-MIT LICENSE-APACHE "$d/"
+            chmod +x "$d/$exe" || true
+            echo "  $(basename "$d") <- $target"
+          done
+
+      - name: Publish the platform packages
+        run: |
+          set -euo pipefail
+          for d in npm/platforms/*/; do (cd "$d" && npm publish --provenance --access public); done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Last, so the wrapper is never resolvable before the binaries it points at.
+      - name: Publish the wrapper
+        run: cd npm && npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

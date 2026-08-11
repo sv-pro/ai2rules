@@ -1,26 +1,57 @@
 #!/usr/bin/env node
-// Thin launcher: exec the real Rust binary, pass through argv, exit with its code.
+// Launcher: find the prebuilt binary and exec it, passing argv through.
 //
-// No logic lives here. This file exists so `npx ai2rules-harness init` works, and
-// so a missing binary produces one clear sentence instead of a stack trace.
+// There is no install script. The binary arrives as an `optionalDependencies`
+// entry that npm resolves by `os`/`cpu` — exactly one matches, the rest are
+// skipped — so installing this package performs **no network access, no shell
+// execution, and no chmod**. That is not a score optimisation: it means the
+// binary you run is covered by the integrity hash npm already wrote into your
+// lockfile, rather than by a checksum this package fetched from the same host it
+// fetched the binary from. The old design proved integrity; this one has
+// provenance.
+//
+// Escape hatch for unsupported platforms and for development: set
+// AI2RULES_HARNESS to an absolute path and it is used verbatim.
 
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const vendored = path.join(
-  __dirname,
-  '..',
-  'vendor',
-  process.platform === 'win32' ? 'harness.exe' : 'harness'
-);
-const bin = process.env.AI2RULES_HARNESS || vendored;
+const PKG = {
+  'linux-x64': 'ai2rules-harness-linux-x64',
+  'darwin-x64': 'ai2rules-harness-darwin-x64',
+  'darwin-arm64': 'ai2rules-harness-darwin-arm64',
+  'win32-x64': 'ai2rules-harness-win32-x64',
+};
 
-if (!fs.existsSync(bin)) {
-  console.error(`ai2rules-harness: no binary at ${bin}
+function resolveBinary() {
+  const override = process.env.AI2RULES_HARNESS;
+  if (override) return { bin: override, how: 'AI2RULES_HARNESS' };
 
-The postinstall step did not install one for ${process.platform}-${process.arch}.
-Build it, or point at an existing binary:
+  const key = `${process.platform}-${process.arch}`;
+  const pkg = PKG[key];
+  if (!pkg) return { bin: null, why: `no prebuilt binary is published for ${key}` };
+
+  const exe = process.platform === 'win32' ? 'harness.exe' : 'harness';
+  try {
+    // Resolve through the package's own manifest so this works with npm,
+    // pnpm and yarn layouts alike rather than assuming node_modules is flat.
+    const manifest = require.resolve(`${pkg}/package.json`);
+    return { bin: path.join(path.dirname(manifest), exe), how: pkg };
+  } catch {
+    return {
+      bin: null,
+      why: `the optional dependency ${pkg} is not installed (it may have been skipped by --no-optional, or filtered by a lockfile from a different platform)`,
+    };
+  }
+}
+
+const { bin, why, how } = resolveBinary();
+
+if (!bin || !fs.existsSync(bin)) {
+  console.error(`ai2rules-harness: no usable binary — ${why || `${bin} is missing`}
+
+Build one, or point at an existing binary:
 
     cargo install --git https://github.com/sv-pro/ai2rules cli-harness
     export AI2RULES_HARNESS=/absolute/path/to/harness
@@ -30,7 +61,7 @@ Build it, or point at an existing binary:
 
 const res = spawnSync(bin, process.argv.slice(2), { stdio: 'inherit' });
 if (res.error) {
-  console.error(`ai2rules-harness: cannot execute ${bin}: ${res.error.message}`);
+  console.error(`ai2rules-harness: cannot execute ${bin} (via ${how}): ${res.error.message}`);
   process.exit(126);
 }
 process.exit(res.status === null ? 1 : res.status);

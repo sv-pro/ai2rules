@@ -11,14 +11,31 @@ That writes a governance manifest, a `PreToolUse` shim, and the host settings en
 into the current project. It is safe to run twice, it never replaces a manifest you
 have tuned, and turning it off is one file.
 
-> **Try it without installing:** `npx ai2rules-harness init` works and is the
-> fastest way to see a verdict — but **prefer the global install for real use.**
-> The shim records the absolute path of the binary that ran `init`, and under
-> `npx` that path is inside npm's transient `_npx` cache. When the cache is
-> cleaned or evicted the binary disappears, and the shim **fails open** — your
-> tool calls go back to the host's normal permissions with no error. That is the
-> correct behaviour for a missing kernel and the wrong place to be surprised by
-> it. After a global install, re-run `harness init` to re-bake the stable path.
+> **Install it globally, not into a project.** `harness init` **refuses** to run
+> when the binary lives inside the project it would govern — a local
+> `node_modules` install puts the kernel in the agent's own writable root, where
+> replacing one file turns governance off silently. `npx ai2rules-harness init`
+> is fine: its cache is outside your project.
+
+## How it installs — and why there is no install script
+
+The binary arrives as a **platform package** (`ai2rules-harness-linux-x64` and
+friends), listed in `optionalDependencies`. npm resolves exactly one by `os`/`cpu`
+and skips the rest.
+
+That means installing this package runs **no install script, makes no network
+request, executes no shell, and chmods nothing**. Earlier versions downloaded a
+binary in a `postinstall` and verified a checksum fetched from the same host — which
+proves the file arrived intact, not that it is the right file. Now the binary is
+covered by the integrity hash npm writes into *your* lockfile, and the tarballs
+carry [npm provenance](https://docs.npmjs.com/generating-provenance-statements)
+signed against the workflow and commit that built them.
+
+Practical upshots: installs are reproducible, work offline from a cache, and work
+behind a proxy or a mirrored registry — none of which was true before.
+
+If your platform has no prebuilt binary, nothing silently breaks: the CLI tells you
+how to build one, or you point `AI2RULES_HARNESS` at an existing binary.
 
 ## What it does
 

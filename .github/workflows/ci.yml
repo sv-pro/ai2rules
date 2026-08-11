@@ -44,11 +44,11 @@ jobs:
         run: bash scripts/check-demos.sh
 
   npm-wrapper:
-    # The `ai2rules-harness` wrapper (D56) is how a stranger gets a binary, and
-    # nothing else in CI touches it. Two cheap checks: it parses, and its platform
-    # map still matches what release.yml publishes. Drift between those two files
-    # fails silently — a wrong target 404s on a URL nobody tested, and only ever
-    # on someone else's machine.
+    # The npm packages (D56, restructured in D58) are how a stranger gets a
+    # binary, and nothing else in CI touches them. Two cheap checks: they parse,
+    # and the five-package layout is consistent — versions in lockstep, no install
+    # script anywhere, every shipped platform actually built. Each of those fails
+    # silently otherwise, and only ever on someone else's machine.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,11 +57,10 @@ jobs:
           node-version: "22"
       - name: Syntax
         run: |
-          node --check npm/install.js
           node --check npm/bin/harness.js
-          node --check npm/verify-targets.js
-      - name: Platform map matches the release matrix
-        run: node npm/verify-targets.js
+          node --check npm/verify-packages.js
+      - name: Layout — versions in lockstep, no install scripts
+        run: node npm/verify-packages.js
 
   hero-mcp:
     # TypeScript MCP tool under tools/hero-mcp (not a Cargo member); typecheck + unit

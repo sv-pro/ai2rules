@@ -1,0 +1,22 @@
+{
+  "name": "ai2rules-harness-darwin-x64",
+  "version": "0.2.0",
+  "description": "Prebuilt `harness` binary for darwin-x64. Installed automatically as an optional dependency of ai2rules-harness; not meant to be depended on directly.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sv-pro/ai2rules.git",
+    "directory": "npm"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "harness",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ]
+}

@@ -461,6 +461,30 @@ pub fn run(target: &Path, grant: bool, force: bool, dry_run: bool) -> i32 {
         }
     };
 
+    // The kernel must not live inside the project it governs. A locally-installed
+    // npm package lands in ./node_modules, which is squarely in the agent's
+    // writable root — and an agent that can replace the binary the shim execs has
+    // defeated governance in one write, silently, exactly as it could through
+    // .claude/gate-off before 2026-08-11. Measured: Write to that path returns
+    // ALLOW, and swapping in a no-op makes every verdict disappear.
+    //
+    // Refuse rather than warn. A governance install that can be trivially undone is
+    // worse than none, because it is indistinguishable from one that works.
+    if !force && Path::new(&harness_bin).starts_with(&target) {
+        eprintln!(
+            "harness init: the kernel binary lives inside the project it would govern.\n\
+             \n  kernel : {harness_bin}\n  project: {}\n\n\
+             An agent with write access to the project could replace that binary and turn\n\
+             governance off in one write. Install it outside the project instead:\n\n\
+             \x20   npm install -g ai2rules-harness      (or: cargo install --git … cli-harness)\n\
+             \x20   harness init\n\n\
+             `npx ai2rules-harness init` also works — its cache is outside your project.\n\
+             Pass --force to override, if you know the binary is protected some other way.",
+            target.display()
+        );
+        return 2;
+    }
+
     let plan = match plan(&target, &harness_bin, grant, force) {
         Ok(p) => p,
         Err(e) => {
