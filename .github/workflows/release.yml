@@ -176,14 +176,24 @@ jobs:
           for d in npm/platforms/*/; do
             target="$(cat "$d/TARGET")"
             case "$target" in
-              *windows*) exe=harness.exe; ar="dist/harness-$target.zip" ;;
-              *)         exe=harness;     ar="dist/harness-$target.tar.gz" ;;
+              *windows*)
+                exe=harness.exe
+                # GNU tar (which is what ubuntu-latest ships) cannot read a zip.
+                # Caught by dry-running this step locally before the first tag —
+                # it would otherwise have failed the job *after* the GitHub
+                # release was already published.
+                python3 -m zipfile -e "dist/harness-$target.zip" dist/
+                ;;
+              *)
+                exe=harness
+                tar -xf "dist/harness-$target.tar.gz" -C dist
+                ;;
             esac
-            tar -xf "$ar" -C dist
             cp "dist/harness-$target/$exe" "$d/$exe"
             cp LICENSE-MIT LICENSE-APACHE "$d/"
             chmod +x "$d/$exe" || true
-            echo "  $(basename "$d") <- $target"
+            test -s "$d/$exe" || { echo "::error::$d/$exe is missing or empty"; exit 1; }
+            echo "  $(basename "$d") <- $target ($(stat -c%s "$d/$exe") bytes)"
           done
 
       - name: Publish the platform packages
