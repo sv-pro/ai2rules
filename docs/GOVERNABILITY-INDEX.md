@@ -134,19 +134,22 @@ listed as a question rather than guessed.
 
 | | Claude Code | Claude Desktop | Antigravity CLI | Codex CLI | Copilot |
 |---|---|---|---|---|---|
-| **G1** pre-execution intercept | **yes** ✓ | **no** ? | **yes** ○ | ? | ? |
-| **G2** can deny | **yes** ✓ | n/a | **yes** ○ | ? | ? |
+| **G1** pre-execution intercept | **yes** ✓ | **no** ? | **yes** ○ | **yes*** ✓ | ? |
+| **G2** can deny | **yes** ✓ | n/a | **yes** ○ | **yes** ✓ | ? |
 | **G3** can grant | ? | n/a | **no** (headless) ✓ | ? | ? |
-| **G4** covers MCP + native | **yes** ✓ | n/a | ? | ? | ? |
+| **G4** covers MCP + native | **yes** ✓ | n/a | ? | **native ✓, MCP ?** | ? |
 | **G5** approval cache-satisfiable ⚠ | ? | ? | **yes** ✓ | ? | ? |
 | **G6** capability can be absent | **MCP seam only** ✓ | ? | ? | ? | ? |
-| **G7** post-execution observation | **yes** ✓ | ? | ? | ? | ? |
-| **G8** config file-based | **no** ✓ | **no** ○ | ? | ? | ? |
+| **G7** post-execution observation | **yes** ✓ | ? | ? | **yes** ✓ | ? |
+| **G8** config file-based | **no** ✓ | **no** ○ | ? | **yes** ✓ | ? |
 | **G9** live config reload | **yes** ✓ | ? | ? | ? | ? |
 
+**\*** Codex's G1 carries a condition no other host has — see its notes below.
+
 *Claude Code cells dated 2026-08-06 (G1, G4, G9) and **2026-08-08 on 2.1.223** (G2, G6, G7,
-G8). Seven of nine now measured; G3 and G5 are **blocked, not merely unmeasured** — see
-their notes.*
+G8); Antigravity G3 on **agy 1.1.10**, 2026-08-08; **Codex CLI on 0.147.0, 2026-08-12**.
+Claude Code is seven of nine, Codex five of nine. **G3 and G5 are blocked on both hosts, for
+the same reason** — see their notes.*
 
 ### Notes on specific cells
 
@@ -197,6 +200,41 @@ their notes.*
   author's own product benefits from a `yes` here is exactly where a generous reading slips
   in. The COI disclosure at the top of this file is the promise; downgrading our own
   strongest cell is what it costs.
+- **Codex CLI G1 `yes ✓` — with a condition no other host imposes, and it fails silently.**
+  Measured 2026-08-12 on **0.147.0**. A `PreToolUse` hook in `~/.codex/config.toml` fired and
+  received the proposed call. But it required **both** `--enable hooks` (the engine is
+  feature-flagged off, and Codex says so) **and `--dangerously-bypass-hook-trust`** — Codex
+  will not run a hook whose definition has not been persisted as trusted. **With the feature
+  enabled and the hook configured but untrusted, it is skipped with no warning**: the agent
+  ran the command and nothing indicated that governance was configured and inert. That is
+  the asterisk in the table. The trust model is defensible — it stops a plugin shipping a
+  hook that silently intercepts your tool calls — but *silent* skipping means an operator can
+  believe they are governed when they are not, which is the failure mode this whole index
+  exists to surface.
+- **Codex CLI G2 `yes ✓`** — the same emitted shape as Claude Code:
+  `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":…}}`. The
+  call was blocked before execution, the file was never written, and the model reported
+  *"The command was blocked before execution by a `PreToolUse` hook"* quoting the reason
+  verbatim. **Codex has adopted Claude Code's hook contract**, which is the single most
+  useful fact in this column for anyone writing one governance layer for both.
+- **Codex CLI G4 `native ✓, MCP ?`** — one hook received both `Bash` and `apply_patch` (its
+  file-editing tool) in a single run, so coverage is not shell-only. **Vendor documentation
+  claims MCP calls are covered too; that half is not measured here**, so the cell stays
+  split rather than being rounded up. Worth noting because two secondary sources stated
+  flatly that PreToolUse is "shell only, by design" — the primary docs and the run both
+  contradict them, which is why this index does not cite blog posts.
+- **Codex CLI G7 `yes ✓`** — `PostToolUse` fired alongside `PreToolUse` for the same call.
+- **Codex CLI G8 `yes ✓`** — everything is `~/.codex/config.toml`, plus `-c key=value`
+  overrides on the command line. `codex doctor` prints the resolved config path and parse
+  status. This is the only **yes** in the row, and it is a real difference from Claude Code,
+  whose live MCP surface was 1-of-6 file-declared.
+- **Codex CLI G3 and G5 `?` — blocked, and by the same thing that blocks them on Claude
+  Code.** Both need an action the host *prompts* for. In `codex exec` nothing escalates:
+  `touch` ran under `approval_policy = "untrusted"`, and so did a write **outside** the
+  `workspace-write` sandbox. Vendor docs say a hook may return `"allow"` and even rewrite
+  input via `updatedInput`; **that is `○` at best and is not recorded as a cell**, because a
+  grant is only demonstrable against something that would otherwise have been refused.
+  Measuring these needs an interactive session, not `exec`.
 - **Claude Code G5 `?` — attempted 2026-08-08 with an operator standing by; no prompt ever
   appeared, so there was nothing to measure.** A hook returned `ask` for a command that
   already had a stored approval in `permissions.allow` — reusing an existing cached answer
