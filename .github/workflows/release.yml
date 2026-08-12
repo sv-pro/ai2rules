@@ -182,6 +182,21 @@ jobs:
       - name: Layout guard
         run: node npm/verify-packages.js
 
+      # npm points `latest` at whatever you publish unless told otherwise —
+      # prerelease versions included. Without this, a `v0.3.0-rc.1` tag would make
+      # every `npm install ai2rules-harness` resolve to a release candidate.
+      - name: Choose the dist-tag
+        id: disttag
+        run: |
+          set -euo pipefail
+          ver=$(node -p "require('./npm/package.json').version")
+          case "$ver" in
+            *-*) tag=next ;;   # any semver prerelease: 0.3.0-rc.1, 1.0.0-beta.2
+            *)   tag=latest ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publishing $ver under dist-tag '$tag'"
+
       - name: Fill each platform package with its binary
         shell: bash
         run: |
@@ -223,7 +238,7 @@ jobs:
             if npm view "$name@$ver" version >/dev/null 2>&1; then
               echo "  $name@$ver already published — skipping"
             else
-              (cd "$d" && npm publish --access public)
+              (cd "$d" && npm publish --access public --tag "${{ steps.disttag.outputs.tag }}")
             fi
           done
 
@@ -238,5 +253,5 @@ jobs:
           if npm view "ai2rules-harness@$ver" version >/dev/null 2>&1; then
             echo "  wrapper @$ver already published — skipping"
           else
-            cd npm && npm publish --access public
+            cd npm && npm publish --access public --tag "${{ steps.disttag.outputs.tag }}"
           fi
