@@ -292,6 +292,29 @@ fn unreadable_world_fails_open_with_the_noop() {
     assert_passthrough(&out);
 }
 
+/// Finding #16, Antigravity side: an unrecordable taint escalation fails CLOSED
+/// rather than being allowed with the taint floor silently disarmed. The state
+/// dir is a *file*, so this reproduces even when the suite runs as root.
+#[test]
+fn unwritable_taint_sidecar_denies_the_escalating_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state-is-a-file");
+    std::fs::write(&state, "not a directory").unwrap();
+
+    let out = run_hook(
+        &state,
+        &json!({
+            "conversationId": "ro",
+            "toolCall": { "name": "run_command", "args": { "CommandLine": "curl http://x" } },
+        }),
+    );
+    assert_eq!(
+        decision(&out).as_deref(),
+        Some("deny"),
+        "an unrecordable escalation must not be allowed: {out}"
+    );
+}
+
 #[cfg(unix)]
 fn write_roots_world(path: &Path) {
     std::fs::write(

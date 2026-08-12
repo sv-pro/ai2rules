@@ -17,6 +17,7 @@
 
 use harness_types::RootsDef;
 use serde_json::Value;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Filesystem-safe form of a host session identifier, for the taint sidecar
@@ -32,6 +33,33 @@ pub fn sanitize(s: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Durably record the monotonic taint marker for a session, returning whether it
+/// was actually written (finding #16).
+///
+/// The boolean is the point. Both adapters previously discarded every error here
+/// (`let _ = File::create(..)`), so an unwritable state directory — a read-only
+/// mount, ownership skew after a `sudo` run, a full disk, a read-only container
+/// rootfs — made the escalation invisible to every later call in the session: the
+/// taint floor silently stopped engaging while the hook kept reporting `clean`.
+///
+/// This is a **governance** failure, not the process failure that the documented
+/// fail-open strategy covers, so callers must fail closed on `false`. Only the one
+/// call that would escalate is refused; the session keeps working.
+pub fn persist_taint(state_dir: &Path, taint_file: &Path, note: &str) -> bool {
+    if std::fs::create_dir_all(state_dir).is_err() {
+        return false;
+    }
+    let Ok(mut file) = std::fs::File::create(taint_file) else {
+        return false;
+    };
+    if writeln!(file, "{note}").is_err() {
+        return false;
+    }
+    // The next call reads this back from a *different* process, so the write has
+    // to be durable, not merely buffered.
+    file.sync_all().is_ok()
 }
 
 /// Extract and absolutize the target path of a file action, for path-scope (roots).

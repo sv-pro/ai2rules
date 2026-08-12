@@ -24,13 +24,15 @@
 //!   uncompilable world — exits 0 with no output. A broken hook must never brick
 //!   a session. A process failure is never an outcome (see `host.rs`).
 
-use crate::hostkit::{canonicalize_root_paths, normalize_tool, resolve_action_path, sanitize};
+use crate::hostkit::{
+    canonicalize_root_paths, normalize_tool, persist_taint, resolve_action_path, sanitize,
+};
 use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
     gate, host_outcome, BlockKind, GateContext, GateRequest, HostOutcome, ABI_VERSION,
 };
 use serde_json::{json, Value};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
 
 /// Emit a PreToolUse decision (`deny`/`ask`, or `allow` in `--grant` mode) and exit 0.
@@ -122,10 +124,23 @@ pub fn run(
 
     // Persist the kernel-computed monotonic taint for the next call. The note
     // records the host tool and the kernel's effective action (D36).
+    //
+    // If the marker cannot be written the escalation is invisible to every later
+    // call, so the taint floor silently stops engaging (finding #16). That is a
+    // governance failure rather than the process failure fail-open covers, so it
+    // fails CLOSED — but only for the one call that would escalate, leaving the
+    // rest of the session usable.
     if res.context.taint == "tainted" && !tainted {
-        let _ = std::fs::create_dir_all(state_dir);
-        if let Ok(mut f) = std::fs::File::create(&taint_file) {
-            let _ = writeln!(f, "tainted by {tool} ({})", res.action);
+        let note = format!("tainted by {tool} ({})", res.action);
+        if !persist_taint(state_dir, &taint_file, &note) {
+            eprintln!(
+                "harness cc-hook: cannot record session taint under {} — refusing the call that would escalate",
+                state_dir.display()
+            );
+            emit(
+                "deny",
+                "session taint could not be recorded, so this ingestion cannot be governed (untracked_taint)",
+            );
         }
     }
 

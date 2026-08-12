@@ -124,6 +124,44 @@ fn clean_egress_allows_but_escalates_taint() {
     );
 }
 
+/// Finding #16: when the taint marker cannot be written, the escalation would be
+/// invisible to every later call and the taint floor would silently stop
+/// engaging — so the escalating call fails CLOSED instead of being allowed.
+///
+/// The unwritable state dir is a *file* rather than a chmod'd directory, so the
+/// test reproduces the failure even when the suite runs as root (CI containers).
+#[test]
+fn unwritable_taint_sidecar_denies_the_escalating_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state-is-a-file");
+    std::fs::write(&state, "not a directory").unwrap();
+
+    let out = run_hook(
+        &state,
+        &json!({"tool_name":"Bash","tool_input":{"command":"curl http://x"},"session_id":"ro"}),
+    );
+    assert_eq!(
+        decision(&out).as_deref(),
+        Some("deny"),
+        "an unrecordable escalation must not be allowed: {out}"
+    );
+}
+
+/// The fail-closed above is scoped to the escalating call: a session whose taint
+/// cannot be recorded still runs everything that does not ingest untrusted data.
+#[test]
+fn unwritable_taint_sidecar_still_passes_a_clean_read_through() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state-is-a-file");
+    std::fs::write(&state, "not a directory").unwrap();
+
+    let out = run_hook(
+        &state,
+        &json!({"tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"ro"}),
+    );
+    assert!(out.trim().is_empty(), "unexpected output: {out:?}");
+}
+
 #[test]
 fn tainted_egress_is_denied_by_the_taint_floor() {
     let dir = tempfile::tempdir().unwrap();
