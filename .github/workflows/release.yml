@@ -163,16 +163,24 @@ jobs:
       id-token: write # the credential itself: OIDC, no stored token
     steps:
       - uses: actions/checkout@v4
+      # NOTE: deliberately no `registry-url:`. setup-node uses it to write an
+      # .npmrc line `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`, and with
+      # no token in the environment that expands to an EMPTY credential — npm then
+      # presents a broken token instead of falling back to OIDC, and the publish
+      # fails with a 404 on PUT that reads like a missing trusted-publisher entry.
+      # registry.npmjs.org is the default registry anyway, so nothing is lost.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
 
       # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10.x.
       - name: Upgrade npm for trusted publishing
         run: |
           npm install -g npm@latest
-          npm --version
+          echo "npm $(npm --version) / node $(node --version)"
+          echo "--- npm auth config (must show no _authToken) ---"
+          npm config list | grep -iE "registry|token" || true
+          test -f ~/.npmrc && cat ~/.npmrc || echo "(no ~/.npmrc — good)"
 
       - uses: actions/download-artifact@v4
         with: { merge-multiple: true, path: dist }
