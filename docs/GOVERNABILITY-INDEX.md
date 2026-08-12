@@ -134,7 +134,7 @@ listed as a question rather than guessed.
 
 | | Claude Code | Claude Desktop | Antigravity CLI | Codex CLI | Copilot |
 |---|---|---|---|---|---|
-| **G1** pre-execution intercept | **yes** ✓ | **no** ? | **yes** ○ | **yes*** ✓ | ? |
+| **G1** pre-execution intercept | **yes** ✓ | **no** ? | **yes** ○ | **yes*** ✓ | **yes** ○ / not on 1.0.79-linux ✓ |
 | **G2** can deny | **yes** ✓ | n/a | **yes** ○ | **yes** ✓ | ? |
 | **G3** can grant | ? | n/a | **no** (headless) ✓ | ? | ? |
 | **G4** covers MCP + native | **yes** ✓ | n/a | ? | **native ✓, MCP ?** | ? |
@@ -148,7 +148,8 @@ listed as a question rather than guessed.
 
 *Claude Code cells dated 2026-08-06 (G1, G4, G9) and **2026-08-08 on 2.1.223** (G2, G6, G7,
 G8); Antigravity G3 on **agy 1.1.10**, 2026-08-08; **Codex CLI on 0.147.0, 2026-08-12**.
-Claude Code is seven of nine, Codex five of nine. **G3 and G5 are blocked on both hosts, for
+Claude Code is seven of nine, Codex five of nine; **Copilot CLI 1.0.79, 2026-08-12** — one
+cell, and it is a disagreement rather than a value. **G3 and G5 are blocked on both hosts, for
 the same reason** — see their notes.*
 
 ### Notes on specific cells
@@ -200,6 +201,28 @@ the same reason** — see their notes.*
   author's own product benefits from a `yes` here is exactly where a generous reading slips
   in. The COI disclosure at the top of this file is the promise; downgrading our own
   strongest cell is what it costs.
+- **Copilot G1 — the vendor documents it, and it did not run here.** Two things are true and the
+  cell records both rather than averaging them. GitHub documents a hook system for Copilot CLI,
+  including reading **cross-tool `.claude/settings.json`**, and
+  [copilot-cli#4001](https://github.com/github/copilot-cli/issues/4001) shows it demonstrably
+  *running* on Windows — badly, executing hooks through PowerShell without `$CLAUDE_PROJECT_DIR`
+  and then failing **closed**, blocking every tool call. That is a `yes ○` and a strong one: the
+  feature exists and misbehaves in a way only a working implementation can.
+  **On Copilot CLI 1.0.79 / Linux it did not fire.** Measured 2026-08-12 with a schema-valid
+  `.github/hooks/*.json` per the vendor reference (`version: 1`, camelCase `preToolUse`, script in
+  the `bash` field, `timeoutSec`): Copilot executed the tool call, created the file, and the hook
+  was never invoked. Neither `--experimental` nor a `.claude/settings.json` variant changed it, and
+  **Copilot's own log contains zero occurrences of "hook"** — it never looked.
+  **This corrects an earlier reading in our own notes** that concluded "Copilot ignores
+  `.claude/settings.json`". That conclusion came from a run whose hook file used the *wrong schema*
+  — `command` where the reference requires `bash`, `timeout` where it requires `timeoutSec`. The
+  file was malformed, so its silence proved nothing. The re-run with the correct schema still did
+  not fire, which is a different and better-founded result.
+  **So the honest cell is a version/platform split, not a verdict**: documented and observed working
+  on Windows, not present on 1.0.79/Linux. Whether that is a staged rollout, a platform difference,
+  or an undocumented flag is unknown, and the index does not guess. **Everything below G1 for this
+  column stays `?`** — without an intercept here there is nothing to measure deny, grant or coverage
+  against.
 - **Codex CLI G1 `yes ✓` — with a condition no other host imposes, and it fails silently.**
   Measured 2026-08-12 on **0.147.0**. A `PreToolUse` hook in `~/.codex/config.toml` fired and
   received the proposed call. But it required **both** `--enable hooks` (the engine is
