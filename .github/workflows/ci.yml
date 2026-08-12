@@ -43,6 +43,32 @@ jobs:
       - name: Demos still say what they claim
         run: bash scripts/check-demos.sh
 
+  wasm:
+    # `blog/public/vendor/harness-wasm/` is a build output committed to git so the
+    # playground can load it as a static asset — which means nothing rebuilt it.
+    # It sat nine preview-affecting commits behind the kernel (the whole `roots`
+    # feature, D36 classification) for seven weeks, advertising version 0.0.1,
+    # while every job here stayed green (finding #18). AGENTS.md states the
+    # no-drift invariant; this is what enforces it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # From crates.io rather than a third-party action: this workflow should not
+      # take a supply-chain dependency the project would flag in a review.
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Build the engine from source
+        run: wasm-pack build --target web --release
+        working-directory: crates/harness-wasm
+      - name: Committed artifact must still answer for the kernel
+        run: node scripts/check-wasm-freshness.mjs
+
   npm-wrapper:
     # The npm packages (D56, restructured in D58) are how a stranger gets a
     # binary, and nothing else in CI touches them. Two cheap checks: they parse,

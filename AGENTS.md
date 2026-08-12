@@ -27,7 +27,7 @@ ai2rules/
 │   ├── safe-mcp-proxy/
 │   └── mcp-tool-projection/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
-├── DECISIONS.md              # ADR-lite decision log (D1–D59+)
+├── DECISIONS.md              # ADR-lite decision log (D1–D60+)
 ├── README.md                 # Project overview, milestone status, build instructions
 └── rustfmt.toml              # max_width 100, edition 2021
 ```
@@ -123,16 +123,21 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
   harness paths explicitly.
 - **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
   a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
-  can be revisited later. Currently D1–D59.
+  can be revisited later. Currently D1–D60.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
   contains 11 base actions + 7 scoped capabilities. Changes to it affect
   `compile_default()` and the embedded WASM artifact.
 - **WASM artifact** is committed to `blog/public/vendor/harness-wasm/` as a
-  release build (480 KB optimised). Rebuild with `wasm-pack build --target web
+  release build (576 KB optimised). Rebuild with `wasm-pack build --target web
   --release` inside `crates/harness-wasm/` after any change to `harness-preview`
-  or `compiler`.
+  or `compiler`, then copy `pkg/harness_wasm{_bg.wasm,.js}` over the committed
+  pair. **This is enforced now** (finding #18): the `wasm` CI job rebuilds the
+  engine and runs `scripts/check-wasm-freshness.mjs`, which fails if the
+  committed artifact answers differently from the current kernel. It went seven
+  weeks and nine preview-affecting commits stale — missing all of `roots` and D36
+  classification, advertising version `0.0.1` — with CI green throughout.
 
 ---
 
@@ -147,8 +152,18 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --offline -- -D warnings
 ```
 
+After touching `harness-preview` or `compiler`, also refresh the committed WASM
+engine — CI fails otherwise (D60):
+
+```bash
+(cd crates/harness-wasm && wasm-pack build --target web --release)
+cp crates/harness-wasm/pkg/harness_wasm{_bg.wasm,.js} blog/public/vendor/harness-wasm/
+node scripts/check-wasm-freshness.mjs
+```
+
 CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
-(`.github/workflows/ci.yml`).
+(`.github/workflows/ci.yml`), plus the demo guard, the WASM freshness check, and
+the npm/blog layout guards.
 
 **Demo binaries** (run via `cargo run --example <name> --offline`):
 - `kernel_demo` — taint + disposition walkthrough
@@ -173,7 +188,7 @@ marker in the same commit as the kernel change.
 | `README.md` | Project overview, milestone table, build/run instructions |
 | `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D59+; consult before choosing alternatives |
+| `DECISIONS.md` | ADR-lite log D1–D60+; consult before choosing alternatives |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |

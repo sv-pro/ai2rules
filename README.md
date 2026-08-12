@@ -129,7 +129,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10 planned |
-| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (480 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
+| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (576 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
 
 **Done so far:**
 
@@ -217,7 +217,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   (D22). A spike compiles the whole stack to `wasm32` and a Node smoke test proves
   the kernel decides client-side (clean `fetch_web` → Allow, tainted → Deny by
   `taint_invariant`). This is the engine under the visualization suite (M5 / E15):
-  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **480 KB**) ships on the
+  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **576 KB**) ships on the
   blog at **`/playground`**, where a structured `KernelPlayground` editor — preset +
   Clean/Tainted switch + per-tool toggles — sorts every tool live into
   ALLOWED / ASK / DENIED / ABSENT buckets, all decided by the real kernel in-browser.
@@ -279,7 +279,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **254 tests** green.
+Builds clean offline with `clippy -D warnings`; **257 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
