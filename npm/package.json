@@ -1,6 +1,6 @@
 {
   "name": "ai2rules-harness",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.1",
   "description": "Deterministic governance for local CLI coding agents. `npx ai2rules-harness init` governs a project in one command.",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -32,9 +32,9 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "ai2rules-harness-darwin-arm64": "0.2.1-rc.3",
-    "ai2rules-harness-darwin-x64": "0.2.1-rc.3",
-    "ai2rules-harness-linux-x64": "0.2.1-rc.3",
-    "ai2rules-harness-windows-x64": "0.2.1-rc.3"
+    "ai2rules-harness-darwin-arm64": "0.2.1",
+    "ai2rules-harness-darwin-x64": "0.2.1",
+    "ai2rules-harness-linux-x64": "0.2.1",
+    "ai2rules-harness-windows-x64": "0.2.1"
   }
 }
