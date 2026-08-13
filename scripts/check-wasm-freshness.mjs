@@ -20,7 +20,7 @@
 // Fix a failure by copying the fresh build over the committed one:
 //   cp crates/harness-wasm/pkg/harness_wasm{_bg.wasm,.js} blog/public/vendor/harness-wasm/
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 
@@ -100,6 +100,41 @@ const REBUILD = `The committed artifact no longer matches the kernel. Rebuild an
 // 0.2.1, and the check passed against a source tree that was not. CI always builds
 // immediately beforehand so it never saw this; a developer running the script
 // locally would have been told everything was fine.
+// ...and against the clock, because the version only moves at release time. Within
+// a release window a `pkg/` built before the latest kernel edit reports the same
+// version as the source tree, so the version anchor alone still passes vacuously —
+// which it did, on the very change that fixed finding #17. If any source the engine
+// is compiled from is newer than the reference build, the reference is stale.
+const ENGINE_SOURCES = [
+  'crates/harness-types/src',
+  'crates/compiler/src',
+  'crates/compiler/assets',
+  'crates/harness-preview/src',
+  'crates/harness-wasm/src',
+];
+function newestMtime(dir) {
+  const root = new URL(`../${dir}`, import.meta.url);
+  let newest = 0;
+  const walk = (u) => {
+    for (const e of readdirSync(u, { withFileTypes: true })) {
+      const child = new URL(`${e.name}${e.isDirectory() ? '/' : ''}`, u);
+      if (e.isDirectory()) walk(child);
+      else newest = Math.max(newest, statSync(child).mtimeMs);
+    }
+  };
+  walk(new URL(`${dir}/`, new URL('../', import.meta.url)));
+  return newest;
+}
+const builtAt = statSync(new URL(`../${FRESH}/harness_wasm_bg.wasm`, import.meta.url)).mtimeMs;
+const newestSource = Math.max(...ENGINE_SOURCES.map(newestMtime));
+if (newestSource > builtAt) {
+  fail(
+    `the reference build is stale — ${FRESH} predates the newest engine source by ` +
+      `${Math.round((newestSource - builtAt) / 1000)}s`,
+    `Rebuild it before comparing:\n\n    (cd crates/harness-wasm && wasm-pack build --target web --release)`,
+  );
+}
+
 const workspaceVersion = readFileSync(
   new URL('../Cargo.toml', import.meta.url),
   'utf8',

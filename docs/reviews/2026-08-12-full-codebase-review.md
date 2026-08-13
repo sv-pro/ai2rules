@@ -9,7 +9,7 @@ findings ran to #14).
 `cargo fmt` clean, no `unsafe` anywhere in the workspace, CI green.
 
 That baseline is the point worth opening with. Every finding below was invisible
-to it. Seven are now fixed, one of those having been public for seven weeks, and
+to it. Eight are now fixed, one of those having been public for seven weeks, and
 the test suite, the linter, and five CI jobs all reported success throughout. The
 recurring shape is not bad code — the code is careful — it is
 **an invariant stated in prose that nothing executes**. Three separate places
@@ -23,7 +23,7 @@ said "these must not diverge"; all three had diverged.
 |---|---|---|---|---|
 | 15 | 🔴 Critical | `agy_hook.rs` | Manifest roots not canonicalized → grants writes to `Deny`/`Credential` roots | **Fixed** |
 | 16 | 🔴 Critical | both adapters | Silent taint-persist failure disables the taint floor | **Fixed** (D59) |
-| 17 | 🟠 High | `compiled.rs` | Class ordering is first-match-wins → `ls && curl` evades the egress class | Open, latent |
+| 17 | 🟠 High | `compiled.rs` | Class ordering is first-match-wins → `ls && curl` evades the egress class | **Fixed** (D63) |
 | 18 | 🟠 High | `blog/public/vendor/` | Committed WASM artifact nine commits stale, advertising v0.0.1 | **Fixed** (D60) |
 | 19 | 🟡 Medium | `loader.rs` | `default_to` optional → unclassified shell allowed while tainted | **Fixed** (D62) |
 | 20 | 🟡 Medium | `loader.rs` | Duplicate `command_classes` silently ignored | **Fixed** (D62) |
@@ -217,7 +217,7 @@ cross-filesystem fallback was exercised separately by pointing `TMPDIR` at tmpfs
 
 ## Open findings
 
-### #17 — Class ordering is first-match-wins, and ordering is security-critical 🟠
+### #17 — Class ordering is first-match-wins, and ordering is security-critical 🟠 *(fixed, D63)*
 
 `classify_command` returns the first class with any matching pattern. A world that
 lists a permissive class before a restrictive one loses the restrictive one on
@@ -237,9 +237,13 @@ asserts `ls && curl` classifies as network — true only because that fixture ha
 earlier-matching permissive class. The suite encodes the safe ordering without
 ever stating the rule.
 
-**Recommendation:** evaluate all classes and select the most restrictive match
-(severity-ordered, not declaration-ordered), or reject a manifest in which a class
-with a lower-severity `side_effect` precedes a higher-severity one.
+**Fixed (D63)** — though not as recommended here. Selecting the most restrictive
+match needs a severity ordering over `SideEffectClass` that does not exist;
+`SideEffectClass` derives `Ord` from *declaration order*, so ranking by it would
+encode policy in enum layout. Instead every class is evaluated and a command claimed
+by two different classes resolves to `default_to`. Ambiguity has somewhere safe to go
+only because D62 had just made the catch-all mandatory — the two findings fix each
+other.
 
 Worth stating plainly in the docs alongside it: substring matching over shell
 strings is a heuristic, not a decision procedure. `"curl" http://x`,
