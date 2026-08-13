@@ -26,6 +26,12 @@ there is one, so anything here can be traced to the reasoning in
   limit now requires `context.usage`, and a request omitting it gets
   `DENY` / `missing_usage` — the fourth fail-closed hardening of ABI v1, after
   `taint`, `source_channel` and `path`, and like those it does not bump `v`.
+- The cross-host demo now prefers the freshly built debug binary over
+  `target/release/harness`. `check-demos.sh` builds debug and then runs the demo,
+  so a stale release binary lying around meant the guard could validate a
+  two-day-old kernel — which it did, passing locally while CI, with no release
+  build, correctly failed. A guard that can check the wrong artifact is the same
+  family of bug as the rest of this release.
 - **Command classification no longer lets declaration order decide a verdict**
   (finding #17, D63). Every class is evaluated; a command claimed by two different
   classes resolves to `default_to` rather than to whichever was declared first.
