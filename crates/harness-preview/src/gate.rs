@@ -19,7 +19,7 @@ use harness_types::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use world_kernel::{decide, BudgetUsage, EvalContext, KernelOutcome};
+use world_kernel::{charge, decide, BudgetUsage, EvalContext, KernelOutcome};
 
 /// The current ABI version. Bumped only on a breaking wire change (§8).
 pub const ABI_VERSION: u32 = 1;
@@ -69,6 +69,50 @@ pub struct GateContext {
     /// verify approval stores, so this field is never treated as a grant.
     #[serde(default)]
     pub approval_token: Option<String>,
+    /// Budget counters consumed so far this session (finding #16). The kernel is
+    /// pure and each call is a separate process, so — exactly like `taint` — the
+    /// host adapter carries this across calls and persists what comes back.
+    /// Required when the world declares a counted budget; see `missing_usage`.
+    #[serde(default)]
+    pub usage: Option<GateUsage>,
+}
+
+/// Session budget counters on the wire (§3/§4). Absent counters are zero, so a
+/// caller may send only what it tracks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateUsage {
+    #[serde(default)]
+    pub commands_run: u64,
+    #[serde(default)]
+    pub network_calls: u64,
+    #[serde(default)]
+    pub file_writes: u64,
+    /// Only a caller that has seen a model response can count these; the gate
+    /// carries the value through without ever charging it.
+    #[serde(default)]
+    pub tokens_used: u64,
+}
+
+impl From<GateUsage> for BudgetUsage {
+    fn from(u: GateUsage) -> Self {
+        BudgetUsage {
+            commands_run: u.commands_run,
+            tokens_used: u.tokens_used,
+            file_writes: u.file_writes,
+            network_calls: u.network_calls,
+        }
+    }
+}
+
+impl From<BudgetUsage> for GateUsage {
+    fn from(u: BudgetUsage) -> Self {
+        GateUsage {
+            commands_run: u.commands_run,
+            network_calls: u.network_calls,
+            file_writes: u.file_writes,
+            tokens_used: u.tokens_used,
+        }
+    }
 }
 
 /// The kernel's verdict for one call (§4).
@@ -98,6 +142,10 @@ pub struct GateResponse {
 pub struct GateResponseContext {
     /// Monotonic post-call taint to persist: `clean` | `tainted`.
     pub taint: String,
+    /// Post-call budget counters to persist for the next call (finding #16).
+    /// Charged only on an ALLOW that will actually run — a blocked call consumes
+    /// nothing.
+    pub usage: GateUsage,
 }
 
 /// Approval handshake returned on `ASK` (§4). The token is a correlation id,
@@ -115,14 +163,22 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
     // The effective action: the world's own command classifiers run first
     // (D36), so classification is kernel data, identical for every host.
     let action = world.classify_command(&ActionName::new(&req.tool), &req.arguments);
+    let carried = req.context.usage.unwrap_or_default();
     let inbound = match parse_taint(req.context.taint.as_deref()) {
         Ok(t) => t,
-        Err(rule) => return denied_response(world, &action, rule, Taint::Tainted),
+        Err(rule) => return denied_response(world, &action, rule, Taint::Tainted, carried),
     };
     let channel = match parse_channel(world, req.context.source_channel.as_deref()) {
         Ok(c) => c,
-        Err(rule) => return denied_response(world, &action, rule, inbound),
+        Err(rule) => return denied_response(world, &action, rule, inbound, carried),
     };
+    // Budget counters are session state the pure kernel cannot hold, so the adapter
+    // carries them (finding #16). A world that counts calls therefore requires them:
+    // otherwise a thin adapter silently disables every limit by omission, which is
+    // the same failure `missing_path` closes for roots.
+    if world.budget().counts_calls() && req.context.usage.is_none() {
+        return denied_response(world, &action, "missing_usage", inbound, carried);
+    }
     let inbound = inbound.join(channel.taint);
     let session = SessionId::new(&req.context.session_id);
 
@@ -144,7 +200,7 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
     let ctx = EvalContext {
         taint: TaintContext::from_taint(inbound),
         mode,
-        usage: BudgetUsage::default(),
+        usage: BudgetUsage::from(carried),
         // The gate ABI is intentionally pure and has no verifier callback or
         // store access. A request-supplied token is untrusted input, so it must
         // never grant approval at this boundary.
@@ -228,6 +284,17 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         }
     }
 
+    // Charge the budget for a call that will actually run. `charge` lives beside
+    // `budget_exceeded` in the kernel so a limit and its cost cannot drift apart.
+    let out_usage = if decision == Decision::Allow {
+        match (world.action_type(&action), world.side_effect(&action)) {
+            (Some(at), Some(se)) => charge(&BudgetUsage::from(carried), at, se).into(),
+            _ => carried,
+        }
+    } else {
+        carried
+    };
+
     let approval = (decision == Decision::Ask).then(|| GateApproval {
         token: format!("{}:{}", req.context.session_id, action.as_str()),
         required: true,
@@ -242,6 +309,7 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         reason: reason_for(decision, &rule).to_string(),
         context: GateResponseContext {
             taint: taint_str(out_taint).to_string(),
+            usage: out_usage,
         },
         approval,
         manifest_hash: short_hash(world),
@@ -257,6 +325,7 @@ fn denied_response(
     action: &ActionName,
     rule: &'static str,
     out_taint: Taint,
+    usage: GateUsage,
 ) -> GateResponse {
     GateResponse {
         v: ABI_VERSION,
@@ -266,6 +335,7 @@ fn denied_response(
         reason: reason_for(Decision::Deny, rule).to_string(),
         context: GateResponseContext {
             taint: taint_str(out_taint).to_string(),
+            usage,
         },
         approval: None,
         manifest_hash: short_hash(world),
@@ -369,6 +439,9 @@ fn reason_for(d: Decision, rule: &str) -> &'static str {
         (Decision::Deny, "missing_path") => {
             "path-scoped file action is missing its resolved target path"
         }
+        (Decision::Deny, "missing_usage") => {
+            "gate request is missing the budget counters this world's limits are counted against"
+        }
         (Decision::Deny, "missing_taint") => "gate request is missing required taint context",
         (Decision::Deny, "invalid_taint") => "gate request has invalid taint context",
         (Decision::Deny, "missing_source_channel") => {
@@ -406,6 +479,7 @@ mod tests {
                 taint: Some(taint.to_string()),
                 source_channel: Some("user_prompt".to_string()),
                 approval_token: None,
+                usage: Some(GateUsage::default()),
             },
         }
     }
@@ -864,6 +938,133 @@ base_actions:
         assert_eq!(res.action, "run_command_unclassified");
         assert_eq!(res.decision, "DENY");
         assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+    }
+
+    // ---- budgets (finding #16) ----
+
+    /// A world whose limits are small enough to reach in a test.
+    fn budgeted_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: budget-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Command, Web] }
+base_actions:
+  - { name: read_file,  action_type: Read,    side_effect: Read }
+  - { name: run_cmd,    action_type: Command, side_effect: Process }
+  - { name: fetch,      action_type: Web,     side_effect: Network }
+budget:
+  max_commands_per_task: 2
+  max_network_calls: 1
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    fn with_usage(tool: &str, usage: GateUsage) -> GateRequest {
+        let mut r = req(tool, "clean");
+        r.context.usage = Some(usage);
+        r
+    }
+
+    #[test]
+    fn an_allowed_call_charges_the_budget_it_consumes() {
+        let world = budgeted_world();
+
+        // A command charges commands_run and nothing else.
+        let res = gate(&world, &with_usage("run_cmd", GateUsage::default()));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.usage.commands_run, 1);
+        assert_eq!(res.context.usage.network_calls, 0);
+
+        // A web call charges network_calls.
+        let res = gate(&world, &with_usage("fetch", GateUsage::default()));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.usage.network_calls, 1);
+
+        // A read charges nothing counted.
+        let res = gate(&world, &with_usage("read_file", GateUsage::default()));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.usage, GateUsage::default());
+    }
+
+    #[test]
+    fn carried_usage_at_the_limit_denies() {
+        // The whole finding: counters carried across calls actually bind. Before
+        // the fix every call arrived with a zeroed usage, so no limit was reachable.
+        let world = budgeted_world();
+        let at_limit = GateUsage {
+            commands_run: 2,
+            ..GateUsage::default()
+        };
+        let res = gate(&world, &with_usage("run_cmd", at_limit));
+        assert_eq!(res.decision, "REPLAN");
+        assert_eq!(res.rule.as_deref(), Some("max_commands_per_task"));
+
+        let at_limit = GateUsage {
+            network_calls: 1,
+            ..GateUsage::default()
+        };
+        let res = gate(&world, &with_usage("fetch", at_limit));
+        assert_eq!(res.decision, "REPLAN");
+        assert_eq!(res.rule.as_deref(), Some("max_network_calls"));
+    }
+
+    #[test]
+    fn a_blocked_call_charges_nothing() {
+        // Only an executed call consumes budget; a refusal must not push the
+        // session toward its limit.
+        let world = budgeted_world();
+        let carried = GateUsage {
+            commands_run: 2,
+            ..GateUsage::default()
+        };
+        let res = gate(&world, &with_usage("run_cmd", carried));
+        assert_eq!(res.decision, "REPLAN");
+        assert_eq!(res.context.usage, carried, "a denied call is not charged");
+    }
+
+    #[test]
+    fn a_budgeted_world_refuses_a_request_with_no_counters() {
+        // Omission is how a limit gets bypassed, so it fails closed — the same
+        // shape as `missing_path` for roots.
+        let world = budgeted_world();
+        let mut r = req("run_cmd", "clean");
+        r.context.usage = None;
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_usage"));
+    }
+
+    #[test]
+    fn only_a_counted_limit_obliges_a_caller_to_carry_counters() {
+        // `command_timeout_ms` bounds one execution and is enforced by the executor,
+        // not by counting calls — so it must not force every caller to carry usage.
+        // A world with no counted limit accepts a request without counters.
+        let yaml = r#"
+world_id: timeout-only
+capabilities:
+  - { trust: Trusted, actions: [Command] }
+base_actions:
+  - { name: run_cmd, action_type: Command, side_effect: Process }
+budget:
+  command_timeout_ms: 5000
+"#;
+        let world = compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap();
+        let mut r = req("run_cmd", "clean");
+        r.context.usage = None;
+        assert_eq!(gate(&world, &r).decision, "ALLOW");
+
+        // Add one counted limit and the same request is refused.
+        let counted = compiler::compile(
+            &compiler::loader::load_yaml(&yaml.replace(
+                "  command_timeout_ms: 5000",
+                "  command_timeout_ms: 5000\n  max_commands_per_task: 10",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let res = gate(&counted, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_usage"));
     }
 
     #[test]

@@ -288,6 +288,7 @@ fn every_entry_point_agrees_with_the_in_process_kernel() {
                 "taint": if taint == "tainted" { json!("tainted") } else { json!("clean") },
                 "source_channel": "user_prompt",
                 "approval_token": Value::Null,
+                "usage": {},
             },
         });
         let (code, stdout) = gate_cli(&oc_req.to_string());
@@ -317,7 +318,8 @@ fn harness_gate_does_not_trust_request_supplied_approval_tokens() {
             "mode": "interactive",
             "taint": "clean",
             "source_channel": "user_prompt",
-            "approval_token": "forged-token"
+            "approval_token": "forged-token",
+            "usage": {}
         }
     });
 
@@ -335,23 +337,30 @@ fn harness_gate_fails_closed_on_missing_or_malformed_context() {
     for (name, context, rule) in [
         (
             "missing_taint",
-            json!({"session_id": "bad-context", "mode": "interactive", "source_channel": "user_prompt"}),
+            json!({"session_id": "bad-context", "mode": "interactive", "source_channel": "user_prompt", "usage": {}}),
             "missing_taint",
         ),
         (
             "invalid_taint",
-            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean-ish", "source_channel": "user_prompt"}),
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean-ish", "source_channel": "user_prompt", "usage": {}}),
             "invalid_taint",
         ),
         (
             "missing_source",
-            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean"}),
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean", "usage": {}}),
             "missing_source_channel",
         ),
         (
             "invalid_source",
-            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean", "source_channel": "probably_user"}),
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean", "source_channel": "probably_user", "usage": {}}),
             "invalid_source_channel",
+        ),
+        // Finding #16: demo-world.yaml counts calls, so a caller that omits its
+        // budget counters is refused rather than handed an unlimited session.
+        (
+            "missing_usage",
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean", "source_channel": "user_prompt"}),
+            "missing_usage",
         ),
     ] {
         let request = json!({

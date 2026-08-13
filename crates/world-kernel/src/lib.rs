@@ -20,7 +20,7 @@ pub mod schema;
 pub mod spec;
 pub mod taint;
 
-pub use disposition::{evaluate, BudgetUsage, EvalContext};
+pub use disposition::{charge, evaluate, BudgetUsage, EvalContext};
 pub use intent::{IRBuilder, IntentIR};
 pub use spec::{build_execution_spec, ExecEnv, SpecError};
 

@@ -59,7 +59,8 @@
 //!   outcome (see `host.rs`).
 
 use crate::hostkit::{
-    canonicalize_root_paths, normalize_tool, persist_taint, resolve_action_path, sanitize,
+    canonicalize_root_paths, normalize_tool, persist_taint, persist_usage, read_usage,
+    resolve_action_path, sanitize,
 };
 use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
@@ -180,6 +181,11 @@ pub fn run(
 
     let taint_file = state_dir.join(format!("taint-{}", sanitize(&sid)));
     let tainted = taint_file.exists();
+    // Budget counters are session state, carried across calls exactly like taint
+    // (finding #16). Unreadable counters are unenforceable ones, so a corrupt
+    // sidecar fails closed rather than silently restarting the budget at zero.
+    let usage_file = state_dir.join(format!("usage-{}", sanitize(&sid)));
+    let carried_usage = read_usage(&usage_file);
 
     // (4) project base from the payload; $HOME for `~`, read at the I/O boundary
     // so the compiler/kernel stay pure.
@@ -217,6 +223,7 @@ pub fn run(
             taint: Some(if tainted { "tainted" } else { "clean" }.to_string()),
             source_channel: Some("user_prompt".to_string()),
             approval_token: None,
+            usage: carried_usage,
         },
     };
     let res = gate(&world, &req);
@@ -229,6 +236,24 @@ pub fn run(
     // governance failure rather than the process failure fail-open covers, so it
     // fails CLOSED — but only for the one call that would escalate, leaving the
     // rest of the session usable.
+    // Persist the charged budget counters before anything else can proceed. Same
+    // discipline as taint (D59): a counter that silently fails to land is a budget
+    // that silently stops counting, which is the failure this closes (finding #16).
+    if carried_usage
+        .map(|c| c != res.context.usage)
+        .unwrap_or(true)
+        && !persist_usage(state_dir, &usage_file, &res.context.usage)
+    {
+        eprintln!(
+            "harness agy-hook: cannot record budget counters under {} — refusing the call they would charge",
+            state_dir.display()
+        );
+        emit(
+            "deny",
+            "budget counters could not be recorded, so this call cannot be counted against the world's limits (untracked_budget)",
+        );
+    }
+
     if res.context.taint == "tainted" && !tainted {
         let note = format!("tainted by {tool} ({})", res.action);
         if !persist_taint(state_dir, &taint_file, &note) {

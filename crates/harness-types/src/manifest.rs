@@ -181,6 +181,22 @@ pub struct Budget {
     pub max_file_writes: Option<u64>,
 }
 
+impl Budget {
+    /// Does this world declare any budget a *decision* can exceed?
+    ///
+    /// `command_timeout_ms` is deliberately excluded: it bounds one execution and is
+    /// enforced by the executor, not by counting calls, so it does not oblige a
+    /// caller to carry usage. The counted limits do — see the gate ABI's
+    /// `missing_usage`, which mirrors `missing_path` for roots: a limit a thin
+    /// adapter can skip by omitting its counters is not a limit.
+    pub fn counts_calls(&self) -> bool {
+        self.max_tokens_per_session.is_some()
+            || self.max_commands_per_task.is_some()
+            || self.max_network_calls.is_some()
+            || self.max_file_writes.is_some()
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Observability {
     #[serde(default)]

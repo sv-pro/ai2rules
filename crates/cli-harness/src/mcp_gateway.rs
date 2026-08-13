@@ -23,7 +23,7 @@
 
 use compiler::{compile, loader::load_yaml};
 use harness_preview::{
-    gate, host_outcome, GateContext, GateRequest, GateResponse, HostOutcome, ABI_VERSION,
+    gate, host_outcome, GateContext, GateRequest, GateResponse, GateUsage, HostOutcome, ABI_VERSION,
 };
 use harness_types::{ActionName, CompiledWorld};
 use serde_json::{json, Value};
@@ -164,6 +164,7 @@ fn govern(
     source: &str,
     tainted: bool,
     mode: &str,
+    usage: GateUsage,
 ) -> GateResponse {
     let req = GateRequest {
         v: ABI_VERSION,
@@ -176,6 +177,9 @@ fn govern(
             taint: Some(if tainted { "tainted" } else { "clean" }.to_string()),
             source_channel: Some(source.to_string()),
             approval_token: None,
+            // The gateway is one long-lived process, so it carries budget counters in
+            // memory rather than through a sidecar (finding #16).
+            usage: Some(usage),
         },
     };
     gate(world, &req)
@@ -293,6 +297,7 @@ pub fn run(
 
     // Monotonic session taint: starts at the inbound floor, only ever rises.
     let mut session_taint = initial_taint;
+    let mut session_usage = GateUsage::default();
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -397,7 +402,16 @@ pub fn run(
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
-                let verdict = govern(&world, &name, &args, source, session_taint, mode);
+                let verdict = govern(
+                    &world,
+                    &name,
+                    &args,
+                    source,
+                    session_taint,
+                    mode,
+                    session_usage,
+                );
+                session_usage = verdict.context.usage;
                 let action = verdict.action.clone();
                 let manifest_hash = verdict.manifest_hash.clone();
                 audit(

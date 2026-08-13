@@ -62,6 +62,42 @@ pub fn persist_taint(state_dir: &Path, taint_file: &Path, note: &str) -> bool {
     file.sync_all().is_ok()
 }
 
+/// Read the persisted budget counters for a session, or zeros if none are stored.
+///
+/// A malformed sidecar reads as `None` so the caller can fail closed: counters we
+/// cannot read are counters we cannot enforce, and silently restarting a budget at
+/// zero is how a limit stops binding (finding #16).
+pub fn read_usage(usage_file: &Path) -> Option<harness_preview::GateUsage> {
+    if !usage_file.exists() {
+        return Some(harness_preview::GateUsage::default());
+    }
+    let text = std::fs::read_to_string(usage_file).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Persist budget counters for the next call, reporting whether they landed.
+/// Same discipline as [`persist_taint`] (D59) and for the same reason: a counter
+/// that silently fails to persist is a budget that silently stops counting.
+pub fn persist_usage(
+    state_dir: &Path,
+    usage_file: &Path,
+    usage: &harness_preview::GateUsage,
+) -> bool {
+    if std::fs::create_dir_all(state_dir).is_err() {
+        return false;
+    }
+    let Ok(text) = serde_json::to_string(usage) else {
+        return false;
+    };
+    let Ok(mut file) = std::fs::File::create(usage_file) else {
+        return false;
+    };
+    if writeln!(file, "{text}").is_err() {
+        return false;
+    }
+    file.sync_all().is_ok()
+}
+
 /// Extract and absolutize the target path of a file action, for path-scope (roots).
 /// Reads the common path arg keys; returns `None` for tools without one (a shell
 /// command string is not a path, so shell actions are path-scope-exempt). Relative

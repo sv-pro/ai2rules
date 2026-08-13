@@ -14,6 +14,18 @@ there is one, so anything here can be traced to the reasoning in
 
 ### Changed
 
+- **Manifest budgets are now enforced** (Codex-scan finding, D64). `Budget` and its
+  limit checks were complete, but every decision path constructed a zeroed
+  `BudgetUsage`, so each call was evaluated as the session's first and
+  `max_commands_per_task`, `max_network_calls`, `max_file_writes` and
+  `max_tokens_per_session` were decorative in every manifest that declared them.
+  Counters are now carried session state, exactly like taint: `context.usage` in
+  and out of the gate ABI, persisted by the adapters in a `usage-<session>`
+  sidecar, held in memory by the long-lived gateway and orchestrator. Charged only
+  on an ALLOW that will actually run. **Breaking**: a world declaring a *counted*
+  limit now requires `context.usage`, and a request omitting it gets
+  `DENY` / `missing_usage` — the fourth fail-closed hardening of ABI v1, after
+  `taint`, `source_channel` and `path`, and like those it does not bump `v`.
 - **Command classification no longer lets declaration order decide a verdict**
   (finding #17, D63). Every class is evaluated; a command claimed by two different
   classes resolves to `default_to` rather than to whichever was declared first.

@@ -19,7 +19,9 @@
 pub mod gate;
 pub mod host;
 
-pub use gate::{gate, GateApproval, GateContext, GateRequest, GateResponse, ABI_VERSION};
+pub use gate::{
+    gate, GateApproval, GateContext, GateRequest, GateResponse, GateUsage, ABI_VERSION,
+};
 pub use host::{host_outcome, BlockKind, HostOutcome};
 
 use compiler::{compile, loader::load_yaml};
