@@ -93,6 +93,27 @@ const REBUILD = `The committed artifact no longer matches the kernel. Rebuild an
     (cd crates/harness-wasm && wasm-pack build --target web --release)
     cp crates/harness-wasm/pkg/harness_wasm{_bg.wasm,.js} ${COMMITTED}/`;
 
+// Anchor the "fresh" build to the source tree before trusting it as a reference.
+// Without this the check compares two artifacts that can both be stale and calls
+// that agreement — which is exactly what happened on the 0.2.2 version bump: the
+// committed artifact and a `pkg/` left over from the previous build were both
+// 0.2.1, and the check passed against a source tree that was not. CI always builds
+// immediately beforehand so it never saw this; a developer running the script
+// locally would have been told everything was fine.
+const workspaceVersion = readFileSync(
+  new URL('../Cargo.toml', import.meta.url),
+  'utf8',
+).match(/^version = "([^"]+)"/m)?.[1];
+if (!workspaceVersion) {
+  fail('cannot read the workspace version from Cargo.toml');
+}
+if (fresh.version() !== workspaceVersion) {
+  fail(
+    `the reference build is stale — ${FRESH} reports ${fresh.version()}, Cargo.toml says ${workspaceVersion}`,
+    `Rebuild it before comparing:\n\n    (cd crates/harness-wasm && wasm-pack build --target web --release)`,
+  );
+}
+
 if (committed.version() !== fresh.version()) {
   fail(
     `version mismatch — committed says ${committed.version()}, source is ${fresh.version()}`,
