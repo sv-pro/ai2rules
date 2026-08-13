@@ -9,10 +9,11 @@ findings ran to #14).
 `cargo fmt` clean, no `unsafe` anywhere in the workspace, CI green.
 
 That baseline is the point worth opening with. Every finding below was invisible
-to it. Three of them were live, one had been live and public for seven weeks, and
-the test suite, the linter, and five CI jobs all reported success throughout. The
-recurring shape is not bad code — the code is careful — it is **an invariant
-stated in prose that nothing executes**.
+to it. Four were live and are now fixed, one of those had been public for seven
+weeks, and the test suite, the linter, and five CI jobs all reported success
+throughout. The recurring shape is not bad code — the code is careful — it is
+**an invariant stated in prose that nothing executes**. Three separate places
+said "these must not diverge"; all three had diverged.
 
 ---
 
@@ -31,6 +32,8 @@ stated in prose that nothing executes**.
 | 23 | 🔵 Low | both workflows | Actions pinned to mutable tags/branches | Open |
 | 24 | 🔵 Low | `npm/bin/harness.js` | Signal-killed child exits 1, not `128+signum` | Open |
 | 25 | 🔵 Low | `tests/init.rs:729` | Flaky `ETXTBSY` race — plants a binary and executes it | Open |
+| 26 | 🟠 High | `main.rs` `run_gate` | `harness gate` never resolved manifest roots | **Fixed** (D61) |
+| 27 | 🟡 Medium | adapters + compiler | Argument aliasing and schema validation are mutually exclusive | Open |
 
 "Latent" means the shipped manifests are safely written and the hazard is in the
 manifest *language* — a third party authoring their own world hits it. That
@@ -75,9 +78,17 @@ cases**. The one test that compares adapters against each other never exercised
 the feature where they diverged. The per-adapter symlink tests passed on Linux
 only because `/tmp` happens not to be a symlink there.
 
-> **Recommended follow-up (not done here):** add roots cases to `cases.yaml`.
-> That converts this from a bug that was fixed into a bug that cannot recur, and
-> it is the highest-leverage single change available in the repo.
+> **Follow-up: done (D61).** Path-scope now has its own conformance pair,
+> `docs/demos/one-kernel/roots-world.yaml` + `roots-cases.yaml`, driven by two
+> new parity tests. A second world rather than roots on `demo-world.yaml`,
+> because enabling `roots` there turns its existing pathless `read` case into a
+> correct `missing_path` DENY and breaks the shell demo asserting the old output.
+>
+> The fixture is a real temp tree, and one rule points at a symlink on purpose —
+> that rule is the regression anchor. Both fixes were reverted in turn to confirm
+> the tests actually catch them: the adapter test fails with `path_scope_ask`
+> where it expects `deny`, and the wire-ABI test fails on `manifest_hash`. Two
+> further findings fell out of writing it, #26 and #27 below.
 
 ### #16 — An unrecordable taint escalation was allowed, silently 🔴
 
@@ -152,6 +163,22 @@ is drift in the build, not in the kernel, and a check that cries wolf gets delet
 Verified in both directions — it passes on the rebuilt artifact and fails on the
 stale one recovered from `HEAD`.
 
+### #26 — `harness gate` never resolved manifest roots 🟠 *(fixed, D61)*
+
+Found while building the path-scope case set, and the same shape as #15 one layer
+out. `run_gate` read the manifest and compiled it directly, with no
+`resolve_root_paths` and no `canonicalize_root_paths`. Since `run_gate` compiles
+the world itself, a caller of the documented D24 wire ABI had **nowhere** to
+perform that step — so under `harness gate`, every relative rule path, every `~`
+rule, and every rule traversing a symlink silently stopped binding and dropped
+through to the policy `default`.
+
+Two of the three live host manifests use relative or `~` root paths, so this was
+not hypothetical for anyone driving the CLI directly. Fixed by performing the same
+resolve-then-canonicalize step the hooks do, against `$PWD` and `$HOME`. The
+kernel stays pure — this is the adapter half of the boundary, and the whole point
+of D61 is that it must not differ per entry point.
+
 ---
 
 ## Open findings
@@ -222,6 +249,23 @@ distinguishes it, or state plainly in AGENTS.md that channel policy is currently
 inert on live hosts. The second is acceptable; silence is not, because the code
 reads as though the control is active.
 
+### #27 — Argument aliasing and schema validation cannot both be used 🟡
+
+The adapters translate host argument keys into the neutral vocabulary by *adding*
+keys — Antigravity's `AbsolutePath` becomes `path`, `CommandLine` becomes
+`command`, originals preserved. Schema validation rejects properties the schema
+does not declare. The two are therefore mutually exclusive: an Antigravity call
+against a schema-bearing action returns `schema_violation` however well-formed it
+is.
+
+Surfaced when the new roots world declared `file_path` on its `read` action and
+the agy leg of the parity test failed. `.agents/agy-world.yaml` declares no
+schemas at all — which reads as a deliberate design choice but is nowhere written
+down, so the next person to add one gets a puzzling `schema_violation` on exactly
+one host. Options are alias-aware validation, declaring the host keys alongside
+the neutral ones, or documenting that portable worlds go schema-less. Recorded in
+D61 and in the world file's header; the reconciliation itself is open.
+
 ### #22–#25 — Low
 
 - **#22** `ci.yml` has no `permissions:` block, so it inherits the repository
@@ -237,7 +281,9 @@ reads as though the control is active.
   "harness failed" from "user pressed Ctrl-C".
 - **#25** `tests/init.rs:729` intermittently fails with `ETXTBSY` ("Text file
   busy") — it plants a binary and executes it while a writer handle may still be
-  open. Observed once in ~4 full-suite runs; it will surface as random CI reds.
+  open. Observed **3 times in ~9 full-suite runs** over this review, so closer to
+  one red in three. It will make CI unreliable for every check above it, and at
+  that rate it trains people to re-run rather than read the failure.
 
 ---
 
@@ -278,7 +324,7 @@ Everything here is absent from the repo as of this review.
 
 | Gap | What it closes |
 |---|---|
-| **Roots cases in `cases.yaml`** | Finding #15's entire class. The parity harness already exists and is correct; it is simply under-fed. |
+| **Roots cases in the shared case set** | Finding #15's entire class. *Added in this pass (D61)* — and it immediately produced #26 and #27. |
 | **A WASM freshness job** | Finding #18. *Added in this pass (D60).* |
 | **`cargo-deny` / `cargo-audit` in CI** | No dependency-vulnerability or license gate exists on a security product. |
 
@@ -317,7 +363,7 @@ All of this had to be discovered by running things:
 - **No fuzzing.** `left_word_match`, `normalize_dots`, and the hand-rolled
   JSON-RPC framing in `mcp_gateway` are all untrusted-input parsers with no fuzz
   target.
-- **No coverage reporting.** 257 tests is a good number; nothing shows which
+- **No coverage reporting.** 259 tests is a good number; nothing shows which
   branches of `gate()` are unexercised.
 - **No adversarial corpus.** The classifier tests check false *positives*
   (`jsonc` is not `nc`). There is no corpus of known evasions pinning intended
@@ -346,10 +392,13 @@ All changes in this pass were verified together:
 ```
 cargo fmt --all -- --check                            clean
 cargo clippy --workspace --all-targets -- -D warnings clean
-cargo test --workspace                                257 passed, 0 failed
+cargo test --workspace                                259 passed, 0 failed
 bash scripts/check-demos.sh                           all demos still say what they claim
 node scripts/check-wasm-freshness.mjs                 matches the kernel (v0.2.1, 3 cases)
 ```
 
 Reproductions for #15, #16, #17, and #19 were executed against built binaries and
-the live manifests, not inferred from reading.
+the live manifests, not inferred from reading. For #15 and #26 the fixes were
+then reverted one at a time to confirm the new conformance tests fail without
+them — a test that has never been seen to fail is a test with no evidence behind
+it.

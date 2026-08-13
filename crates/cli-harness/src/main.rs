@@ -417,13 +417,28 @@ fn run_gate(world_path: &Path) -> i32 {
             return 2;
         }
     };
-    let manifest = match load_yaml(&content) {
+    let mut manifest = match load_yaml(&content) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("gate: cannot parse world {}: {e}", world_path.display());
             return 2;
         }
     };
+    // Resolve and canonicalize the manifest's roots at this I/O boundary, exactly
+    // as `cc-hook` and `agy-hook` do (finding #26). `run_gate` compiles the world
+    // itself, so a caller of the wire ABI has no other place to do it — and roots
+    // left lexical silently stop matching whenever a rule path is relative, uses
+    // `~`, or traverses a symlink, which drops its `Deny` through to the policy
+    // `default`. The kernel stays pure; this is the adapter half of the same
+    // boundary, and it must not differ per entry point.
+    if let Some(roots) = &manifest.roots {
+        let base = std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string());
+        let home = std::env::var("HOME").ok();
+        let resolved = compiler::resolve_root_paths(roots, home.as_deref(), base.as_deref());
+        manifest.roots = Some(hostkit::canonicalize_root_paths(&resolved));
+    }
     let world = match compile(&manifest) {
         Ok(w) => w,
         Err(e) => {
