@@ -9,7 +9,7 @@ findings ran to #14).
 `cargo fmt` clean, no `unsafe` anywhere in the workspace, CI green.
 
 That baseline is the point worth opening with. Every finding below was invisible
-to it. Four were live and are now fixed, one of those had been public for seven
+to it. Five were live and are now fixed, one of those had been public for seven
 weeks, and the test suite, the linter, and five CI jobs all reported success
 throughout. The recurring shape is not bad code — the code is careful — it is
 **an invariant stated in prose that nothing executes**. Three separate places
@@ -31,7 +31,7 @@ said "these must not diverge"; all three had diverged.
 | 22 | 🔵 Low | `ci.yml` | No `permissions:` block → inherits repo default | Open |
 | 23 | 🔵 Low | both workflows | Actions pinned to mutable tags/branches | Open |
 | 24 | 🔵 Low | `npm/bin/harness.js` | Signal-killed child exits 1, not `128+signum` | Open |
-| 25 | 🔵 Low | `tests/init.rs:729` | Flaky `ETXTBSY` race — plants a binary and executes it | Open |
+| 25 | 🟡 Medium | `tests/init.rs` | Flaky `ETXTBSY` race — reproduces ~40% of post-rebuild runs, i.e. every CI run | **Fixed** |
 | 26 | 🟠 High | `main.rs` `run_gate` | `harness gate` never resolved manifest roots | **Fixed** (D61) |
 | 27 | 🟡 Medium | adapters + compiler | Argument aliasing and schema validation are mutually exclusive | Open |
 
@@ -179,6 +179,40 @@ resolve-then-canonicalize step the hooks do, against `$PWD` and `$HOME`. The
 kernel stays pure — this is the adapter half of the boundary, and the whole point
 of D61 is that it must not differ per entry point.
 
+### #25 — A flaky `ETXTBSY` that fires on exactly the runs CI performs 🟡 *(fixed)*
+
+`init_refuses_a_kernel_that_lives_inside_the_project` copies the harness binary
+into a temp project and immediately executes it. Intermittently the `execve`
+returned `ETXTBSY` — "Text file busy", meaning the file is open for writing
+somewhere.
+
+The mechanism is a multithreaded fork/exec race. Cargo runs these tests on
+parallel threads; while `fs::copy` holds a write descriptor to the planted file,
+any `Command` another thread spawns forks and the child inherits that descriptor.
+`CLOEXEC` only takes effect at the child's own `exec`, so until then a second
+process holds the inode open for writing — and our `execve` fails.
+
+**Filed as Low, then promoted, because the first estimate of its rate was wrong
+in an important way.** It appeared 3 times in ~9 full-suite runs during the
+review, but 8 consecutive warm re-runs could not reproduce it at all. The
+correlation was that all three failures landed on runs that had just
+*recompiled*. Testing that directly — `touch` a source file, then run the whole
+suite — gave **2 failures in 5** with the original code, against **0 in 8** warm.
+A freshly linked binary is not in the page cache, so the copy takes far longer and
+the race window is correspondingly wider.
+
+That reframes the severity: the reproducing condition is "build, then test",
+which is precisely and only what CI does. A flake that is nearly invisible
+locally and fires on roughly two of every five CI runs is worse than a flake with
+a uniform one-in-three rate, because the local evidence argues it away.
+
+**Fix:** hard-link the binary instead of copying it where the filesystem allows
+(a hard link shares the already-built inode, which nothing opens for writing at
+any point in a test run, so the window does not exist), and fall back to copy plus
+a bounded `ETXTBSY` retry across filesystems. Verified under the reproducing
+condition: **0 failures in 6 post-rebuild runs**, plus 12 warm runs clean. The
+cross-filesystem fallback was exercised separately by pointing `TMPDIR` at tmpfs.
+
 ---
 
 ## Open findings
@@ -266,7 +300,7 @@ one host. Options are alias-aware validation, declaring the host keys alongside
 the neutral ones, or documenting that portable worlds go schema-less. Recorded in
 D61 and in the world file's header; the reconciliation itself is open.
 
-### #22–#25 — Low
+### #22–#24 — Low
 
 - **#22** `ci.yml` has no `permissions:` block, so it inherits the repository
   default. `release.yml` scopes its permissions correctly per job; `ci.yml` should
@@ -279,11 +313,7 @@ D61 and in the world file's header; the reconciliation itself is open.
 - **#24** `npm/bin/harness.js` exits `1` when the child is killed by a signal,
   discarding `res.signal`. Convention is `128 + signum`, so a shell can distinguish
   "harness failed" from "user pressed Ctrl-C".
-- **#25** `tests/init.rs:729` intermittently fails with `ETXTBSY` ("Text file
-  busy") — it plants a binary and executes it while a writer handle may still be
-  open. Observed **3 times in ~9 full-suite runs** over this review, so closer to
-  one red in three. It will make CI unreliable for every check above it, and at
-  that rate it trains people to re-run rather than read the failure.
+- **#25** — see below; promoted out of Low once its trigger was understood.
 
 ---
 
@@ -370,8 +400,11 @@ All of this had to be discovered by running things:
   behaviour. Documenting "these evade, they land in the fail-closed bucket, and
   that is the design" would convert a reviewer's suspicion into a settled
   question — and would have made #19's severity obvious on sight.
-- **A flaky test is a tax on every future review** (#25): the first full-suite run
-  of this review went red for reasons unrelated to any change under review.
+- **A flaky test is a tax on every future review** (#25, now fixed): the first
+  full-suite run of this review went red for reasons unrelated to any change under
+  review. Its real lesson is about measurement — the naive failure rate pointed at
+  a mild intermittent problem, and only correlating failures with *recompilation*
+  revealed a defect that fires on the exact shape of run CI makes every time.
 
 ### Documentation
 

@@ -28,6 +28,48 @@ fn init(target: &Path, args: &[&str]) -> std::process::Output {
     cmd.output().expect("run harness init")
 }
 
+/// Put a kernel inside the project, the way a package manager would.
+///
+/// Hard-linked rather than copied where the filesystem allows it, because a fresh
+/// copy is briefly open for writing and that is enough to lose the following
+/// `execve` to `ETXTBSY`. Cargo runs these tests on parallel threads: any
+/// `Command` another thread spawns forks while our write fd is open, the forked
+/// child inherits the descriptor, and it keeps the inode open-for-write until it
+/// reaches its own `exec`. Hitting that window is rare per attempt and reliable
+/// across a suite — it cost roughly one full-suite run in three. A hard link
+/// shares the already-built binary's inode, which nothing opens for writing at
+/// any point during a test run, so the window does not exist.
+fn plant_kernel(dir: &Path) -> PathBuf {
+    let planted = dir.join("harness");
+    if fs::hard_link(harness_bin(), &planted).is_err() {
+        // Different filesystems (tmp on tmpfs, target/ on disk) cannot be linked;
+        // fall back to a copy and let `run_planted` absorb the race.
+        fs::copy(harness_bin(), &planted).expect("copy binary into the project");
+    }
+    planted
+}
+
+/// Run a planted kernel, retrying briefly on `ETXTBSY` so the fallback copy path
+/// above cannot flake either. The offending descriptor closes as soon as the
+/// other thread's child execs, so this resolves in microseconds when it triggers.
+fn run_planted(planted: &Path, args: &[&str]) -> std::process::Output {
+    for _ in 0..50 {
+        match Command::new(planted).args(args).output() {
+            Ok(out) => return out,
+            // 26 = ETXTBSY on both Linux and macOS. Spelled numerically to avoid
+            // depending on `libc` or on `ErrorKind::ExecutableFileBusy`.
+            Err(e) if e.raw_os_error() == Some(26) => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(e) => panic!("run planted binary {}: {e}", planted.display()),
+        }
+    }
+    panic!(
+        "planted binary {} stayed ETXTBSY for 500ms",
+        planted.display()
+    );
+}
+
 fn settings(target: &Path) -> Value {
     let text = fs::read_to_string(target.join(".claude/settings.json")).expect("settings.json");
     serde_json::from_str(&text).expect("settings.json parses")
@@ -719,14 +761,9 @@ fn init_refuses_a_kernel_that_lives_inside_the_project() {
     let target = tmp.path();
     let inside = target.join("node_modules/ai2rules-harness-linux-x64");
     fs::create_dir_all(&inside).expect("mkdir");
-    let planted = inside.join("harness");
-    fs::copy(harness_bin(), &planted).expect("copy binary into the project");
+    let planted = plant_kernel(&inside);
 
-    let out = std::process::Command::new(&planted)
-        .arg("init")
-        .arg(target)
-        .output()
-        .expect("run planted binary");
+    let out = run_planted(&planted, &["init", &target.to_string_lossy()]);
     assert!(
         !out.status.success(),
         "init accepted a kernel inside the governed project"
@@ -743,11 +780,6 @@ fn init_refuses_a_kernel_that_lives_inside_the_project() {
 
     // --force is the deliberate override, for anyone protecting the binary
     // another way (immutable image, read-only mount).
-    let out = std::process::Command::new(&planted)
-        .arg("init")
-        .arg(target)
-        .arg("--force")
-        .output()
-        .expect("run with --force");
+    let out = run_planted(&planted, &["init", &target.to_string_lossy(), "--force"]);
     assert!(out.status.success(), "--force did not override the refusal");
 }
