@@ -12,6 +12,17 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Changed
+
+- **A `command_classes` classifier must declare `default_to`, and an action may have
+  only one classifier** (findings #19/#20, D62). Both are now compile errors.
+  Pattern matching over shell strings is always evadable; `default_to` is the
+  fail-closed bucket an evasion lands in, so its optionality was the real hole — a
+  manifest without one let a tainted session run arbitrary unmatched shell. A second
+  classifier for the same action silently never ran. **Breaking** for any manifest
+  that omitted `default_to`; those are precisely the vulnerable ones, and the error
+  names the field and the consequence.
+
 ## [0.2.2] — 2026-08-13
 
 A security release. Everything in it came out of a full review of our own
@@ -75,12 +86,12 @@ nothing in a session tells you the governance stopped applying.
 
 ### Known issues
 
-Open findings, all documented in the review: classifier class ordering is
-first-match-wins and a permissive class listed first wins on a chained command
-(#17); `default_to` is optional though the fail-closed guarantee depends on it
-(#19); duplicate `command_classes` for one action are silently ignored (#20);
-`source_channel` is pinned to `user_prompt` on live hosts (#21); argument aliasing
-and schema validation are mutually exclusive (#27).
+Open findings, all documented in the review and now tracked as issues on
+[`agentic-execution-governance`](https://github.com/sv-pro/agentic-execution-governance/issues):
+classifier class ordering is first-match-wins and a permissive class listed first
+wins on a chained command (#17); `source_channel` is pinned to `user_prompt` on live
+hosts (#21); argument aliasing and schema validation are mutually exclusive (#27).
+(#19 and #20 are fixed in Unreleased, above.)
 
 ## [0.2.1] — 2026-08-12
 

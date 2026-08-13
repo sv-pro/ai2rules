@@ -9,9 +9,9 @@ findings ran to #14).
 `cargo fmt` clean, no `unsafe` anywhere in the workspace, CI green.
 
 That baseline is the point worth opening with. Every finding below was invisible
-to it. Five were live and are now fixed, one of those had been public for seven
-weeks, and the test suite, the linter, and five CI jobs all reported success
-throughout. The recurring shape is not bad code — the code is careful — it is
+to it. Seven are now fixed, one of those having been public for seven weeks, and
+the test suite, the linter, and five CI jobs all reported success throughout. The
+recurring shape is not bad code — the code is careful — it is
 **an invariant stated in prose that nothing executes**. Three separate places
 said "these must not diverge"; all three had diverged.
 
@@ -25,8 +25,8 @@ said "these must not diverge"; all three had diverged.
 | 16 | 🔴 Critical | both adapters | Silent taint-persist failure disables the taint floor | **Fixed** (D59) |
 | 17 | 🟠 High | `compiled.rs` | Class ordering is first-match-wins → `ls && curl` evades the egress class | Open, latent |
 | 18 | 🟠 High | `blog/public/vendor/` | Committed WASM artifact nine commits stale, advertising v0.0.1 | **Fixed** (D60) |
-| 19 | 🟡 Medium | `loader.rs` | `default_to` optional → unclassified shell allowed while tainted | Open, latent |
-| 20 | 🟡 Medium | `loader.rs` | Duplicate `command_classes` silently ignored | Open, latent |
+| 19 | 🟡 Medium | `loader.rs` | `default_to` optional → unclassified shell allowed while tainted | **Fixed** (D62) |
+| 20 | 🟡 Medium | `loader.rs` | Duplicate `command_classes` silently ignored | **Fixed** (D62) |
 | 21 | 🟡 Medium | both adapters | `source_channel` hardcoded to `user_prompt` | Open, design gap |
 | 22 | 🔵 Low | `ci.yml` | No `permissions:` block → inherits repo default | Open |
 | 23 | 🔵 Low | both workflows | Actions pinned to mutable tags/branches | Open |
@@ -248,7 +248,7 @@ already handles this correctly — evasion *downgrades* into the `default_to`
 bucket, which is stricter — and that property is doing the real work. Which is
 exactly why #19 matters.
 
-### #19 — `default_to` is optional, and omitting it opens the shell 🟡
+### #19 — `default_to` is optional, and omitting it opens the shell 🟡 *(fixed, D62)*
 
 A world declaring `command_classes` without `default_to` compiles clean and falls
 back to the raw action:
@@ -259,11 +259,12 @@ tainted + "python3 -c 'import socket…'"      -> bash                ALLOW
 ```
 
 The classifier's entire security value rests on the catch-all, and nothing
-requires one. All three shipped worlds set it. **Recommendation:** require
-`default_to` whenever `command_classes` is present, or default it to the most
-restrictive declared class.
+required one. All three shipped worlds set it. **Fixed (D62):** `validate()` now
+rejects a classifier without `default_to`, with an error naming the field and the
+consequence. Defaulting it to the most restrictive class was rejected — that is a
+judgement about the author's ontology the compiler should not make silently.
 
-### #20 — Duplicate `command_classes` are silently ignored 🟡
+### #20 — Duplicate `command_classes` are silently ignored 🟡 *(fixed, D62)*
 
 `validate()` rejects duplicate channels and duplicate actions, but not two
 classifiers for the same action; `classify_command` uses `.find()`, so the second
