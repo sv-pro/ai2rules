@@ -2,7 +2,6 @@
 title: 'Every Check Was Green. Five Guarantees Were Not.'
 description: "254 tests, zero clippy warnings, no unsafe, five CI jobs — all passing, and five real holes underneath. The worst one: our taint floor silently stopped working whenever a directory wasn't writable. Here is each hole, and the five different ways a check can be present and still prove nothing."
 pubDate: 'Aug 13 2026'
-draft: true
 heroImage: '../../assets/every-check-was-green.jpg'
 ---
 
@@ -213,8 +212,18 @@ for that than the claim.
 
 ---
 
+*Every fix described here ships in
+[`ai2rules-harness@0.2.2`](https://www.npmjs.com/package/ai2rules-harness) —
+`npm install -g ai2rules-harness`. If you use path scope, or run the harness
+anywhere its state directory might not be writable, upgrade: both of those
+failures are silent, and a session will never tell you the governance stopped
+applying.*
+
 *The full review, including the eight findings still open, is
 [in the repository](https://github.com/sv-pro/ai2rules/blob/main/docs/reviews/2026-08-12-full-codebase-review.md).
 The reasoning behind each fix, and the alternatives rejected, is in
 [`DECISIONS.md`](https://github.com/sv-pro/ai2rules/blob/main/DECISIONS.md)
-D59–D61.*
+D59–D61. New since this review: a
+[`SECURITY.md`](https://github.com/sv-pro/ai2rules/blob/main/SECURITY.md) that
+says what this tool does not protect you from, which is the half a governance
+tool owes you.*
