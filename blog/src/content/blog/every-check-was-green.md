@@ -3,6 +3,7 @@ title: 'Every Check Was Green. Five Guarantees Were Not.'
 description: "254 tests, zero clippy warnings, no unsafe, five CI jobs — all passing, and five real holes underneath. The worst one: our taint floor silently stopped working whenever a directory wasn't writable. Here is each hole, and the five different ways a check can be present and still prove nothing."
 pubDate: 'Aug 13 2026'
 draft: true
+heroImage: '../../assets/every-check-was-green.jpg'
 ---
 
 We build a tool that decides what an AI coding agent is allowed to do on your
