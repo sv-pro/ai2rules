@@ -19,9 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No version here on purpose: `rust-toolchain.toml` pins it, and rustup
+      # honours that file. Naming a version in the workflow too would be a second
+      # place to drift from — which is the bug this pin exists to prevent.
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -53,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Version comes from `rust-toolchain.toml`; only the extra target is set here.
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown

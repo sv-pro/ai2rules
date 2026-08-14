@@ -29,7 +29,8 @@ ai2rules/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
 ├── DECISIONS.md              # ADR-lite decision log (D1–D66+)
 ├── README.md                 # Project overview, milestone status, build instructions
-└── rustfmt.toml              # max_width 100, edition 2021
+├── rustfmt.toml              # max_width 100, edition 2021
+└── rust-toolchain.toml       # the pinned compiler — same one locally and in CI
 ```
 
 ---
@@ -144,6 +145,12 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
 ## Build & test
 
 The local crate cache supports offline builds; prefer `--offline`.
+
+**The toolchain is pinned** in `rust-toolchain.toml`, so `cargo` uses the same
+compiler here as CI does — rustup installs it automatically on first use. Before
+the pin, this machine's `stable` was fifteen months behind CI's and a clippy error
+reached `main` because the local check could not see it. Bump the pin
+deliberately, fixing whatever the newer lints find in the same commit.
 
 ```bash
 cargo build --workspace --offline

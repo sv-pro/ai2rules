@@ -1,0 +1,20 @@
+# The one toolchain this project is built and linted with.
+#
+# Not a formality. Before this file existed, CI used `dtolnay/rust-toolchain@stable`
+# and this workspace's dev machine had a `stable` last updated in May 2025 — a
+# fifteen-month gap. "clippy is clean" was true locally and false in CI, and a lint
+# error reached `main` because the local check could not see it
+# (sv-pro/agentic-execution-governance#25). A pinned version makes the local answer
+# and the CI answer the same answer.
+#
+# `channel` is the version CI was already running green, so pinning changed nothing
+# about CI and upgraded the developer instead. Bump it deliberately: read the
+# release notes, run `cargo clippy --workspace --all-targets -- -D warnings`, and
+# fix what the new lints find in the same commit as the bump.
+#
+# This is the *development* toolchain, not a minimum supported version. The
+# workspace declares no MSRV; consumers install a released binary rather than
+# compiling, so there is nothing to promise yet.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

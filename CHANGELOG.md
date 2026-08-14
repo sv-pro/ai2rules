@@ -12,6 +12,14 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Changed
+
+- **The Rust toolchain is pinned** in `rust-toolchain.toml`. CI resolved
+  `stable` while the dev machine's `stable` was fifteen months older, so "clippy is
+  clean" described a compiler nobody else ran and a lint error reached `main`. The
+  pin is the version CI was already using, so CI is unchanged and the developer
+  moved to meet it. The workflows no longer name a version — one source of truth.
+
 ### Security
 
 - **Secrets embedded in values are masked in the audit log** (finding #17, D66).
