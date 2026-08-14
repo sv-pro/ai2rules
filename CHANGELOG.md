@@ -12,6 +12,20 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Fixed
+
+- **A schema-bearing action is usable from every host** (finding #23/#27, D68).
+  Adapters aliased host argument keys by *adding* the neutral key and keeping the
+  host spelling, and object schemas are closed by default — so the adapter injected
+  a second key the manifest author never wrote, and any action with a `schema`
+  returned `schema_violation` on Antigravity however well-formed the call was.
+  Adapters now rename instead. The kernel never needed the host copy: the
+  classifier reads `arguments[arg]` and the resolved path travels out-of-band.
+
+  Unchanged on purpose: a host argument the manifest does not declare still fails a
+  closed schema, because an undeclared argument is input the kernel was not asked
+  to judge. `additionalProperties: true` accepts unjudged extras explicitly.
+
 ## [0.4.0] — 2026-08-14
 
 Closes the last of the Codex-scan P2 findings. A minor bump rather than a patch

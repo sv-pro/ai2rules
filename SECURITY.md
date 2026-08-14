@@ -110,9 +110,13 @@ Live limitations we would rather write down than have someone find:
   channel for every call, including one the model proposed right after reading a
   poisoned file. Data-flow taint still applies; channel trust currently does not.
   Tracked as finding #21.
-- **Argument schemas and cross-host portability are mutually exclusive.** Adapters
-  alias host argument keys by adding them, and schema validation rejects undeclared
-  properties, so a schema-bearing action fails on some hosts. Tracked as #27.
+- **A closed schema still refuses host-specific extra arguments.** Adapters now
+  rename host argument keys into the manifest's vocabulary rather than adding a
+  second copy (D68), so a schema declaring the neutral key works across hosts. What
+  remains is deliberate: an object schema is closed by default, and a host argument
+  the manifest never declared is refused, because an undeclared argument is input
+  the kernel was not asked to judge. Declare it, or set `additionalProperties: true`
+  to state that you accept unjudged extras.
 
 The full list, open and fixed, is in [`docs/reviews/`](docs/reviews/); the
 reasoning behind each design decision is in

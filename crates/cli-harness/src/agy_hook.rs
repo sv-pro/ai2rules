@@ -84,8 +84,8 @@ fn emit(decision: &str, reason: &str) -> ! {
 }
 
 /// Antigravity tool arguments are PascalCase and host-specific; the shared world
-/// data is host-neutral. Alias the known argument keys into the neutral
-/// vocabulary the kernel reads, **preserving the originals**.
+/// data is host-neutral. **Rename** the known argument keys into the neutral
+/// vocabulary the kernel reads.
 ///
 /// | Antigravity | neutral | why |
 /// |---|---|---|
@@ -95,6 +95,21 @@ fn emit(decision: &str, reason: &str) -> ! {
 ///
 /// An existing neutral key is never overwritten — a host that already speaks the
 /// neutral vocabulary wins over the alias.
+///
+/// **Renaming, not adding (finding #23).** This used to keep the host spelling
+/// alongside the neutral one, on the reasoning that an audit record might
+/// reference it. The cost was that an action with a `schema` became unusable on
+/// this host: object schemas are closed by default, and the adapter was injecting
+/// a second key the manifest author never wrote and could not anticipate, so every
+/// well-formed call came back `schema_violation`. The host's spelling is a
+/// transport detail; the call, expressed in the manifest's vocabulary, has one
+/// name for one argument.
+///
+/// This does not make every schema portable, and the remaining limit is a
+/// deliberate one rather than an oversight: a host that sends arguments the
+/// manifest does not declare still fails a closed schema, because an undeclared
+/// argument is input the kernel was never asked to judge. Declare them, or set
+/// `additionalProperties: true` to say plainly that you accept unjudged extras.
 fn alias_neutral_args(args: &Value) -> Value {
     const ALIASES: [(&str, &str); 5] = [
         ("CommandLine", "command"),
@@ -108,12 +123,14 @@ fn alias_neutral_args(args: &Value) -> Value {
         None => Map::new(),
     };
     for (host_key, neutral) in ALIASES {
-        if out.contains_key(neutral) {
+        let Some(v) = args.get(host_key).cloned() else {
             continue;
-        }
-        if let Some(v) = args.get(host_key).cloned() {
-            out.insert(neutral.to_string(), v);
-        }
+        };
+        // The host spelling goes away either way: if the neutral key is already
+        // present the host wins nothing, and if it is not, the value moves under
+        // the neutral name. Leaving both behind is what broke schemas.
+        out.remove(host_key);
+        out.entry(neutral.to_string()).or_insert(v);
     }
     Value::Object(out)
 }
@@ -314,9 +331,100 @@ mod tests {
         // D36 classifies the `command` arg; Antigravity spells it `CommandLine`.
         let args = alias_neutral_args(&json!({"CommandLine": "rm -rf /tmp/x", "Cwd": "/w"}));
         assert_eq!(args["command"], "rm -rf /tmp/x");
-        // originals preserved
-        assert_eq!(args["CommandLine"], "rm -rf /tmp/x");
+        // The host spelling is GONE, not kept alongside (finding #23): leaving both
+        // made every schema-bearing action fail `schema_violation` on this host.
+        assert!(
+            args.get("CommandLine").is_none(),
+            "the host spelling must not survive the rename: {args}"
+        );
+        // A key with no neutral alias is untouched — the adapter renames what the
+        // kernel reads, it does not curate the argument set.
         assert_eq!(args["Cwd"], "/w");
+    }
+
+    /// Finding #23: the point of the rename is that a schema-bearing action
+    /// becomes usable from this host at all.
+    #[test]
+    fn a_renamed_argument_satisfies_a_closed_schema() {
+        let yaml = r#"
+world_id: schema-portability
+capabilities:
+  - { trust: Trusted, actions: [Read] }
+base_actions:
+  - name: view_file
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        path: { type: string }
+"#;
+        let world = compile(&load_yaml(yaml).unwrap()).unwrap();
+        let args = alias_neutral_args(&json!({ "AbsolutePath": "/w/x.rs" }));
+        let req = GateRequest {
+            v: ABI_VERSION,
+            tool: "view_file".to_string(),
+            arguments: args,
+            path: Some("/w/x.rs".to_string()),
+            context: GateContext {
+                session_id: "s".to_string(),
+                mode: Some("interactive".to_string()),
+                taint: Some("clean".to_string()),
+                source_channel: Some("user_prompt".to_string()),
+                approval_token: None,
+                usage: Some(Default::default()),
+            },
+        };
+        let res = gate(&world, &req);
+        assert_eq!(res.decision, "ALLOW", "rule={:?}", res.rule);
+    }
+
+    /// And the limit that remains, pinned so it stays deliberate: a host argument
+    /// the manifest never declared is still refused by a closed schema, because it
+    /// is input the kernel was not asked to judge.
+    #[test]
+    fn an_undeclared_host_argument_still_fails_a_closed_schema() {
+        let yaml = r#"
+world_id: schema-strict
+capabilities:
+  - { trust: Trusted, actions: [Read] }
+base_actions:
+  - name: view_file
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        path: { type: string }
+"#;
+        let world = compile(&load_yaml(yaml).unwrap()).unwrap();
+        let args = alias_neutral_args(&json!({ "AbsolutePath": "/w/x.rs", "Blocking": true }));
+        let req = GateRequest {
+            v: ABI_VERSION,
+            tool: "view_file".to_string(),
+            arguments: args,
+            path: Some("/w/x.rs".to_string()),
+            context: GateContext {
+                session_id: "s".to_string(),
+                mode: Some("interactive".to_string()),
+                taint: Some("clean".to_string()),
+                source_channel: Some("user_prompt".to_string()),
+                approval_token: None,
+                usage: Some(Default::default()),
+            },
+        };
+        assert_eq!(gate(&world, &req).decision, "DENY");
+
+        // …and `additionalProperties: true` is the documented way to accept it.
+        let open = compile(
+            &load_yaml(&yaml.replace(
+                "      type: object",
+                "      type: object\n      additionalProperties: true",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(gate(&open, &req).decision, "ALLOW");
     }
 
     #[test]

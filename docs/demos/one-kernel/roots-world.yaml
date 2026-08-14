@@ -29,19 +29,23 @@ capabilities:
   - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
 
 base_actions:
-  # No `schema` on any action here, and that is a cross-host constraint rather
-  # than an omission (finding #27): the adapters alias host argument keys into
-  # the neutral vocabulary by ADDING keys — Antigravity's `AbsolutePath` becomes
-  # `path`, `CommandLine` becomes `command` — and schema validation rejects
-  # properties the schema does not declare. So a world that declares schemas and
-  # a world that is portable across hosts are, today, different worlds. Every
-  # live multi-host manifest here (.agents/agy-world.yaml) already declares none;
-  # this one matches, deliberately.
+  # No `schema` on any action here. This used to be a hard constraint (finding
+  # #27/#23): the adapters aliased host argument keys by ADDING them, so an
+  # Antigravity call carried both `AbsolutePath` and `path`, and object schemas are
+  # closed by default — every well-formed call came back `schema_violation`. The
+  # adapters now RENAME instead (D68), so a schema declaring the neutral key does
+  # work across hosts.
   #
-  # The consequence for path-scope: `requires_resolved_path` only forces a Read
-  # to carry a resolved target when the descriptor advertises a path argument, so
-  # a schema-less Read is exempt. Writes and patches always require one, which is
-  # what `path_scoped_write_without_a_resolved_path_fails_closed` pins.
+  # It stays schema-less anyway, for a narrower reason: a host that sends arguments
+  # the manifest never declared still fails a closed schema, deliberately, because
+  # an undeclared argument is input the kernel was not asked to judge. This fixture
+  # is fed by four entry points sending four argument shapes, so declaring a schema
+  # here would pin one host's shape rather than the path-scope behaviour under test.
+  #
+  # The consequence for path-scope: `requires_resolved_path` only forces a Read to
+  # carry a resolved target when the descriptor advertises a path argument, so a
+  # schema-less Read is exempt. Writes and patches always require one, which is what
+  # `path_scoped_write_without_a_resolved_path_fails_closed` pins.
   - { name: read, action_type: Read, side_effect: Read }
   - { name: write, action_type: Write, side_effect: FilesystemWrite }
   # A shell command string is not a single resolvable path, so `bash` is
