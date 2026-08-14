@@ -47,9 +47,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No version here: `rust-toolchain.toml` pins it and rustup honours the file.
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+
+      # …which means the target has to be added to the PINNED toolchain, not to
+      # whatever the action installed. Passing `targets:` above installed it for
+      # `stable` while cargo ran the pinned version, and every cross-compiled job
+      # failed with "the target may not be installed" — after CI was green, because
+      # CI never cross-compiles. Adding it here runs against the active toolchain.
+      - name: Add the release target to the pinned toolchain
+        run: rustup target add ${{ matrix.target }}
 
       # The musl target links statically; musl-tools provides the toolchain.
       # (No C deps in the tree today, so this is belt-and-suspenders.)

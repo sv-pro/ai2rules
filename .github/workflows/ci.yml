@@ -71,6 +71,25 @@ jobs:
       - name: Committed artifact must still answer for the kernel
         run: node scripts/check-wasm-freshness.mjs
 
+  cross:
+    # The release workflow cross-compiles; CI never did, so a change that breaks
+    # the release build stayed invisible until a tag was pushed — which is exactly
+    # how pinning the toolchain shipped a broken release: the target had been
+    # installed for `stable` while cargo ran the pinned version, and every
+    # cross-compiled job failed after CI had gone green. One target is enough to
+    # catch that class; it is a proxy for "the release build still works", not a
+    # full matrix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add the target to the pinned toolchain
+        run: rustup target add x86_64-unknown-linux-musl
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Cross-compile the binary the way the release does
+        run: cargo build --release --locked -p cli-harness --target x86_64-unknown-linux-musl
+
   npm-wrapper:
     # The npm packages (D56, restructured in D58) are how a stranger gets a
     # binary, and nothing else in CI touches them. Two cheap checks: they parse,
