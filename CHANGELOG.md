@@ -14,6 +14,16 @@ there is one, so anything here can be traced to the reasoning in
 
 ### Security
 
+- **Secrets embedded in values are masked in the audit log** (finding #17, D66).
+  Redaction matched keys and dotted paths only, so a bearer token inside
+  `command`, an `api_key` in a `url`, or a password in a clone URL was written to
+  the trace verbatim. Every string value is now scanned and only the
+  secret-shaped span is masked, so the surrounding command stays auditable. The
+  detectors are few and high-confidence — issuer-defined prefixes (`ghp_`, `AKIA`,
+  `AIza`, `sk-`, JWTs), PEM private-key blocks, `Authorization`/`Cookie` header
+  values, secret-bearing query parameters, and URL userinfo passwords. Entropy
+  guessing is deliberately excluded: a redactor that guesses corrupts the record
+  and trains readers to ignore the mask.
 - **The web handler enforces the spec's `NetworkPolicy`** (finding #12, D65). It
   previously fetched whatever URL the spec carried, so `NetworkPolicy::Disabled`
   still made the request. `Disabled` now refuses and `AllowHosts` matches the URL's
