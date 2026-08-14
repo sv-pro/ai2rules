@@ -49,7 +49,7 @@
     </section>
   </div>
   <p class="kp-foot">
-    Engine v<span class="kp-ver">…</span> · the real compiler + kernel, compiled to
+    Engine <span class="kp-ver">…</span> · the real compiler + kernel, compiled to
     WebAssembly and running <strong>entirely in your browser</strong>.
   </p>
 </div>
@@ -252,7 +252,7 @@
 
   try {
     await init();
-    root.querySelector('.kp-ver').textContent = version();
+    root.querySelector('.kp-ver').textContent = `v${version()}`;
     buildToolToggles();
     update();
   } catch (e) {

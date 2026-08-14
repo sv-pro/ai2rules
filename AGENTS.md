@@ -170,7 +170,7 @@ node scripts/check-wasm-freshness.mjs
 
 CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
 (`.github/workflows/ci.yml`), plus the demo guard, the WASM freshness check, and
-the npm/blog layout guards.
+the npm/blog guards (`check:heroes`, `check:drafts`, `check:spacing`).
 
 **Demo binaries** (run via `cargo run --example <name> --offline`):
 - `kernel_demo` — taint + disposition walkthrough

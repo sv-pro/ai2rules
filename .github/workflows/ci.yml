@@ -124,3 +124,4 @@ jobs:
       # A draft that reaches the build is worse than a published post: it looks
       # hidden while being fully reachable at its URL.
       - run: npm run check:drafts
+      - run: npm run check:spacing
