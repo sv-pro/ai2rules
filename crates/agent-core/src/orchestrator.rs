@@ -295,6 +295,9 @@ fn resolve_approval(
         call.action_name.clone(),
         params_hash(&call.arguments),
         world.world_id().clone(),
+        // Bind the approval to this exact compiled policy, not just to the world's
+        // name (finding #15): a manifest can be rewritten while keeping its id.
+        world.manifest_hash().clone(),
         descriptor_hash.clone(),
         provenance.clone(),
         config.effect_mode,
@@ -352,6 +355,7 @@ fn resolve_approval(
                 &call.action_name,
                 &call.arguments,
                 world.world_id(),
+                world.manifest_hash(),
                 &descriptor_hash,
                 provenance,
                 config.effect_mode,

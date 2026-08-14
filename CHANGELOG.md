@@ -12,6 +12,24 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Security
+
+- **The approval log is signed, and approvals are bound to the policy that granted
+  them** (finding #15, D67). The store is the one file whose contents *grant*
+  something, and as plain append-only JSONL anything with write access could append
+  a token already in the `Approved` state and manufacture a human decision that
+  never happened. Every line now carries an HMAC-SHA256 under a key kept beside the
+  log at `0600`, opened `O_NOFOLLOW`, with mode and ownership re-checked on every
+  open; a line that does not verify fails the whole load rather than being skipped,
+  because a modified grant record is not one to keep answering from — and no
+  approvals simply means the human is asked again. `manifest_hash` joins the
+  binding, so an approval no longer survives a rewrite of the rules it was granted
+  under while the world keeps its id.
+
+  **Breaking for any existing approval log**: unsigned lines cannot be told apart
+  from forged ones, so an old log is refused rather than honoured. Delete it; the
+  affected approvals are re-asked.
+
 ## [0.3.1] — 2026-08-14
 
 Finishes the P2 sweep from the self-review: four security fixes, each closing a

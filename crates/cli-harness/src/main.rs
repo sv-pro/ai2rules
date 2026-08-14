@@ -357,8 +357,14 @@ fn main() {
     };
 
     let executor = default_executor(&world);
-    // Use a tempdir for sandbox storage in this CLI runner (simulating a session workspace).
-    // In a real deployed tool, we'd persist this in `.agents/`.
+    // Session storage for this CLI runner. A tempdir, which also satisfies the
+    // constraint that matters: the approval store must NOT live inside the project
+    // being governed (finding #15). An earlier note here proposed `.agents/` for a
+    // deployed tool — that is precisely wrong, and it is the same mistake D58 found
+    // in the npm layout and D57 in the control plane: anything the enforcement
+    // depends on must live outside what it enforces upon. A grant record the agent
+    // can write is not a grant record. The log is MAC'd so tampering is detectable
+    // wherever it sits, but detection is the backstop, not the plan.
     let sandbox = tempfile::tempdir().expect("sandbox");
     let trace = TraceStore::open(sandbox.path().join("trace.jsonl"));
     let mut store = ApprovalStore::open(sandbox.path().join("approvals.jsonl")).expect("store");

@@ -12,6 +12,7 @@
 
 mod approval;
 mod bundle;
+pub mod integrity;
 mod record;
 mod redact;
 mod replay;

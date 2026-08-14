@@ -93,6 +93,7 @@ mod tests {
             ActionName::new("git_commit"),
             ContentHash::new("p"),
             WorldId::new("w"),
+            ManifestHash::new("m"),
             DescriptorHash::new("d"),
             Provenance::from_channel(
                 SourceChannel::UserPrompt,
