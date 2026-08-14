@@ -112,8 +112,7 @@ fn mask_pem_blocks(text: &str) -> String {
     const END: &str = "-----END ";
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    loop {
-        let Some(start) = rest.find(BEGIN) else { break };
+    while let Some(start) = rest.find(BEGIN) {
         let Some(end_rel) = rest[start..].find(END) else {
             break;
         };
