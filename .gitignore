@@ -23,3 +23,8 @@ crates/harness-wasm/pkg-web/
 # Python bytecode (the .claude/hooks/*.py gate hooks generate this)
 __pycache__/
 *.pyc
+
+# Local git worktrees for parallel agent sessions — never part of the repo.
+# Committed once by accident when an `add -A` pathspec exclusion was evaluated
+# relative to a subdirectory; ignored so it cannot happen again.
+.claude/worktrees/
