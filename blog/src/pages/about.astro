@@ -5,33 +5,91 @@ import Layout from '../layouts/BlogPost.astro';
 
 <Layout
 	title="About The Harness"
-	description="The philosophy behind deterministic agent sandboxing."
+	description="Why a deterministic kernel decides what your coding agent may do — and what it deliberately does not claim to protect you from."
 	pubDate={new Date('June 19 2026')}
+	updatedDate={new Date('August 14 2026')}
 	heroImage={AboutHeroImage}
 >
 	<p>
-		<strong>ai2rules</strong> is an open-source security project designed to solve a critical problem in the era of autonomous developer tools: <em>Ambient Authority</em>.
+		<strong>ai2rules</strong> is an open-source security project aimed at one problem
+		in the era of autonomous developer tools: <em>ambient authority</em>.
 	</p>
 
 	<p>
-		When you run agents like Claude Code, Aider, or Codex locally on your machine, they typically inherit your entire environment. They have access to your SSH keys, your production AWS credentials, and root-level write access to your hard drive. 
+		When you run an agent like Claude Code or Codex on your machine, it runs as you.
+		It inherits your SSH keys, your production cloud credentials, and write access to
+		everything you own. Nothing about the tool is malicious; the authority is simply
+		yours, and it is handed over whole.
 	</p>
 
 	<p>
-		Most developers attempt to "secure" these agents by writing better system prompts ("Do not delete my files"). But prompt injection proves that <strong>behavioral filtering fails</strong>. You cannot filter danger with an LLM.
+		The common answer is to write a better system prompt — "do not delete my files."
+		Prompt injection is the standing proof that this cannot hold:
+		<strong>you cannot filter danger with the thing being manipulated</strong>. A model
+		asked to police its own inputs is one persuasive input away from not doing so.
 	</p>
 
-	<h3>The Kernel Approach</h3>
+	<h3>The kernel approach</h3>
 
 	<p>
-		This project replaces wrappers with a <strong>deterministic governance kernel</strong>. 
-		We virtualize the world for the agent using an immutable <code>WorldManifest</code>. If a tool is not in the agent's ontology, it simply does not exist. If a piece of data is tainted, the compiler statically ensures it can never drive a network request.
+		So the decision moves out of the model. You describe what the agent may do in an
+		immutable <code>WorldManifest</code>, and a deterministic kernel decides every
+		proposed tool call against it — before the host acts. A tool absent from the
+		manifest is not merely refused; it is never offered. Data that arrived from
+		somewhere untrusted is marked, and marked data cannot reach an
+		externally-effectful action.
 	</p>
 
-	<h3>The Engineering Flywheel</h3>
+	<p>
+		The property that matters is that none of this is a judgement call. The same
+		manifest and the same call always yield the same verdict, the rule that fired is
+		named in the answer, and the whole decision is recorded and replayable. You can
+		disagree with a verdict and go read exactly why it happened.
+	</p>
+
+	<h3>What is actually governed</h3>
 
 	<p>
-		This blog itself is maintained by an autonomous multi-agent system spinning an "Engineering Flywheel." 
-		Codex constantly queries the web for new vulnerabilities, Claude Code writes the Rust defenses in the <code>ai2rules</code> kernel, and Antigravity generates these deep-dive articles and terminal demos to share with the community.
+		Coverage is uneven, and pretending otherwise is the fastest way to lose a reader
+		who checks. Hosts that expose a pre-tool hook — Claude Code, the Antigravity CLI,
+		OpenCode — are governed deeply: every native tool call is decided by the kernel.
+		Hosts that do not are reachable only through their MCP seam, via a gateway that
+		shapes the tool surface and gates each call. Same kernel, same manifest, different
+		depth. Which host lets you control what is measured, host by host, in the
+		<a href="https://github.com/sv-pro/ai2rules/blob/main/docs/GOVERNABILITY-INDEX.md"
+			>Agent Governability Index</a
+		> — including the parameters where our own integration scores badly.
+	</p>
+
+	<h3>What it is not</h3>
+
+	<p>
+		It is a decision layer, not a sandbox. It rules on an action before it happens; it
+		does not confine a process that is already running, and it cannot stop a tool that
+		never asks. Command classification reads shell strings, which is a heuristic — the
+		safety comes from unmatched commands falling into a fail-closed bucket, not from
+		the patterns being exhaustive. If you need containment, you need containment. The
+		full list of what this does not protect against, kept current rather than
+		flattering, is in
+		<a href="https://github.com/sv-pro/ai2rules/blob/main/SECURITY.md">SECURITY.md</a>.
+	</p>
+
+	<h3>How it is built</h3>
+
+	<p>
+		The harness governs its own development: the manifest in this repository is the one
+		applied to the agents working on it, so a weakness in the kernel is a weakness the
+		project runs on. That has caught real defects — a policy that two hosts silently
+		disagreed about, a taint marker that stopped being written when a directory was
+		read-only, an in-browser demo quietly running a two-month-old engine.
+	</p>
+
+	<p>
+		Findings against our own kernel get a number, a fix, and a written record, whether
+		they came from outside or from us. Every design decision, including the ones later
+		reversed, is in
+		<a href="https://github.com/sv-pro/ai2rules/blob/main/DECISIONS.md">DECISIONS.md</a>
+		with the alternatives that were rejected and why. That trail is the point: a
+		security tool you are asked to trust should be one you can audit instead.
 	</p>
 </Layout>
