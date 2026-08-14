@@ -115,6 +115,16 @@ fn run_with_timeout(spec: &ExecutionSpec, argv: &[String]) -> Result<ExecOutput,
         }
     }
 
+    // Put the child in its own process group so a timeout can kill everything it
+    // spawned, not just the process we hold a handle to (finding #11). With
+    // `process_group(0)` the child becomes group leader and its pgid equals its
+    // pid, so the group is exactly this command's descendants.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     let mut child = command.spawn().map_err(|e| ExecError::Io(e.to_string()))?;
 
     let stdout = child.stdout.take();
@@ -135,7 +145,14 @@ fn run_with_timeout(spec: &ExecutionSpec, argv: &[String]) -> Result<ExecOutput,
                 });
             }
             None if Instant::now() >= deadline => {
-                let _ = child.kill();
+                // Kill the whole group, not just the direct child. Two things were
+                // wrong with `child.kill()` alone (finding #11): a timed-out command
+                // could leave `sleep 300 &` running indefinitely, and any surviving
+                // descendant still holding the inherited stdout/stderr pipes meant
+                // the reader threads never saw EOF — so `out_reader.join()` below
+                // could block forever, hanging the executor on the very path meant
+                // to bound it.
+                kill_tree(&mut child);
                 let _ = child.wait();
                 let _ = out_reader.join();
                 let _ = err_reader.join();
@@ -146,6 +163,34 @@ fn run_with_timeout(spec: &ExecutionSpec, argv: &[String]) -> Result<ExecOutput,
             None => std::thread::sleep(POLL_INTERVAL),
         }
     }
+}
+
+/// Kill a timed-out command and everything it spawned.
+///
+/// Unix: signal the process group created at spawn. The safe `nix` wrapper is
+/// used rather than a raw `libc::killpg` so the workspace stays free of `unsafe`.
+/// `SIGKILL` rather than `SIGTERM` because this path has already waited out the
+/// command's whole timeout budget — there is no grace period left to offer.
+#[cfg(unix)]
+fn kill_tree(child: &mut std::process::Child) {
+    use nix::sys::signal::{killpg, Signal};
+    use nix::unistd::Pid;
+
+    let pgid = Pid::from_raw(child.id() as i32);
+    // Best effort: the group may already be gone, which is the outcome we wanted.
+    let _ = killpg(pgid, Signal::SIGKILL);
+    // Still reap the direct child, and cover the case where the group call failed.
+    let _ = child.kill();
+}
+
+/// Non-Unix fallback: kill only the direct child.
+///
+/// Windows needs a Job Object to bound a process tree and the executor does not
+/// create one yet, so a timed-out command may still leave descendants there. The
+/// gap is real and stated rather than hidden.
+#[cfg(not(unix))]
+fn kill_tree(child: &mut std::process::Child) {
+    let _ = child.kill();
 }
 
 fn drain<R: Read>(pipe: Option<R>) -> String {

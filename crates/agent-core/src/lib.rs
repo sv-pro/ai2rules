@@ -343,6 +343,14 @@ mod tests {
         // (verbatim in the trusted request → provably clean-origin) is recovered,
         // while a fetch to a model-supplied URL is still denied by ambient taint.
         const GUIDE: &str = "https://docs.example/guide";
+        // `ExecEnv.network` is caller-supplied and defaults to `Disabled`; since
+        // finding #12 the web handler actually enforces it, so a test that means to
+        // exercise a real fetch has to grant the egress it expects to happen. That
+        // the default is closed is the point — before the fix it made no difference.
+        let env = ExecEnv {
+            network: harness_types::NetworkPolicy::AllowHosts(vec!["docs.example".into()]),
+            ..ExecEnv::default()
+        };
         let world = compile_default();
         let dir = tempfile::tempdir().unwrap();
         let trace = TraceStore::open(dir.path().join("t.jsonl"));
@@ -373,14 +381,7 @@ mod tests {
             ..SessionConfig::default()
         };
         let outcome = run(
-            &world,
-            &ExecEnv::default(),
-            &executor,
-            &trace,
-            &mut store,
-            &mut model,
-            &config,
-            None,
+            &world, &env, &executor, &trace, &mut store, &mut model, &config, None,
         );
 
         assert_eq!(outcome.transcript[0].verdict, "ALLOW"); // retrieval

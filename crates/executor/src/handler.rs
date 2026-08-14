@@ -60,6 +60,11 @@ pub enum ExecError {
     /// execution — fail closed rather than run a subprocess unconstrained
     /// (finding #10 / D47). `Simulate` is unaffected.
     SandboxRequired { action: ActionName },
+    /// A web fetch was refused by the spec's `NetworkPolicy` — the policy was
+    /// `Disabled`, the host was not on the allowlist, or the URL resolved to a
+    /// loopback/link-local/private target (finding #12). The web handler owns its
+    /// own egress, so unlike a subprocess it can enforce this itself.
+    NetworkBlocked { url: String, reason: String },
     /// The operation payload did not match what the handler expected.
     BadOperation(String),
     /// An underlying I/O failure.
@@ -88,6 +93,9 @@ impl std::fmt::Display for ExecError {
             }
             ExecError::Timeout { timeout_ms } => {
                 write!(f, "command exceeded timeout of {timeout_ms} ms")
+            }
+            ExecError::NetworkBlocked { url, reason } => {
+                write!(f, "network policy blocked {url}: {reason}")
             }
             ExecError::UnsupportedEffectMode(mode) => {
                 write!(f, "effect mode {mode:?} is not supported yet")

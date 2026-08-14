@@ -12,6 +12,30 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Security
+
+- **The web handler enforces the spec's `NetworkPolicy`** (finding #12, D65). It
+  previously fetched whatever URL the spec carried, so `NetworkPolicy::Disabled`
+  still made the request. `Disabled` now refuses and `AllowHosts` matches the URL's
+  real host — parsed so that userinfo cannot impersonate an allowed host
+  (`https://docs.example@evil.example/`), with loopback, link-local and private
+  targets requiring an explicit allowlist entry rather than being reachable through
+  a broad one. **Note:** `ExecEnv.network` defaults to `Disabled` and nothing sets
+  it, so a caller that wants a web fetch must now grant the egress. That the field
+  was inert is why nobody noticed it was unconfigured.
+- **A timed-out command takes its descendants with it** (finding #11, D65).
+  `child.kill()` signalled only the direct child, so `sleep 300 &` outlived its
+  parent's timeout — and a surviving descendant holding the inherited stdout pipe
+  meant the reader thread never saw EOF, so the timeout path could block forever
+  instead of bounding anything. The child now gets its own process group and the
+  group is killed. Windows still lacks a Job Object and is documented as such.
+- **`hero-mcp` defaults to `HERO_ELICIT=require`** (finding #18). It defaulted to
+  `auto`, so a host with no elicitation channel silently satisfied the human gate
+  and let caller-controlled prompt content drive the already-authenticated `agy`.
+  An approval that cannot reach a human is a denial. The spawned `agy` also
+  inherits an allowlisted environment rather than the whole shell's, so a
+  prompt-injection surface cannot reach cloud keys or registry tokens.
+
 ## [0.3.0] — 2026-08-14
 
 A security release, and the first with breaking changes. All three come from one

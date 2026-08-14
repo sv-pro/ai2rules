@@ -176,6 +176,32 @@ mod tests {
         )
     }
 
+    /// As [`spec`], with an explicit network policy — the default `spec` keeps
+    /// `NetworkPolicy::Disabled`, which is the fail-closed default every
+    /// non-network test wants.
+    #[allow(clippy::too_many_arguments)]
+    fn spec_with_network(
+        action: &str,
+        operation: Operation,
+        cwd: &Path,
+        hash: &str,
+        effect: EffectMode,
+        network: NetworkPolicy,
+    ) -> ExecutionSpec {
+        ExecutionSpec::new(
+            ActionName::new(action),
+            operation,
+            cwd.to_path_buf(),
+            EnvPolicy::default(),
+            1_000,
+            network,
+            FilesystemPolicy::default(),
+            DescriptorHash::new(hash),
+            effect,
+            TraceId::new("t"),
+        )
+    }
+
     fn read_executor() -> Executor {
         Executor::builder()
             .register(
@@ -467,6 +493,78 @@ mod tests {
         assert!(matches!(exec.run(&s), Err(ExecError::Timeout { .. })));
     }
 
+    /// Finding #11: a timed-out command must take its descendants with it.
+    ///
+    /// The command backgrounds a grandchild that writes a marker after a delay,
+    /// then sleeps past the timeout. If the kill only reached the direct child,
+    /// the grandchild survives and the marker appears. The assertion is the
+    /// absence of that file, checked after the moment it would have been written.
+    #[cfg(unix)]
+    #[test]
+    fn a_timed_out_command_kills_its_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("grandchild-survived");
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("run_command"),
+                DescriptorHash::new(HASH),
+                Box::new(CommandHandler::unconfined()),
+            )
+            .build();
+        let script = format!("( sleep 1; echo alive > {} ) & sleep 30", marker.display());
+        let s = spec(
+            "run_command",
+            Operation::Argv(vec!["sh".into(), "-c".into(), script]),
+            dir.path(),
+            vec![],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            200,
+        );
+        assert!(matches!(exec.run(&s), Err(ExecError::Timeout { .. })));
+
+        // Past the point the grandchild would have written its marker.
+        std::thread::sleep(std::time::Duration::from_millis(1_800));
+        assert!(
+            !marker.exists(),
+            "a descendant of the timed-out command survived and kept running"
+        );
+    }
+
+    /// The same shape, checking the second half of finding #11: a descendant
+    /// holding the inherited stdout pipe used to keep the reader thread from ever
+    /// seeing EOF, so the timeout path could block forever instead of returning.
+    #[cfg(unix)]
+    #[test]
+    fn a_timed_out_command_returns_even_when_a_descendant_holds_the_pipe() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("run_command"),
+                DescriptorHash::new(HASH),
+                Box::new(CommandHandler::unconfined()),
+            )
+            .build();
+        // The backgrounded grandchild inherits stdout and holds it open for 30s.
+        let s = spec(
+            "run_command",
+            Operation::Argv(vec!["sh".into(), "-c".into(), "sleep 30 & sleep 30".into()]),
+            dir.path(),
+            vec![],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            200,
+        );
+        let started = std::time::Instant::now();
+        assert!(matches!(exec.run(&s), Err(ExecError::Timeout { .. })));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "the timeout path blocked on a pipe held open by a descendant"
+        );
+    }
+
     // Regression for finding #10 (D47): with the fail-closed default handler and
     // no OS sandbox, a command must NOT Execute — the executor can't confine a
     // subprocess's network/filesystem access, so it refuses before spawning.
@@ -593,33 +691,74 @@ mod tests {
         }
     }
 
-    #[test]
-    fn web_handler_returns_tainted_content() {
-        let dir = tempfile::tempdir().unwrap();
-        let fetcher = MockWebFetcher::new().with("https://x", "hello web");
-        let exec = Executor::builder()
+    fn web_executor() -> Executor {
+        let fetcher = MockWebFetcher::new().with("https://docs.example/g", "hello web");
+        Executor::builder()
             .register(
                 ActionName::new("fetch_web"),
                 DescriptorHash::new(HASH),
                 Box::new(WebHandler::new(Box::new(fetcher))),
             )
-            .build();
-        let s = spec(
+            .build()
+    }
+
+    #[test]
+    fn web_handler_returns_tainted_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = spec_with_network(
             "fetch_web",
-            Operation::Structured(json!({"url": "https://x"})),
+            Operation::Structured(json!({"url": "https://docs.example/g"})),
             dir.path(),
-            vec![],
-            vec![],
             HASH,
             EffectMode::Execute,
-            1_000,
+            NetworkPolicy::AllowHosts(vec!["docs.example".to_string()]),
         );
-        let out = exec.run(&s).unwrap();
+        let out = web_executor().run(&s).unwrap();
         assert!(out.taint.is_tainted());
         match out.value {
             ExecOutput::External { content, .. } => assert_eq!(content, "hello web"),
             other => panic!("expected External, got {other:?}"),
         }
+    }
+
+    /// Finding #12. This test previously existed in the inverse: the suite fetched
+    /// a URL under `NetworkPolicy::Disabled` and asserted it succeeded, which
+    /// pinned the vulnerability rather than the policy.
+    #[test]
+    fn web_handler_refuses_a_fetch_when_network_is_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = spec_with_network(
+            "fetch_web",
+            Operation::Structured(json!({"url": "https://docs.example/g"})),
+            dir.path(),
+            HASH,
+            EffectMode::Execute,
+            NetworkPolicy::Disabled,
+        );
+        let err = web_executor()
+            .run(&s)
+            .expect_err("Disabled must refuse the fetch");
+        assert!(
+            matches!(err, ExecError::NetworkBlocked { .. }),
+            "expected NetworkBlocked, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn web_handler_refuses_a_host_outside_the_allowlist() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = spec_with_network(
+            "fetch_web",
+            Operation::Structured(json!({"url": "https://docs.example/g"})),
+            dir.path(),
+            HASH,
+            EffectMode::Execute,
+            NetworkPolicy::AllowHosts(vec!["other.example".to_string()]),
+        );
+        let err = web_executor()
+            .run(&s)
+            .expect_err("unlisted host must be refused");
+        assert!(matches!(err, ExecError::NetworkBlocked { .. }), "{err:?}");
     }
 
     #[test]
