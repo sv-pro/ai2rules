@@ -1,6 +1,6 @@
 {
   "name": "ai2rules-harness-linux-x64",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Prebuilt `harness` binary for linux-x64. Installed automatically as an optional dependency of ai2rules-harness; not meant to be depended on directly.",
   "license": "MIT OR Apache-2.0",
   "repository": {

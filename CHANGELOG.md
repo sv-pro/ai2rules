@@ -12,6 +12,23 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-14
+
+Closes the last of the Codex-scan P2 findings. A minor bump rather than a patch
+because an existing approval log will no longer load — deliberately, since an
+unsigned entry cannot be told apart from a forged one.
+
+### Migration
+
+**If you have an approval log, delete it.** It lives beside your session state as
+`approvals.jsonl`; removing it is safe and the only consequence is that any
+approval still in force gets asked again. A key file is generated next to the new
+log on first use — keep it `0600` and owned by you, or the store will refuse to
+open rather than trust a key someone else can read.
+
+Nothing else changes. The hook adapters, the gate ABI and manifest validation are
+untouched by this release.
+
 ### Security
 
 - **The approval log is signed, and approvals are bound to the policy that granted
@@ -302,7 +319,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sv-pro/ai2rules/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/sv-pro/ai2rules/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/sv-pro/ai2rules/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/sv-pro/ai2rules/compare/v0.2.1...v0.2.2
