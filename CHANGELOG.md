@@ -12,6 +12,15 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-08-15
+
+Closes the security sweep: with this release there are no open findings against
+the kernel, the adapters, the distribution or the workflows. Everything here is
+either a hardening of the supply chain around the binary or a limit that turned
+out to be self-inflicted.
+
+Nothing in it is breaking.
+
 ### Security
 
 - **Every GitHub Action is pinned to a commit SHA** (finding #25). They were on
@@ -28,13 +37,6 @@ there is one, so anything here can be traced to the reasoning in
   a PR, or publishes. `release.yml` keeps its per-job scopes, which it genuinely
   needs.
 
-### Fixed
-
-- **The npm launcher reports how the harness actually ended** (finding #26). A
-  child killed by a signal exited `1`, so a caller could not tell "the harness
-  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
-  convention: SIGINT gives 130 and SIGTERM 143.
-
 ### Added
 
 - **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
@@ -49,6 +51,10 @@ there is one, so anything here can be traced to the reasoning in
 
 ### Fixed
 
+- **The npm launcher reports how the harness actually ended** (finding #26). A
+  child killed by a signal exited `1`, so a caller could not tell "the harness
+  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
+  convention: SIGINT gives 130 and SIGTERM 143.
 - **A schema-bearing action is usable from every host** (finding #23/#27, D68).
   Adapters aliased host argument keys by *adding* the neutral key and keeping the
   host spelling, and object schemas are closed by default — so the adapter injected
@@ -566,7 +572,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sv-pro/ai2rules/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/sv-pro/ai2rules/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/sv-pro/ai2rules/compare/v0.2.2...v0.3.0
