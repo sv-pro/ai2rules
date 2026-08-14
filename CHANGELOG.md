@@ -12,6 +12,19 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-08-14
+
+Finishes the P2 sweep from the self-review: four security fixes, each closing a
+control that was present and enforcing nothing, plus a pinned toolchain so "the
+checks pass" means the same thing here as it does in CI.
+
+**One behaviour change worth knowing before you upgrade.** The web handler now
+honours the network policy it was always given, and `ExecEnv.network` defaults to
+`Disabled` — so if you drive the in-process agent loop and expect a web fetch to
+work, you must now grant the egress explicitly. The deployed hook adapters
+(`cc-hook`, `agy-hook`, `gate`) are decision-only and never execute, so they are
+unaffected. Nothing else here takes away a capability that worked before.
+
 ### Changed
 
 - **The Rust toolchain is pinned** in `rust-toolchain.toml`. CI resolved
@@ -271,7 +284,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/sv-pro/ai2rules/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/sv-pro/ai2rules/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/sv-pro/ai2rules/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/sv-pro/ai2rules/compare/v0.2.0...v0.2.1
