@@ -12,6 +12,29 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Security
+
+- **Every GitHub Action is pinned to a commit SHA** (finding #25). They were on
+  mutable refs — `@v4`, `@v2`, and `dtolnay/rust-toolchain@stable`, which is a
+  *branch*. That matters more here than in most repositories: `release.yml` holds
+  `contents: write` and `id-token: write`, which together are npm publish authority
+  via OIDC, so a retagged or compromised action could mint a release. Pinned to the
+  SHAs those refs resolved to today, with the version in a trailing comment.
+  Dependabot is configured for `github-actions` so the pins keep moving — pinning
+  without an update path trades one kind of rot for another.
+- **CI declares `permissions: contents: read`** (finding #24). It had no
+  `permissions:` block, so every job inherited the repository default, which is
+  write in many configurations. Nothing in CI writes to the repository, comments on
+  a PR, or publishes. `release.yml` keeps its per-job scopes, which it genuinely
+  needs.
+
+### Fixed
+
+- **The npm launcher reports how the harness actually ended** (finding #26). A
+  child killed by a signal exited `1`, so a caller could not tell "the harness
+  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
+  convention: SIGINT gives 130 and SIGTERM 143.
+
 ### Added
 
 - **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
@@ -218,6 +241,29 @@ linter, and five passing CI jobs. Full write-up:
 directory might not be writable.** Both failures below are silent by construction:
 nothing in a session tells you the governance stopped applying.
 
+### Security
+
+- **Every GitHub Action is pinned to a commit SHA** (finding #25). They were on
+  mutable refs — `@v4`, `@v2`, and `dtolnay/rust-toolchain@stable`, which is a
+  *branch*. That matters more here than in most repositories: `release.yml` holds
+  `contents: write` and `id-token: write`, which together are npm publish authority
+  via OIDC, so a retagged or compromised action could mint a release. Pinned to the
+  SHAs those refs resolved to today, with the version in a trailing comment.
+  Dependabot is configured for `github-actions` so the pins keep moving — pinning
+  without an update path trades one kind of rot for another.
+- **CI declares `permissions: contents: read`** (finding #24). It had no
+  `permissions:` block, so every job inherited the repository default, which is
+  write in many configurations. Nothing in CI writes to the repository, comments on
+  a PR, or publishes. `release.yml` keeps its per-job scopes, which it genuinely
+  needs.
+
+### Fixed
+
+- **The npm launcher reports how the harness actually ended** (finding #26). A
+  child killed by a signal exited `1`, so a caller could not tell "the harness
+  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
+  convention: SIGINT gives 130 and SIGTERM 143.
+
 ### Added
 
 - **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
@@ -256,6 +302,29 @@ nothing in a session tells you the governance stopped applying.
   misdescribed the kernel rather than exposing it — a fidelity bug, not an
   exploitable one.
 
+### Security
+
+- **Every GitHub Action is pinned to a commit SHA** (finding #25). They were on
+  mutable refs — `@v4`, `@v2`, and `dtolnay/rust-toolchain@stable`, which is a
+  *branch*. That matters more here than in most repositories: `release.yml` holds
+  `contents: write` and `id-token: write`, which together are npm publish authority
+  via OIDC, so a retagged or compromised action could mint a release. Pinned to the
+  SHAs those refs resolved to today, with the version in a trailing comment.
+  Dependabot is configured for `github-actions` so the pins keep moving — pinning
+  without an update path trades one kind of rot for another.
+- **CI declares `permissions: contents: read`** (finding #24). It had no
+  `permissions:` block, so every job inherited the repository default, which is
+  write in many configurations. Nothing in CI writes to the repository, comments on
+  a PR, or publishes. `release.yml` keeps its per-job scopes, which it genuinely
+  needs.
+
+### Fixed
+
+- **The npm launcher reports how the harness actually ended** (finding #26). A
+  child killed by a signal exited `1`, so a caller could not tell "the harness
+  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
+  convention: SIGINT gives 130 and SIGTERM 143.
+
 ### Added
 
 - `SECURITY.md` — reporting channel, and an explicit statement of what the harness
@@ -292,6 +361,29 @@ Unreleased, above.)
 
 No user-facing change. The entire release is the publish path, and all three fixes
 came from it failing in ways nothing else would have caught.
+
+### Security
+
+- **Every GitHub Action is pinned to a commit SHA** (finding #25). They were on
+  mutable refs — `@v4`, `@v2`, and `dtolnay/rust-toolchain@stable`, which is a
+  *branch*. That matters more here than in most repositories: `release.yml` holds
+  `contents: write` and `id-token: write`, which together are npm publish authority
+  via OIDC, so a retagged or compromised action could mint a release. Pinned to the
+  SHAs those refs resolved to today, with the version in a trailing comment.
+  Dependabot is configured for `github-actions` so the pins keep moving — pinning
+  without an update path trades one kind of rot for another.
+- **CI declares `permissions: contents: read`** (finding #24). It had no
+  `permissions:` block, so every job inherited the repository default, which is
+  write in many configurations. Nothing in CI writes to the repository, comments on
+  a PR, or publishes. `release.yml` keeps its per-job scopes, which it genuinely
+  needs.
+
+### Fixed
+
+- **The npm launcher reports how the harness actually ended** (finding #26). A
+  child killed by a signal exited `1`, so a caller could not tell "the harness
+  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
+  convention: SIGINT gives 130 and SIGTERM 143.
 
 ### Added
 
@@ -334,6 +426,29 @@ came from it failing in ways nothing else would have caught.
 - The Windows platform package is named `…-windows-x64`; `win32` in an unscoped
   name is rejected by npm's spam filter.
 
+### Security
+
+- **Every GitHub Action is pinned to a commit SHA** (finding #25). They were on
+  mutable refs — `@v4`, `@v2`, and `dtolnay/rust-toolchain@stable`, which is a
+  *branch*. That matters more here than in most repositories: `release.yml` holds
+  `contents: write` and `id-token: write`, which together are npm publish authority
+  via OIDC, so a retagged or compromised action could mint a release. Pinned to the
+  SHAs those refs resolved to today, with the version in a trailing comment.
+  Dependabot is configured for `github-actions` so the pins keep moving — pinning
+  without an update path trades one kind of rot for another.
+- **CI declares `permissions: contents: read`** (finding #24). It had no
+  `permissions:` block, so every job inherited the repository default, which is
+  write in many configurations. Nothing in CI writes to the repository, comments on
+  a PR, or publishes. `release.yml` keeps its per-job scopes, which it genuinely
+  needs.
+
+### Fixed
+
+- **The npm launcher reports how the harness actually ended** (finding #26). A
+  child killed by a signal exited `1`, so a caller could not tell "the harness
+  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
+  convention: SIGINT gives 130 and SIGTERM 143.
+
 ### Added
 
 - **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
@@ -354,6 +469,29 @@ came from it failing in ways nothing else would have caught.
 
 Three defects found by real use, all the same shape: the enforcement depending on
 something the thing being enforced upon could reach.
+
+### Security
+
+- **Every GitHub Action is pinned to a commit SHA** (finding #25). They were on
+  mutable refs — `@v4`, `@v2`, and `dtolnay/rust-toolchain@stable`, which is a
+  *branch*. That matters more here than in most repositories: `release.yml` holds
+  `contents: write` and `id-token: write`, which together are npm publish authority
+  via OIDC, so a retagged or compromised action could mint a release. Pinned to the
+  SHAs those refs resolved to today, with the version in a trailing comment.
+  Dependabot is configured for `github-actions` so the pins keep moving — pinning
+  without an update path trades one kind of rot for another.
+- **CI declares `permissions: contents: read`** (finding #24). It had no
+  `permissions:` block, so every job inherited the repository default, which is
+  write in many configurations. Nothing in CI writes to the repository, comments on
+  a PR, or publishes. `release.yml` keeps its per-job scopes, which it genuinely
+  needs.
+
+### Fixed
+
+- **The npm launcher reports how the harness actually ended** (finding #26). A
+  child killed by a signal exited `1`, so a caller could not tell "the harness
+  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
+  convention: SIGINT gives 130 and SIGTERM 143.
 
 ### Added
 
@@ -381,6 +519,29 @@ something the thing being enforced upon could reach.
   tarball.
 
 ## [0.1.1] — 2026-08-09
+
+### Security
+
+- **Every GitHub Action is pinned to a commit SHA** (finding #25). They were on
+  mutable refs — `@v4`, `@v2`, and `dtolnay/rust-toolchain@stable`, which is a
+  *branch*. That matters more here than in most repositories: `release.yml` holds
+  `contents: write` and `id-token: write`, which together are npm publish authority
+  via OIDC, so a retagged or compromised action could mint a release. Pinned to the
+  SHAs those refs resolved to today, with the version in a trailing comment.
+  Dependabot is configured for `github-actions` so the pins keep moving — pinning
+  without an update path trades one kind of rot for another.
+- **CI declares `permissions: contents: read`** (finding #24). It had no
+  `permissions:` block, so every job inherited the repository default, which is
+  write in many configurations. Nothing in CI writes to the repository, comments on
+  a PR, or publishes. `release.yml` keeps its per-job scopes, which it genuinely
+  needs.
+
+### Fixed
+
+- **The npm launcher reports how the harness actually ended** (finding #26). A
+  child killed by a signal exited `1`, so a caller could not tell "the harness
+  failed" from "the user pressed Ctrl-C". It now exits `128 + signum`, the shell
+  convention: SIGINT gives 130 and SIGTERM 143.
 
 ### Added
 

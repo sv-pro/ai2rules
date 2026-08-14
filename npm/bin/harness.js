@@ -14,6 +14,7 @@
 // AI2RULES_HARNESS to an absolute path and it is used verbatim.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -64,5 +65,13 @@ const res = spawnSync(bin, process.argv.slice(2), { stdio: 'inherit' });
 if (res.error) {
   console.error(`ai2rules-harness: cannot execute ${bin} (via ${how}): ${res.error.message}`);
   process.exit(126);
+}
+// Propagate how the harness actually ended. When a child dies from a signal,
+// `status` is null and `signal` holds the name — exiting 1 there would tell a
+// caller "the harness failed" when the truth is "the user pressed Ctrl-C", and a
+// script cannot tell those apart. The shell convention is 128 + the signal number.
+if (res.signal) {
+  const num = os.constants.signals[res.signal];
+  process.exit(num ? 128 + num : 1);
 }
 process.exit(res.status === null ? 1 : res.status);

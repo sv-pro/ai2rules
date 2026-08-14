@@ -1,0 +1,20 @@
+# Keep the SHA-pinned actions moving.
+#
+# Pinning without an update path just trades one kind of rot for another: an
+# unpinned tag silently changes under you, a pinned SHA silently stops receiving
+# fixes. Dependabot understands the `uses: owner/repo@<sha> # vX` form and bumps
+# both the SHA and the comment, so the pin stays deliberate rather than becoming
+# an artefact of the day it was written.
+#
+# Actions only, for now. The Cargo workspace pins versions to what the offline
+# crate cache holds, so automated bumps there would open PRs that cannot build
+# here; that wants a decision about the offline story first, not a bot.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
