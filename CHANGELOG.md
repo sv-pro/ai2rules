@@ -12,6 +12,18 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Added
+
+- **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
+  `user_prompt` — the most-trusted channel — for every call, so the manifest's
+  `channels:` table did nothing on a live host. It cannot be *derived*: a PreToolUse
+  event says what is about to run, never who asked for it, on either host. It can
+  be *declared*, so an unattended session can be run at a lower trust and lose
+  capability accordingly — against the live world, a `Write` is allowed by default
+  and ABSENT under `--source-channel web_fetch`, while a `Read` still passes.
+  Default is unchanged, so existing installs behave identically. Data-flow taint
+  remains the control that does the real work here, and applies either way.
+
 ### Fixed
 
 - **A schema-bearing action is usable from every host** (finding #23/#27, D68).
@@ -206,6 +218,18 @@ linter, and five passing CI jobs. Full write-up:
 directory might not be writable.** Both failures below are silent by construction:
 nothing in a session tells you the governance stopped applying.
 
+### Added
+
+- **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
+  `user_prompt` — the most-trusted channel — for every call, so the manifest's
+  `channels:` table did nothing on a live host. It cannot be *derived*: a PreToolUse
+  event says what is about to run, never who asked for it, on either host. It can
+  be *declared*, so an unattended session can be run at a lower trust and lose
+  capability accordingly — against the live world, a `Write` is allowed by default
+  and ABSENT under `--source-channel web_fetch`, while a `Read` still passes.
+  Default is unchanged, so existing installs behave identically. Data-flow taint
+  remains the control that does the real work here, and applies either way.
+
 ### Fixed
 
 - **An unrecordable taint escalation is no longer allowed** (finding #16, D59).
@@ -269,6 +293,18 @@ Unreleased, above.)
 No user-facing change. The entire release is the publish path, and all three fixes
 came from it failing in ways nothing else would have caught.
 
+### Added
+
+- **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
+  `user_prompt` — the most-trusted channel — for every call, so the manifest's
+  `channels:` table did nothing on a live host. It cannot be *derived*: a PreToolUse
+  event says what is about to run, never who asked for it, on either host. It can
+  be *declared*, so an unattended session can be run at a lower trust and lose
+  capability accordingly — against the live world, a `Write` is allowed by default
+  and ABSENT under `--source-channel web_fetch`, while a `Read` still passes.
+  Default is unchanged, so existing installs behave identically. Data-flow taint
+  remains the control that does the real work here, and applies either way.
+
 ### Fixed
 
 - npm dist-tags are derived from the version, so a prerelease can no longer become
@@ -298,6 +334,18 @@ came from it failing in ways nothing else would have caught.
 - The Windows platform package is named `…-windows-x64`; `win32` in an unscoped
   name is rejected by npm's spam filter.
 
+### Added
+
+- **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
+  `user_prompt` — the most-trusted channel — for every call, so the manifest's
+  `channels:` table did nothing on a live host. It cannot be *derived*: a PreToolUse
+  event says what is about to run, never who asked for it, on either host. It can
+  be *declared*, so an unattended session can be run at a lower trust and lose
+  capability accordingly — against the live world, a `Write` is allowed by default
+  and ABSENT under `--source-channel web_fetch`, while a `Read` still passes.
+  Default is unchanged, so existing installs behave identically. Data-flow taint
+  remains the control that does the real work here, and applies either way.
+
 ### Fixed
 
 - npm publishing is idempotent after a partial failure.
@@ -306,6 +354,18 @@ came from it failing in ways nothing else would have caught.
 
 Three defects found by real use, all the same shape: the enforcement depending on
 something the thing being enforced upon could reach.
+
+### Added
+
+- **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
+  `user_prompt` — the most-trusted channel — for every call, so the manifest's
+  `channels:` table did nothing on a live host. It cannot be *derived*: a PreToolUse
+  event says what is about to run, never who asked for it, on either host. It can
+  be *declared*, so an unattended session can be run at a lower trust and lose
+  capability accordingly — against the live world, a `Write` is allowed by default
+  and ABSENT under `--source-channel web_fetch`, while a `Read` still passes.
+  Default is unchanged, so existing installs behave identically. Data-flow taint
+  remains the control that does the real work here, and applies either way.
 
 ### Fixed
 
@@ -321,6 +381,18 @@ something the thing being enforced upon could reach.
   tarball.
 
 ## [0.1.1] — 2026-08-09
+
+### Added
+
+- **`--source-channel` on both host adapters** (finding #22, D69). They hardcoded
+  `user_prompt` — the most-trusted channel — for every call, so the manifest's
+  `channels:` table did nothing on a live host. It cannot be *derived*: a PreToolUse
+  event says what is about to run, never who asked for it, on either host. It can
+  be *declared*, so an unattended session can be run at a lower trust and lose
+  capability accordingly — against the live world, a `Write` is allowed by default
+  and ABSENT under `--source-channel web_fetch`, while a `Read` still passes.
+  Default is unchanged, so existing installs behave identically. Data-flow taint
+  remains the control that does the real work here, and applies either way.
 
 ### Fixed
 

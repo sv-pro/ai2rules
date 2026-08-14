@@ -53,6 +53,7 @@ pub fn run(
     world_path: &Path,
     state_dir: &Path,
     mode: &str,
+    source_channel: &str,
     enforce_absent: bool,
     grant: bool,
 ) -> i32 {
@@ -122,7 +123,10 @@ pub fn run(
             session_id: sid,
             mode: Some(mode.to_string()),
             taint: Some(if tainted { "tainted" } else { "clean" }.to_string()),
-            source_channel: Some("user_prompt".to_string()),
+            // Declared by the operator, not inferred from the event (finding #22):
+            // a PreToolUse payload says what is about to run, never who asked for
+            // it. See the `--source-channel` flag's documentation.
+            source_channel: Some(source_channel.to_string()),
             approval_token: None,
             usage: carried_usage,
         },

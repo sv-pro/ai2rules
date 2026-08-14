@@ -162,6 +162,61 @@ fn unwritable_taint_sidecar_still_passes_a_clean_read_through() {
     assert!(out.trim().is_empty(), "unexpected output: {out:?}");
 }
 
+/// Finding #22: the channel cannot be derived from a PreToolUse event — it says
+/// what is about to run, never who asked — but it can be *declared*, which turns
+/// an inert field into a posture control. An unattended session can be run at a
+/// lower trust so the capability matrix shrinks.
+#[test]
+fn a_lower_trust_source_channel_shrinks_the_capability_surface() {
+    let dir = tempfile::tempdir().unwrap();
+    let write = json!({"tool_name":"Write","tool_input":{"file_path":"/tmp/x"},"session_id":"sc1"});
+
+    // Default posture: the live world trusts `user_prompt`, so a write is allowed.
+    let out = run_hook_args(dir.path(), &write, &["--grant"]);
+    assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
+
+    // Declared as an untrusted channel, the same call is not merely denied — it is
+    // ABSENT, outside what that trust level can even express.
+    let out = run_hook_args(
+        dir.path(),
+        &write,
+        &[
+            "--grant",
+            "--enforce-absent",
+            "--source-channel",
+            "web_fetch",
+        ],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
+
+    // …while a read, which that trust level *can* perform, still goes through.
+    let read = json!({"tool_name":"Read","tool_input":{"file_path":"/tmp/x"},"session_id":"sc2"});
+    let out = run_hook_args(
+        dir.path(),
+        &read,
+        &[
+            "--grant",
+            "--enforce-absent",
+            "--source-channel",
+            "web_fetch",
+        ],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
+}
+
+/// A channel the world does not declare fails closed rather than falling back to
+/// a trusted default.
+#[test]
+fn an_undeclared_source_channel_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = run_hook_args(
+        dir.path(),
+        &json!({"tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"sc3"}),
+        &["--grant", "--source-channel", "not_a_channel"],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
+}
+
 #[test]
 fn tainted_egress_is_denied_by_the_taint_floor() {
     let dir = tempfile::tempdir().unwrap();

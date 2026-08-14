@@ -129,6 +129,21 @@ enum Command {
         /// everything outside the manifest would brick the host.
         #[arg(long)]
         enforce_absent: bool,
+        /// The manifest channel this session's tool calls are attributed to —
+        /// the proposing actor's trust, resolved against the world's `channels:`
+        /// table.
+        ///
+        /// **Declared, not derived (finding #22).** A PreToolUse event says what
+        /// tool is about to run, never who asked for it: Claude Code sends
+        /// `tool_name`/`tool_input`/`permission_mode`, Antigravity sends
+        /// `toolCall`/`modelName`/`stepIdx`. Neither identifies the proposer, so an
+        /// adapter that claimed to know would be guessing. What it can do is let
+        /// you *state* the posture: run a supervised session as `user_prompt`, and
+        /// an unattended one as a lower-trust channel so the capability matrix
+        /// shrinks accordingly. Data-flow taint is enforced either way and does not
+        /// depend on this.
+        #[arg(long, default_value = "user_prompt")]
+        source_channel: String,
         /// Replace mode: emit an explicit `allow` on ALLOW verdicts, which
         /// *grants* — Claude Code skips its Allow/Deny prompt — so the manifest
         /// is the authoritative allowlist, not an additive overlay. Pair with an
@@ -159,6 +174,19 @@ enum Command {
         /// everything outside the manifest would brick the host.
         #[arg(long)]
         enforce_absent: bool,
+        /// The manifest channel this session's tool calls are attributed to —
+        /// the proposing actor's trust, resolved against the world's `channels:`
+        /// table.
+        ///
+        /// **Declared, not derived (finding #22).** An Antigravity PreToolUse
+        /// payload carries `toolCall`, `modelName` and `stepIdx` — what is about to
+        /// run, never who asked for it — so an adapter claiming to know the
+        /// proposer would be guessing. What it can do is let you *state* the
+        /// posture: a supervised session as `user_prompt`, an unattended one as a
+        /// lower-trust channel so the capability matrix shrinks accordingly.
+        /// Data-flow taint is enforced either way and does not depend on this.
+        #[arg(long, default_value = "user_prompt")]
+        source_channel: String,
         /// Replace mode: emit an explicit `allow` on ALLOW verdicts, which
         /// *grants* — Antigravity skips its permission prompt — so the manifest
         /// is the authoritative allowlist, not an additive overlay. Default off:
@@ -302,17 +330,26 @@ fn main() {
         world,
         state,
         mode,
+        source_channel,
         enforce_absent,
         grant,
     }) = &cli.command
     {
-        std::process::exit(cc_hook::run(world, state, mode, *enforce_absent, *grant));
+        std::process::exit(cc_hook::run(
+            world,
+            state,
+            mode,
+            source_channel,
+            *enforce_absent,
+            *grant,
+        ));
     }
 
     if let Some(Command::AgyHook {
         world,
         state,
         mode,
+        source_channel,
         enforce_absent,
         grant,
         soft_ask,
@@ -322,6 +359,7 @@ fn main() {
             world,
             state,
             mode,
+            source_channel,
             *enforce_absent,
             *grant,
             *soft_ask,

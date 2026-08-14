@@ -105,11 +105,15 @@ false context yourself is not.
 
 Live limitations we would rather write down than have someone find:
 
-- **`source_channel` is pinned to `user_prompt` on live hosts.** The channel-trust
-  machinery exists and works, but both shipped adapters declare the most-trusted
-  channel for every call, including one the model proposed right after reading a
-  poisoned file. Data-flow taint still applies; channel trust currently does not.
-  Tracked as finding #21.
+- **`source_channel` is declared, not derived.** A PreToolUse event says what tool
+  is about to run, never who asked for it — Claude Code sends
+  `tool_name`/`tool_input`/`permission_mode`, Antigravity sends
+  `toolCall`/`modelName`/`stepIdx`. Neither identifies the proposer, so no adapter
+  can infer it honestly. Both adapters take `--source-channel` (default
+  `user_prompt`) so an operator can *state* the posture: run an unattended session
+  as a lower-trust channel and the capability matrix shrinks with it. Left at the
+  default, channel trust does no work — the load-bearing control for
+  "the model read something poisoned" is data-flow taint, which applies either way.
 - **A closed schema still refuses host-specific extra arguments.** Adapters now
   rename host argument keys into the manifest's vocabulary rather than adding a
   second copy (D68), so a schema declaring the neutral key works across hosts. What
