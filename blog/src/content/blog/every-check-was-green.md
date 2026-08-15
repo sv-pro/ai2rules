@@ -1,13 +1,12 @@
 ---
 title: 'Every Check Was Green. Five Guarantees Were Not.'
-description: "254 tests, zero clippy warnings, no unsafe, five CI jobs — all passing, and five real holes underneath. The worst one: our taint floor silently stopped working whenever a directory wasn't writable. Here is each hole, and the five different ways a check can be present and still prove nothing."
+description: "254 tests, zero clippy warnings, no unsafe, five CI jobs — all passing, and five real holes underneath. The worst one: our taint floor silently stopped working whenever a directory wasn't writable. Each hole, and the five ways a check can be present and prove nothing."
 pubDate: 'Aug 13 2026'
 heroImage: '../../assets/every-check-was-green.jpg'
 ---
 
 We build a tool that decides what an AI coding agent is allowed to do on your
-machine. Last week we pointed a full review at our own repository. Here is the
-state it was in when we started:
+machine. Last week we reviewed our own repository. Before we started it had:
 
 - 254 tests passing
 - `clippy -D warnings` clean
@@ -17,10 +16,10 @@ state it was in when we started:
 And five live defects, three of them security-relevant, one of them public for
 seven weeks.
 
-None of this is a story about sloppy code. Every hole sat inside something
-careful — a considered design, a written-down invariant, a test suite built for
-exactly this purpose. What we collected was five different ways a check can be
-present, look reassuring, and prove nothing.
+The code was not sloppy. Every hole sat inside something careful: a considered
+design, a written-down invariant, a test suite built for this exact purpose. We
+ended up with five ways a check can be present, look reassuring, and prove
+nothing.
 
 ## 1. The taint floor stopped working when a directory wasn't writable
 
@@ -64,12 +63,12 @@ is a governance tool people uninstall. We still believe that.
 
 But it applies to a specific thing: **failures to reach a decision.** Here the
 kernel reached the right decision. What failed was our ability to remember the
-consequence. At the call site those two look identical — both are just an error
-you could ignore — and that's why this hid so well. A governance failure was
-wearing a process failure's clothes.
+consequence. At the call site those two look identical: both are just an error
+you could ignore. That is why this hid so well. A governance failure was wearing
+a process failure's clothes.
 
 The fix distinguishes them. Writing the mark now reports whether it actually
-landed (durably — the next process has to read it back), and if it didn't, that
+landed (durably: the next process has to read it back), and if it didn't, that
 one call is refused:
 
 ```
@@ -104,12 +103,11 @@ on the way.
 
 The reason is one missing step: one adapter resolved policy paths through the
 filesystem before matching, the other compared them as text. A rule about
-`~/.ssh` stops matching a file whose real path is `/home/real/.ssh/...` — and a
+`~/.ssh` stops matching a file whose real path is `/home/real/.ssh/...`, and a
 `Deny` that stops matching doesn't fail loudly, it quietly falls through to
 whatever the default is.
 
-Here is the part that stings. The shared helper module the second adapter *did*
-use opens with this:
+The shared helper module the second adapter *did* use opens with this:
 
 > The path helpers carry the D46 hardening: action targets and manifest roots are
 > canonicalized **through the filesystem** at this adapter boundary… **Keep that
@@ -130,16 +128,15 @@ So the suite that exists to catch host divergence had never exercised the one
 feature where the hosts had diverged. A parity harness only covers what you feed
 it, and ours was starved.
 
-We've since added a path-scope case set — fourteen cases against a real temporary
+We've since added a path-scope case set: fourteen cases against a real temporary
 directory tree, because path rules are decided after resolving symlinks and a
 fixture made of imaginary paths pins imaginary behaviour. One rule deliberately
 points at a symlink; that rule is the tripwire.
 
-Then we did the thing that makes a test worth having: we put the bug back, twice,
-and watched the new tests fail. Writing that harness immediately turned up a
-third entry point with the same hole — our command-line interface had never
-resolved policy paths *at all*, so relative rules and `~` rules silently didn't
-bind for anyone driving it directly.
+Then we put the bug back, twice, and watched the new tests fail. Writing that
+harness immediately turned up a third entry point with the same hole: our
+command-line interface had never resolved policy paths *at all*, so relative
+rules and `~` rules silently didn't bind for anyone driving it directly.
 
 **A test that has never been seen to fail is a test with no evidence behind it.**
 
@@ -147,7 +144,7 @@ bind for anyone driving it directly.
 
 Our site has a playground that runs the real engine, compiled to WebAssembly, so
 you can try policies in the browser. That artifact is committed to the repository
-as a static asset — which means nothing ever rebuilt it.
+as a static asset, which means nothing ever rebuilt it.
 
 It was nine engine-affecting commits behind. It reported its version as `0.0.1`
 against a source tree at `0.2.1`. Seven weeks, every CI job green throughout, and
@@ -157,7 +154,7 @@ time.
 **A correction, because we got this wrong first.** The initial review claimed the
 stale playground was shipping seven unpatched security fixes to the browser. That
 was wrong. The WebAssembly build exports the *policy preview* function, not the
-decision function — so the vulnerable code paths were never in it. The playground
+decision function, so the vulnerable code paths were never in it. The playground
 wasn't exposing a hole; it was describing our engine inaccurately to anyone
 evaluating the project. A fidelity problem, not an exploit. Worth fixing, worth
 being precise about, and worth reporting rather than quietly deleting from the
@@ -182,14 +179,14 @@ window widens to match.
 "Build, then test" is precisely and only what CI does.
 
 So this wasn't a mild intermittent. It was a defect firing on roughly two of
-every five CI runs while being nearly invisible on a developer's machine — which
+every five CI runs while being nearly invisible on a developer's machine, which
 is *worse*, because the local evidence argues it away. It got promoted, then
 fixed.
 
-## What we'd take from this
+## Three rules worth stealing
 
 **An ignored error is a policy decision, made silently.** `let _ =`, a bare
-`except:`, an unchecked `err` — each one is a sentence that says "if this fails,
+`except:`, an unchecked `err`: each one is a sentence that says "if this fails,
 proceed as if it succeeded." Read a few of yours as that sentence and see how
 many you still agree with.
 
@@ -199,16 +196,15 @@ are the same shape. Every advisory security control that remembers something
 between invocations has this bug available to it.
 
 **An invariant nothing executes is a wish.** Three separate places in this
-repository said some version of "these must not diverge" — a comment, a
+repository said some version of "these must not diverge": a comment, a
 contributor guide, a conformance suite. All three had diverged. Prose describes
 intent; only a check that can fail defends it.
 
-One last thing, and it's the reason we're comfortable publishing all of this: not
-one of these five was in the kernel. The pure decision engine — the part that
-holds the actual policy logic — was correct throughout. Every hole was at an
-edge: an adapter, a build artifact, a case list, a test. That's the boundary the
-architecture was drawn to protect, and it held. We'd rather show you the evidence
-for that than the claim.
+None of these five was in the kernel, which is why we are comfortable publishing
+them. The pure decision engine, the part holding the actual policy logic, was
+correct throughout. Every hole was at an edge: an adapter, a build artifact, a
+case list, a test. That is the boundary the architecture was drawn to protect,
+and it held. We would rather show you the evidence for that than the claim.
 
 ---
 
