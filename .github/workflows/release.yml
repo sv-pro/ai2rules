@@ -212,32 +212,19 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "publishing $ver under dist-tag '$tag'"
 
+      # The same script `ci.yml`'s `release-dry-run` job runs on every pull
+      # request — deliberately shared rather than duplicated, so the rehearsal
+      # cannot drift from the performance. See the header of the script for why
+      # this stopped being an inline step.
       - name: Fill each platform package with its binary
         shell: bash
-        run: |
-          set -euo pipefail
-          for d in npm/platforms/*/; do
-            target="$(cat "$d/TARGET")"
-            case "$target" in
-              *windows*)
-                exe=harness.exe
-                # GNU tar (which is what ubuntu-latest ships) cannot read a zip.
-                # Caught by dry-running this step locally before the first tag —
-                # it would otherwise have failed the job *after* the GitHub
-                # release was already published.
-                python3 -m zipfile -e "dist/harness-$target.zip" dist/
-                ;;
-              *)
-                exe=harness
-                tar -xf "dist/harness-$target.tar.gz" -C dist
-                ;;
-            esac
-            cp "dist/harness-$target/$exe" "$d/$exe"
-            cp LICENSE-MIT LICENSE-APACHE "$d/"
-            chmod +x "$d/$exe" || true
-            test -s "$d/$exe" || { echo "::error::$d/$exe is missing or empty"; exit 1; }
-            echo "  $(basename "$d") <- $target ($(stat -c%s "$d/$exe") bytes)"
-          done
+        run: bash scripts/assemble-npm-packages.sh
+
+      # What npm would actually upload, checked before it uploads it. A `files`
+      # allowlist that no longer names the binary publishes an empty package
+      # successfully, on a version that can never be reused.
+      - name: Packed tarballs carry their payload
+        run: node scripts/check-npm-pack.mjs
 
       # Idempotent: skip any package+version already on the registry. A partial
       # publish is the normal failure here — v0.2.0 got three of four through

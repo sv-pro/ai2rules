@@ -28,3 +28,11 @@ __pycache__/
 # Committed once by accident when an `add -A` pathspec exclusion was evaluated
 # relative to a subdirectory; ignored so it cannot happen again.
 .claude/worktrees/
+
+# Release staging. `scripts/assemble-npm-packages.sh` unpacks the platform
+# archives here, and its header invites running it by hand — which left an
+# untracked multi-megabyte dist/ behind before this line existed.
+/dist/
+/harness-*.tar.gz
+/harness-*.zip
+/harness-*.sha256

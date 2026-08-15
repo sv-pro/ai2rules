@@ -169,8 +169,23 @@ node scripts/check-wasm-freshness.mjs
 ```
 
 CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
-(`.github/workflows/ci.yml`), plus the demo guard, the WASM freshness check, and
-the npm/blog guards (`check:heroes`, `check:drafts`, `check:spacing`).
+(`.github/workflows/ci.yml`), plus the demo guard, the WASM freshness check, the
+npm/blog guards (`check:heroes`, `check:drafts`, `check:spacing`), a
+cross-compile, and **`release-dry-run`** — which rehearses the whole publish path
+short of publishing (D70). The last one exists because everything after the
+compile in `release.yml` is tag-gated, so it used to run for the first time in the
+job that publishes to npm, where a version cannot be republished.
+
+**If you change the packaging, change `scripts/assemble-npm-packages.sh`** — both
+`release.yml` and the dry-run call it, deliberately, so the rehearsal cannot drift
+from the performance. Rehearse locally with:
+
+```bash
+cargo build --release --locked -p cli-harness      # any target; packaging is what is under test
+# …stage dist/harness-<target>.{tar.gz,zip} as the release matrix would, then:
+bash scripts/assemble-npm-packages.sh
+node npm/verify-packages.js && node scripts/check-npm-pack.mjs
+```
 
 **Demo binaries** (run via `cargo run --example <name> --offline`):
 - `kernel_demo` — taint + disposition walkthrough
@@ -210,6 +225,8 @@ marker in the same commit as the kernel change.
 | `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
 | `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source). Path-scope lives in the `roots-world.yaml` / `roots-cases.yaml` pair — a second world because enabling `roots` changes every pathless file action's verdict (D61) |
 | `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
+| `scripts/assemble-npm-packages.sh` | Fills the four platform packages from `dist/`. Shared by `release.yml` and CI's `release-dry-run` so they cannot diverge (D70) |
+| `scripts/check-npm-pack.mjs` | Asserts the tarballs npm *would* publish contain their binary and licenses — `verify-packages.js` reads manifests, this reads the packed output |
 
 ---
 
