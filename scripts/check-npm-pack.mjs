@@ -30,17 +30,54 @@ const MIN_BINARY_BYTES = 100_000;
 
 const problems = [];
 
-/** `npm pack --dry-run --json` reports the exact file list, without publishing. */
+/**
+ * `npm pack --dry-run --json` reports the exact file list, without publishing.
+ *
+ * Two output shapes are in the wild and this script has been burned by the
+ * difference. npm <= 11 returns an ARRAY of entries; npm 12 returns an OBJECT
+ * KEYED BY PACKAGE NAME. The release job installs `npm@latest` (trusted
+ * publishing needs >= 11.5.1) while CI used whatever setup-node bundled, so the
+ * rehearsal and the release parsed different shapes — and the v0.4.2-rc.1 npm
+ * job failed on an npm 12 runner after every check had passed on npm 11.
+ *
+ * The parsing bug was the smaller half. The script reported the unreadable
+ * output as "every file is missing from every package", which is a VERDICT about
+ * the packages, when the truth was that it could not read the tool. Those are
+ * different failures and only one of them is about the artifact. A guard that
+ * cannot tell "the thing is broken" from "I could not inspect the thing" is not
+ * a guard — it is the fail-open/fail-closed confusion this project wrote a whole
+ * post about, pointed the other way. So an unrecognised shape now throws with
+ * the npm version and the raw keys, rather than being scored as a defect.
+ */
 function packedFiles(dir) {
   const out = execFileSync('npm', ['pack', '--dry-run', '--json'], {
     cwd: dir,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const parsed = JSON.parse(out);
-  const entry = Array.isArray(parsed) ? parsed[0] : parsed;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(out);
+  } catch (e) {
+    throw new Error(`cannot parse \`npm pack --json\` output from ${dir}: ${e.message}`);
+  }
+
+  const entries = Array.isArray(parsed) ? parsed : Object.values(parsed ?? {});
+  const entry = entries.find((e) => e && typeof e === 'object' && Array.isArray(e.files));
+
+  if (!entry || typeof entry.name !== 'string') {
+    const npmV = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+    throw new Error(
+      `unrecognised \`npm pack --json\` shape from ${dir} (npm ${npmV}).\n` +
+        `      Expected an array of entries, or an object keyed by package name, each with name/version/files.\n` +
+        `      Top-level was ${Array.isArray(parsed) ? `an array of ${parsed.length}` : `an object with keys: ${Object.keys(parsed ?? {}).join(', ') || '(none)'}`}.\n` +
+        `      THIS IS AN INSTRUMENT FAILURE, NOT A VERDICT ABOUT THE PACKAGE.`
+    );
+  }
+
   const files = new Map();
-  for (const f of entry.files || []) files.set(f.path, f.size);
+  for (const f of entry.files) files.set(f.path, f.size);
   return { name: entry.name, version: entry.version, files };
 }
 

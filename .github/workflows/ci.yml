@@ -218,6 +218,21 @@ jobs:
         with:
           node-version: "22"
 
+      # The release job runs `npm install -g npm@latest` because trusted
+      # publishing needs npm >= 11.5.1, so the rehearsal must run the same npm —
+      # otherwise the two differ in a component that behaves differently.
+      #
+      # This is not theoretical. v0.4.2-rc.1 failed here: `npm pack --json`
+      # returns an array on npm 11 and an object keyed by package name on npm 12,
+      # and this job was on setup-node's bundled npm while the release had
+      # upgraded. Every check was green and the release job died on the guard.
+      # Same lesson as the shared assemble script and the pinned action SHAs,
+      # arriving through a third door.
+      - name: Match the release's npm
+        run: |
+          npm install -g npm@latest
+          echo "npm $(npm --version) / node $(node --version)"
+
       # From here down, every step is one the tag-only npm job runs, in order.
       - name: Layout guard
         run: node npm/verify-packages.js

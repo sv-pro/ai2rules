@@ -2553,3 +2553,44 @@ with "would publish WITHOUT harness".
     does not cover.
 - **Related:** D56, D58 (the npm layout this protects); `scripts/assemble-npm-packages.sh`,
   `scripts/check-npm-pack.mjs`, `.github/workflows/{ci,release}.yml`.
+
+### D70 amendment (2026-08-15) — what the first candidate found, including about D70 itself
+
+`v0.4.2-rc.1` was cut for one reason: `softprops/action-gh-release` runs only on a
+tag, so D70's own residual said the only way to exercise it was a candidate. It was
+exercised — four platform builds, eight assets, and the GitHub release correctly
+marked as a prerelease. **The candidate then failed on `check-npm-pack.mjs`, one
+step before publishing.** Nothing reached npm.
+
+Two findings, and the second is the one worth keeping.
+
+1. **`npm pack --json` has two output shapes.** npm ≤ 11 returns an array of
+   entries; npm 12 returns an object keyed by package name. The release job runs
+   `npm install -g npm@latest` because trusted publishing needs ≥ 11.5.1, while
+   `release-dry-run` used whatever `setup-node` bundled. So the rehearsal ran npm 11
+   and the performance ran npm 12. **This is the third instance of one rule** —
+   after the shared assembly script and the action-pin parity guard — and the first
+   where the drifting component was a *tool* rather than a file in this repository.
+   The dry-run now upgrades npm the same way.
+
+2. **The guard could not tell "I cannot read the tool" from "the package is
+   broken."** Handed output it did not understand, it reported *every file missing
+   from every package* — a verdict about the artifact, when the truth was that it
+   had failed to inspect the artifact. **That is the exact confusion this project
+   published a post about, pointed the other way.** There, a failure to *record* a
+   decision was treated as permission to proceed; here, a failure to *reach* one was
+   treated as a defect. Both come from the same place: at the call site, "no answer"
+   and "a negative answer" have the same shape, and only one of them is about the
+   thing under test.
+
+   An unrecognised shape now throws, naming the npm version and the observed keys,
+   labelled as an instrument failure. **A guard that cannot say "I do not know" will
+   eventually say something false with confidence** — and in this case the false
+   thing was severe enough to block a release, which is the harmless direction. The
+   same bug in a guard that failed open would have published four empty packages.
+
+**Kept, deliberately: `v0.4.2-rc.1`'s tag and GitHub prerelease stay.** They are a
+valid, complete GitHub release that simply never reached npm, and re-pushing a
+published tag to tidy the history is a worse habit than an honest gap in the version
+sequence. `v0.3.1` was deleted and re-cut under a different rule — it was about to
+become `latest`.

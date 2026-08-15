@@ -12,6 +12,32 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+## [0.4.2-rc.2] — 2026-08-15
+
+**rc.1 stopped at its own guard, one step before publishing.** Nothing reached npm;
+the GitHub prerelease exists with all eight assets, which is why
+`softprops/action-gh-release@v3` can be reported as exercised. This candidate
+fixes the guard and the reason it could fail there and nowhere else.
+
+### Fixed
+
+- **`check-npm-pack.mjs` parses both `npm pack --json` shapes.** npm ≤ 11 returns
+  an array of entries; npm 12 returns an object keyed by package name. The release
+  job installs `npm@latest` because trusted publishing needs ≥ 11.5.1, so it was on
+  npm 12 while every check that had passed ran on npm 11.
+- **The guard now distinguishes "I cannot read the tool" from "the package is
+  broken."** It reported the unparseable output as *every file missing from every
+  package* — a verdict about the artifact, when the truth was that it could not
+  inspect the artifact. An unrecognised shape now throws with the npm version and
+  the observed keys, labelled as an instrument failure. **This is the same
+  fail-open/fail-closed confusion the `every-check-was-green` post is about,
+  pointed the other way:** there, a failure to record a decision was treated as
+  permission; here, a failure to reach one was treated as a defect.
+- **`release-dry-run` now upgrades npm the way the release does**, so the
+  rehearsal and the performance run the same npm. Third instance of one rule —
+  after the shared assembly script and the action-pin parity guard — and the first
+  where the drift was in a tool rather than in the repository's own files.
+
 ## [0.4.2-rc.1] — 2026-08-15
 
 **A release candidate whose purpose is the release itself.** No kernel, adapter or
