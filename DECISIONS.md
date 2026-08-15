@@ -2493,3 +2493,63 @@ and agent decision boundaries".**
   - *Remove `source_channel` from the ABI.* The in-process orchestrator does know real
     provenance per perception, and the field is doing genuine work there.
 - **Related:** D24 (the gate ABI), D37, D48; `crates/cli-harness/src/{cc_hook,agy_hook}.rs`.
+
+## D70 — The publish path is rehearsed on every pull request, from a shared script
+
+**Context.** `release.yml` runs only on a tag. Everything after the compile — the artifact
+round-trip, unpacking four archives, filling the platform packages, packing the tarballs — sits
+behind `if: startsWith(github.ref, 'refs/tags/')` and therefore executes for the first time on a
+tag push, inside the job that publishes to npm. An npm version cannot be republished, so first
+contact with a bug happens at the one point in the pipeline that has no undo.
+
+That path had already produced two incidents, both caught by a human dry-running steps by hand
+rather than by anything in the repository: GNU tar cannot read a zip (the Windows package would
+have shipped empty), and `v0.3.1` went out as two platforms of four. A third was latent — see
+below.
+
+The proximate trigger was Dependabot. `actions/upload-artifact` and `actions/download-artifact`
+appear **only** in `release.yml`, so the PRs bumping them across major versions arrived carrying a
+complete set of green checks that could not, even in principle, have failed. Merging on green
+would have been the exact mistake `blog/…/every-check-was-green` is about, in the week it was
+published.
+
+**Decision.** The assembly step becomes `scripts/assemble-npm-packages.sh`, called by both
+`release.yml` and a new `release-dry-run` job in `ci.yml`. The CI job builds one real binary,
+produces all four archives in the release's layout and names, uploads them as four separate
+artifacts, **deletes the local copies**, downloads them back with `merge-multiple: true`, and then
+runs the release's own steps in order. Deleting before the download is the load-bearing detail: it
+is what makes the round-trip the thing under test rather than a formality.
+
+A second guard, `scripts/check-npm-pack.mjs`, asserts that the tarballs npm *would* publish
+actually contain their payload.
+
+**The shared script is the decision, not an implementation detail.** A copied step would drift
+from the one it rehearses, and a check that has drifted from the thing it checks is this
+repository's most reliable failure mode — the rotted demos, the stale WASM, three tests asserting
+a vulnerability. The rehearsal must be the performance.
+
+**What it caught immediately, which is the argument for it.** Deleting the `files` allowlist from
+a platform `package.json` — a plausible tidy-up — makes npm fall back to `.gitignore`, which
+ignores `harness` and `LICENSE-*` because they are build outputs. The package then publishes
+successfully, installs successfully, and has no binary. `npm/verify-packages.js` reports
+**"npm layout OK"**. Verified by doing it: the existing guard passed, `check-npm-pack.mjs` failed
+with "would publish WITHOUT harness".
+
+- **Alternatives rejected.**
+  - *`npm publish --dry-run` in CI.* Tried first, and it does not do what its name suggests: it
+    contacts the registry and fails with "cannot publish over the previously published versions"
+    at any version already on npm — which is every commit between releases. It would have been a
+    permanently red job. `npm pack --dry-run` is local and covers the tarball contents, which is
+    the whole delta. Recorded in the workflow so it is not helpfully re-added.
+  - *Build all four targets in CI.* Three extra runners, including macOS and Windows, on every
+    pull request, to test packaging rather than compilation. One real binary in four archives
+    exercises the same code; `check` and `cross` own the compiler.
+  - *Rely on `workflow_dispatch` against `release.yml`.* It exercises the build job only — the
+    `npm` job is tag-gated too — and it requires someone to remember. A check nobody runs is the
+    problem, not the solution.
+  - *A draft GitHub release to exercise `softprops/action-gh-release`.* Rejected as the wrong
+    trade: it creates real, visible releases on every pull request. **That action therefore stays
+    unrehearsed, and this is a known residual** — it is the only step of the publish path this job
+    does not cover.
+- **Related:** D56, D58 (the npm layout this protects); `scripts/assemble-npm-packages.sh`,
+  `scripts/check-npm-pack.mjs`, `.github/workflows/{ci,release}.yml`.

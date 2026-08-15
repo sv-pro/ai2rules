@@ -98,6 +98,136 @@ jobs:
       - name: Cross-compile the binary the way the release does
         run: cargo build --release --locked -p cli-harness --target x86_64-unknown-linux-musl
 
+  release-dry-run:
+    # Rehearse the publish path, on every pull request, without publishing.
+    #
+    # `cross` (above) proves the release still COMPILES. Nothing proved the
+    # release still SHIPS: everything after the build — the artifact round-trip,
+    # unpacking four archives, filling the platform packages, and packing the
+    # tarballs — lives in `release.yml` behind `if: startsWith(github.ref,
+    # 'refs/tags/')`. Its first execution is therefore on a tag, in the job that
+    # publishes to npm, where a version cannot be republished. That path has
+    # already produced two incidents: a Windows package that would have shipped
+    # empty (GNU tar cannot read a zip), and v0.3.1 going out as two platforms of
+    # four. Both were caught by a human dry-running steps by hand.
+    #
+    # It also makes a class of dependency bump verifiable that previously was
+    # not. `upload-artifact` and `download-artifact` appear ONLY in `release.yml`,
+    # so a Dependabot PR bumping them across a major version arrived with a full
+    # set of green checks that could not, even in principle, have failed. The
+    # action versions below are pinned to the same SHAs `release.yml` uses, which
+    # is the entire point: bump them there and this job exercises the bump here.
+    #
+    # One real binary, four archives. The compiler is `check`/`cross`'s job; this
+    # one is about everything that happens to the binary afterwards.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+      - name: Add the release target to the pinned toolchain
+        run: rustup target add x86_64-unknown-linux-musl
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build the binary the release would ship
+        run: cargo build --release --locked -p cli-harness --target x86_64-unknown-linux-musl
+
+      # Produce the four archives the release matrix produces, in the same layout
+      # and under the same names. Three targets get the musl binary they would not
+      # get in a real release; that is fine — nothing downstream of here inspects
+      # the machine code, and using a real multi-MB executable is what makes the
+      # size assertions in check-npm-pack.mjs meaningful.
+      - name: Package four archives, as the matrix would
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin=target/x86_64-unknown-linux-musl/release/harness
+          for target in x86_64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin; do
+            name="harness-$target"
+            mkdir -p "dist/$name"
+            cp "$bin" "dist/$name/harness"
+            cp README.md "dist/$name/"
+            tar -C dist -czf "$name.tar.gz" "$name"
+            sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          done
+          # Windows ships a zip containing harness.exe. Built with python's zipfile
+          # rather than `zip` so the archive is byte-shaped like the one
+          # Compress-Archive produces on the Windows runner, and so the tar/zip
+          # asymmetry that once nearly shipped an empty package is present here.
+          name=harness-x86_64-pc-windows-msvc
+          mkdir -p "dist/$name"
+          cp "$bin" "dist/$name/harness.exe"
+          cp README.md "dist/$name/"
+          (cd dist && python3 -m zipfile -c "../$name.zip" "$name")
+          sha256sum "$name.zip" > "$name.zip.sha256"
+          ls -l harness-*.tar.gz harness-*.zip
+
+      # Four uploads, because four matrix jobs produce four artifacts and
+      # `merge-multiple: true` below only means anything when more than one
+      # exists. Same action SHA as release.yml.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dryrun-harness-x86_64-unknown-linux-musl
+          path: harness-x86_64-unknown-linux-musl.tar.gz*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dryrun-harness-aarch64-apple-darwin
+          path: harness-aarch64-apple-darwin.tar.gz*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dryrun-harness-x86_64-apple-darwin
+          path: harness-x86_64-apple-darwin.tar.gz*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dryrun-harness-x86_64-pc-windows-msvc
+          path: harness-x86_64-pc-windows-msvc.zip*
+          if-no-files-found: error
+
+      # Destroy the local copies first, or the assembly below could read what this
+      # job produced instead of what the round-trip returned — and the round-trip
+      # is the thing under test.
+      - name: Discard everything the download must restore
+        run: rm -rf dist harness-*.tar.gz harness-*.zip harness-*.sha256
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: { merge-multiple: true, path: dist }
+
+      - name: The round-trip returned the release's layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l dist/
+          for f in harness-x86_64-unknown-linux-musl.tar.gz \
+                   harness-aarch64-apple-darwin.tar.gz \
+                   harness-x86_64-apple-darwin.tar.gz \
+                   harness-x86_64-pc-windows-msvc.zip; do
+            test -s "dist/$f" || { echo "::error::dist/$f did not survive the artifact round-trip"; exit 1; }
+          done
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      # From here down, every step is one the tag-only npm job runs, in order.
+      - name: Layout guard
+        run: node npm/verify-packages.js
+      - name: Fill each platform package with its binary
+        run: bash scripts/assemble-npm-packages.sh
+      - name: Packed tarballs carry their payload
+        run: node scripts/check-npm-pack.mjs
+
+      # NO `npm publish --dry-run` HERE, and it is not an oversight. Despite the
+      # name it contacts the registry, so at any version already on npm — which is
+      # every commit between releases — it fails with "cannot publish over the
+      # previously published versions". It would turn this job permanently red.
+      # `check-npm-pack.mjs` uses `npm pack --dry-run --json`, which is local, and
+      # the tarball contents are the only part a publish would add. The one thing
+      # a real publish also proves is that OIDC authenticates, and that cannot be
+      # rehearsed from `ci.yml` at all: trusted publishing is bound to the
+      # `release.yml` workflow filename.
+
   npm-wrapper:
     # The npm packages (D56, restructured in D58) are how a stranger gets a
     # binary, and nothing else in CI touches them. Two cheap checks: they parse,
