@@ -223,3 +223,7 @@ D59–D61. New since this review: a
 [`SECURITY.md`](https://github.com/sv-pro/ai2rules/blob/main/SECURITY.md) that
 says what this tool does not protect you from, which is the half a governance
 tool owes you.*
+
+*Written with AI assistance: drafted with Claude Code, then edited and checked by
+hand. The review, the findings and the fixes are ours. Saying so up front is
+cheaper than being asked.*
