@@ -1,12 +1,12 @@
 ---
 title: 'My Own Sandbox Blocked Me. The Fix Wasn’t a Hole.'
-description: "While researching competitors, the harness tainted my session and denied my own web request — exactly as designed. Here's why I added a new primitive instead of punching through the floor."
+description: "While researching competitors, the harness tainted my session and denied my own web request, exactly as designed. Why I added a new primitive instead of punching through the floor."
 pubDate: 'Jun 27 2026'
 heroImage: '../../assets/harness-blocked-itself.jpg'
 ---
 
-I was doing competitor research — reading a pile of third-party governance projects
-checked out under `repos/3p/` — when I went to fetch a GitHub page and the agent
+I was doing competitor research, reading a pile of third-party governance projects
+checked out under `repos/3p/`, when I went to fetch a GitHub page and the agent
 refused itself:
 
 ```text
@@ -20,7 +20,7 @@ read untrusted data, any tool that can reach the network is blocked, so injected
 text in that content can't phone home. I had just read a competitor's `README.md`
 under `repos/`. The session was tainted. The floor did precisely what it promises.
 
-The honest first reaction was annoyance. The correct second reaction was: *good —
+The honest first reaction was annoyance. The correct second reaction was: *good,
 this is the product working on its own author.* If your sandbox never inconveniences
 the person who built it, it isn't enforcing anything. So the question wasn't "how do
 I get my network back," it was "what's the *right* way for an operator to vouch for
@@ -29,25 +29,25 @@ a source they've actually reviewed?"
 ## The two tempting wrong answers
 
 **Delete the sidecar.** Taint state lives in a per-session file; `rm` it and the
-floor lifts. But that's a blind reset — it discards the audit record *and* lifts the
+floor lifts. But that's a blind reset: it discards the audit record *and* lifts the
 floor for every other untrusted thing the session touched, not just the README I
 trust. One poisoned file I'd forgotten about, and I've just re-opened the exfil
 path. A reset can't tell *why* the session was tainted, so it can't be surgical.
 
-**Drop `repos/` from the taint sources.** Now the whole tree is trusted — including
+**Drop `repos/` from the taint sources.** Now the whole tree is trusted, including
 files I haven't read, and any future edits to them. That's not vouching for a
 reviewed artifact; it's permanently lowering the floor for a directory whose whole
 job is to hold *untrusted* third-party code.
 
 Both punch a hole. Both trade a real guarantee for convenience. The tell is that
-neither is bound to *what I actually reviewed* — they're bound to a session, or a
+neither is bound to *what I actually reviewed*: they're bound to a session, or a
 path prefix.
 
 ## The fix: pin trust to content, not to a path
 
 What I actually want to say is narrow and specific: *"I read these exact bytes, I
 vouch for them, trust them only while they stay these exact bytes."* That's a **trust
-pin** — an operator attestation bound to **content identity**:
+pin**: an operator attestation bound to **content identity**:
 
 ```jsonc
 "trust_pins": [
@@ -79,10 +79,10 @@ tracked in this repo (we never `git add repos/`), so this repo's HEAD says *noth
 about those bytes. Trust has to be pinned to the artifact's own identity — its
 sha256, or its own repository's commit — not to a commit that doesn't describe it.
 
-## The part that made the current session clear
+## Reframing taint as a claim about a source
 
-A pin would gate *future* reads, but I was already tainted *now*. The thing that let
-the live session recover — without a blind reset — was reframing taint itself. Taint
+A pin would gate *future* reads, but I was already tainted *now*. What let
+the live session recover, without a blind reset, was reframing taint itself. Taint
 stopped being a one-way boolean flag and became a **recomputed ledger of causes**:
 
 ```text
@@ -92,14 +92,14 @@ tainted  ==  any recorded cause not covered by a valid pin
 The ledger keeps every cause forever (that's the audit trail). Pinning a cause
 removes it from the *taint computation*, not from the *record*. The moment I added
 the pin for that README, the only outstanding cause was covered, the predicate went
-false, and the floor lifted — for that source, on the next call, with the record
+false, and the floor lifted: for that source, on the next call, with the record
 intact.
 
-**Doesn't this break monotonic taint?** No — and the distinction is the whole point.
+**Doesn't this break monotonic taint?** No, and the distinction is the whole point.
 This isn't an "untaint." A pinned read was *never* a legitimate untrusted-taint cause;
 recomputing reflects **corrected provenance**, not a reduction of taint under fixed
 facts. A human made a design-time, auditable attestation. That's the legitimate
-lever, and only the operator can pull it — the model can't pin its way out of the
+lever, and only the operator can pull it: the model can't pin its way out of the
 floor at runtime. Monotonicity constrains what the *agent* can do; it was never meant
 to forbid a *human* from correcting a source's trust label.
 
@@ -127,7 +127,7 @@ Two things I'd hand to anyone building guardrails for autonomous agents:
 2. **The right response to a true positive is a sharper primitive, not a bypass.** A
    reset or a blanket exception would have "fixed" it by deleting the guarantee.
    Pinning trust to *content identity*, with drift that re-tightens automatically,
-   removed the friction while keeping the floor — and added an audit trail on the way.
+   removed the friction while keeping the floor, and added an audit trail on the way.
 
 The whole episode took one denied request to surface and one new primitive to
 resolve. That's the trade I want every time: the kernel tells me the truth, and I

@@ -1,6 +1,6 @@
 ---
 title: 'The Switch Inside the Room'
-description: "We shipped a governance tool with an off switch the agent could reach. Then we found the same shape twice more, in places that looked nothing alike. Here is the pattern, three demonstrations of it, and the one sentence that catches all three."
+description: "We shipped a governance tool with an off switch the agent could reach. Then we found the same shape twice more, in places that looked nothing alike. The pattern, three demonstrations of it, and the one sentence that catches all three."
 pubDate: 'Aug 12 2026'
 heroImage: '../../assets/the-switch-inside-the-room.jpg'
 ---
@@ -22,7 +22,7 @@ One turn. No denial, no prompt, no warning. And a write to `/etc/passwd` that ha
 been refused thirty seconds earlier now went straight through.
 
 The person who reported it noticed something sharper than the bug. Their agent had
-*refused* the same request earlier in a different session — when the conversation
+*refused* the same request earlier in a different session, when the conversation
 had made clear what the file was for. It complied when it didn't know. Which means
 the thing standing between the agent and the off switch was **the agent's own
 understanding of what it was being asked to do.**
@@ -46,7 +46,7 @@ Then we went looking, and found it twice more.
 
 ## Twice more
 
-**The rulebook.** The policy is a manifest — a YAML file listing what the agent may
+**The rulebook.** The policy is a manifest: a YAML file listing what the agent may
 touch. It also lived in the project directory. Writing to it drew no denial, not
 even a prompt:
 
@@ -72,7 +72,7 @@ governance is still running, still logging, still returning verdicts. It's just
 answering a different question than you think it is.
 
 **The kernel itself.** This one we introduced while fixing packaging. The tool ships
-as an npm package; install it locally and the binary lands in `node_modules/` —
+as an npm package; install it locally and the binary lands in `node_modules/`,
 which is, once again, inside the project the agent can write to. We measured it:
 
 ```
@@ -93,14 +93,14 @@ written.
 
 If you've done any security work this will sound familiar, and it should. It's half
 of the [reference monitor](https://en.wikipedia.org/wiki/Reference_monitor) criteria
-from 1972 — a reference validation mechanism must be tamperproof, always invoked,
+from 1972: a reference validation mechanism must be tamperproof, always invoked,
 and small enough to verify. We rediscovered *tamperproof* the slow way, by breaking
 it three times in one codebase.
 
 Worth being precise about why the classic phrasing didn't save us. "Tamperproof"
 sounds like it's about attackers. None of these were attacks. There was no adversary
 and no injection; a helpful assistant was asked to create a file and did. The
-property you need isn't "resistant to a determined attacker" — it's **"not reachable
+property you need isn't "resistant to a determined attacker". It's **"not reachable
 by the ordinary, well-intentioned operation of the thing being governed."** Much
 lower bar, and we cleared it in the wrong direction three times.
 
@@ -109,7 +109,7 @@ lower bar, and we cleared it in the wrong direction three times.
 **The switch moved out of the project.** It now lives at
 `~/.claude/ai2rules/off/<project>`, and writes outside the project are themselves
 governed, so an agent reaching for it gets an approval prompt instead of silence.
-Not a hard denial — a human in the loop, which is the right bar for *"turn off your
+Not a hard denial: a human in the loop, which is the right bar for *"turn off your
 own supervision."*
 
 **The rulebook became read-only.** One line in the manifest:
@@ -120,7 +120,7 @@ own supervision."*
 
 Read stays allowed on purpose. An agent that can't see its own rules can't explain
 a refusal or suggest a sensible change to one, and the file is committed to the
-repo anyway — secrecy was never the property being defended. **Write authority
+repo anyway; secrecy was never the property being defended. **Write authority
 was.**
 
 **The installer now refuses to install itself somewhere it can be replaced.** If the
@@ -128,18 +128,18 @@ binary is inside the project it would govern, it stops and tells you to install
 globally. A governance install that can be undone with one file write is worse than
 none, because it's indistinguishable from one that works.
 
-## The part that generalises past our tool
+## One question to ask of your own guardrail
 
 That last sentence is the one worth taking away, and it isn't really about us.
 
-If you run any agent with a guardrail — a hook, a permissions file, a wrapper
-script, an allowlist, a sandbox profile — ask one question: **can the agent write
+If you run any agent with a guardrail (a hook, a permissions file, a wrapper
+script, an allowlist, a sandbox profile) ask one question: **can the agent write
 to it?** Not "would it," not "why would it want to." Can it.
 
 Try it, too, rather than reasoning about it. Every one of these three was found by
 running something and watching, and two of them survived a security review, a test
 suite that grew to 244 cases, and a published blog post about how careful we were
-being. The kill-switch test in that suite *passed the entire time* — it asserted the
+being. The kill-switch test in that suite *passed the entire time*: it asserted the
 shim contained the string `.claude/gate-off`, and after the fix the shim still
 contained that string, in a comment explaining the old behaviour. A green test,
 agreeing with a defect, made wrong by a documentation improvement.

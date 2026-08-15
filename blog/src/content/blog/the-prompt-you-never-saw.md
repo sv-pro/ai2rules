@@ -1,6 +1,6 @@
 ---
 title: 'The Prompt You Never Saw'
-description: "A new Microsoft protocol for AI coding agents includes a type that decides when you get asked to approve a tool call. The only source it can name for that decision is a model, and the answer is a number between 0 and 1. Here is why that is the wrong shape — and the narrower, truer version of the complaint."
+description: "A new Microsoft protocol for AI coding agents includes a type that decides when you get asked to approve a tool call. The only source it can name for that decision is a model, and the answer is a number between 0 and 1. Why that is the wrong shape, and the narrower, truer version of the complaint."
 pubDate: 'Aug 6 2026'
 heroImage: '../../assets/the-prompt-you-never-saw.jpg'
 ---
@@ -18,7 +18,7 @@ In March, Microsoft published a specification called the **Agent Host Protocol**
 real and slightly boring problem: if an AI agent is working on your code, you might want to
 watch it from your editor, your phone, and a browser tab at the same time, and you would like
 all three to show the same thing. That is harder than it sounds. The protocol is a careful
-piece of engineering — an agreed-upon way for several screens to share one agent session
+piece of engineering: an agreed-upon way for several screens to share one agent session
 without drifting out of sync. It is open source, MIT-licensed, at version 0.7, with a
 reference implementation inside VS Code.
 
@@ -39,7 +39,7 @@ export interface ToolCallRiskAssessmentCompleteState {
 
 Two things are worth unpacking for anyone who does not read TypeScript for a living.
 
-An **enum** is a fixed menu of allowed values — the complete list of things a field is
+An **enum** is a fixed menu of allowed values: the complete list of things a field is
 permitted to be. This one has exactly one item on it: `Judge`. In the protocol's own words,
 a *model judge*: another AI, asked to look at the pending action and say how dangerous it
 is.
@@ -59,14 +59,14 @@ early.
 
 Those are different, and the difference matters. Nothing in that type blocks a tool call.
 If the assessment says a command is fine, the command proceeds the way it would have anyway;
-if it says a command is risky, you see a dialog and *you* decide. It is an escalation hint —
-a suggestion about when to interrupt a human — not a security control.
+if it says a command is risky, you see a dialog and *you* decide. It is an escalation hint,
+a suggestion about when to interrupt a human, not a security control.
 
 Anyone who tells you Microsoft has shipped a protocol where an AI decides what other AIs are
 allowed to do is describing something that is not there. We nearly wrote that sentence
 ourselves. It was a better headline and it was false.
 
-Here is the version that survives contact with the actual code.
+The version that survives contact with the actual code is narrower.
 
 ## The failure mode is a dialog that never appears
 
@@ -81,7 +81,7 @@ a destructive command at 0.9 and a session where the command was genuinely routi
 exactly alike. The record shows a tool call that ran without confirmation, and that is all it
 ever shows.
 
-That is the same shape as your spam folder — a score decides what reaches you — with one
+That is the same shape as your spam folder, where a score decides what reaches you, with one
 important difference. You know your spam folder exists. You go and check it when something
 important never turns up. There is no folder here.
 

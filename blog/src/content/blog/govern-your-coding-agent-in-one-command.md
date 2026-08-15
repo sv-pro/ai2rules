@@ -1,6 +1,6 @@
 ---
 title: 'Govern Your Coding Agent in One Command'
-description: "Your coding agent can write anywhere your shell can, and it reads untrusted text on every turn. Here is a one-command install that puts a deterministic gate in front of it — plus the two-line test that proves the gate is real, and the honest list of what it does not do."
+description: "Your coding agent can write anywhere your shell can, and it reads untrusted text on every turn. A one-command install that puts a deterministic gate in front of it, plus the two-line test that proves the gate is real, and the honest list of what it does not do."
 pubDate: 'Aug 10 2026'
 heroImage: '../../assets/govern-your-coding-agent-in-one-command.jpg'
 ---
@@ -26,7 +26,7 @@ echo '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd"}}' \
 ```
 
 Now change the path to something inside the project and run it again. Nothing
-comes back — silence means it passed. That difference is the entire product, and
+comes back: silence means it passed. That difference is the entire product, and
 you just reproduced it in about five seconds.
 
 ## What the install actually did
@@ -50,19 +50,19 @@ and says so; your existing hooks and settings survive untouched.
 ## Why the deny is more interesting than it looks
 
 Most agent permission systems are lists of command strings: allow `git status`,
-ask about `rm -rf`, deny `curl`. That model breaks in a specific and boring way —
+ask about `rm -rf`, deny `curl`. That model breaks in a specific and boring way:
 it can only recognise things it has seen written down before, and there are
 infinitely many ways to write "delete that file".
 
 The deny above is not about the command's shape. It is about **where the path
 points**. The manifest declares the project directory as the writable root, and
 anything resolving outside it is refused whatever it looks like. `/etc/passwd`,
-`../../secrets`, a symlink, an absolute path assembled at runtime — same answer,
+`../../secrets`, a symlink, an absolute path assembled at runtime: same answer,
 because the question being asked is about the destination, not the spelling.
 
 ## The one an allowlist cannot express at all
 
-Here is the sequence worth running, because no list of permitted commands can
+Run this sequence, because no list of permitted commands can
 represent it. Fetch a web page:
 
 ```bash
@@ -98,7 +98,7 @@ cat .claude/state/taint-default
 ```
 
 Delete that file and the session is clean again. It is a text file. That is
-deliberate — you should be able to read everything this thing believes.
+deliberate: you should be able to read everything this thing believes.
 
 ## Two modes, and the difference matters
 
@@ -113,7 +113,7 @@ you are back to normal.
 
 **Replace** (`--grant`) means the manifest becomes the allowlist: it returns an
 explicit "allowed" and your host stops asking. That is genuinely better once you
-trust your manifest — fewer prompts, one file deciding — and genuinely worse if
+trust your manifest (fewer prompts, one file deciding) and genuinely worse if
 you have not read it. Start additive.
 
 ## Turning it off is one file
@@ -144,7 +144,7 @@ switch off in one second is a governance tool you should not install.
 - **Prefer the global install over `npx` for real use.** `npx ai2rules-harness
   init` works and is the fastest way to see a verdict, but the shim records the
   path of the binary that ran it, and under `npx` that path lives in a temporary
-  cache. When the cache is cleared the binary is gone — and the shim then **fails
+  cache. When the cache is cleared the binary is gone, and the shim then **fails
   open**, which is the right behaviour for a missing kernel and a surprising place
   to discover it. After installing globally, re-run `harness init`.
 
@@ -163,5 +163,5 @@ verdict and makes every decision replayable afterwards.
   [`docs/TUTORIAL.md`](https://github.com/sv-pro/ai2rules/blob/main/docs/TUTORIAL.md).
 
 If you run it and something behaves differently from what is written here, that is
-worth an issue — the whole point of a deterministic gate is that its behaviour is
+worth an issue: the whole point of a deterministic gate is that its behaviour is
 supposed to be a fact you can check, not a claim you have to accept.

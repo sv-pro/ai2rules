@@ -1,6 +1,6 @@
 ---
 title: 'A Scanner Flagged Our Supply-Chain Package. It Was Right.'
-description: "Socket gave our governance tool 64% on supply chain security. The install script fetched a binary from the internet, unpacked it with a shell and made it executable — which is a fair description of the thing scanners exist to catch. Here is what we changed, and the honest reason the score only moved five points."
+description: "Socket gave our governance tool 64% on supply chain security. The install script fetched a binary from the internet, unpacked it with a shell and made it executable, which is a fair description of the thing scanners exist to catch. What we changed, and the honest reason the score only moved five points."
 pubDate: 'Aug 12 2026'
 heroImage: '../../assets/a-scanner-flagged-our-security-package.jpg'
 ---
@@ -12,7 +12,7 @@ machine. Shortly after it went on npm, [Socket](https://socket.dev) scored it:
 
 The instinct is to argue. We know what our code does. The scanner doesn't.
 
-The instinct is wrong. Here is what installing our package actually did:
+The instinct is wrong. Installing our package actually did this:
 
 1. run a `postinstall` script
 2. `fetch()` a binary from the internet
@@ -24,7 +24,7 @@ Read that as a stranger. That is not *similar to* a supply-chain attack; it is a
 step-by-step description of one. No scanner can tell our download from a hostile
 one, and a scanner that tried to would be worse at its job, not better.
 
-## The part that was worse than the score
+## The flaw the score did not catch
 
 The score is a number. The thing underneath it was a real weakness, and we'd have
 kept missing it if we'd spent the afternoon disputing the number instead.
@@ -38,7 +38,7 @@ sitting next to it. What that check actually proves is that the file arrived
 without being corrupted in transit.
 
 That's **integrity**. It is not **provenance**. And the difference between those two
-is a distinction this project spends its entire existence drawing everywhere else —
+is a distinction this project spends its entire existence drawing everywhere else,
 we'd written thousands of words on why a claim needs to be traceable to who made it,
 then shipped an install path that couldn't tell you who made the binary.
 
@@ -46,8 +46,8 @@ then shipped an install path that couldn't tell you who made the binary.
 
 The fix isn't a better checksum. It's not having the problem.
 
-The binary now ships as a **per-platform package** — `ai2rules-harness-linux-x64`,
-`-darwin-arm64`, and so on — listed in `optionalDependencies`. npm resolves exactly
+The binary now ships as a **per-platform package** (`ai2rules-harness-linux-x64`,
+`-darwin-arm64`, and so on) listed in `optionalDependencies`. npm resolves exactly
 one by `os`/`cpu` and skips the rest. The main package has **no `scripts` block at
 all.**
 
@@ -62,12 +62,12 @@ Two packages. Under a second. **Nothing ran.** No network request, no shell, no
 Three things follow, and only one of them is about the score:
 
 - **The binary is covered by the integrity hash npm writes into *your* lockfile.**
-  Not a digest we fetched — one your package manager recorded and will check
+  Not a digest we fetched: one your package manager recorded and will check
   forever. That's the provenance we didn't have.
 - **Publishing moved into CI with signed attestation**, so each tarball is bound to
   the workflow and commit that produced it.
 - **Installs became reproducible, offline-cacheable, and usable behind a corporate
-  proxy or a mirrored registry** — none of which was true when installing meant
+  proxy or a mirrored registry**, none of which was true when installing meant
   reaching out to GitHub.
 
 That third one is the giveaway that this was a real improvement rather than a
@@ -124,7 +124,7 @@ npm view ai2rules-harness scripts
 # undefined
 ```
 
-That's a claim you can verify without believing anything we say — which is, roughly,
+That's a claim you can verify without believing anything we say, which is, roughly,
 the whole point of the project the package belongs to.
 
 ---
