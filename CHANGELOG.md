@@ -12,6 +12,16 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+The tree carries `0.4.2-rc.2`, and **`0.4.2` is deliberately unreleased.** Everything
+between it and `0.4.1` is CI and packaging — no kernel, adapter or CLI behaviour
+changed — so moving `latest` would ask every installed copy to update for nothing.
+
+The machinery it exercises is verified, which is the point of stopping here rather
+than pressing on: two candidates published end to end, and a cold install of
+`0.4.2-rc.2` from the public registry governs a project, denies a write outside it,
+denies egress under taint, and refuses when it cannot record either. **Cut `0.4.2`
+when real code lands, not before.**
+
 ## [0.4.2-rc.2] — 2026-08-15
 
 **rc.1 stopped at its own guard, one step before publishing.** Nothing reached npm;
