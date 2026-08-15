@@ -12,6 +12,54 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+## [0.4.2-rc.1] — 2026-08-15
+
+**A release candidate whose purpose is the release itself.** No kernel, adapter or
+CLI code changed — `harness` behaves exactly as `0.4.1` does. What changed is the
+machinery that ships it, and four of the actions doing the shipping moved across
+major versions on the same day. This tag exists to run that machinery once, under
+a dist-tag nobody installs by default, before a real release depends on it.
+
+Published to npm under **`next`**, not `latest`. `npm install ai2rules-harness`
+still resolves `0.4.1`.
+
+### Added
+
+- **`release-dry-run` rehearses the publish path on every pull request** (D70).
+  Everything after the compile in `release.yml` is tag-gated, so it used to run for
+  the first time inside the job that publishes to npm — where a version cannot be
+  republished. The job builds a real binary, produces all four archives, uploads
+  them as four artifacts, deletes the local copies, downloads them back with
+  `merge-multiple: true`, and runs the release's own steps. The assembly step moved
+  to `scripts/assemble-npm-packages.sh` so both workflows call the same code.
+- **`scripts/check-npm-pack.mjs`** — asserts the tarballs npm *would* publish carry
+  their binary and licenses. `verify-packages.js` reads manifests; this reads the
+  packed output. Deleting a `files` allowlist makes npm fall back to `.gitignore`,
+  which ignores `harness` because it is a build output: the package then publishes
+  fine, installs fine, and contains no binary, while the older guard reports
+  "layout OK". Verified by doing it.
+- **`scripts/check-action-pins.mjs`** — every action is SHA-pinned (keeps finding
+  #25 closed), and an action used in both workflows carries the *same* pin in both.
+  The second half is not hypothetical: `release-dry-run` added five action uses to
+  `ci.yml` that the open Dependabot PRs did not cover, and merging them unrebased
+  would have left the rehearsal on v4 while the release ran v7.
+
+### Fixed
+
+- **A prerelease tag no longer publishes a GitHub release marked as the current
+  one.** The npm dist-tag has derived `next` from the version since the OIDC work;
+  the GitHub half was never done, and nothing noticed because no candidate had been
+  cut since. The repository homepage is where the README sends people for a binary.
+
+### Changed
+
+- `actions/setup-node` v4.4.0 → v7.0.0, `actions/upload-artifact` v4.6.2 → v7.0.1,
+  `actions/download-artifact` v4.3.0 → v8.0.1, `softprops/action-gh-release` v2.6.2
+  → v3.0.2. The middle two are exercised by `release-dry-run`. **`action-gh-release`
+  is not** — it runs only on a tag, and covering it would mean creating real
+  releases on every pull request (D70 records this as the known residual). Cutting
+  this candidate is how it gets exercised.
+
 ## [0.4.1] — 2026-08-15
 
 Closes the security sweep: with this release there are no open findings against

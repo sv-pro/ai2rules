@@ -143,6 +143,13 @@ jobs:
             harness-${{ matrix.target }}.${{ matrix.archive }}
             harness-${{ matrix.target }}.${{ matrix.archive }}.sha256
           fail_on_unmatched_files: true
+          # The same rule the npm dist-tag uses, applied to GitHub. Without it a
+          # `v0.4.2-rc.1` tag publishes a release GitHub presents as the current
+          # one — on the repository homepage, which is where the README sends
+          # people to get a binary. The npm half of this was fixed the first time
+          # prereleases were used (three rcs during the OIDC work); the GitHub
+          # half was not, and nothing noticed because no rc has been cut since.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   npm:
     # Publish the five npm packages: four platform packages, each holding one
