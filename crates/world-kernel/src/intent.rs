@@ -10,7 +10,7 @@ use harness_types::{
     ActionName, ActionType, ArgRole, ArgSource, BuildError, CompiledWorld, DescriptorHash,
     Provenance, SideEffectClass, Taint, TaintContext, ToolCall,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{invariants, schema};
 
@@ -119,9 +119,10 @@ impl<'w> IRBuilder<'w> {
 
         // 4. Schema — validate arguments against the frozen descriptor.
         if let Some(descriptor) = self.world.descriptor(&action) {
+            let schema_args = schema_args_for(self.world, &action, &call.arguments);
             schema::validate(
                 &action,
-                &call.arguments,
+                &schema_args,
                 &descriptor.schema,
                 &descriptor.arg_constraints,
             )?;
@@ -177,4 +178,28 @@ impl<'w> IRBuilder<'w> {
             expected_descriptor_hash,
         })
     }
+}
+
+fn schema_args_for(world: &CompiledWorld, action: &ActionName, actor_args: &Value) -> Value {
+    let Some(cap) = world.scoped_capability(action) else {
+        return actor_args.clone();
+    };
+    let actor = actor_args.as_object();
+    let mut out = Map::new();
+    for (name, source) in &cap.args {
+        match source {
+            ArgSource::ActorInput => {
+                if let Some(value) = actor.and_then(|o| o.get(name)) {
+                    out.insert(name.clone(), value.clone());
+                }
+            }
+            ArgSource::Literal(value) => {
+                out.insert(name.clone(), Value::String(value.clone()));
+            }
+            ArgSource::ContextRef(_) => {
+                out.insert(name.clone(), Value::String("<context>".to_string()));
+            }
+        }
+    }
+    Value::Object(out)
 }

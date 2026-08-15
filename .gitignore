@@ -17,6 +17,22 @@ crates/harness-wasm/pkg-web/
 # OpenCode plugin runtime state (E17 governance adapter taint sidecar)
 .opencode/ai2rules-state.json
 
+# Antigravity CLI (`agy`) runtime state (D48 governance adapter taint sidecar)
+.agents/state/
+
 # Python bytecode (the .claude/hooks/*.py gate hooks generate this)
 __pycache__/
 *.pyc
+
+# Local git worktrees for parallel agent sessions — never part of the repo.
+# Committed once by accident when an `add -A` pathspec exclusion was evaluated
+# relative to a subdirectory; ignored so it cannot happen again.
+.claude/worktrees/
+
+# Release staging. `scripts/assemble-npm-packages.sh` unpacks the platform
+# archives here, and its header invites running it by hand — which left an
+# untracked multi-megabyte dist/ behind before this line existed.
+/dist/
+/harness-*.tar.gz
+/harness-*.zip
+/harness-*.sha256

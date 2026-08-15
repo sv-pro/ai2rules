@@ -45,11 +45,18 @@ jobs:
             bin: harness.exe
             archive: zip
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      # No version here: `rust-toolchain.toml` pins it and rustup honours the file.
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+
+      # …which means the target has to be added to the PINNED toolchain, not to
+      # whatever the action installed. Passing `targets:` above installed it for
+      # `stable` while cargo ran the pinned version, and every cross-compiled job
+      # failed with "the target may not be installed" — after CI was green, because
+      # CI never cross-compiles. Adding it here runs against the active toolchain.
+      - name: Add the release target to the pinned toolchain
+        run: rustup target add ${{ matrix.target }}
 
       # The musl target links statically; musl-tools provides the toolchain.
       # (No C deps in the tree today, so this is belt-and-suspenders.)
@@ -82,18 +89,178 @@ jobs:
           Copy-Item "README.md" "dist/$name/" -ErrorAction SilentlyContinue
           Compress-Archive -Path "dist/$name" -DestinationPath "$name.zip"
 
+      # Checksum beside every archive, for anyone downloading a release asset
+      # directly. The npm path no longer depends on it — since 0.2.0 the binary
+      # ships inside a platform package and is covered by npm's own integrity
+      # hash, which is stronger: a digest fetched from the same host as the
+      # artifact proves it arrived intact, not that it is the right artifact.
+      - name: Checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          f="harness-${{ matrix.target }}.${{ matrix.archive }}"
+          if command -v sha256sum >/dev/null; then sha256sum "$f" > "$f.sha256"
+          else shasum -a 256 "$f" > "$f.sha256"; fi
+          cat "$f.sha256"
+
+      # Cheapest possible guard on what we are about to publish: govern a
+      # throwaway project with the binary we just built. Skipped where the runner
+      # cannot execute the artifact (Intel macOS is cross-compiled here).
+      - name: Smoke test — `harness init` governs a temp project
+        if: ${{ matrix.archive == 'tar.gz' && matrix.target != 'x86_64-apple-darwin' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          tmp="$(mktemp -d)"
+          "$bin" init "$tmp"
+          test -f "$tmp/.claude/cc-world.yaml"
+          test -x "$tmp/.claude/hooks/world-gate.sh"
+          out=$(echo '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd"}}' \
+            | CLAUDE_PROJECT_DIR="$tmp" bash "$tmp/.claude/hooks/world-gate.sh")
+          echo "$out"
+          case "$out" in
+            *'"permissionDecision":"deny"'*) echo "governed: deny verdict returned" ;;
+            *) echo "release binary did not govern the temp project"; exit 1 ;;
+          esac
+
       # Always keep the build artifact (handy for workflow_dispatch test runs).
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: harness-${{ matrix.target }}
-          path: harness-${{ matrix.target }}.${{ matrix.archive }}
+          path: |
+            harness-${{ matrix.target }}.${{ matrix.archive }}
+            harness-${{ matrix.target }}.${{ matrix.archive }}.sha256
           if-no-files-found: error
 
       # Publish to the GitHub Release — only on a tag push.
       - name: Attach to Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          files: harness-${{ matrix.target }}.${{ matrix.archive }}
+          files: |
+            harness-${{ matrix.target }}.${{ matrix.archive }}
+            harness-${{ matrix.target }}.${{ matrix.archive }}.sha256
           fail_on_unmatched_files: true
+          # The same rule the npm dist-tag uses, applied to GitHub. Without it a
+          # `v0.4.2-rc.1` tag publishes a release GitHub presents as the current
+          # one — on the repository homepage, which is where the README sends
+          # people to get a binary. The npm half of this was fixed the first time
+          # prereleases were used (three rcs during the OIDC work); the GitHub
+          # half was not, and nothing noticed because no rc has been cut since.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  npm:
+    # Publish the five npm packages: four platform packages, each holding one
+    # prebuilt binary, plus the wrapper that lists them as optionalDependencies.
+    # There is no install script anywhere in that set — npm resolves the right
+    # platform by os/cpu, so installing performs no network access, no shell
+    # execution and no chmod. The binary is then covered by the integrity hash npm
+    # writes into the consumer's lockfile, rather than by a checksum this project
+    # fetched from the same host as the artifact it was verifying.
+    #
+    # Authentication is **trusted publishing (OIDC)** — no npm token exists for
+    # this repo. npm verifies the short-lived id-token against a trusted-publisher
+    # config naming this repository and this workflow filename, so there is no
+    # long-lived credential to store, rotate or leak. Provenance is signed
+    # automatically, which is why `--provenance` is absent below.
+    #
+    # If publishing starts failing with a 401/404 on PUT, the trusted-publisher
+    # entry for that package is missing or its workflow filename does not match
+    # `release.yml` exactly — it is case-sensitive.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # the credential itself: OIDC, no stored token
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # NOTE: deliberately no `registry-url:`. setup-node uses it to write an
+      # .npmrc line `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`, and with
+      # no token in the environment that expands to an EMPTY credential — npm then
+      # presents a broken token instead of falling back to OIDC, and the publish
+      # fails with a 404 on PUT that reads like a missing trusted-publisher entry.
+      # registry.npmjs.org is the default registry anyway, so nothing is lost.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10.x.
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          echo "npm $(npm --version) / node $(node --version)"
+          echo "--- npm auth config (must show no _authToken) ---"
+          npm config list | grep -iE "registry|token" || true
+          test -f ~/.npmrc && cat ~/.npmrc || echo "(no ~/.npmrc — good)"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with: { merge-multiple: true, path: dist }
+
+      # Fails the release if versions have drifted across the five packages, or if
+      # an install script has reappeared. Both are silent failures otherwise.
+      - name: Layout guard
+        run: node npm/verify-packages.js
+
+      # npm points `latest` at whatever you publish unless told otherwise —
+      # prerelease versions included. Without this, a `v0.3.0-rc.1` tag would make
+      # every `npm install ai2rules-harness` resolve to a release candidate.
+      - name: Choose the dist-tag
+        id: disttag
+        run: |
+          set -euo pipefail
+          ver=$(node -p "require('./npm/package.json').version")
+          case "$ver" in
+            *-*) tag=next ;;   # any semver prerelease: 0.3.0-rc.1, 1.0.0-beta.2
+            *)   tag=latest ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publishing $ver under dist-tag '$tag'"
+
+      # The same script `ci.yml`'s `release-dry-run` job runs on every pull
+      # request — deliberately shared rather than duplicated, so the rehearsal
+      # cannot drift from the performance. See the header of the script for why
+      # this stopped being an inline step.
+      - name: Fill each platform package with its binary
+        shell: bash
+        run: bash scripts/assemble-npm-packages.sh
+
+      # What npm would actually upload, checked before it uploads it. A `files`
+      # allowlist that no longer names the binary publishes an empty package
+      # successfully, on a version that can never be reused.
+      - name: Packed tarballs carry their payload
+        run: node scripts/check-npm-pack.mjs
+
+      # Idempotent: skip any package+version already on the registry. A partial
+      # publish is the normal failure here — v0.2.0 got three of four through
+      # before npm's spam filter rejected the fourth name — and without this a
+      # retry dies on "cannot publish over existing version" before reaching the
+      # package that actually needs publishing.
+      - name: Publish the platform packages
+        run: |
+          set -euo pipefail
+          for d in npm/platforms/*/; do
+            name=$(node -p "require('./$d/package.json').name")
+            ver=$(node -p "require('./$d/package.json').version")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "  $name@$ver already published — skipping"
+            else
+              (cd "$d" && npm publish --access public --tag "${{ steps.disttag.outputs.tag }}")
+            fi
+          done
+
+      # Last, so the wrapper is never resolvable before the binaries it points at.
+      # That ordering is what kept v0.2.0's partial failure harmless: three
+      # platform packages existed but no consumer could reach them, because the
+      # wrapper that names them had not shipped.
+      - name: Publish the wrapper
+        run: |
+          set -euo pipefail
+          ver=$(node -p "require('./npm/package.json').version")
+          if npm view "ai2rules-harness@$ver" version >/dev/null 2>&1; then
+            echo "  wrapper @$ver already published — skipping"
+          else
+            cd npm && npm publish --access public --tag "${{ steps.disttag.outputs.tag }}"
+          fi

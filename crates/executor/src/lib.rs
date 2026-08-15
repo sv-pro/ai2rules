@@ -16,7 +16,9 @@ mod handlers;
 mod transport;
 
 pub use handler::{ExecError, ExecOutput, Handler};
-pub use handlers::{CommandHandler, McpHandler, PatchHandler, ReadHandler, WebHandler};
+pub use handlers::{
+    CommandHandler, Confinement, McpHandler, PatchHandler, ReadHandler, WebHandler,
+};
 pub use transport::{McpTransport, MockMcpTransport, MockWebFetcher, WebFetcher};
 
 use std::collections::BTreeMap;
@@ -174,6 +176,32 @@ mod tests {
         )
     }
 
+    /// As [`spec`], with an explicit network policy — the default `spec` keeps
+    /// `NetworkPolicy::Disabled`, which is the fail-closed default every
+    /// non-network test wants.
+    #[allow(clippy::too_many_arguments)]
+    fn spec_with_network(
+        action: &str,
+        operation: Operation,
+        cwd: &Path,
+        hash: &str,
+        effect: EffectMode,
+        network: NetworkPolicy,
+    ) -> ExecutionSpec {
+        ExecutionSpec::new(
+            ActionName::new(action),
+            operation,
+            cwd.to_path_buf(),
+            EnvPolicy::default(),
+            1_000,
+            network,
+            FilesystemPolicy::default(),
+            DescriptorHash::new(hash),
+            effect,
+            TraceId::new("t"),
+        )
+    }
+
     fn read_executor() -> Executor {
         Executor::builder()
             .register(
@@ -247,6 +275,97 @@ mod tests {
             exec.run(&s),
             Err(ExecError::WriteOutsideRoots { .. })
         ));
+    }
+
+    // Regression for the dangling-symlink escape (security finding #9): a symlink
+    // *inside* a writable root whose target is missing used to pass containment as
+    // an "in-root new file", after which `fs::write` followed the link and created
+    // the outside target. It must now fail closed with nothing written outside.
+    #[cfg(unix)]
+    #[test]
+    fn dangling_symlink_leaf_inside_root_cannot_escape_write() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_target = outside.path().join("pwned.txt");
+        assert!(!outside_target.exists());
+
+        // Dangling symlink inside the root pointing at the missing outside file.
+        let link = root.path().join("link.txt");
+        symlink(&outside_target, &link).unwrap();
+
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("apply_patch"),
+                DescriptorHash::new(HASH),
+                Box::new(PatchHandler),
+            )
+            .build();
+        let s = spec(
+            "apply_patch",
+            Operation::Structured(json!({"path": link.to_str().unwrap(), "contents": "pwned"})),
+            root.path(),
+            vec![root.path().to_path_buf()],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            1_000,
+        );
+
+        assert!(matches!(
+            exec.run(&s),
+            Err(ExecError::WriteOutsideRoots { .. })
+        ));
+        assert!(
+            !outside_target.exists(),
+            "dangling symlink leaf must not let fs::write create the outside target"
+        );
+    }
+
+    // Companion: a *resolvable* symlink leaf pointing outside was already denied
+    // (canonicalize follows it, containment rejects the real target). Lock that
+    // branch so a future refactor of `resolve` cannot regress it.
+    #[cfg(unix)]
+    #[test]
+    fn resolvable_symlink_leaf_pointing_outside_is_denied() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_target = outside.path().join("secret.txt");
+        std::fs::write(&outside_target, "original").unwrap();
+
+        let link = root.path().join("link.txt");
+        symlink(&outside_target, &link).unwrap();
+
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("apply_patch"),
+                DescriptorHash::new(HASH),
+                Box::new(PatchHandler),
+            )
+            .build();
+        let s = spec(
+            "apply_patch",
+            Operation::Structured(json!({"path": link.to_str().unwrap(), "contents": "pwned"})),
+            root.path(),
+            vec![root.path().to_path_buf()],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            1_000,
+        );
+
+        assert!(matches!(
+            exec.run(&s),
+            Err(ExecError::WriteOutsideRoots { .. })
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&outside_target).unwrap(),
+            "original",
+            "the outside file behind the symlink must be untouched"
+        );
     }
 
     #[test]
@@ -327,7 +446,7 @@ mod tests {
             .register(
                 ActionName::new("run_command"),
                 DescriptorHash::new(HASH),
-                Box::new(CommandHandler),
+                Box::new(CommandHandler::unconfined()),
             )
             .build();
         let s = spec(
@@ -358,7 +477,7 @@ mod tests {
             .register(
                 ActionName::new("run_command"),
                 DescriptorHash::new(HASH),
-                Box::new(CommandHandler),
+                Box::new(CommandHandler::unconfined()),
             )
             .build();
         let s = spec(
@@ -372,6 +491,144 @@ mod tests {
             50,
         );
         assert!(matches!(exec.run(&s), Err(ExecError::Timeout { .. })));
+    }
+
+    /// Finding #11: a timed-out command must take its descendants with it.
+    ///
+    /// The command backgrounds a grandchild that writes a marker after a delay,
+    /// then sleeps past the timeout. If the kill only reached the direct child,
+    /// the grandchild survives and the marker appears. The assertion is the
+    /// absence of that file, checked after the moment it would have been written.
+    #[cfg(unix)]
+    #[test]
+    fn a_timed_out_command_kills_its_descendants() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("grandchild-survived");
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("run_command"),
+                DescriptorHash::new(HASH),
+                Box::new(CommandHandler::unconfined()),
+            )
+            .build();
+        let script = format!("( sleep 1; echo alive > {} ) & sleep 30", marker.display());
+        let s = spec(
+            "run_command",
+            Operation::Argv(vec!["sh".into(), "-c".into(), script]),
+            dir.path(),
+            vec![],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            200,
+        );
+        assert!(matches!(exec.run(&s), Err(ExecError::Timeout { .. })));
+
+        // Past the point the grandchild would have written its marker.
+        std::thread::sleep(std::time::Duration::from_millis(1_800));
+        assert!(
+            !marker.exists(),
+            "a descendant of the timed-out command survived and kept running"
+        );
+    }
+
+    /// The same shape, checking the second half of finding #11: a descendant
+    /// holding the inherited stdout pipe used to keep the reader thread from ever
+    /// seeing EOF, so the timeout path could block forever instead of returning.
+    #[cfg(unix)]
+    #[test]
+    fn a_timed_out_command_returns_even_when_a_descendant_holds_the_pipe() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("run_command"),
+                DescriptorHash::new(HASH),
+                Box::new(CommandHandler::unconfined()),
+            )
+            .build();
+        // The backgrounded grandchild inherits stdout and holds it open for 30s.
+        let s = spec(
+            "run_command",
+            Operation::Argv(vec!["sh".into(), "-c".into(), "sleep 30 & sleep 30".into()]),
+            dir.path(),
+            vec![],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            200,
+        );
+        let started = std::time::Instant::now();
+        assert!(matches!(exec.run(&s), Err(ExecError::Timeout { .. })));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "the timeout path blocked on a pipe held open by a descendant"
+        );
+    }
+
+    // Regression for finding #10 (D47): with the fail-closed default handler and
+    // no OS sandbox, a command must NOT Execute — the executor can't confine a
+    // subprocess's network/filesystem access, so it refuses before spawning.
+    #[test]
+    fn command_execute_without_sandbox_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let escaped = outside.path().join("pwned.txt");
+
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("run_command"),
+                DescriptorHash::new(HASH),
+                Box::new(CommandHandler::new()), // fail-closed default
+            )
+            .build();
+        // A command that WOULD write outside the writable root if it ran.
+        let s = spec(
+            "run_command",
+            Operation::Argv(vec![
+                "sh".into(),
+                "-c".into(),
+                format!("echo pwned > {}", escaped.display()),
+            ]),
+            root.path(),
+            vec![root.path().to_path_buf()],
+            vec![],
+            HASH,
+            EffectMode::Execute,
+            1_000,
+        );
+        assert!(matches!(
+            exec.run(&s),
+            Err(ExecError::SandboxRequired { .. })
+        ));
+        assert!(!escaped.exists(), "fail-closed command must spawn nothing");
+    }
+
+    // The sandbox gate must never block `Simulate` — it spawns nothing, so
+    // confinement is irrelevant to it. Even the fail-closed default simulates.
+    #[test]
+    fn command_simulate_is_allowed_when_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = Executor::builder()
+            .register(
+                ActionName::new("run_command"),
+                DescriptorHash::new(HASH),
+                Box::new(CommandHandler::new()),
+            )
+            .build();
+        let s = spec(
+            "run_command",
+            Operation::Argv(vec!["echo".into(), "hi".into()]),
+            dir.path(),
+            vec![],
+            vec![],
+            HASH,
+            EffectMode::Simulate,
+            1_000,
+        );
+        assert!(matches!(
+            exec.run(&s).unwrap().value,
+            ExecOutput::Simulated(_)
+        ));
     }
 
     #[test]
@@ -434,33 +691,74 @@ mod tests {
         }
     }
 
-    #[test]
-    fn web_handler_returns_tainted_content() {
-        let dir = tempfile::tempdir().unwrap();
-        let fetcher = MockWebFetcher::new().with("https://x", "hello web");
-        let exec = Executor::builder()
+    fn web_executor() -> Executor {
+        let fetcher = MockWebFetcher::new().with("https://docs.example/g", "hello web");
+        Executor::builder()
             .register(
                 ActionName::new("fetch_web"),
                 DescriptorHash::new(HASH),
                 Box::new(WebHandler::new(Box::new(fetcher))),
             )
-            .build();
-        let s = spec(
+            .build()
+    }
+
+    #[test]
+    fn web_handler_returns_tainted_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = spec_with_network(
             "fetch_web",
-            Operation::Structured(json!({"url": "https://x"})),
+            Operation::Structured(json!({"url": "https://docs.example/g"})),
             dir.path(),
-            vec![],
-            vec![],
             HASH,
             EffectMode::Execute,
-            1_000,
+            NetworkPolicy::AllowHosts(vec!["docs.example".to_string()]),
         );
-        let out = exec.run(&s).unwrap();
+        let out = web_executor().run(&s).unwrap();
         assert!(out.taint.is_tainted());
         match out.value {
             ExecOutput::External { content, .. } => assert_eq!(content, "hello web"),
             other => panic!("expected External, got {other:?}"),
         }
+    }
+
+    /// Finding #12. This test previously existed in the inverse: the suite fetched
+    /// a URL under `NetworkPolicy::Disabled` and asserted it succeeded, which
+    /// pinned the vulnerability rather than the policy.
+    #[test]
+    fn web_handler_refuses_a_fetch_when_network_is_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = spec_with_network(
+            "fetch_web",
+            Operation::Structured(json!({"url": "https://docs.example/g"})),
+            dir.path(),
+            HASH,
+            EffectMode::Execute,
+            NetworkPolicy::Disabled,
+        );
+        let err = web_executor()
+            .run(&s)
+            .expect_err("Disabled must refuse the fetch");
+        assert!(
+            matches!(err, ExecError::NetworkBlocked { .. }),
+            "expected NetworkBlocked, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn web_handler_refuses_a_host_outside_the_allowlist() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = spec_with_network(
+            "fetch_web",
+            Operation::Structured(json!({"url": "https://docs.example/g"})),
+            dir.path(),
+            HASH,
+            EffectMode::Execute,
+            NetworkPolicy::AllowHosts(vec!["other.example".to_string()]),
+        );
+        let err = web_executor()
+            .run(&s)
+            .expect_err("unlisted host must be refused");
+        assert!(matches!(err, ExecError::NetworkBlocked { .. }), "{err:?}");
     }
 
     #[test]

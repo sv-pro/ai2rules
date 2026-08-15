@@ -1,0 +1,156 @@
+# Canonical path-scope case set, evaluated against roots-world.yaml.
+#
+# The sibling of cases.yaml for spatial confinement. tests/one_kernel.rs asserts
+# decision, rule and post-call taint are EQUAL across every entry point that can
+# carry a resolved path:
+#   (a) in-process harness_preview::gate()
+#   (b) the `harness gate` CLI
+#   (c) `harness cc-hook`   (PreToolUse event, path taken from tool_input)
+#   (d) `harness agy-hook`  (Antigravity payload, path taken from AbsolutePath)
+# The MCP gateway is out of scope: its tools carry issue keys, not file paths.
+#
+# Why this file exists: finding #15 shipped because `cases.yaml` had no path
+# cases at all. The suite that compares adapters against each other never
+# exercised the one feature where they had silently diverged — cc-hook
+# canonicalized manifest roots and agy-hook did not, so the same world granted a
+# write on one host that it denied on the other. Parity harnesses only cover
+# what you feed them.
+#
+# `{project}` is substituted with a real, canonicalized temp directory.
+#
+# Each case carries BOTH spellings of the target, because that is how the real
+# boundary works:
+#   `arguments.file_path` — the raw, host-supplied path the ADAPTER resolves
+#   `path`                — the already-resolved absolute path the PURE gate expects
+# For most cases these are the same string. Where they differ (`link` →
+# `private`) the difference is the point.
+cases:
+  # --- inside the writable root -------------------------------------------
+  - name: write_inside_root_is_allowed
+    request:
+      tool: write
+      arguments: { file_path: "{project}/src/lib.rs" }
+      path: "{project}/src/lib.rs"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: ALLOW, rule: null, taint: clean }
+
+  # A file that does not exist yet is classified by its canonicalized parent —
+  # otherwise every new-file write would fail closed and roots would be unusable.
+  - name: write_new_file_under_real_parent_is_allowed
+    request:
+      tool: write
+      arguments: { file_path: "{project}/src/brand-new.rs" }
+      path: "{project}/src/brand-new.rs"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: ALLOW, rule: null, taint: clean }
+
+  - name: read_inside_root_does_not_taint
+    request:
+      tool: read
+      arguments: { file_path: "{project}/src/lib.rs" }
+      path: "{project}/src/lib.rs"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: ALLOW, rule: null, taint: clean }
+
+  # --- read-only roots ------------------------------------------------------
+  - name: read_of_read_only_root_is_allowed
+    request:
+      tool: read
+      arguments: { file_path: "{project}/vendor/dep.js" }
+      path: "{project}/vendor/dep.js"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: ALLOW, rule: null, taint: clean }
+
+  - name: write_to_read_only_root_is_denied
+    request:
+      tool: write
+      arguments: { file_path: "{project}/vendor/dep.js" }
+      path: "{project}/vendor/dep.js"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: DENY, rule: path_scope_readonly, taint: clean }
+
+  # --- longest-prefix wins: a Deny shadows the broader Read above it ---------
+  - name: deny_rule_shadows_the_broader_read_root
+    request:
+      tool: read
+      arguments: { file_path: "{project}/vendor/.env" }
+      path: "{project}/vendor/.env"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: DENY, rule: path_scope_denied, taint: clean }
+
+  # --- the regression anchor: a Deny root reached through a symlink ----------
+  # The rule is declared on {project}/link; the real directory is
+  # {project}/private. An entry point that canonicalizes the action path but not
+  # the root sees no match and falls through to `default: Ask` — which is how
+  # finding #15 turned a Deny(Credential) into a prompt on one host, and into an
+  # outright grant on a world whose default was ReadWrite.
+  - name: write_to_denied_root_through_a_symlinked_rule_is_denied
+    request:
+      tool: write
+      arguments: { file_path: "{project}/link/id_rsa" }
+      path: "{project}/private/id_rsa"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: DENY, rule: path_scope_denied, taint: clean }
+
+  - name: read_of_denied_root_through_a_symlinked_rule_is_denied
+    request:
+      tool: read
+      arguments: { file_path: "{project}/link/id_rsa" }
+      path: "{project}/private/id_rsa"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: DENY, rule: path_scope_denied, taint: clean }
+
+  # --- taint_source: reading untrusted input escalates the session ----------
+  - name: read_under_taint_source_root_taints_the_session
+    request:
+      tool: read
+      arguments: { file_path: "{project}/inbox/message.txt" }
+      path: "{project}/inbox/message.txt"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: ALLOW, rule: null, taint: tainted }
+
+  - name: write_to_taint_source_root_is_read_only
+    request:
+      tool: write
+      arguments: { file_path: "{project}/inbox/message.txt" }
+      path: "{project}/inbox/message.txt"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: DENY, rule: path_scope_readonly, taint: clean }
+
+  # --- outside every root: the closed-world default -------------------------
+  - name: out_of_root_write_falls_to_the_default_ask
+    request:
+      tool: write
+      arguments: { file_path: "{project}/untracked/x.txt" }
+      path: "{project}/untracked/x.txt"
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: ASK, rule: path_scope_ask, taint: clean }
+
+  # Invariant 10: an approval that cannot reach a human is a denial.
+  - name: out_of_root_write_in_background_fails_closed
+    request:
+      tool: write
+      arguments: { file_path: "{project}/untracked/x.txt" }
+      path: "{project}/untracked/x.txt"
+      context: { taint: clean, mode: background, source_channel: user_cli }
+    expect: { decision: DENY, rule: path_scope_ask_background, taint: clean }
+
+  # --- path-scoped actions must carry a resolved path -----------------------
+  # Without this the policy is bypassable by omission: a thin adapter that simply
+  # forgot to resolve the target would sail past every root rule.
+  - name: path_scoped_write_without_a_resolved_path_fails_closed
+    request:
+      tool: write
+      arguments: {}
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: DENY, rule: missing_path, taint: clean }
+
+  # --- and the exemption that keeps roots honest ----------------------------
+  # A shell command has no single resolvable target, so roots cannot scope it.
+  # This is a real limit of spatial confinement, pinned so it stays deliberate.
+  - name: shell_carries_no_path_and_is_exempt
+    request:
+      tool: bash
+      arguments: { command: "ls -la" }
+      context: { taint: clean, mode: interactive, source_channel: user_cli }
+    expect: { decision: ALLOW, rule: null, taint: clean }

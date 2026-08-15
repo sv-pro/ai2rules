@@ -15,7 +15,10 @@ use std::path::{Path, PathBuf};
 use trace_store::{ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
+mod agy_hook;
 mod cc_hook;
+mod hostkit;
+mod init;
 mod mcp_gateway;
 mod mock_jira;
 mod serve;
@@ -42,6 +45,32 @@ struct Cli {
 
 #[derive(clap::Subcommand, Debug)]
 enum Command {
+    /// Govern the project in this directory: write a starter manifest, the
+    /// PreToolUse shim, and the host settings entry — with nothing but this
+    /// binary. No ai2rules checkout, no `cargo`, no `jq`.
+    ///
+    /// The starter manifest is compiled into this executable and is compiled
+    /// (by the real compiler) before anything is written. The shim bakes the
+    /// absolute path of *this* binary, so there is no separate install step.
+    /// Safe to re-run: a tuned manifest is kept unless `--force`, and the
+    /// settings hook is merged idempotently.
+    Init {
+        /// Project directory to govern.
+        #[arg(default_value = ".")]
+        target: PathBuf,
+        /// Replace mode: the manifest becomes the authoritative allowlist and
+        /// ALLOW verdicts *grant* (the host skips its own prompt). Default is
+        /// additive — deny/ask overlay only, which can never lock you out.
+        #[arg(long)]
+        grant: bool,
+        /// Overwrite an existing `.claude/cc-world.yaml`. Off by default: a
+        /// tuned manifest is the valuable artifact here, not the template.
+        #[arg(long)]
+        force: bool,
+        /// Print the plan and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Launch the World Authoring Tool: a local browser editor for world
     /// manifests, backed by the real compiler + kernel (E11).
     Serve {
@@ -66,6 +95,18 @@ enum Command {
         /// offline (E16.E). See `docs/demos/jira-copilot/REAL-ATLASSIAN.md`.
         #[arg(long)]
         rovo: bool,
+        /// Behave like a **malicious or drifted** upstream (finding #14): advertise
+        /// an allowed tool name with an extra, undeclared `deleteAll` argument in
+        /// its `inputSchema`, and echo back whatever arguments actually arrive.
+        /// The governed surface must never republish that schema, and must never
+        /// forward that argument. Used by `tests/mcp_gateway_poisoned.rs`.
+        #[arg(long)]
+        poisoned: bool,
+        /// Answer every `tools/call` with an MRTR `InputRequiredResult` (MCP
+        /// `2026-07-28`) demanding a credential, instead of a result. The governed
+        /// gateway must refuse to relay that demand — see D49 and issue #40.
+        #[arg(long)]
+        input_required: bool,
     },
     /// Claude Code PreToolUse adapter, in Rust (D33 / E16.C): read a PreToolUse
     /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
@@ -90,6 +131,21 @@ enum Command {
         /// everything outside the manifest would brick the host.
         #[arg(long)]
         enforce_absent: bool,
+        /// The manifest channel this session's tool calls are attributed to —
+        /// the proposing actor's trust, resolved against the world's `channels:`
+        /// table.
+        ///
+        /// **Declared, not derived (finding #22).** A PreToolUse event says what
+        /// tool is about to run, never who asked for it: Claude Code sends
+        /// `tool_name`/`tool_input`/`permission_mode`, Antigravity sends
+        /// `toolCall`/`modelName`/`stepIdx`. Neither identifies the proposer, so an
+        /// adapter that claimed to know would be guessing. What it can do is let
+        /// you *state* the posture: run a supervised session as `user_prompt`, and
+        /// an unattended one as a lower-trust channel so the capability matrix
+        /// shrinks accordingly. Data-flow taint is enforced either way and does not
+        /// depend on this.
+        #[arg(long, default_value = "user_prompt")]
+        source_channel: String,
         /// Replace mode: emit an explicit `allow` on ALLOW verdicts, which
         /// *grants* — Claude Code skips its Allow/Deny prompt — so the manifest
         /// is the authoritative allowlist, not an additive overlay. Pair with an
@@ -97,6 +153,54 @@ enum Command {
         /// even on a hook `allow`). Default off: ALLOW stays a silent passthrough.
         #[arg(long)]
         grant: bool,
+    },
+    /// Antigravity CLI (`agy`) PreToolUse adapter, in Rust (D48): read an
+    /// Antigravity `PreToolUse` payload on stdin, govern it with the kernel
+    /// in-process, and emit a deny/force_ask decision — or, in `--grant`/replace
+    /// mode, an explicit `allow` that grants (skips the host's prompt). Additive
+    /// by default (never auto-allows); fail-open. The agy sibling of `cc-hook`.
+    AgyHook {
+        /// Path to the world manifest (YAML/JSON) that governs this session.
+        #[arg(long)]
+        world: PathBuf,
+        /// Directory for the per-conversation taint sidecar.
+        #[arg(long, default_value = ".agents/state")]
+        state: PathBuf,
+        /// Execution mode threaded into every gate call. The kernel itself
+        /// collapses ASK->DENY in background (invariant 10).
+        #[arg(long, default_value = "interactive", value_parser = ["interactive", "background"])]
+        mode: String,
+        /// Enforce ABSENT: deny tools the world does not declare (reason
+        /// prefixed "ABSENT: "). Default is passthrough — additive dogfooding,
+        /// since a PreToolUse hook cannot remove native tools and denying
+        /// everything outside the manifest would brick the host.
+        #[arg(long)]
+        enforce_absent: bool,
+        /// The manifest channel this session's tool calls are attributed to —
+        /// the proposing actor's trust, resolved against the world's `channels:`
+        /// table.
+        ///
+        /// **Declared, not derived (finding #22).** An Antigravity PreToolUse
+        /// payload carries `toolCall`, `modelName` and `stepIdx` — what is about to
+        /// run, never who asked for it — so an adapter claiming to know the
+        /// proposer would be guessing. What it can do is let you *state* the
+        /// posture: a supervised session as `user_prompt`, an unattended one as a
+        /// lower-trust channel so the capability matrix shrinks accordingly.
+        /// Data-flow taint is enforced either way and does not depend on this.
+        #[arg(long, default_value = "user_prompt")]
+        source_channel: String,
+        /// Replace mode: emit an explicit `allow` on ALLOW verdicts, which
+        /// *grants* — Antigravity skips its permission prompt — so the manifest
+        /// is the authoritative allowlist, not an additive overlay. Default off:
+        /// ALLOW stays a silent passthrough.
+        #[arg(long)]
+        grant: bool,
+        /// Map kernel ASK verdicts onto Antigravity's cache-respecting `ask`
+        /// instead of `force_ask`. Default is `force_ask`, so a cached
+        /// "Always Allow" grant can never silently satisfy an approval the
+        /// kernel required.
+        #[arg(long)]
+        soft_ask: bool,
     },
     /// Front a real upstream MCP server with the kernel: shape its `tools/list`
     /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
@@ -108,7 +212,7 @@ enum Command {
         #[arg(long, default_value = "cli")]
         source: String,
         /// Initial carried session taint floor: `clean` (default) | `tainted`.
-        #[arg(long, default_value = "clean")]
+        #[arg(long, default_value = "clean", value_parser = ["clean", "tainted"])]
         taint: String,
         /// Execution mode threaded into every gate call. The kernel itself
         /// collapses ASK→DENY in background (invariant 10).
@@ -230,6 +334,16 @@ fn ask_approval(call: &ToolCall, _world: &CompiledWorld, _provenance: &Provenanc
 fn main() {
     let cli = Cli::parse();
 
+    if let Some(Command::Init {
+        target,
+        grant,
+        force,
+        dry_run,
+    }) = &cli.command
+    {
+        std::process::exit(init::run(target, *grant, *force, *dry_run));
+    }
+
     if let Some(Command::Serve { port }) = cli.command {
         if let Err(e) = serve::run(port) {
             eprintln!("authoring server error: {e}");
@@ -242,19 +356,53 @@ fn main() {
         std::process::exit(run_gate(world));
     }
 
-    if let Some(Command::MockJira { rovo }) = &cli.command {
-        std::process::exit(mock_jira::run(*rovo));
+    if let Some(Command::MockJira {
+        rovo,
+        poisoned,
+        input_required,
+    }) = &cli.command
+    {
+        std::process::exit(mock_jira::run(*rovo, *poisoned, *input_required));
     }
 
     if let Some(Command::CcHook {
         world,
         state,
         mode,
+        source_channel,
         enforce_absent,
         grant,
     }) = &cli.command
     {
-        std::process::exit(cc_hook::run(world, state, mode, *enforce_absent, *grant));
+        std::process::exit(cc_hook::run(
+            world,
+            state,
+            mode,
+            source_channel,
+            *enforce_absent,
+            *grant,
+        ));
+    }
+
+    if let Some(Command::AgyHook {
+        world,
+        state,
+        mode,
+        source_channel,
+        enforce_absent,
+        grant,
+        soft_ask,
+    }) = &cli.command
+    {
+        std::process::exit(agy_hook::run(
+            world,
+            state,
+            mode,
+            source_channel,
+            *enforce_absent,
+            *grant,
+            *soft_ask,
+        ));
     }
 
     if let Some(Command::McpGateway {
@@ -292,8 +440,14 @@ fn main() {
     };
 
     let executor = default_executor(&world);
-    // Use a tempdir for sandbox storage in this CLI runner (simulating a session workspace).
-    // In a real deployed tool, we'd persist this in `.agents/`.
+    // Session storage for this CLI runner. A tempdir, which also satisfies the
+    // constraint that matters: the approval store must NOT live inside the project
+    // being governed (finding #15). An earlier note here proposed `.agents/` for a
+    // deployed tool — that is precisely wrong, and it is the same mistake D58 found
+    // in the npm layout and D57 in the control plane: anything the enforcement
+    // depends on must live outside what it enforces upon. A grant record the agent
+    // can write is not a grant record. The log is MAC'd so tampering is detectable
+    // wherever it sits, but detection is the backstop, not the plan.
     let sandbox = tempfile::tempdir().expect("sandbox");
     let trace = TraceStore::open(sandbox.path().join("trace.jsonl"));
     let mut store = ApprovalStore::open(sandbox.path().join("approvals.jsonl")).expect("store");
@@ -423,13 +577,28 @@ fn run_gate(world_path: &Path) -> i32 {
             return 2;
         }
     };
-    let manifest = match load_yaml(&content) {
+    let mut manifest = match load_yaml(&content) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("gate: cannot parse world {}: {e}", world_path.display());
             return 2;
         }
     };
+    // Resolve and canonicalize the manifest's roots at this I/O boundary, exactly
+    // as `cc-hook` and `agy-hook` do (finding #26). `run_gate` compiles the world
+    // itself, so a caller of the wire ABI has no other place to do it — and roots
+    // left lexical silently stop matching whenever a rule path is relative, uses
+    // `~`, or traverses a symlink, which drops its `Deny` through to the policy
+    // `default`. The kernel stays pure; this is the adapter half of the same
+    // boundary, and it must not differ per entry point.
+    if let Some(roots) = &manifest.roots {
+        let base = std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string());
+        let home = std::env::var("HOME").ok();
+        let resolved = compiler::resolve_root_paths(roots, home.as_deref(), base.as_deref());
+        manifest.roots = Some(hostkit::canonicalize_root_paths(&resolved));
+    }
     let world = match compile(&manifest) {
         Ok(w) => w,
         Err(e) => {

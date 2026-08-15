@@ -1,8 +1,12 @@
 # `harness gate` — the host-neutral governance ABI
 
-Status: **shipped (v1 + the D36 `action` addition)**, updated 2026-07-12.
+Status: **shipped (v1 + the D36 `action` addition)**, updated 2026-07-23.
 Decisions: `DECISIONS.md` **D24** (refines D19), **D34** (in-process vs wire),
-**D36** (kernel-side classification), **D37** (live-hook cutover). Vocabulary:
+**D36** (kernel-side classification), **D37** (live-hook cutover), **D41**
+(approval tokens are correlation ids, not bearer grants), **D42** (gate context
+is explicit and fail-closed), **D43** (source-channel trust is compiled manifest
+policy), **D44** (shell classifiers fail closed), **D46** (trusted harness
+resolution). Vocabulary:
 `docs/GLOSSARY.md` → *Integration / topology*. Cross-host parity is pinned by
 `crates/cli-harness/tests/one_kernel.rs` (see `docs/one-kernel-many-hosts.md`).
 
@@ -64,12 +68,14 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
   "v": 1,
   "tool": "Bash",
   "arguments": { "command": "rm -rf /tmp/x" },
+  "path": null,
   "context": {
     "session_id": "cc-9f3a",
     "mode": "interactive",
     "taint": "clean",
     "source_channel": "user_prompt",
-    "approval_token": null
+    "approval_token": null,
+    "usage": { "commands_run": 2, "network_calls": 0, "file_writes": 1, "tokens_used": 0 }
   }
 }
 ```
@@ -79,14 +85,33 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
 | `v` | ✓ | ABI version (integer). v1. |
 | `tool` | ✓ | The action name **in the manifest's vocabulary** (the adapter has already mapped the host's tool name; for CC the manifest *uses* `Bash`/`Read`/…). → `ToolCall.action_name`. |
 | `arguments` | ✓ | The proposed call's arguments (object). → `ToolCall.arguments`. |
+| `path` |  | Adapter-canonicalized absolute path for path-scoped file actions. Required when roots are enabled and the effective action is a filesystem read/write/patch action; Bash and other non-file actions set `null`. |
 | `context.session_id` | ✓ | Opaque host session id. → `SessionId`; trace correlation; taint sidecar key. |
 | `context.mode` | ✓ | `interactive` \| `background`. → `ExecutionMode` (drives ASK→DENY fail-closed). |
 | `context.taint` | ✓ | Monotonic state carried by the adapter: `clean` \| `tainted`. → `TaintContext`. |
-| `context.source_channel` |  | Provenance of this call's trigger: `user_prompt` (default) \| `web` \| `workspace_file` \| `mcp_output` \| … → `SourceChannel` (trust). |
-| `context.approval_token` |  | A token previously minted by an `ASK` and now granted, when re-submitting. → `EvalContext.approval_granted`. |
+| `context.source_channel` | ✓ | Provenance of this call's trigger: `user_prompt` \| `cli` \| `web` \| `workspace_file` \| `workspace_files` \| `mcp_output` \| …, resolved against the compiled manifest `channels:` table. Manifest trust drives capability checks; manifest taint is joined into `context.taint`. |
+| `context.approval_token` |  | Optional correlation id from a prior `ASK`. The pure gate ignores request-supplied tokens; it never maps this field to `EvalContext.approval_granted`. |
+| `context.usage` |  | Budget counters consumed so far this session. **Required when the world declares a counted budget** (`max_tokens_per_session`, `max_commands_per_task`, `max_network_calls`, `max_file_writes`); omitted then, the gate returns `DENY` / `missing_usage`. Absent counters within the object are zero, so a caller may send only what it tracks. `command_timeout_ms` alone does not oblige a caller to carry usage — it bounds one execution and the executor enforces it. |
 
-Unknown fields are ignored (forward-compatible). Budgets/usage are a v1.x addition
-to `context` (kernel already supports `BudgetUsage`); v1 assumes fresh usage.
+Unknown fields are ignored (forward-compatible). `context.usage` is the v1.x
+budget addition anticipated here — it is now implemented, so v1 no longer assumes
+fresh usage. Before it, every call arrived with zeroed counters and **no manifest
+budget was ever reachable** (finding #16).
+
+The gate fails closed on missing or malformed security context: omitted/invalid
+taint, omitted/undeclared/invalid source channel, an omitted `path` for a
+roots-scoped file action, or omitted `usage` for a world that counts calls returns
+`DENY` with a specific rule. The pattern is the same in each case — a control a
+thin adapter can disable by leaving a field out is not a control. This is an
+evaluated verdict (exit `0`), not a malformed-process error, so every host
+handles it through the same verdict channel.
+
+`context.approval_token` is not a bearer credential. A host that supports
+approval resumption must validate a durable approval-store binding at a trusted
+adapter/orchestrator boundary (action, params, world, descriptor, provenance, and
+effect mode) before setting `EvalContext.approval_granted`. The public
+`harness gate` ABI has no verifier or store access, so a non-null token still
+returns `ASK` for approval-required actions.
 
 ## 4. `GateResponse` (stdout)
 
@@ -97,7 +122,10 @@ to `context` (kernel already supports `BudgetUsage`); v1 assumes fresh usage.
   "action": "bash_network",
   "rule": "taint_invariant",
   "reason": "tainted context cannot reach an externally-effectful action",
-  "context": { "taint": "tainted" },
+  "context": {
+    "taint": "tainted",
+    "usage": { "commands_run": 2, "network_calls": 0, "file_writes": 1, "tokens_used": 0 }
+  },
   "approval": null,
   "manifest_hash": "ab12cd34ef56"
 }
@@ -106,11 +134,12 @@ to `context` (kernel already supports `BudgetUsage`); v1 assumes fresh usage.
 | Field | Meaning |
 |---|---|
 | `decision` | `ABSENT` \| `ALLOW` \| `DENY` \| `ASK` \| `REPLAN`. (`UnknownToOntology` is surfaced as `ABSENT` with `rule:"unknown_to_ontology"`, per `KernelOutcome::decision()`.) |
-| `action` | The **effective action** the kernel decided on: the request's `tool` after the world's `command_classes` classifiers ran (D36) — e.g. `bash` with a `curl …` command resolves to `bash_network`. Equal to `tool` when no classifier matched. Backward-compatible v1 addition; adapters use it in taint-cause notes and it seeds the approval token. |
+| `action` | The **effective action** the kernel decided on: the request's `tool` after the world's `command_classes` classifiers ran (D36/D44) — e.g. `bash` with a `curl …` command resolves to `bash_network`, and unmatched shell can resolve to a manifest-declared unclassified fallback. Equal to `tool` only when no classifier applies. Backward-compatible v1 addition; adapters use it in taint-cause notes and it seeds the approval token. |
 | `rule` | The rule/invariant that fired (`absent`, `capability`, `taint_invariant`, `approval_required`, `budget_exceeded`, …), or `null` for a plain `ALLOW`. |
 | `reason` | Human-readable, for the host's UI / the trace. |
 | `context.taint` | **Post-call** monotonic taint the adapter must persist for the next call. `clean` only if it was clean *and* this call is not a declared taint source; otherwise `tainted`. |
-| `approval` | On `ASK`: `{ "token": "<id>", "required": true }`. Else `null`. The adapter surfaces the host's approval UI; on grant it re-submits with `context.approval_token`. |
+| `context.usage` | **Post-call** budget counters the adapter must persist for the next call. Charged only on an `ALLOW` that will actually run — a blocked call consumes nothing, so a refusal never pushes a session toward its limit. Tokens are carried through unchanged; only a caller that has seen a model response can count them. |
+| `approval` | On `ASK`: `{ "token": "<id>", "required": true }`. Else `null`. The token is a correlation id for the adapter's approval UI/store, not a grant credential. |
 | `manifest_hash` | First 12 hex of the compiled manifest hash — drift correlation + trace join. |
 
 ## 5. Exit codes (process-level, **not** the verdict)
@@ -125,22 +154,33 @@ The adapter decides fail-open vs fail-closed on `≠0` (the current CC hook is
 fail-open by policy). The ABI never overloads the exit code with the verdict
 (D24 alt (e)); decision→host-convention mapping is the adapter's job.
 
-## 6. Host-adapter contract (the six steps)
+## 6. Host-adapter contract (the seven steps)
 
 Every host adapter, regardless of language, does exactly this:
 
 1. Receive the host's pre-tool intercept event.
-2. Restore monotonic taint for `session_id` from the sidecar (default `clean`).
-3. Build a `GateRequest` (map the host tool/args, set `mode`, attach `taint`).
+2. Restore monotonic taint for `session_id` from the sidecar (default `clean`),
+   **and the session's budget counters** (default all-zero). Counters that cannot
+   be read are counters that cannot be enforced: fail closed rather than restart a
+   budget at zero.
+3. Build a `GateRequest` (map the host tool/args, set `mode`, attach explicit
+   `taint` + `source_channel` + `usage`, and attach a symlink-aware canonical
+   absolute `path` for path-scoped file actions).
 4. Run `harness gate --world <W>` with the request on stdin; read the response.
 5. Persist `response.context.taint` back to the sidecar (monotonic; never lowers).
-6. Map `response.decision` → the host's decision shape; fail-open/closed on `≠0`.
+6. **Persist `response.context.usage`** back to the sidecar. If it cannot be
+   written, refuse the call it would have charged — a counter that silently fails
+   to persist is a budget that silently stops counting (D59's rule, applied to
+   budgets).
+7. Map `response.decision` → the host's decision shape; fail-open/closed on `≠0`.
 
-No governance logic lives in the adapter — only event-shape translation and taint
-state plumbing. **The taint *algebra*, the rules (incl. which inputs taint), and —
+No governance logic lives in the adapter — only event-shape translation and
+session-state plumbing (taint and budget counters). **The taint *algebra*, the rules (incl. which inputs taint), and —
 since D36 — command *classification* live in the kernel + the compiled
 `WorldManifest`.** Adapters send the **raw host tool name**; the world's
 `command_classes` resolve the effective action (returned as `response.action`).
+For shell-shaped actions, D44 requires a fail-closed `default_to` fallback; shell
+whitespace such as tabs/newlines is treated as whitespace for command patterns.
 
 ### Claude Code adapter (illustrative)
 
@@ -150,7 +190,7 @@ link `gate()` in-process; the wire ABI serves out-of-process/non-Rust hosts):
 
 ```bash
 # .claude/hooks/world-gate.sh (bootstrap only — no governance logic)
-BIN=…locate harness ($HARNESS_BIN → target/{release,debug}/harness → PATH)…
+BIN=…locate harness (absolute $HARNESS_BIN/$AI2RULES_HARNESS or installed absolute path)…
 [ -z "$BIN" ] && exit 0   # fail-open: no kernel binary, fall through
 exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state"
 ```
@@ -184,3 +224,11 @@ kernel's, driven by `cc-world.yaml` — a real `WorldManifest`.
 
 `v` is an integer; v1 additions are backward-compatible (new optional fields,
 ignored if unknown). A breaking change bumps `v` and the adapter negotiates.
+
+**The fail-closed hardenings are the exception, and they have not bumped `v`.**
+Requiring `taint`, `source_channel`, `path` (under roots) and now `usage` (under a
+counted budget) each turned a previously-tolerated omission into a `DENY`. That is
+breaking for a caller relying on the omission — but such a caller was silently
+running ungoverned, which is the condition being removed, and a version bump would
+let it keep doing so by pinning v1. A caller that sends the full context is
+unaffected by all of them.

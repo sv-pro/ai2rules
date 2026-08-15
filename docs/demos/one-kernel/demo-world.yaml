@@ -35,6 +35,7 @@ base_actions:
   - name: jira_get_issue
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: jira, tool: get_issue }
     schema:
       type: object
       properties:
@@ -42,6 +43,7 @@ base_actions:
   - name: jira_search_issues_using_jql
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: jira, tool: search_issues_using_jql }
     schema:
       type: object
       properties:
@@ -49,6 +51,7 @@ base_actions:
   - name: jira_get_project
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: jira, tool: get_project }
     schema:
       type: object
       properties:
@@ -69,6 +72,7 @@ base_actions:
   - { name: bash, action_type: Command, side_effect: Process }
   - { name: bash_network, action_type: Command, side_effect: Network }
   - { name: bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
 
 # DELIBERATELY NOT DECLARED (→ ABSENT, never offered): jira_delete_issue,
 # jira_create_issue, jira_bulk_create_issues, jira_transition_issue.
@@ -79,6 +83,7 @@ base_actions:
 command_classes:
   - action: bash
     arg: command
+    default_to: bash_unclassified
     classes:
       - to: bash_network
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]

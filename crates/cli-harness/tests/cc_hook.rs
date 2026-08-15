@@ -6,6 +6,8 @@
 
 use serde_json::{json, Value};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -20,23 +22,35 @@ fn run_hook(state: &Path, event: &Value) -> String {
 
 /// As [`run_hook`], with extra CLI args (e.g. `--grant`).
 fn run_hook_args(state: &Path, event: &Value, extra: &[&str]) -> String {
+    run_hook_with_world_env(&world(), state, event, extra, &[])
+}
+
+/// As [`run_hook_args`], with an explicit world and environment overrides.
+fn run_hook_with_world_env(
+    world: &Path,
+    state: &Path,
+    event: &Value,
+    extra: &[&str],
+    env: &[(&str, &Path)],
+) -> String {
     let bin = env!("CARGO_BIN_EXE_harness");
-    let w = world();
     let mut args = vec![
         "cc-hook",
         "--world",
-        w.to_str().unwrap(),
+        world.to_str().unwrap(),
         "--state",
         state.to_str().unwrap(),
     ];
     args.extend_from_slice(extra);
-    let mut child = Command::new(bin)
-        .args(&args)
+    let mut cmd = Command::new(bin);
+    cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn cc-hook");
+        .stderr(Stdio::null());
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let mut child = cmd.spawn().expect("spawn cc-hook");
     child
         .stdin
         .take()
@@ -54,6 +68,33 @@ fn decision(out: &str) -> Option<String> {
     v["hookSpecificOutput"]["permissionDecision"]
         .as_str()
         .map(String::from)
+}
+
+#[cfg(unix)]
+fn write_roots_world(path: &Path) {
+    std::fs::write(
+        path,
+        r#"
+world_id: native-root-symlink-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Write] }
+base_actions:
+  - name: Read
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        file_path: { type: string }
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+roots:
+  default: Ask
+  rules:
+    - { path: ".", access: ReadWrite }
+    - { path: "~/.ssh", access: Deny, class: Credential }
+"#,
+    )
+    .expect("write roots world");
 }
 
 #[test]
@@ -81,6 +122,99 @@ fn clean_egress_allows_but_escalates_taint() {
         dir.path().join("taint-s2").exists(),
         "egress must escalate taint"
     );
+}
+
+/// Finding #16: when the taint marker cannot be written, the escalation would be
+/// invisible to every later call and the taint floor would silently stop
+/// engaging — so the escalating call fails CLOSED instead of being allowed.
+///
+/// The unwritable state dir is a *file* rather than a chmod'd directory, so the
+/// test reproduces the failure even when the suite runs as root (CI containers).
+#[test]
+fn unwritable_taint_sidecar_denies_the_escalating_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state-is-a-file");
+    std::fs::write(&state, "not a directory").unwrap();
+
+    let out = run_hook(
+        &state,
+        &json!({"tool_name":"Bash","tool_input":{"command":"curl http://x"},"session_id":"ro"}),
+    );
+    assert_eq!(
+        decision(&out).as_deref(),
+        Some("deny"),
+        "an unrecordable escalation must not be allowed: {out}"
+    );
+}
+
+/// The fail-closed above is scoped to the escalating call: a session whose taint
+/// cannot be recorded still runs everything that does not ingest untrusted data.
+#[test]
+fn unwritable_taint_sidecar_still_passes_a_clean_read_through() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state-is-a-file");
+    std::fs::write(&state, "not a directory").unwrap();
+
+    let out = run_hook(
+        &state,
+        &json!({"tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"ro"}),
+    );
+    assert!(out.trim().is_empty(), "unexpected output: {out:?}");
+}
+
+/// Finding #22: the channel cannot be derived from a PreToolUse event — it says
+/// what is about to run, never who asked — but it can be *declared*, which turns
+/// an inert field into a posture control. An unattended session can be run at a
+/// lower trust so the capability matrix shrinks.
+#[test]
+fn a_lower_trust_source_channel_shrinks_the_capability_surface() {
+    let dir = tempfile::tempdir().unwrap();
+    let write = json!({"tool_name":"Write","tool_input":{"file_path":"/tmp/x"},"session_id":"sc1"});
+
+    // Default posture: the live world trusts `user_prompt`, so a write is allowed.
+    let out = run_hook_args(dir.path(), &write, &["--grant"]);
+    assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
+
+    // Declared as an untrusted channel, the same call is not merely denied — it is
+    // ABSENT, outside what that trust level can even express.
+    let out = run_hook_args(
+        dir.path(),
+        &write,
+        &[
+            "--grant",
+            "--enforce-absent",
+            "--source-channel",
+            "web_fetch",
+        ],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
+
+    // …while a read, which that trust level *can* perform, still goes through.
+    let read = json!({"tool_name":"Read","tool_input":{"file_path":"/tmp/x"},"session_id":"sc2"});
+    let out = run_hook_args(
+        dir.path(),
+        &read,
+        &[
+            "--grant",
+            "--enforce-absent",
+            "--source-channel",
+            "web_fetch",
+        ],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
+}
+
+/// A channel the world does not declare fails closed rather than falling back to
+/// a trusted default.
+#[test]
+fn an_undeclared_source_channel_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = run_hook_args(
+        dir.path(),
+        &json!({"tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"sc3"}),
+        &["--grant", "--source-channel", "not_a_channel"],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
 }
 
 #[test]
@@ -129,4 +263,50 @@ fn grant_mode_still_denies_tainted_egress() {
         &["--grant"],
     );
     assert_eq!(decision(&out).as_deref(), Some("deny"));
+}
+
+#[cfg(unix)]
+#[test]
+fn grant_mode_denies_write_through_project_symlink_to_denied_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let project = dir.path().join("project");
+    let state = dir.path().join("state");
+    let world = dir.path().join("world.yaml");
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(home.join(".ssh/config"), "secret").unwrap();
+    symlink(home.join(".ssh"), project.join("link")).unwrap();
+    write_roots_world(&world);
+
+    let out = run_hook_with_world_env(
+        &world,
+        &state,
+        &json!({"tool_name":"Write","tool_input":{"file_path":"link/config"},"session_id":"symlink"}),
+        &["--grant"],
+        &[("CLAUDE_PROJECT_DIR", &project), ("HOME", &home)],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
+}
+
+#[cfg(unix)]
+#[test]
+fn grant_mode_allows_new_file_under_real_project_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let project = dir.path().join("project");
+    let state = dir.path().join("state");
+    let world = dir.path().join("world.yaml");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    write_roots_world(&world);
+
+    let out = run_hook_with_world_env(
+        &world,
+        &state,
+        &json!({"tool_name":"Write","tool_input":{"file_path":"src/new.txt"},"session_id":"in-root"}),
+        &["--grant"],
+        &[("CLAUDE_PROJECT_DIR", &project), ("HOME", &home)],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
 }

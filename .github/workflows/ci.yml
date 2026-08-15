@@ -14,14 +14,23 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Least privilege for the whole workflow. Nothing in CI writes to the repository,
+# comments on a PR, or publishes anything; without this the jobs inherit whatever
+# the repository default happens to be, which is write in many configurations.
+# `release.yml` scopes its own permissions per job, because it genuinely needs
+# `contents: write` and `id-token: write` to publish.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # No version here on purpose: `rust-toolchain.toml` pins it, and rustup
+      # honours that file. Naming a version in the workflow too would be a second
+      # place to drift from — which is the bug this pin exists to prevent.
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -31,6 +40,236 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  demos:
+    # Guard what the demos *print*. The unit tests cover the kernel; they stayed
+    # green twice while a hardening change silently hollowed out a demo (the
+    # source_channel drift in demo-one-kernel-many-hosts.sh, and execution_demo's
+    # third refusal going unrepresentable after D45). Both exited 0 throughout.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+      - name: Demos still say what they claim
+        run: bash scripts/check-demos.sh
+
+  wasm:
+    # `blog/public/vendor/harness-wasm/` is a build output committed to git so the
+    # playground can load it as a static asset — which means nothing rebuilt it.
+    # It sat nine preview-affecting commits behind the kernel (the whole `roots`
+    # feature, D36 classification) for seven weeks, advertising version 0.0.1,
+    # while every job here stayed green (finding #18). AGENTS.md states the
+    # no-drift invariant; this is what enforces it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Version comes from `rust-toolchain.toml`; only the extra target is set here.
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      # From crates.io rather than a third-party action: this workflow should not
+      # take a supply-chain dependency the project would flag in a review.
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Build the engine from source
+        run: wasm-pack build --target web --release
+        working-directory: crates/harness-wasm
+      - name: Committed artifact must still answer for the kernel
+        run: node scripts/check-wasm-freshness.mjs
+
+  cross:
+    # The release workflow cross-compiles; CI never did, so a change that breaks
+    # the release build stayed invisible until a tag was pushed — which is exactly
+    # how pinning the toolchain shipped a broken release: the target had been
+    # installed for `stable` while cargo ran the pinned version, and every
+    # cross-compiled job failed after CI had gone green. One target is enough to
+    # catch that class; it is a proxy for "the release build still works", not a
+    # full matrix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+      - name: Add the target to the pinned toolchain
+        run: rustup target add x86_64-unknown-linux-musl
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Cross-compile the binary the way the release does
+        run: cargo build --release --locked -p cli-harness --target x86_64-unknown-linux-musl
+
+  release-dry-run:
+    # Rehearse the publish path, on every pull request, without publishing.
+    #
+    # `cross` (above) proves the release still COMPILES. Nothing proved the
+    # release still SHIPS: everything after the build — the artifact round-trip,
+    # unpacking four archives, filling the platform packages, and packing the
+    # tarballs — lives in `release.yml` behind `if: startsWith(github.ref,
+    # 'refs/tags/')`. Its first execution is therefore on a tag, in the job that
+    # publishes to npm, where a version cannot be republished. That path has
+    # already produced two incidents: a Windows package that would have shipped
+    # empty (GNU tar cannot read a zip), and v0.3.1 going out as two platforms of
+    # four. Both were caught by a human dry-running steps by hand.
+    #
+    # It also makes a class of dependency bump verifiable that previously was
+    # not. `upload-artifact` and `download-artifact` appear ONLY in `release.yml`,
+    # so a Dependabot PR bumping them across a major version arrived with a full
+    # set of green checks that could not, even in principle, have failed. The
+    # action versions below are pinned to the same SHAs `release.yml` uses, which
+    # is the entire point: bump them there and this job exercises the bump here.
+    #
+    # One real binary, four archives. The compiler is `check`/`cross`'s job; this
+    # one is about everything that happens to the binary afterwards.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # First, and deliberately before the build: a rehearsal that runs a
+      # different version of an action than the performance is not a rehearsal.
+      # This asserts every action is SHA-pinned (finding #25 stays fixed) and
+      # that an action used in both workflows carries the SAME pin in both.
+      - name: The rehearsal uses the same actions as the performance
+        run: node scripts/check-action-pins.mjs
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+      - name: Add the release target to the pinned toolchain
+        run: rustup target add x86_64-unknown-linux-musl
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build the binary the release would ship
+        run: cargo build --release --locked -p cli-harness --target x86_64-unknown-linux-musl
+
+      # Produce the four archives the release matrix produces, in the same layout
+      # and under the same names. Three targets get the musl binary they would not
+      # get in a real release; that is fine — nothing downstream of here inspects
+      # the machine code, and using a real multi-MB executable is what makes the
+      # size assertions in check-npm-pack.mjs meaningful.
+      - name: Package four archives, as the matrix would
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin=target/x86_64-unknown-linux-musl/release/harness
+          for target in x86_64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin; do
+            name="harness-$target"
+            mkdir -p "dist/$name"
+            cp "$bin" "dist/$name/harness"
+            cp README.md "dist/$name/"
+            tar -C dist -czf "$name.tar.gz" "$name"
+            sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          done
+          # Windows ships a zip containing harness.exe. Built with python's zipfile
+          # rather than `zip` so the archive is byte-shaped like the one
+          # Compress-Archive produces on the Windows runner, and so the tar/zip
+          # asymmetry that once nearly shipped an empty package is present here.
+          name=harness-x86_64-pc-windows-msvc
+          mkdir -p "dist/$name"
+          cp "$bin" "dist/$name/harness.exe"
+          cp README.md "dist/$name/"
+          (cd dist && python3 -m zipfile -c "../$name.zip" "$name")
+          sha256sum "$name.zip" > "$name.zip.sha256"
+          ls -l harness-*.tar.gz harness-*.zip
+
+      # Four uploads, because four matrix jobs produce four artifacts and
+      # `merge-multiple: true` below only means anything when more than one
+      # exists. Same action SHA as release.yml.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dryrun-harness-x86_64-unknown-linux-musl
+          path: harness-x86_64-unknown-linux-musl.tar.gz*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dryrun-harness-aarch64-apple-darwin
+          path: harness-aarch64-apple-darwin.tar.gz*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dryrun-harness-x86_64-apple-darwin
+          path: harness-x86_64-apple-darwin.tar.gz*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dryrun-harness-x86_64-pc-windows-msvc
+          path: harness-x86_64-pc-windows-msvc.zip*
+          if-no-files-found: error
+
+      # Destroy the local copies first, or the assembly below could read what this
+      # job produced instead of what the round-trip returned — and the round-trip
+      # is the thing under test.
+      - name: Discard everything the download must restore
+        run: rm -rf dist harness-*.tar.gz harness-*.zip harness-*.sha256
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with: { merge-multiple: true, path: dist }
+
+      - name: The round-trip returned the release's layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l dist/
+          for f in harness-x86_64-unknown-linux-musl.tar.gz \
+                   harness-aarch64-apple-darwin.tar.gz \
+                   harness-x86_64-apple-darwin.tar.gz \
+                   harness-x86_64-pc-windows-msvc.zip; do
+            test -s "dist/$f" || { echo "::error::dist/$f did not survive the artifact round-trip"; exit 1; }
+          done
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      # The release job runs `npm install -g npm@latest` because trusted
+      # publishing needs npm >= 11.5.1, so the rehearsal must run the same npm —
+      # otherwise the two differ in a component that behaves differently.
+      #
+      # This is not theoretical. v0.4.2-rc.1 failed here: `npm pack --json`
+      # returns an array on npm 11 and an object keyed by package name on npm 12,
+      # and this job was on setup-node's bundled npm while the release had
+      # upgraded. Every check was green and the release job died on the guard.
+      # Same lesson as the shared assemble script and the pinned action SHAs,
+      # arriving through a third door.
+      - name: Match the release's npm
+        run: |
+          npm install -g npm@latest
+          echo "npm $(npm --version) / node $(node --version)"
+
+      # From here down, every step is one the tag-only npm job runs, in order.
+      - name: Layout guard
+        run: node npm/verify-packages.js
+      - name: Fill each platform package with its binary
+        run: bash scripts/assemble-npm-packages.sh
+      - name: Packed tarballs carry their payload
+        run: node scripts/check-npm-pack.mjs
+
+      # NO `npm publish --dry-run` HERE, and it is not an oversight. Despite the
+      # name it contacts the registry, so at any version already on npm — which is
+      # every commit between releases — it fails with "cannot publish over the
+      # previously published versions". It would turn this job permanently red.
+      # `check-npm-pack.mjs` uses `npm pack --dry-run --json`, which is local, and
+      # the tarball contents are the only part a publish would add. The one thing
+      # a real publish also proves is that OIDC authenticates, and that cannot be
+      # rehearsed from `ci.yml` at all: trusted publishing is bound to the
+      # `release.yml` workflow filename.
+
+  npm-wrapper:
+    # The npm packages (D56, restructured in D58) are how a stranger gets a
+    # binary, and nothing else in CI touches them. Two cheap checks: they parse,
+    # and the five-package layout is consistent — versions in lockstep, no install
+    # script anywhere, every shipped platform actually built. Each of those fails
+    # silently otherwise, and only ever on someone else's machine.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Syntax
+        run: |
+          node --check npm/bin/harness.js
+          node --check npm/verify-packages.js
+      - name: Layout — versions in lockstep, no install scripts
+        run: node npm/verify-packages.js
+
   hero-mcp:
     # TypeScript MCP tool under tools/hero-mcp (not a Cargo member); typecheck + unit
     # tests only — the agy-backed generation needs auth and isn't run in CI.
@@ -39,8 +278,8 @@ jobs:
       run:
         working-directory: tools/hero-mcp
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - run: npm ci
@@ -55,10 +294,14 @@ jobs:
       run:
         working-directory: blog
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - run: npm ci
       - run: npm run build
       - run: npm run check:heroes
+      # A draft that reaches the build is worse than a published post: it looks
+      # hidden while being fully reachable at its URL.
+      - run: npm run check:drafts
+      - run: npm run check:spacing

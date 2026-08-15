@@ -127,6 +127,13 @@ defined below under *Action layer*.
 - **Scoped capability** *(Action/Capability)* — a base action narrowed by locking
   args to literals (e.g. `run_tests` always runs `pytest`; injected/unknown args
   are stripped — invariant 12).
+- **roots** *(Action)* — the manifest's path-scoped capabilities: which paths an
+  action may read and which it may write (spatial confinement). **Not MCP `roots`.**
+  MCP's `roots` / `roots/list` feature was *deprecated* in protocol version
+  2026-07-28, with the suggested migration being to pass directories via tool
+  parameters or server configuration — i.e. as policy data, which is where ours
+  already live. Same word, different layer: ours are compiled world data the kernel
+  enforces, never a protocol message.
 
 ## Knowledge layer
 

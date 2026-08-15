@@ -12,9 +12,11 @@
 
 mod approval;
 mod bundle;
+pub mod integrity;
 mod record;
 mod redact;
 mod replay;
+pub mod secrets;
 mod store;
 
 pub use approval::{params_hash, ApprovalEvent, ApprovalStore};

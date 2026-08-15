@@ -91,6 +91,7 @@ mod tests {
             rule: rule.map(String::from),
             reason: reason.to_string(),
             context: GateResponseContext {
+                usage: Default::default(),
                 taint: "clean".to_string(),
             },
             approval: None,

@@ -2,7 +2,7 @@
 title: "The ZombieAgent Threat: Why Your AI's Memory is a Ticking Time Bomb"
 description: "Exploring cross-session taint tracking and why wiping the context window isn't enough to secure an agent."
 pubDate: 'Jun 17 2026'
-heroImage: '../../assets/blog-placeholder-3.jpg'
+heroImage: '../../assets/zombieagent-threat.jpg'
 ---
 
 When a local AI agent reads a poisoned web page, that data enters its context window. Most developers assume that once the session ends and the context window is cleared, the threat is gone. "We start fresh every time," the logic goes.

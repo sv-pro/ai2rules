@@ -246,7 +246,7 @@ For a coding CLI, the first useful manifest should be small:
 
 - `read_workspace`: read files under workspace roots.
 - `write_workspace`: write files under workspace roots.
-- `apply_patch`: modify workspace files using a structured patch.
+- `apply_patch`: modify workspace files using a structured full-file write (`path`, `contents`).
 - `run_command`: run non-network commands with timeout.
 - `run_network_command`: explicit network-capable execution, approval-gated.
 - `start_pty`: long-running command session, approval-gated by command class.
@@ -257,7 +257,7 @@ Also define scoped capabilities over raw actions:
 
 - `run_tests`: constrained `run_command` with fixed argv prefixes.
 - `cargo_check`: constrained `run_command` with network disabled.
-- `apply_workspace_patch`: constrained `apply_patch` limited to writable roots.
+- `apply_workspace_patch`: constrained `apply_patch` full-file write limited to writable roots.
 - `read_repo_file`: constrained `read_file` limited to workspace roots.
 - `call_known_mcp_tool`: constrained `call_mcp_tool` bound to a pinned server and
   descriptor hash.

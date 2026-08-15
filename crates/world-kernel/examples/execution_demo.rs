@@ -182,7 +182,10 @@ fn timeout_refusal(env: &ExecEnv) {
     let fast = compile(&manifest).expect("compile fast world");
     let executor = build_executor(&fast);
 
-    let args = json!({ "command": "sleep", "args": ["5"] });
+    // `run_command` declares exactly one argument, `command`. Passing a separate
+    // `args` array is a schema violation since arguments were sealed (D45) — the
+    // intent never builds, and this refusal silently stops happening.
+    let args = json!({ "command": "sleep 5" });
     println!(
         "    proposes : run_command({})  [budget: 200ms]",
         compact(&args)
@@ -202,6 +205,10 @@ fn timeout_refusal(env: &ExecEnv) {
             }
             other => println!("    unexpected: {other:?}"),
         }
+    } else {
+        // Never skip a refusal in silence: a hardening change that makes this call
+        // unrepresentable has to be loud, or the demo just quietly gets shorter.
+        println!("    unexpected: run_command did not evaluate");
     }
     println!();
 }
@@ -227,7 +234,9 @@ fn build_executor(world: &CompiledWorld) -> Executor {
         .register(
             ActionName::new("run_command"),
             hash("run_command"),
-            Box::new(CommandHandler),
+            // Demo runs in a throwaway tempdir; opt into unconfined execution
+            // (D47) since no OS sandbox is present.
+            Box::new(CommandHandler::unconfined()),
         )
         .build()
 }

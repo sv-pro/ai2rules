@@ -7,7 +7,13 @@
 //! world (an `enum`/`const` constraint on a secret is a noted edge case).
 //!
 //! Patterns use a minimal `*` wildcard (any run, including `/`), so `**/.env`
-//! degrades sensibly. Full glob / value-pattern semantics are deferred.
+//! degrades sensibly.
+//!
+//! Key matching alone was not enough (finding #17): a secret embedded in an
+//! ordinary value — a bearer token inside `command`, an `api_key` in a `url` — has
+//! no matching key and was written to the trace verbatim. Every string value is
+//! now additionally scanned by [`crate::secrets`], which masks only the
+//! secret-shaped span so the surrounding command or URL stays auditable.
 
 use serde_json::{Map, Value};
 
@@ -39,6 +45,9 @@ fn redact_at(value: &Value, path: &str, patterns: &[String]) -> Value {
         Value::Array(items) => {
             Value::Array(items.iter().map(|v| redact_at(v, path, patterns)).collect())
         }
+        // A string that no key pattern matched can still *contain* a secret.
+        // Scan it and mask only the offending span (finding #17).
+        Value::String(text) => Value::String(crate::secrets::mask_secrets(text)),
         other => other.clone(),
     }
 }

@@ -49,3 +49,52 @@ export function assetReturnPath(repoRoot: string, outJpg: string): string {
   const rel = path.relative(repoRoot, outJpg);
   return rel.startsWith("..") || path.isAbsolute(rel) ? outJpg : rel;
 }
+
+// The environment `agy` inherits (finding #18). An allowlist, not a denylist: the
+// caller's prompt is untrusted input driving an authenticated agent, and the
+// process it launches has no business seeing this shell's cloud keys, registry
+// tokens or CI secrets. Everything `agy` genuinely needs to find its config and
+// its Google auth is named here; add more with HERO_AGY_ENV (comma-separated) if a
+// future agy needs it, rather than widening the list silently.
+export const AGY_ENV_ALLOWLIST = [
+  "HOME",
+  "PATH",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TERM",
+  "TMPDIR",
+  "LANG",
+  "TZ",
+];
+export const AGY_ENV_PREFIXES = [
+  "LC_",
+  "XDG_",
+  "GOOGLE_",
+  "GEMINI_",
+  "ANTIGRAVITY_",
+  "AGY_",
+];
+
+/** Filter an environment down to what `agy` needs. Pure, so it is testable. */
+export function agyEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  extraNames = source.HERO_AGY_ENV ?? "",
+): NodeJS.ProcessEnv {
+  const extra = extraNames
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(source)) {
+    if (v === undefined) continue;
+    if (
+      AGY_ENV_ALLOWLIST.includes(k) ||
+      AGY_ENV_PREFIXES.some((p) => k.startsWith(p)) ||
+      extra.includes(k)
+    ) {
+      out[k] = v;
+    }
+  }
+  return out;
+}

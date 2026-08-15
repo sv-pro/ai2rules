@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::decision::EffectMode;
-use crate::ids::{ActionName, ApprovalTokenId, ContentHash, DescriptorHash, WorldId};
+use crate::ids::{ActionName, ApprovalTokenId, ContentHash, DescriptorHash, ManifestHash, WorldId};
 use crate::provenance::Provenance;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,8 +33,14 @@ impl std::fmt::Display for ApprovalTransitionError {
 
 impl std::error::Error for ApprovalTransitionError {}
 
-/// An approval is bound to the exact action, params, world version, descriptor
-/// hash, provenance, and effect mode. It cannot be reused after any drift.
+/// An approval is bound to the exact action, params, world, **compiled manifest**,
+/// descriptor hash, provenance, and effect mode. It cannot be reused after any
+/// drift in those.
+///
+/// `manifest_hash` is the binding that `world_id` does not provide (finding #15):
+/// a world keeps its id while its rules are rewritten, so an approval granted
+/// under one policy stayed valid under the next. Both are kept — `world_id` says
+/// *which* world, `manifest_hash` says *which version of it*.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApprovalToken {
     pub id: ApprovalTokenId,
@@ -42,6 +48,7 @@ pub struct ApprovalToken {
     pub action: ActionName,
     pub params_hash: ContentHash,
     pub world_id: WorldId,
+    pub manifest_hash: ManifestHash,
     pub descriptor_hash: DescriptorHash,
     pub provenance: Provenance,
     pub effect_mode: EffectMode,
@@ -54,6 +61,7 @@ impl ApprovalToken {
         action: ActionName,
         params_hash: ContentHash,
         world_id: WorldId,
+        manifest_hash: ManifestHash,
         descriptor_hash: DescriptorHash,
         provenance: Provenance,
         effect_mode: EffectMode,
@@ -64,6 +72,7 @@ impl ApprovalToken {
             action,
             params_hash,
             world_id,
+            manifest_hash,
             descriptor_hash,
             provenance,
             effect_mode,

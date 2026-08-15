@@ -39,10 +39,12 @@ base_actions:
   - { name: Bash, action_type: Command, side_effect: Process }
   - { name: Bash_network, action_type: Command, side_effect: Network }
   - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: Bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
 
 command_classes:
   - action: Bash
     arg: command
+    default_to: Bash_unclassified
     classes:
       - to: Bash_network
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
@@ -60,6 +62,15 @@ roots:
     - { path: "/tmp", access: ReadWrite }                  # scratch
     - { path: "/usr", access: Read }                       # tools / libs, read-only
     - { path: "/etc", access: Read }                       # system config, read-only
+    # THE CONTROL PLANE — readable, never writable.
+    # `.claude/` holds the manifest that governs this session, the shim the host
+    # invokes, and the hook registration. All three sat inside the project's own
+    # writable root until 2026-08-11, which meant the agent could rewrite the policy
+    # binding it: flipping one rule here took effect on the very NEXT tool call,
+    # because the shim runs a fresh `cc-hook` per call and recompiles each time.
+    # Read stays allowed on purpose — an agent should be able to see the rules it is
+    # under, and it needs to in order to propose a change to them.
+    - { path: "./.claude", access: Read }
     # sensitive paths — out of bounds even inside an allowed parent
     - { path: "/etc/shadow", access: Deny, class: Secret }
     - { path: "~/.ssh", access: Deny, class: Credential }
@@ -70,6 +81,7 @@ roots:
     # - { path: "./inbox", access: Read, taint_source: true }
 
 # The taint floor (invariant 7): tainted context cannot reach an effectful surface.
+# Tainted WebFetch/WebSearch/Bash_network/Bash_unclassified all DENY here.
 transition_policies:
   - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
   - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }

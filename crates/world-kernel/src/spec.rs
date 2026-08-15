@@ -9,7 +9,7 @@
 //! It stays pure: everything environmental arrives in [`ExecEnv`]; nothing here
 //! reads the filesystem, the process environment, or the clock.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use harness_types::{
@@ -87,24 +87,27 @@ pub fn build_execution_spec(
     trace_id: TraceId,
 ) -> Result<ExecutionSpec, SpecError> {
     let action = intent.action().clone();
-    let backing = world
+    let descriptor = world
         .descriptor(&action)
-        .map(|d| d.backing.clone())
         .ok_or_else(|| SpecError::BadArgument {
             detail: format!("no descriptor for {action}"),
         })?;
+    let backing = descriptor.backing.clone();
 
     // Scoped capabilities narrow the actor's args: strip anything not declared
     // actor-input, inject literals, resolve context refs (invariant 12). A base
-    // action passes its params through unchanged.
-    let params = effective_params(world, &action, intent.params(), env)?;
+    // action keeps its params, but local-handler lowering may only read fields
+    // explicitly declared by the sealed descriptor.
+    let params = effective_params(world, &action, intent.params(), descriptor, env)?;
 
     let operation = match &backing {
-        BackingIdentity::LocalHandler(handler) => operation_for(&action, handler, &params)?,
+        BackingIdentity::LocalHandler(handler) => {
+            operation_for(&action, handler, &params.value, &params.contract)?
+        }
         BackingIdentity::McpServer { server, tool } => Operation::Structured(json!({
             "server": server,
             "tool": tool,
-            "input": params,
+            "input": params.value,
         })),
     };
 
@@ -143,23 +146,60 @@ fn operation_for(
     action: &ActionName,
     handler: &str,
     params: &Value,
+    contract: &ParamContract,
 ) -> Result<Operation, SpecError> {
     match handler {
         "read_workspace" => Ok(Operation::Structured(
-            serde_json::json!({ "path": str_param(params, "path")? }),
+            serde_json::json!({ "path": str_param(params, contract, "path")? }),
         )),
         "apply_patch" => Ok(Operation::Structured(serde_json::json!({
-            "path": str_param(params, "path")?,
-            "contents": str_param(params, "contents")?,
+            "path": str_param(params, contract, "path")?,
+            "contents": str_param(params, contract, "contents")?,
         }))),
-        "run_command" => Ok(Operation::Argv(argv_from(params)?)),
+        "run_command" => Ok(Operation::Argv(argv_from(params, contract)?)),
         "fetch_web" => Ok(Operation::Structured(
-            serde_json::json!({ "url": str_param(params, "url")? }),
+            serde_json::json!({ "url": str_param(params, contract, "url")? }),
         )),
         other => Err(SpecError::UnsupportedBacking {
             action: action.clone(),
             backing: format!("local:{other}"),
         }),
+    }
+}
+
+struct EffectiveParams {
+    value: Value,
+    contract: ParamContract,
+}
+
+struct ParamContract {
+    declared: BTreeSet<String>,
+}
+
+impl ParamContract {
+    fn for_descriptor(descriptor: &harness_types::Descriptor) -> Self {
+        Self {
+            declared: crate::schema::declared_arg_names(
+                &descriptor.schema,
+                &descriptor.arg_constraints,
+            ),
+        }
+    }
+
+    fn for_scoped_args(args: &BTreeMap<String, ArgSource>) -> Self {
+        Self {
+            declared: args.keys().cloned().collect(),
+        }
+    }
+
+    fn require(&self, key: &str) -> Result<(), SpecError> {
+        if self.declared.contains(key) {
+            Ok(())
+        } else {
+            Err(SpecError::BadArgument {
+                detail: format!("handler requested undeclared argument `{key}`"),
+            })
+        }
     }
 }
 
@@ -170,10 +210,16 @@ fn effective_params(
     world: &CompiledWorld,
     action: &ActionName,
     actor_params: &Value,
+    descriptor: &harness_types::Descriptor,
     env: &ExecEnv,
-) -> Result<Value, SpecError> {
+) -> Result<EffectiveParams, SpecError> {
     let cap = match world.scoped_capability(action) {
-        None => return Ok(actor_params.clone()),
+        None => {
+            return Ok(EffectiveParams {
+                value: actor_params.clone(),
+                contract: ParamContract::for_descriptor(descriptor),
+            });
+        }
         Some(cap) => cap,
     };
     let actor = actor_params.as_object();
@@ -201,10 +247,14 @@ fn effective_params(
             }
         }
     }
-    Ok(Value::Object(out))
+    Ok(EffectiveParams {
+        value: Value::Object(out),
+        contract: ParamContract::for_scoped_args(&cap.args),
+    })
 }
 
-fn str_param(params: &Value, key: &str) -> Result<String, SpecError> {
+fn str_param(params: &Value, contract: &ParamContract, key: &str) -> Result<String, SpecError> {
+    contract.require(key)?;
     params
         .get(key)
         .and_then(Value::as_str)
@@ -216,8 +266,12 @@ fn str_param(params: &Value, key: &str) -> Result<String, SpecError> {
 
 /// Accept either a pre-split `argv` array or a `command` string (split with
 /// shell-words) plus optional `args`.
-fn argv_from(params: &Value) -> Result<Vec<String>, SpecError> {
-    if let Some(array) = params.get("argv").and_then(Value::as_array) {
+fn argv_from(params: &Value, contract: &ParamContract) -> Result<Vec<String>, SpecError> {
+    if let Some(value) = params.get("argv") {
+        contract.require("argv")?;
+        let array = value.as_array().ok_or_else(|| SpecError::BadArgument {
+            detail: "argument `argv` must be array".to_string(),
+        })?;
         let argv = string_array(array);
         if argv.is_empty() {
             return Err(SpecError::BadArgument {
@@ -227,11 +281,15 @@ fn argv_from(params: &Value) -> Result<Vec<String>, SpecError> {
         return Ok(argv);
     }
 
-    let command = str_param(params, "command")?;
+    let command = str_param(params, contract, "command")?;
     let mut argv = shell_words::split(&command).map_err(|e| SpecError::BadArgument {
         detail: e.to_string(),
     })?;
-    if let Some(args) = params.get("args").and_then(Value::as_array) {
+    if let Some(value) = params.get("args") {
+        contract.require("args")?;
+        let args = value.as_array().ok_or_else(|| SpecError::BadArgument {
+            detail: "argument `args` must be array".to_string(),
+        })?;
         argv.extend(string_array(args));
     }
     if argv.is_empty() {
@@ -255,12 +313,16 @@ mod tests {
     use crate::IRBuilder;
     use compiler::compile_default;
     use harness_types::{
-        CallId, ContentHash, Provenance, Provider, SessionId, SourceChannel, TaintContext, ToolCall,
+        BuildError, CallId, ContentHash, Provenance, Provider, SessionId, SourceChannel,
+        TaintContext, ToolCall,
     };
     use serde_json::json;
 
-    fn spec(action: &str, args: Value) -> ExecutionSpec {
-        let world = compile_default();
+    fn build_ir_with_world(
+        world: CompiledWorld,
+        action: &str,
+        args: Value,
+    ) -> Result<(CompiledWorld, IntentIR), BuildError> {
         let call = ToolCall {
             action_name: ActionName::new(action),
             arguments: args,
@@ -274,9 +336,16 @@ mod tests {
             SessionId::new("s"),
             ContentHash::new("h"),
         );
-        let ir = IRBuilder::new(&world)
-            .build(&call, prov, &TaintContext::clean())
-            .expect("intent builds");
+        let ir = IRBuilder::new(&world).build(&call, prov, &TaintContext::clean())?;
+        Ok((world, ir))
+    }
+
+    fn try_spec_with_world(
+        world: CompiledWorld,
+        action: &str,
+        args: Value,
+    ) -> Result<ExecutionSpec, BuildError> {
+        let (world, ir) = build_ir_with_world(world, action, args)?;
         build_execution_spec(
             &world,
             &ir,
@@ -284,7 +353,18 @@ mod tests {
             &ExecEnv::default(),
             TraceId::new("t"),
         )
-        .expect("spec assembles")
+        .map_err(|e| BuildError::InvariantViolation {
+            law: "spec_lowering".to_string(),
+            detail: e.to_string(),
+        })
+    }
+
+    fn try_spec(action: &str, args: Value) -> Result<ExecutionSpec, BuildError> {
+        try_spec_with_world(compile_default(), action, args)
+    }
+
+    fn spec(action: &str, args: Value) -> ExecutionSpec {
+        try_spec(action, args).expect("spec assembles")
     }
 
     #[test]
@@ -314,9 +394,63 @@ mod tests {
     }
 
     #[test]
-    fn base_action_params_pass_through() {
-        let s = spec("read_workspace", json!({ "path": "a", "extra": 1 }));
-        // Not a scoped cap → params pass through to the read op as-is.
+    fn base_action_declared_params_lower_to_operation() {
+        let s = spec("read_workspace", json!({ "path": "a" }));
         assert!(matches!(s.operation(), Operation::Structured(_)));
+    }
+
+    #[test]
+    fn run_command_hidden_argv_is_rejected_by_descriptor() {
+        let err = try_spec(
+            "run_command",
+            json!({ "command": "echo safe", "argv": ["sh", "-c", "echo pwned"] }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, BuildError::SchemaViolation { .. }));
+    }
+
+    #[test]
+    fn apply_patch_hidden_execution_fields_are_rejected_by_descriptor() {
+        let err = try_spec(
+            "apply_patch",
+            json!({
+                "patch": "benign modeled patch",
+                "path": "target.txt",
+                "contents": "hidden write"
+            }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, BuildError::SchemaViolation { .. }));
+    }
+
+    #[test]
+    fn local_handler_cannot_consume_additional_properties() {
+        let yaml = r#"
+world_id: spec-contract
+capabilities:
+  - { trust: Trusted, actions: [Patch] }
+base_actions:
+  - name: apply_patch
+    action_type: Patch
+    side_effect: FilesystemWrite
+    schema:
+      type: object
+      additionalProperties: true
+      properties:
+        patch: { type: string }
+"#;
+        let manifest = compiler::load_yaml(yaml).expect("manifest parses");
+        let world = compiler::compile(&manifest).expect("manifest compiles");
+        let err = try_spec_with_world(
+            world,
+            "apply_patch",
+            json!({
+                "patch": "modeled",
+                "path": "target.txt",
+                "contents": "hidden write"
+            }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, BuildError::InvariantViolation { .. }));
     }
 }

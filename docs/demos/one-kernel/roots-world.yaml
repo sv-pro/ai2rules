@@ -1,0 +1,69 @@
+# One-kernel-many-hosts PATH-SCOPE world (spatial confinement, D46).
+#
+# A second demo world rather than roots bolted onto `demo-world.yaml`, for a
+# mechanical reason: enabling `roots` changes the verdict of every path-shaped
+# action that arrives without a resolved target. `demo-world.yaml`'s existing
+# cases (and the shell demo that asserts their output) send `read` with no
+# resolved `path`, which under roots correctly becomes `missing_path` DENY. One
+# world cannot hold both stories, so path-scope gets its own.
+#
+# `{project}` is substituted by tests/one_kernel.rs with a real, already
+# canonicalized temp directory. The paths must be real: root policy is decided
+# after canonicalization through the filesystem, so a fixture of imaginary paths
+# would pin imaginary behaviour.
+#
+# The `{project}/link` rule is deliberately NOT canonical — it is a symlink to
+# `{project}/private`. That single rule is the regression anchor for finding
+# #15: an entry point that resolves the *action* path through the filesystem but
+# leaves the *root* lexical stops matching this rule entirely, and its `Deny`
+# quietly degrades to the policy `default`. Every entry point must canonicalize
+# both sides, or this world's answers diverge by host.
+world_id: one-kernel-roots
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: workspace_files, trust: SemiTrusted, taint: true }
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+
+base_actions:
+  # No `schema` on any action here. This used to be a hard constraint (finding
+  # #27/#23): the adapters aliased host argument keys by ADDING them, so an
+  # Antigravity call carried both `AbsolutePath` and `path`, and object schemas are
+  # closed by default — every well-formed call came back `schema_violation`. The
+  # adapters now RENAME instead (D68), so a schema declaring the neutral key does
+  # work across hosts.
+  #
+  # It stays schema-less anyway, for a narrower reason: a host that sends arguments
+  # the manifest never declared still fails a closed schema, deliberately, because
+  # an undeclared argument is input the kernel was not asked to judge. This fixture
+  # is fed by four entry points sending four argument shapes, so declaring a schema
+  # here would pin one host's shape rather than the path-scope behaviour under test.
+  #
+  # The consequence for path-scope: `requires_resolved_path` only forces a Read to
+  # carry a resolved target when the descriptor advertises a path argument, so a
+  # schema-less Read is exempt. Writes and patches always require one, which is what
+  # `path_scoped_write_without_a_resolved_path_fails_closed` pins.
+  - { name: read, action_type: Read, side_effect: Read }
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  # A shell command string is not a single resolvable path, so `bash` is
+  # path-scope exempt — it stays OS-sandbox territory, not root territory.
+  - { name: bash, action_type: Command, side_effect: Process }
+
+roots:
+  # Closed world: anything not named needs a human.
+  default: Ask
+  rules:
+    - { path: "{project}/src", access: ReadWrite }
+    # Reading untrusted input taints the session — declared per path (D25/D37).
+    - { path: "{project}/inbox", access: Read, taint_source: true }
+    - { path: "{project}/vendor", access: Read }
+    # A longer Deny shadows the broader Read above it (the /etc/shadow probe).
+    - { path: "{project}/vendor/.env", access: Deny, class: Secret }
+    # Non-canonical on purpose: a symlink to {project}/private. See the header.
+    - { path: "{project}/link", access: Deny, class: Credential }
+
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }

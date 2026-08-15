@@ -2,7 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { ProfileSchema, nameSchema, buildPrompt, assetReturnPath } from "./lib.js";
+import {
+  ProfileSchema,
+  nameSchema,
+  buildPrompt,
+  assetReturnPath,
+  agyEnv,
+} from "./lib.js";
 
 const profile = {
   assets_dir: "blog/src/assets",
@@ -62,4 +68,30 @@ test("the shipped hero-profile.json parses under ProfileSchema (no profile drift
   const shipped = ProfileSchema.parse(JSON.parse(raw));
   assert.deepEqual(shipped.dims, [1376, 768]);
   assert.equal(shipped.format, "jpg");
+});
+
+// Finding #18: the caller's prompt is untrusted input driving an authenticated
+// agent, so the process it launches must not inherit this shell's secrets.
+test("agyEnv keeps what agy needs", () => {
+  const env = agyEnv({ HOME: "/h", PATH: "/bin", LC_ALL: "C", GOOGLE_API_KEY: "g" });
+  assert.deepEqual(env, { HOME: "/h", PATH: "/bin", LC_ALL: "C", GOOGLE_API_KEY: "g" });
+});
+
+test("agyEnv drops credentials it was not asked to pass", () => {
+  const env = agyEnv({
+    HOME: "/h",
+    AWS_SECRET_ACCESS_KEY: "s",
+    GITHUB_TOKEN: "t",
+    NPM_TOKEN: "n",
+    ANTHROPIC_API_KEY: "a",
+    OPENAI_API_KEY: "o",
+    SSH_AUTH_SOCK: "/tmp/agent",
+  });
+  assert.deepEqual(Object.keys(env), ["HOME"]);
+});
+
+test("agyEnv passes extra names only when explicitly listed", () => {
+  const source = { HOME: "/h", MY_THING: "v" };
+  assert.equal(agyEnv(source).MY_THING, undefined);
+  assert.equal(agyEnv(source, "MY_THING").MY_THING, "v");
 });

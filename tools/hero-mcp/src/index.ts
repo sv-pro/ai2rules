@@ -26,6 +26,7 @@ import {
   nameSchema,
   buildPrompt,
   assetReturnPath,
+  agyEnv,
 } from "./lib.js";
 
 const execFileP = promisify(execFile);
@@ -68,9 +69,15 @@ const agyTimeoutMs =
 //   off     — never ask
 //   auto    — ask when the host can; proceed when it can't (sandbox is the backstop)
 //   require — ask, and FAIL CLOSED when the host has no elicitation channel: with no
-//             human to ask, ASK collapses to DENY (invariant-10 posture) — the right
-//             default once this sits behind mcp-gateway for non-human callers.
-const elicitMode = process.env.HERO_ELICIT ?? "auto";
+//             human to ask, ASK collapses to DENY (invariant-10 posture).
+//
+// `require` is the default (finding #18). It used to be `auto`, which meant a host
+// with no elicitation channel silently satisfied the human gate and let
+// caller-controlled prompt content drive the already-authenticated `agy`. That is
+// the same shape as invariant 10 everywhere else in this project: an approval that
+// cannot reach a human is a denial, not a pass. Set HERO_ELICIT=auto to opt back
+// into the permissive posture for a trusted, non-interactive host.
+const elicitMode = process.env.HERO_ELICIT ?? "require";
 const [W, H] = profile.dims;
 
 /**
@@ -95,7 +102,12 @@ async function generate(
       await execFileP(
         agyBin,
         ["-p", prompt, ...agyFlags, "--add-dir", workdir],
-        { cwd: workdir, timeout: agyTimeoutMs, maxBuffer: 64 * 1024 * 1024 },
+        {
+          cwd: workdir,
+          timeout: agyTimeoutMs,
+          maxBuffer: 64 * 1024 * 1024,
+          env: agyEnv(),
+        },
       );
     } catch (err) {
       // agy may exit non-zero or overflow stdout yet still have written the image;

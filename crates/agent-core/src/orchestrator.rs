@@ -11,14 +11,16 @@
 
 use executor::{ExecOutput, Executor};
 use harness_types::{
-    ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision, EffectMode,
+    ActionType, ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision, EffectMode,
     ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, Provenance,
-    RedactionPolicy, SessionId, SourceChannel, Taint, TaintContext, TraceId, TrustLevel,
+    RedactionPolicy, SessionId, SideEffectClass, SourceChannel, Taint, TaintContext, TraceId,
+    TrustLevel,
 };
 use provider_adapters::{anthropic, ToolOutcome};
 use trace_store::{params_hash, record_decision, ApprovalStore, TraceStore};
 use world_kernel::{
-    build_execution_spec, decide, BudgetUsage, EvalContext, ExecEnv, IntentIR, KernelOutcome,
+    build_execution_spec, charge, decide, BudgetUsage, EvalContext, ExecEnv, IntentIR,
+    KernelOutcome,
 };
 
 use crate::arg_provenance;
@@ -121,6 +123,12 @@ pub fn run(
     let mut transcript = Vec::new();
     let mut perceptions: Vec<Perception> = Vec::new();
     let mut taint = Taint::Clean;
+    // Budget counters for the session (finding #16). The orchestrator owns a live
+    // session, so unlike the pure gate it can hold these directly — but it was
+    // passing a zeroed `BudgetUsage` into every decision, so no manifest limit was
+    // ever reachable. Charged only on an allowed call, via the kernel's `charge`
+    // so the cost and the limit cannot drift apart.
+    let mut usage = BudgetUsage::default();
     let mut records = 0usize;
     // The trusted user request seeds the clean provenance corpus for the L2
     // producer. It is the one source we can assert is clean-origin by construction
@@ -169,7 +177,7 @@ pub fn run(
         let base = EvalContext {
             taint: TaintContext::from_taint(taint).with_arg_taint(arg_taint),
             mode: config.mode,
-            usage: BudgetUsage::default(),
+            usage,
             approval_granted: false,
         };
         let outcome = decide(world, &call, provenance.clone(), &base);
@@ -197,6 +205,7 @@ pub fn run(
                 action,
                 &mut perceptions,
                 &mut taint,
+                &mut usage,
                 &session,
                 "ALLOW",
                 Decision::Allow,
@@ -220,6 +229,7 @@ pub fn run(
                     action,
                     &mut perceptions,
                     &mut taint,
+                    &mut usage,
                     &session,
                     &mut records,
                 )
@@ -272,6 +282,7 @@ fn resolve_approval(
     action: String,
     perceptions: &mut Vec<Perception>,
     taint: &mut Taint,
+    usage: &mut BudgetUsage,
     session: &SessionId,
     records: &mut usize,
 ) -> TranscriptEntry {
@@ -284,6 +295,9 @@ fn resolve_approval(
         call.action_name.clone(),
         params_hash(&call.arguments),
         world.world_id().clone(),
+        // Bind the approval to this exact compiled policy, not just to the world's
+        // name (finding #15): a manifest can be rewritten while keeping its id.
+        world.manifest_hash().clone(),
         descriptor_hash.clone(),
         provenance.clone(),
         config.effect_mode,
@@ -341,6 +355,7 @@ fn resolve_approval(
                 &call.action_name,
                 &call.arguments,
                 world.world_id(),
+                world.manifest_hash(),
                 &descriptor_hash,
                 provenance,
                 config.effect_mode,
@@ -371,6 +386,7 @@ fn resolve_approval(
                         action,
                         perceptions,
                         taint,
+                        usage,
                         session,
                         "ASK → APPROVED → ALLOW",
                         Decision::Allow,
@@ -437,6 +453,7 @@ fn run_allowed(
     action: String,
     perceptions: &mut Vec<Perception>,
     taint: &mut Taint,
+    usage: &mut BudgetUsage,
     session: &SessionId,
     verdict: &str,
     decision: Decision,
@@ -447,6 +464,17 @@ fn run_allowed(
             Ok(tv) => {
                 let content = describe_output(&tv.value);
                 *taint = taint.join(tv.taint);
+                // Charge the budget for a call that actually ran, beside the taint
+                // join for the same reason: this is where session state advances.
+                *usage = charge(
+                    usage,
+                    world
+                        .action_type(intent.action())
+                        .unwrap_or(ActionType::Read),
+                    world
+                        .side_effect(intent.action())
+                        .unwrap_or(SideEffectClass::Read),
+                );
                 perceptions.push(result_perception(&action, &content, tv.taint, session));
                 TranscriptEntry {
                     action,

@@ -98,7 +98,16 @@ fn register_local(builder: ExecutorBuilder, world: &CompiledWorld) -> ExecutorBu
         "git_diff",
         "git_commit",
     ] {
-        b = b.register(ActionName::new(cmd), hash(cmd), Box::new(CommandHandler));
+        // Explicit unconfined acknowledgment (D47): no OS sandbox (E8) exists yet
+        // to enforce a subprocess's network/filesystem policy, so command Execute
+        // runs with host authority. Fail-closed is the handler default; this is
+        // the one place that opts in, and it should become operator-configurable
+        // (and retire once E8 provides a real sandbox posture).
+        b = b.register(
+            ActionName::new(cmd),
+            hash(cmd),
+            Box::new(CommandHandler::unconfined()),
+        );
     }
     b
 }
@@ -334,6 +343,14 @@ mod tests {
         // (verbatim in the trusted request → provably clean-origin) is recovered,
         // while a fetch to a model-supplied URL is still denied by ambient taint.
         const GUIDE: &str = "https://docs.example/guide";
+        // `ExecEnv.network` is caller-supplied and defaults to `Disabled`; since
+        // finding #12 the web handler actually enforces it, so a test that means to
+        // exercise a real fetch has to grant the egress it expects to happen. That
+        // the default is closed is the point — before the fix it made no difference.
+        let env = ExecEnv {
+            network: harness_types::NetworkPolicy::AllowHosts(vec!["docs.example".into()]),
+            ..ExecEnv::default()
+        };
         let world = compile_default();
         let dir = tempfile::tempdir().unwrap();
         let trace = TraceStore::open(dir.path().join("t.jsonl"));
@@ -364,14 +381,7 @@ mod tests {
             ..SessionConfig::default()
         };
         let outcome = run(
-            &world,
-            &ExecEnv::default(),
-            &executor,
-            &trace,
-            &mut store,
-            &mut model,
-            &config,
-            None,
+            &world, &env, &executor, &trace, &mut store, &mut model, &config, None,
         );
 
         assert_eq!(outcome.transcript[0].verdict, "ALLOW"); // retrieval

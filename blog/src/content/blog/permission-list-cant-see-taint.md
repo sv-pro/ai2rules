@@ -10,10 +10,10 @@ lived in it a while, it's a pile: `Bash(npm run test:*)`, `Edit(src/**)`,
 `WebFetch(domain:…)`, an `mcp__…` line you don't remember adding. It grows, nobody
 prunes it, and no one can read it top to bottom and say what the agent can actually do.
 
-That's the visible problem. Here's the one underneath it: **the pile is blind to where
+That's the visible problem. The one underneath it is worse: **the pile is blind to where
 a request came from.** `Bash(curl:*)` says "curl is allowed." It cannot say "curl is
 allowed *unless the agent just read a web page that told it to run this one*." A flat
-allowlist has no notion of provenance — and provenance is the whole game in prompt
+allowlist has no notion of provenance, and provenance is the whole game in prompt
 injection.
 
 There's a name for the thing the pile can't see. It's *taint*.
@@ -21,7 +21,7 @@ There's a name for the thing the pile can't see. It's *taint*.
 ## Taint, and why it isn't new
 
 The idea is older than agents. Its most familiar home is the Linux kernel: load a
-proprietary driver and the kernel marks itself **tainted** — and it stays tainted even
+proprietary driver and the kernel marks itself **tainted**, and it stays tainted even
 after you unload the driver, because the point was never the driver, it's that the
 kernel's trustworthiness is already spent
 ([kernel docs](https://docs.kernel.org/admin-guide/tainted-kernels.html)). Perl shipped
@@ -36,7 +36,7 @@ request, a file write — is allowed out. That floor is what stops a
 [poisoned memory](/blog/the-zombieagent-threat/) from turning into an exfiltration.
 
 Now look back at the `settings.json` pile. It has nowhere to *put* a taint mark. It
-matches on the shape of a call — the tool, the argument pattern — and never on the
+matches on the shape of a call, the tool and the argument pattern, never on the
 call's history. That isn't a missing feature you could bolt on. It's the wrong kind of
 object.
 
@@ -44,7 +44,7 @@ object.
 
 The reframe is small and it changes everything: you're not editing a tool's config
 file, you're **describing the world a particular actor is allowed to act in.** The actor
-is Claude. The description is a manifest — one reviewable artifact that says which
+is Claude. The description is a manifest: one reviewable artifact that says which
 actions exist, what each one may touch, and how trust flows through them.
 
 Two things a manifest can express that a pile can't:
@@ -60,8 +60,8 @@ manifest actually replace it, or only nag from the sidelines?
 
 ## The trick that makes it possible: "allow" doesn't mean allow
 
-Claude Code lets you run a **PreToolUse hook** — a small program that sees every tool
-call before it runs and returns a verdict. Here's the part almost everyone gets wrong,
+Claude Code lets you run a **PreToolUse hook**, a small program that sees every tool
+call before it runs and returns a verdict. Almost everyone gets the next bit wrong,
 and it's the crux of the whole thing. A hook has three ways to *not* block, and two of
 them look identical until they don't:
 
@@ -72,7 +72,7 @@ them look identical until they don't:
 - **Escalate** — the hook answers `"ask"` and forces the prompt.
 
 "Allow" in plain English sounds like "don't block." In the hook contract it means
-*grant* — silence the prompt, wave it through. The gap between those two readings is a
+*grant*: silence the prompt, wave it through. The gap between those two readings is a
 genuine footgun: a security hook that returns `"allow"` as its default "nothing to see
 here" doesn't hand control back to the permission system, it **replaces** the permission
 system, silently, for every call that passes its check. That behavior has been
@@ -83,7 +83,7 @@ surprising enough to file about, more than once
 [4](https://github.com/anthropics/claude-code/issues/39344)).
 
 Read as a footgun it's a hazard. Read as a hinge, it's exactly the door we want: if a
-hook can *grant*, then a manifest driving that hook can be the whole policy — not an
+hook can *grant*, then a manifest driving that hook can be the whole policy, not an
 overlay on top of the pile, a replacement for it.
 
 ## Replacing the pile
@@ -93,7 +93,7 @@ the deciding. In our harness that's a hook running in "grant" mode against a wor
 manifest: it answers `allow` for what the manifest permits, blocks what it doesn't, and
 carries the taint floor underneath.
 
-Here is the same handful of actions, judged by the old pile and by the manifest:
+The same handful of actions, judged by the old pile and by the manifest:
 
 ```text
 what the agent tries                     the pile        the manifest
@@ -104,7 +104,7 @@ rm -rf on a path                         a match, maybe  ask
 a tool you never declared                absent = ¯\_(ツ)_/¯  ABSENT — it doesn't exist for the agent
 ```
 
-Row three is the whole post in one line. Same command, opposite answer — because between
+Row three is the whole post in one line. Same command, opposite answer, because between
 the two the session touched the network, and the manifest can see that. The pile matches
 both `curl` calls against the same rule and lets both through. No amount of pruning your
 allowlist fixes that, because the allowlist is asking the wrong question.
@@ -127,10 +127,10 @@ This is a real mechanism, not a magic wand, and the boundaries matter.
 
 ## Try it where it can't hurt you
 
-One flag in this setup — the one that makes undeclared tools `ABSENT` — will lock the
+One flag in this setup, the one that makes undeclared tools `ABSENT`, will lock the
 agent out of anything your manifest forgot to list. That's the *point* when you're
 testing a policy, and a disaster if you do it to the Claude you're currently working in.
-So don't. Run the experiment against a **throwaway, containerized Claude** — a disposable
+So don't. Run the experiment against a **throwaway, containerized Claude**: a disposable
 instance with the manifest mounted in and the internet fenced off behind an
 allowlist, exactly the [sandbox we've written up before](/blog/running-claude-safely/).
 Lock that agent out and the fix is `docker rm`, not a ruined afternoon.
@@ -138,7 +138,7 @@ Lock that agent out and the fix is `docker rm`, not a ruined afternoon.
 The container is also the honest home for the emptied `settings.json`: the stripped-down
 config lives *in the container only*, overlaid at runtime, while your real project file
 never changes. Separate the config you develop with from the config that governs the
-runtime — and get to be reckless in the one place recklessness is free.
+runtime, and get to be reckless in the one place recklessness is free.
 
 ## The takeaway
 
@@ -148,6 +148,6 @@ seconds ago, by a document the agent doesn't trust. That's not a rule you can ad
 question the format can't hold.
 
 A manifest can hold it. Give the actor a world instead of the tool a list, put the taint
-floor underneath, and let the hook *grant* instead of defer — and the same `curl` that
+floor underneath, and let the hook *grant* instead of defer, and the same `curl` that
 was fine a moment ago is refused now, for the only reason that ever mattered: not what it
 does, but where it came from.

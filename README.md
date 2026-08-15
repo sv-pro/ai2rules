@@ -24,6 +24,73 @@ and the audit/replay layer are all in place — a proposed tool call flows all t
 way to a real or simulated result, and every decision is logged, redacted, and
 replayable. See [Status](#status).
 
+> **New here? Take the tour: [`docs/TUTORIAL.md`](docs/TUTORIAL.md).** Nine stops,
+> ~45 minutes, all offline and credential-free — from the five verdicts, to one
+> kernel deciding for four different hosts, to governing a project of your own.
+
+---
+
+## Govern a project in one command
+
+```bash
+npm install -g ai2rules-harness   # or: cargo install --git https://github.com/sv-pro/ai2rules cli-harness
+harness init                      # additive: adds deny/ask on top of the host's permissions
+harness init --grant              # replace: the manifest becomes the allowlist
+harness init --dry-run            # print the plan, write nothing
+```
+
+Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
+**no dependencies and no install script.** The binary ships in a per-platform
+package that npm resolves by `os`/`cpu`, so installing performs no network access,
+no shell execution and no chmod, and the binary is covered by the integrity hash
+npm writes into your lockfile.
+
+> **Install globally, not into a project.** `harness init` **refuses** when the
+> binary sits inside the project it would govern — a local `node_modules` install
+> puts the kernel in the agent's own writable root, where replacing one file turns
+> governance off silently. `npx ai2rules-harness init` is fine; its cache is
+> outside your project.
+
+That is the whole install. No checkout, no `cargo`, no `jq` — the starter manifest
+is compiled into the binary, and the shim bakes the absolute path of the executable
+you just ran. It writes four things and is safe to run twice:
+
+```
+.claude/cc-world.yaml         the manifest   (kept if you have tuned one; --force to replace)
+.claude/hooks/world-gate.sh   the PreToolUse shim, kill-switch baked in
+.claude/settings.json         the hook entry, merged — your other hooks are untouched
+.gitignore                    .claude/state/   (the runtime taint state)
+```
+
+**Prove it is real in five seconds**, without starting an agent session — ask the
+kernel directly:
+
+```bash
+echo '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd"}}' \
+  | CLAUDE_PROJECT_DIR=$PWD bash .claude/hooks/world-gate.sh
+# {"hookSpecificOutput":{…,"permissionDecision":"deny",
+#   "permissionDecisionReason":"the target path is read-only under the roots policy (path_scope_readonly)"}}
+```
+
+The same write *inside* the project stays silent. That is the roots policy doing
+what no allowlist of command strings can do — it is about where the path is, not
+what the command looks like.
+
+**Turning it off is one file**, effective on the very next call, no restart. Both
+paths live **outside** the governed project, because a switch the agent can reach
+is a switch the agent can throw — `harness init` prints the exact path for your
+project:
+
+```bash
+touch ~/.claude/ai2rules/off/<your-project>   # this project
+touch ~/.claude/gate-off                      # panic switch, everywhere
+```
+
+The manifest is compiled by the real compiler *before* anything is written, so what
+lands in your project is known to build. `init` supersedes the per-project half of
+[`scripts/install-governance.sh`](scripts/install-governance.sh), which is still
+there for the per-machine half (putting a binary on `PATH` from a checkout).
+
 ---
 
 ## Why
@@ -62,7 +129,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10 planned |
-| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (480 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
+| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (576 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
 
 **Done so far:**
 
@@ -150,7 +217,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   (D22). A spike compiles the whole stack to `wasm32` and a Node smoke test proves
   the kernel decides client-side (clean `fetch_web` → Allow, tainted → Deny by
   `taint_invariant`). This is the engine under the visualization suite (M5 / E15):
-  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **480 KB**) ships on the
+  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **576 KB**) ships on the
   blog at **`/playground`**, where a structured `KernelPlayground` editor — preset +
   Clean/Tainted switch + per-tool toggles — sorts every tool live into
   ALLOWED / ASK / DENIED / ABSENT buckets, all decided by the real kernel in-browser.
@@ -174,18 +241,19 @@ via an `mcp-remote` OAuth bridge with no kernel change — and its shaping is pr
 offline (no creds) by `harness mock-jira --rovo`, which advertises the genuine Rovo
 tool names (see [`docs/demos/jira-copilot/REAL-ATLASSIAN.md`](docs/demos/jira-copilot/REAL-ATLASSIAN.md)).
 
-**One kernel, many hosts (shipped — D36/D37, `docs/one-kernel-many-hosts.md`):**
-Claude Code, OpenCode, and the MCP gateway all decide through the one Rust kernel
+**One kernel, many hosts (shipped — D36/D37/D48, `docs/one-kernel-many-hosts.md`):**
+Claude Code, OpenCode, Antigravity CLI, and the MCP gateway all decide through the one Rust kernel
 via thin adapters that hold no policy, no taint algebra, and no command
 classification — bash shapes are classified by the *kernel* from the manifest's
 `command_classes` (D36), and verdict→host mapping is the shared `host_outcome()`
 layer (ABSENT stays distinct from DENY everywhere):
 
 ```
-Claude Code ─┐
-OpenCode    ─┼─→ thin adapter → GateRequest → one Rust kernel
-MCP Gateway ─┘                        ↓
-                                 GateResponse
+Claude Code    ─┐
+OpenCode       ─┤
+Antigravity CLI ┼─→ thin adapter → GateRequest → one Rust kernel
+MCP Gateway    ─┘                        ↓
+                                    GateResponse
 ```
 
 The parity guarantee — same manifest + same request ⇒ same decision / rule /
@@ -203,7 +271,15 @@ OpenCode (E17 / DECISIONS D35) is dogfooded the same way: the
 `permission` rules) calls the same `harness gate` wire ABI, sending raw tool
 names — see `docs/demos/opencode/`.
 
-Builds clean offline with `clippy -D warnings`; **155 tests** green.
+**Antigravity CLI (`agy`, DECISIONS D48)** is the third live host: `.agents/hooks.json`
+runs a bootstrap shim that `exec`s **`harness agy-hook`**, which links `gate()`
+in-process like `cc-hook`. Its hook ABI is not vendor-published — the contract was
+extracted from the shipped binary and then verified against a live session — so the
+adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
+argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
+shared `command_classes` reads. See `docs/demos/antigravity/`.
+
+Builds clean offline with `clippy -D warnings`; **304 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -222,7 +298,7 @@ crates/               the harness implementation
   trace-store/        append-only audit, redaction, replay (E4)
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
-  cli-harness/        terminal entrypoint + `serve`/`gate`/`mcp-gateway`/`cc-hook`/`mock-jira` (binary `harness`) (E9, E11, E16)
+  cli-harness/        terminal entrypoint + `serve`/`gate`/`mcp-gateway`/`cc-hook`/`agy-hook`/`mock-jira` (binary `harness`) (E9, E11, E16, D48)
   harness-preview/    pure design-time preview + runtime gate() ABI, shared by serve + wasm + `harness gate` (E11/E14, D24)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
 docs/                 architecture (harness-architecture.md is canonical; one-kernel-many-hosts.md = cross-host parity)
@@ -260,7 +336,10 @@ echo '{"tool":"fetch_web","context":{"taint":"tainted"}}' \
 ```
 
 CI runs all four checks on every push and PR
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), plus a `demos` job that
+runs `scripts/check-demos.sh` — every example and demo script, asserting the
+verdict lines each one claims to show. The unit tests cover the kernel; that
+script covers what a reader actually sees.
 
 ### Release binaries (no local toolchain needed)
 
@@ -275,6 +354,9 @@ git tag v0.1.0 && git push gh v0.1.0   # → cross-OS binaries on the v0.1.0 Rel
 ```
 
 ### See the kernel decide
+
+The demos below are the raw list; [`docs/TUTORIAL.md`](docs/TUTORIAL.md) walks the
+same ground in a deliberate order, with what each one is meant to prove.
 
 For a quick noninteractive demo, run the kernel plus the execution boundary. It
 compiles the default world, feeds it a handful of
@@ -403,4 +485,18 @@ Speculative, research-grade directions that aren't committed work (e.g. a cross-
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0.
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE))
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT))
+
+at your option. This is the Rust ecosystem convention and the terms `Cargo.toml` has
+declared since E0 — the license *files* were missing until 2026-08-08, which meant the
+grant was asserted in metadata with no text to accept. Apache-2.0 is the option to take
+if you need an explicit patent grant.
+
+The sibling repos ([`ai-detector-bench`](https://github.com/sv-pro/ai-detector-bench),
+[`agentic-coding-lab`](https://github.com/sv-pro/agentic-coding-lab)) are MIT-only: they
+are content and instruments meant to be copied from, where a single permissive license
+with a minimal attribution burden is the whole point. This repo is the one someone might
+build a product on top of, which is where the patent grant earns its extra file.

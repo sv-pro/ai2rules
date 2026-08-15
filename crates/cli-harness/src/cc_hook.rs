@@ -24,26 +24,17 @@
 //!   uncompilable world — exits 0 with no output. A broken hook must never brick
 //!   a session. A process failure is never an outcome (see `host.rs`).
 
+use crate::hostkit::{
+    canonicalize_root_paths, normalize_tool, persist_taint, persist_usage, read_usage,
+    resolve_action_path, sanitize,
+};
 use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
     gate, host_outcome, BlockKind, GateContext, GateRequest, HostOutcome, ABI_VERSION,
 };
-use harness_types::ActionName;
 use serde_json::{json, Value};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
-
-fn sanitize(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || "_.-".contains(c) {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
 
 /// Emit a PreToolUse decision (`deny`/`ask`, or `allow` in `--grant` mode) and exit 0.
 fn emit(decision: &str, reason: &str) -> ! {
@@ -58,62 +49,11 @@ fn emit(decision: &str, reason: &str) -> ! {
     std::process::exit(0);
 }
 
-/// Extract and absolutize the target path of a file action, for path-scope (roots).
-/// Reads the common path arg keys; returns `None` for tools without one (Bash's
-/// `command` is not a path, so Bash is path-scope-exempt). Absolutization is lexical
-/// — relative paths resolve against the project `base`, `~` against `$HOME`, and
-/// `.`/`..` are normalized — matching the compiler's lexical rule resolution.
-/// Symlink resolution is a documented v1 gap (the symlink-TOCTOU caveat).
-fn resolve_action_path(args: &Value, base: &str, home: Option<&str>) -> Option<String> {
-    let raw = ["file_path", "path", "notebook_path"]
-        .iter()
-        .find_map(|k| args.get(*k).and_then(|v| v.as_str()))?;
-    let joined = if raw.starts_with('/') {
-        raw.to_string()
-    } else if let Some(rest) = raw.strip_prefix("~/") {
-        match home {
-            Some(h) => format!("{}/{}", h.trim_end_matches('/'), rest),
-            None => return Some(raw.to_string()),
-        }
-    } else {
-        format!("{}/{}", base.trim_end_matches('/'), raw)
-    };
-    Some(normalize_dots(&joined))
-}
-
-/// Lexically normalize `.`/`..`/empty segments of an absolute path (no FS access).
-fn normalize_dots(p: &str) -> String {
-    let mut out: Vec<&str> = Vec::new();
-    for seg in p.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                out.pop();
-            }
-            s => out.push(s),
-        }
-    }
-    format!("/{}", out.join("/"))
-}
-
-/// Host-tool-name normalization — a *mapping*, not policy: use the exact host
-/// tool name if the world's ontology declares it; else its lowercase form if
-/// that is declared; else unchanged (the kernel will report it ABSENT).
-fn normalize(world: &harness_types::CompiledWorld, tool: &str) -> String {
-    if world.in_ontology(&ActionName::new(tool)) {
-        return tool.to_string();
-    }
-    let lower = tool.to_lowercase();
-    if world.in_ontology(&ActionName::new(&lower)) {
-        return lower;
-    }
-    tool.to_string()
-}
-
 pub fn run(
     world_path: &Path,
     state_dir: &Path,
     mode: &str,
+    source_channel: &str,
     enforce_absent: bool,
     grant: bool,
 ) -> i32 {
@@ -137,6 +77,11 @@ pub fn run(
 
     let taint_file = state_dir.join(format!("taint-{}", sanitize(&sid)));
     let tainted = taint_file.exists();
+    // Budget counters are session state, carried across calls exactly like taint
+    // (finding #16). Unreadable counters are unenforceable ones, so a corrupt
+    // sidecar fails closed rather than silently restarting the budget at zero.
+    let usage_file = state_dir.join(format!("usage-{}", sanitize(&sid)));
+    let carried_usage = read_usage(&usage_file);
 
     // The project base (for resolving `.`/relative roots + the action path) and $HOME
     // (for `~`), read at the I/O boundary so the compiler/kernel stay pure.
@@ -154,7 +99,8 @@ pub fn run(
         .and_then(|c| load_yaml(&c).ok())
         .and_then(|mut m| {
             if let Some(r) = &m.roots {
-                m.roots = Some(resolve_root_paths(r, home.as_deref(), base.as_deref()));
+                let roots = resolve_root_paths(r, home.as_deref(), base.as_deref());
+                m.roots = Some(canonicalize_root_paths(&roots));
             }
             compile(&m).ok()
         }) {
@@ -170,25 +116,60 @@ pub fn run(
 
     let req = GateRequest {
         v: ABI_VERSION,
-        tool: normalize(&world, tool),
+        tool: normalize_tool(&world, tool),
         arguments: ti,
         path: action_path,
         context: GateContext {
             session_id: sid,
             mode: Some(mode.to_string()),
-            taint: tainted.then(|| "tainted".to_string()),
-            source_channel: None,
+            taint: Some(if tainted { "tainted" } else { "clean" }.to_string()),
+            // Declared by the operator, not inferred from the event (finding #22):
+            // a PreToolUse payload says what is about to run, never who asked for
+            // it. See the `--source-channel` flag's documentation.
+            source_channel: Some(source_channel.to_string()),
             approval_token: None,
+            usage: carried_usage,
         },
     };
     let res = gate(&world, &req);
 
     // Persist the kernel-computed monotonic taint for the next call. The note
     // records the host tool and the kernel's effective action (D36).
+    //
+    // If the marker cannot be written the escalation is invisible to every later
+    // call, so the taint floor silently stops engaging (finding #16). That is a
+    // governance failure rather than the process failure fail-open covers, so it
+    // fails CLOSED — but only for the one call that would escalate, leaving the
+    // rest of the session usable.
+    // Persist the charged budget counters before anything else can proceed. Same
+    // discipline as taint (D59): a counter that silently fails to land is a budget
+    // that silently stops counting, which is the failure this closes (finding #16).
+    if carried_usage
+        .map(|c| c != res.context.usage)
+        .unwrap_or(true)
+        && !persist_usage(state_dir, &usage_file, &res.context.usage)
+    {
+        eprintln!(
+            "harness cc-hook: cannot record budget counters under {} — refusing the call they would charge",
+            state_dir.display()
+        );
+        emit(
+            "deny",
+            "budget counters could not be recorded, so this call cannot be counted against the world's limits (untracked_budget)",
+        );
+    }
+
     if res.context.taint == "tainted" && !tainted {
-        let _ = std::fs::create_dir_all(state_dir);
-        if let Ok(mut f) = std::fs::File::create(&taint_file) {
-            let _ = writeln!(f, "tainted by {tool} ({})", res.action);
+        let note = format!("tainted by {tool} ({})", res.action);
+        if !persist_taint(state_dir, &taint_file, &note) {
+            eprintln!(
+                "harness cc-hook: cannot record session taint under {} — refusing the call that would escalate",
+                state_dir.display()
+            );
+            emit(
+                "deny",
+                "session taint could not be recorded, so this ingestion cannot be governed (untracked_taint)",
+            );
         }
     }
 
@@ -223,43 +204,5 @@ pub fn run(
             kind: BlockKind::Replan,
             reason: _,
         } => 0, // no host channel for "smaller step" — fall through
-    }
-}
-
-#[cfg(test)]
-mod path_tests {
-    use super::*;
-
-    #[test]
-    fn normalize_dots_collapses_dot_and_dotdot() {
-        assert_eq!(normalize_dots("/a/./b/../c"), "/a/c");
-        assert_eq!(normalize_dots("/a//b/"), "/a/b");
-        assert_eq!(normalize_dots("/a/b/.."), "/a");
-    }
-
-    #[test]
-    fn resolve_action_path_reads_file_path_and_absolutizes() {
-        let rel = json!({"file_path": "src/x.rs"});
-        assert_eq!(
-            resolve_action_path(&rel, "/proj", None).as_deref(),
-            Some("/proj/src/x.rs")
-        );
-        let abs = json!({"file_path": "/etc/./shadow"});
-        assert_eq!(
-            resolve_action_path(&abs, "/proj", None).as_deref(),
-            Some("/etc/shadow")
-        );
-        let home = json!({"path": "~/.ssh/id_rsa"});
-        assert_eq!(
-            resolve_action_path(&home, "/proj", Some("/home/u")).as_deref(),
-            Some("/home/u/.ssh/id_rsa")
-        );
-    }
-
-    #[test]
-    fn resolve_action_path_is_none_for_non_path_tools() {
-        // Bash's `command` is not a path key -> None -> path-scope exempt.
-        let args = json!({"command": "rm -rf /"});
-        assert_eq!(resolve_action_path(&args, "/proj", None), None);
     }
 }

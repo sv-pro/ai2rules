@@ -2,8 +2,8 @@
 //! (PLAN.md E1.3, E1.5, E1.6).
 
 use harness_types::{
-    BackingIdentity, CompiledWorld, CompiledWorldParts, Descriptor, RootRule, RootsDef, TaintRule,
-    WorldManifest,
+    BackingIdentity, ChannelDef, ChannelPolicy, CompiledWorld, CompiledWorldParts, Descriptor,
+    RootRule, RootsDef, SourceChannel, Taint, TaintRule, WorldManifest,
 };
 use serde_json::Value;
 
@@ -25,6 +25,7 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
         ..Default::default()
     };
     parts.manifest_hash = hash_manifest(manifest);
+    parts.channel_policies = compile_channel_policies(&manifest.channels);
 
     // Base actions populate the ontology, descriptors, types, and side effects.
     for action in &manifest.base_actions {
@@ -150,6 +151,47 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
     parts.redaction = manifest.observability.redact.clone();
 
     Ok(CompiledWorld::new(parts))
+}
+
+fn compile_channel_policies(
+    channels: &[ChannelDef],
+) -> std::collections::BTreeMap<SourceChannel, ChannelPolicy> {
+    if channels.is_empty() {
+        return SourceChannel::all()
+            .iter()
+            .copied()
+            .map(|channel| {
+                (
+                    channel,
+                    ChannelPolicy {
+                        channel,
+                        trust: channel.default_trust(),
+                        taint: channel.default_taint(),
+                    },
+                )
+            })
+            .collect();
+    }
+
+    channels
+        .iter()
+        .map(|def| {
+            let channel =
+                SourceChannel::from_name(&def.name).expect("validate() guarantees known channels");
+            (
+                channel,
+                ChannelPolicy {
+                    channel,
+                    trust: def.trust,
+                    taint: if def.taint {
+                        Taint::Tainted
+                    } else {
+                        Taint::Clean
+                    },
+                },
+            )
+        })
+        .collect()
 }
 
 /// Resolve `~`, `.`, and relative rule paths to absolute — the env-dependent step

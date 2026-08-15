@@ -41,6 +41,9 @@ mod tests {
             "write_workspace",
             "apply_patch",
             "run_command",
+            "run_command_network",
+            "run_command_destructive",
+            "run_command_unclassified",
             "start_pty",
             "call_mcp_tool",
             "fetch_web",
@@ -167,8 +170,109 @@ base_actions:
                 "command_classes:\n  - { action: bash, classes: [ { to: bash_network, patterns: [\"\"] } ] }\n",
                 "empty pattern",
             ),
+            (
+                "command_classes:\n  - { action: bash, default_to: ghost, classes: [ { to: bash_network, patterns: [\"curl \"] } ] }\n",
+                "unknown default action",
+            ),
         ] {
             let manifest = load_yaml(&format!("{base}{fragment}")).expect("parses");
+            assert!(
+                matches!(compile(&manifest), Err(CompileError::Invalid(_))),
+                "{what} must be rejected"
+            );
+        }
+    }
+
+    /// Finding #19: a classifier without a catch-all is not a safe classifier.
+    /// Pattern matching over shell strings is always evadable; `default_to` is the
+    /// fail-closed bucket an evasion lands in. Without one it lands on the raw
+    /// action instead — typically ambient `Process`, outside the taint floor.
+    #[test]
+    fn validate_requires_a_default_to_on_every_command_classifier() {
+        let yaml = r#"
+world_id: w
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+command_classes:
+  - action: bash
+    classes:
+      - { to: bash_network, patterns: ["curl "] }
+"#;
+        let manifest = load_yaml(yaml).expect("parses");
+        let err = compile(&manifest).expect_err("a classifier with no default_to must be rejected");
+        assert!(
+            matches!(&err, CompileError::Invalid(m) if m.contains("default_to")),
+            "the error must name the missing field, got {err:?}"
+        );
+
+        // The same manifest with a catch-all compiles.
+        let fixed = load_yaml(&yaml.replace(
+            "  - action: bash
+    classes:",
+            "  - action: bash
+    default_to: bash_network
+    classes:",
+        ))
+        .expect("parses");
+        assert!(
+            compile(&fixed).is_ok(),
+            "a classifier with default_to is valid"
+        );
+    }
+
+    /// Finding #20: `classify_command` resolves a classifier with `.find()`, so a
+    /// second entry for the same action silently never runs. Channels and base
+    /// actions were already duplicate-checked; classifiers were the gap.
+    #[test]
+    fn validate_rejects_duplicate_command_classifiers_for_one_action() {
+        let yaml = r#"
+world_id: w
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+command_classes:
+  - action: bash
+    default_to: bash_unclassified
+    classes:
+      - { to: bash_network, patterns: ["curl "] }
+  - action: bash
+    default_to: bash_unclassified
+    classes:
+      - { to: bash_network, patterns: ["wget "] }
+"#;
+        let manifest = load_yaml(yaml).expect("parses");
+        let err = compile(&manifest).expect_err("two classifiers for one action must be rejected");
+        assert!(
+            matches!(&err, CompileError::Invalid(m) if m.contains("duplicate command classifier")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_or_duplicate_channel_names() {
+        for (yaml, what) in [
+            (
+                r#"
+world_id: w
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: unreviewed_pdf, trust: Untrusted, taint: true }
+"#,
+                "unknown channel name",
+            ),
+            (
+                r#"
+world_id: w
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: user_prompt, trust: Trusted, taint: false }
+"#,
+                "duplicate canonical channel",
+            ),
+        ] {
+            let manifest = load_yaml(yaml).expect("parses");
             assert!(
                 matches!(compile(&manifest), Err(CompileError::Invalid(_))),
                 "{what} must be rejected"
