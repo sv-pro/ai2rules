@@ -223,6 +223,7 @@ marker in the same commit as the kernel change.
 | `.agents/hooks.json` + `.agents/hooks/world-gate.sh` | Antigravity PreToolUse wiring → `harness agy-hook` (D48) |
 | `docs/demos/antigravity/` | Antigravity host runbook + the verified hook contract |
 | `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
+| `docs/approval-capable-hosts.md` | How `ASK` is satisfied per host (D41) |
 | `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source). Path-scope lives in the `roots-world.yaml` / `roots-cases.yaml` pair — a second world because enabling `roots` changes every pathless file action's verdict (D61) |
 | `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
 | `scripts/assemble-npm-packages.sh` | Fills the four platform packages from `dist/`. Shared by `release.yml` and CI's `release-dry-run` so they cannot diverge (D70) |
