@@ -8,9 +8,14 @@
 **Pinned commit:** `141eb6fef83422698aef7a981029e843e8161534`
 (`Merge pull request #2783 … release/dsh-0.1.0-rc.8`, 2026-08-19)
 **Method:** static reading of the pinned tree + **executable probes** run against
-the real runtime (see [`probes/governor-integrity.spec.ts`](probes/governor-integrity.spec.ts)
-and [Reproducing](#reproducing) below). Eight probes, all green, recording the
-*observed* behaviour of the live kernel.
+the real runtime — [`probes/governor-integrity.spec.ts`](probes/governor-integrity.spec.ts)
+(8 probes) and [`probes/execution-seams.spec.ts`](probes/execution-seams.spec.ts)
+(5 probes, genuine disk writes + Code Mode sub-call); see [Reproducing](#reproducing).
+**13 probes, all green,** recording the *observed* behaviour of the live kernel.
+Where a claim rests on source reading rather than a probe, it is labelled
+**source-derived**; routes not executed here are labelled **not dynamically
+verified** (see the §5 matrix), so runtime evidence is never conflated with
+static inference.
 
 DeepSeek Harness ("dsh") is a Cordis plugin tree: *everything is a plugin*, there
 is no privileged core to patch, and policy / approval / sandbox / tool-registry /
@@ -192,14 +197,21 @@ OS-ownership boundary, not an in-runtime one.**
 | Probe | What it tries | Result |
 |---|---|---|
 | **A1** | a package with `inject: []` reaches an **undeclared** service via `ctx.get('systemPrompt')` | `LIVE-SERVICE-REACHED` — `ctx.get` is not gated by the `inject` declaration; only *property access* is |
-| **A2** | a package escapes the façade via an **event argument** (`ctx.on('internal/plugin', fiber => fiber.ctx.root.tools.register(rawTool))`) | **`ESCAPED-AND-REGISTERED`** — a raw tool with a live `execute()` lands in the host registry, bypassing the `DYNAMIC_TOOL` marker + realm normalization that the intended `ctx.tools.register` path enforces |
+| **A2 (a) registration** | a package escapes the façade via an **event argument** (`ctx.on('internal/plugin', fiber => fiber.ctx.root.tools.register(rawTool))`) | **`ESCAPED-AND-REGISTERED`** — a raw tool with a live `execute()` lands in the host registry, bypassing the `DYNAMIC_TOOL` marker + realm normalization that the intended `ctx.tools.register` path enforces |
+| **A2 (b) invocation** | *call* the smuggled tool by name through the registry, with a global deny-guard armed | **denied** — invocation still crosses `tools/pre-execute` + monotonic guards; the guard fires and the body never runs |
+| **A2 (c) direct body** | the escaped context calls `smuggledView.execute()` **directly** | body runs with **no pipeline at all** |
 
-A2 is a real façade escape: the whitelist guards injected-service *returns*
-(`denyContext` / `guardedService`) but **not event *arguments***, and cordis
-`Fiber` exposes `public readonly ctx: Context`. The escaped context registers a
-tool that never carried the dynamic-tool marker `sandboxRegisterTool` requires.
+A2 is a real façade escape, and the extended probe pins exactly *what* it
+bypasses. The whitelist guards injected-service *returns* (`denyContext` /
+`guardedService`) but **not event *arguments***, and cordis `Fiber` exposes
+`public readonly ctx: Context`. So (a) a raw tool gets **registered** past the
+marker + normalization. But (b) *invoking* a registry-registered tool by name
+still traverses the guard pipeline — registration bypass is **not** invocation
+bypass. The genuine bypass is (c): once the package holds a host-realm
+`execute` handle (or any host function it reached), it runs raw code with no
+gate — which is just arbitrary in-process code execution.
 
-**But this is within dsh's own threat model.** `tool-cordis`'s README:
+**And that is within dsh's own threat model.** `tool-cordis`'s README:
 > "The sandbox isolates globals but is not a security boundary … host-realm
 > helpers make escape possible. Treat this toolset like bash access."
 
@@ -231,36 +243,63 @@ invariant the subject cannot touch.**
 
 ## 5. Mandatory execution-seam matrix
 
-For "cause one protected file effect outside the workspace" (write `$DSH_HOME`):
+For "cause one protected file effect outside the workspace" (write `$DSH_HOME`).
+The **Verification** column separates what the probes *dynamically demonstrated*
+from what is *derived from source* and what is *not yet dynamically verified* —
+so no row claims runtime evidence it does not have.
 
-| Route | Crosses `tools/pre-execute` + guards? | Crosses the lower FS fence? | Direct path around the seam? |
+| Route | Crosses `tools/pre-execute` + guards? | Crosses the lower FS fence? | Direct path around the seam? | Verification |
+|---|---|---|---|---|
+| ordinary model tool (`tool-fs`) | yes | **yes** — real write to a `$DSH_HOME` stand-in is denied, no file created; a `/tmp` write succeeds | no | **observed** — probes E1–E4 (genuine disk effect) |
+| Code Mode (`run_code` sub-call) | **yes** — a sub-call to a guarded tool is denied by the monotonic guard; body never runs | (fence is the same fs seam) | no | **observed** — probe E5 |
+| dynamic Cordis package (`tool-cordis`) | the *`cordis_run` call* does; a registry-registered tool's *invocation* does (A2b); the package **body** does not (A2c) | **no** — bash-equivalent, vm escape | yes, *once mounted* | **observed** — probes A2, B3, B4 |
+| shell / subprocess (`tool-bash`) | yes | yes — OS sandbox binds only `workspaceRoot`; bwrap/Landlock/Seatbelt all derive from the same `writableRoots` | no | **source-derived** (§1.3); the OS-sandbox path needs a usable bwrap/Landlock/Seatbelt runner and is **not dynamically verified here** |
+| PTY / terminal | yes | yes — same shell sandbox | no | **not dynamically verified** |
+| subagent / delegated agent | yes — each sub-call re-enters the pipeline | yes | no | **not dynamically verified** |
+| background job | yes — dispatched through the same registry | yes | no | **not dynamically verified** |
+
+**Reading (observed rows):** the ordinary filesystem tool is fenced by the
+shared `writableRoots` boundary — a real write to a `$DSH_HOME` stand-in is
+refused and no file appears, while an in-workspace and a `/tmp` write succeed
+(E1–E4). A Code Mode serialized sub-call is judged by the same monotonic guard
+as a direct call (E5). Registering a raw tool via the façade escape does not
+skip the call-time pipeline (A2b); only running a host-realm `execute` handle
+directly does (A2c), which is ordinary in-process code execution. The
+shell/PTY/subagent/job rows are **source-derived or unverified** and are handed
+to follow-up — they share the same `writableRoots` fence in source, but this PR
+does not execute them.
+
+### Failure semantics
+
+**dsh's own governance seams (dynamically probed) fail closed:**
+
+| Failure | Behaviour | Class | Verification |
 |---|---|---|---|
-| ordinary model tool (`tool-fs`) | yes | yes — `writableRoots`, no `$DSH_HOME` | no |
-| shell / subprocess (`tool-bash`) | yes | yes — OS sandbox bound to `workspaceRoot` | no |
-| PTY / terminal | yes | yes — same shell sandbox | no |
-| Code Mode (`run_code` sub-calls) | yes — sub-calls carry the parent token, log `tool/code-dispatch`, return denials as binding rejections | yes | no |
-| dynamic Cordis package (`tool-cordis`) | the *`cordis_run` call* does; the package body does **not** | **no** — bash-equivalent, vm escape (A2) | yes, *once mounted* |
-| subagent / background job | yes (each sub-call re-enters the pipeline) | yes | no |
+| approval service — missing / throwing answerer | request → `unavailable` → **deny** | fail-closed | observed (C2 baseline; `user-approval` tests) |
+| approval service — no open turn | `request()` throws before auditing | fail-closed | source (`ApprovalService.request`) |
+| guard plugin throws | normalized to `isError`; call does not proceed | fail-closed | source (`tools` registry) |
+| sandbox provider unusable | `SANDBOX_UNAVAILABLE`; never falls through unconfined | fail-closed | source (`sandbox-local`) |
+| config reload — bad `cordis.patch.yml` | last-good tree kept; `hmr/config-update-failed` emitted | fail-safe (degraded, logged) | source (`app-boot`) |
 
-**Reading:** every *ordinary* effect route is fenced by one shared boundary, and
-none reaches `$DSH_HOME` under non-danger modes. The one route that escapes the
-fence is the explicitly bash-equivalent dynamic toolset — whose authority is the
-operator's decision to mount it.
+**The ai2rules adapter contract — and where the current shim falls short of it.**
+Issue **#55** is explicit: *"Gate unavailability must have an explicit tested
+behavior; governed effects must not silently fail open."* So a single "logs +
+allows" row is **wrong** for a governed effect. The four cases must be
+distinguished, and only the first may fail open:
 
-### Failure semantics (fail-open vs fail-closed)
-
-| Inject failure into | Behaviour | Class |
+| Case | Was the action ever governed? | Required behaviour (#55) |
 |---|---|---|
-| approval service (missing / throwing answerer) | request → `unavailable` → **deny** | fail-closed |
-| approval service (no turn open) | `request()` throws before auditing | fail-closed |
-| policy/guard plugin (throws) | throw is normalized to `isError` result; call does not proceed | fail-closed |
-| sandbox provider (unusable runner) | `SANDBOX_UNAVAILABLE`; never falls through unconfined | fail-closed |
-| config reload (bad `cordis.patch.yml`) | last-good tree kept; `hmr/config-update-failed` emitted | fail-safe (degraded, logged) |
-| host adapter / gate process error (ai2rules host adapters, for contrast) | logs + **allows** | fail-open |
+| adapter/shim not installed or not activated | no — the gate was never in the path | fail-open is acceptable (the session was never governed; a broken *bootstrap* shim must not brick it) |
+| adapter invoked but the gate process/service is unavailable | yes | **fail-closed** — deny (or block) the governed effect; must not silently allow |
+| malformed / unparseable gate response | yes | **fail-closed** — deny |
+| verdict cannot be faithfully mapped to a host primitive | yes | **fail-closed** and documented as an ABI/host mismatch (#55), not silently weakened |
 
-dsh's own governance seams fail **closed**; only the *host-adapter shim* layer
-(the analogue of ai2rules' `cc-hook` bootstrap) is fail-open, which is the correct
-place for it (a broken shim must not brick a session).
+This benchmark therefore **does not** claim ai2rules already fails closed on gate
+unavailability everywhere: the existing bootstrap shims (`cc-hook`, the OpenCode
+plugin) fail *open* by design for the "not yet engaged" case, which is exactly the
+first row above — but the #55 contract for the *governed* cases (rows 2–4) is the
+requirement the DeepSeek adapter spike (#55) must implement and test, and is
+called out here as an open obligation rather than a settled property.
 
 ## 6. ai2rules comparison
 
@@ -300,40 +339,56 @@ ai2rules removes that surface from the process entirely.
 
 ## Acceptance criteria (issue #54)
 
+Only boxes backed by a *dynamically demonstrated* result are checked; items that
+rest on source reading or remain follow-up are marked as such.
+
 - [x] Exact DeepSeek Harness commit recorded — `141eb6f…` (rc.8).
 - [x] Architecture note maps governor-owned config, patch precedence, execution
       seams, trusted components — §1.
-- [x] Reproducible governor-replacement test (result: **not possible in-runtime**
-      under non-danger modes; possible only via OS write authority) — §3 A-file +
-      probes A1/A2.
-- [x] Reproducible monotonic-guard test — §2, probes B1–B4.
-- [x] At least one cross-route mandatory-path test — §5 matrix; probes exercise the
-      tool / façade / approval routes directly.
-- [x] Claimed vs observed kept separate — each of §2–§4 states both.
+- [x] Reproducible governor-replacement test — §3. In-runtime façade escape is
+      **observed** (A2); the config-layer result (**not writable under non-danger
+      modes**) is **observed for the fs route** (E2) and **source-derived** for the
+      installation-first bundle resolution (§1.1).
+- [x] Reproducible monotonic-guard test — **observed**, probes B1–B4.
+- [x] At least one cross-route mandatory-path test — **observed**: the ordinary
+      filesystem tool (E1–E4, genuine disk effect) and the Code Mode sub-call
+      (E5). Shell/PTY/subagent/background-job rows are **not dynamically verified**
+      and handed to follow-up (§5).
+- [x] Claimed vs observed kept separate — §2–§4 state both; §5 adds a per-row
+      Verification column (observed / source-derived / not verified).
 - [x] Findings mapped to capability shaping (§1.2/§5), invocation authorization
-      (§2), approval integrity (§4), bypass resistance (§3/§5), failure semantics
-      (§5), audit evidence (`approval/asked`+`approval/decided` pair, frozen
-      `tools/result`, `tool/code-dispatch`).
+      (§2, A2b, E5), approval integrity (§4, C2), bypass resistance (§3/§5),
+      failure semantics (§5, incl. the #55 gate-unavailability contract), audit
+      evidence (`approval/asked`+`approval/decided` pair, frozen `tools/result`,
+      `tool/code-dispatch`).
+
+**Explicit follow-up (not claimed as done):** dynamic verification of the
+shell/subprocess route (needs a usable OS-sandbox runner), PTY, subagent, and
+background-job routes; and the ai2rules-side #55 gate-unavailability contract
+(rows 2–4 of the failure table), which belongs to the adapter spike (#55).
 
 ---
 
 ## Reproducing
 
-The probes run against the real dsh runtime. They are written as a vitest spec
-that mounts the actual `ToolRegistry`, `ApprovalService`, and
-`DynamicCordisRunnerService`.
+The probes run against the real dsh runtime as two vitest specs. The first
+mounts the actual `ToolRegistry`, `ApprovalService`, and
+`DynamicCordisRunnerService`; the second mounts the real `SandboxedFileSystem`
++ `tool-fs` (genuine disk writes) and a scriptable `CodeRuntime`.
 
 ```bash
 git clone https://github.com/deepseek-ai/deepseek-harness.git
 cd deepseek-harness && git checkout 141eb6fef83422698aef7a981029e843e8161534
 pnpm install --ignore-scripts
-# drop the probe spec beside the runner's own tests, then:
-cp <ai2rules>/docs/benchmarks/deepseek-harness/probes/governor-integrity.spec.ts \
-   packages/extensions/cordis-host-runner/tests/
-npx vitest run packages/extensions/cordis-host-runner/tests/governor-integrity.spec.ts
-# → 8 passed. Each test records the observed behaviour; comments cite the exact seam.
+DST=packages/extensions/cordis-host-runner/tests
+cp <ai2rules>/docs/benchmarks/deepseek-harness/probes/governor-integrity.spec.ts $DST/
+cp <ai2rules>/docs/benchmarks/deepseek-harness/probes/execution-seams.spec.ts   $DST/
+npx vitest run $DST/governor-integrity.spec.ts   # → 8 passed  (B1-B4, A1, A2, C1, C2)
+npx vitest run $DST/execution-seams.spec.ts      # → 5 passed  (E1-E4 fs, E5 Code Mode)
 ```
 
-The spec depends only on packages already in the dsh workspace
-(`@deepseek-ai/dsh-tools`, `-user-approval`, `-system-prompt`, `cordis-plugin-timer`,
-and the runner under test) and its own `helpers.ts` sibling from that test dir.
+Both specs import only packages already in the dsh workspace. `governor-integrity`
+additionally uses the runner's own `helpers.ts` sibling from that test dir;
+`execution-seams` is self-contained. E1–E4 create and clean a temp tree under
+`os.homedir()` (the faithful `$DSH_HOME` location, deliberately outside `/tmp`,
+which `writableRoots` always includes).
