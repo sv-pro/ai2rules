@@ -53,7 +53,7 @@ harness-types (foundation — language-neutral contracts, pure data)
     ├─ harness-preview   pure preview: manifest → surface + decision matrix
     │       └─ shared by both harness-wasm and cli-harness serve
     ├─ harness-wasm      cdylib/rlib compiled to WebAssembly (wasm-bindgen)
-    └─ cli-harness       binary `harness` — REPL, serve, gate, host adapters
+    └─ cli-harness       binary `harness` — REPL, serve, gate, project, host adapters
                          (cc-hook / agy-hook), shared shape helpers in `hostkit`
 ```
 
@@ -68,12 +68,12 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
-| **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
+| **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 46 · compiler 18 · executor 16 · trace-store 13 ·
-provider-adapters 5 · agent-core 16 · harness-preview 45 · cli-harness 90 ·
-harness-wasm 0 · **total 304** (plus the harness-wasm Node smoke tests, run via
+provider-adapters 5 · agent-core 16 · harness-preview 45 · cli-harness 95 ·
+harness-wasm 0 · **total 309** (plus the harness-wasm Node smoke tests, run via
 wasm-pack)
 
 ---
@@ -224,7 +224,7 @@ marker in the same commit as the kernel change.
 | `docs/demos/antigravity/` | Antigravity host runbook + the verified hook contract |
 | `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
 | `docs/benchmarks/deepseek-harness/` | Governor-integrity benchmark of DeepSeek Harness (issue #54): where final authority lives, monotonic-guard integrity, approval integrity, execution-seam matrix, ai2rules comparison — with reproducible probes |
-| `docs/demos/deepseek-harness/` | DeepSeek Harness `tools/pre-execute` gate adapter (issue #55 spike): a thin cordis plugin → `harness gate` → dsh `PreToolDecision`. Fail-closed when engaged (D71); real world manifest + a spec run against the real dsh registry + real gate binary |
+| `docs/demos/deepseek-harness/` | DeepSeek Harness discovery + invocation adapter (issue #55): `system-prompt/assemble` → `harness project`, `tools/pre-execute` → `harness gate`. Fail-closed when engaged (D71/D72); revocation and stale-call tests against real dsh services |
 | `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source). Path-scope lives in the `roots-world.yaml` / `roots-cases.yaml` pair — a second world because enabling `roots` changes every pathless file action's verdict (D61) |
 | `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
 | `scripts/assemble-npm-packages.sh` | Fills the four platform packages from `dist/`. Shared by `release.yml` and CI's `release-dry-run` so they cannot diverge (D70) |

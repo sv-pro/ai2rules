@@ -1,10 +1,12 @@
-# DeepSeek Harness world for the host-neutral gate ABI (DECISIONS D24 / D34 / D36; issue #55).
+# DeepSeek Harness world for the host-neutral projection + gate ABIs
+# (DECISIONS D24 / D34 / D36 / D72; issue #55).
 #
 # A REAL WorldManifest — compiled by the same kernel as Claude Code's cc-world.yaml
 # and OpenCode's opencode-world.yaml — governed per DeepSeek Harness (dsh) native
-# tool call by the `ai2rules-gate.ts` cordis plugin, which subscribes to dsh's
-# `tools/pre-execute` waterfall and calls `harness gate` (the wire ABI; non-Rust
-# hosts use it, D34).
+# discovery assembly and every native tool call by the `ai2rules-gate.ts` cordis
+# plugin. It subscribes to dsh's `system-prompt/assemble` waterfall and calls
+# `harness project`, then subscribes to `tools/pre-execute` and calls `harness
+# gate` (the sibling wire ABIs for non-Rust hosts, D34/D72).
 #
 # The adapter maps dsh's native tool names onto these actions 1:1 and holds NO
 # governance logic (the one-kernel / thin-adapter rule, D35). `bash` is classified

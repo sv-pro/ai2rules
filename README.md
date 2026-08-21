@@ -231,6 +231,13 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   decision is the pure `harness_preview::gate()`, shared native and WASM. Schema:
   [`docs/harness-gate-abi.md`](docs/harness-gate-abi.md).
 
+- **Discovery projection ABI (D72):** `harness project --world <manifest>` reads
+  the exact schemas a host is about to advertise, removes names the compiled world
+  does not project, and returns joinable manifest/schema identities. DeepSeek's
+  adapter runs it at `system-prompt/assemble`, then uses `gate` at
+  `tools/pre-execute`; a revoked tool disappears on the next model step and a call
+  retained from stale context still has no authority.
+
 The same gate also powers the **governability demo** (`docs/demos/jira-copilot/`,
 DECISIONS D33): `harness mcp-gateway` fronts an MCP server — shaping its `tools/list`
 (ABSENT) and gating each `tools/call` on the real kernel — over a self-contained
@@ -271,6 +278,13 @@ OpenCode (E17 / DECISIONS D35) is dogfooded the same way: the
 `permission` rules) calls the same `harness gate` wire ABI, sending raw tool
 names — see `docs/demos/opencode/`.
 
+DeepSeek Harness (issue #55 / D71/D72) is the fourth host and the first one here
+whose plugin shapes both sides: the authoritative prompt assembly is projected
+before the model sees tools, and the pre-execute waterfall gates every call. The
+same `deepseek-world.yaml` can govern OpenCode because both hosts use the same
+lowercase tool vocabulary; revocation, stale invocation, Code Mode fail-closed,
+and projection/gate outage behavior are pinned in the real dsh service spec.
+
 **Antigravity CLI (`agy`, DECISIONS D48)** is the third live host: `.agents/hooks.json`
 runs a bootstrap shim that `exec`s **`harness agy-hook`**, which links `gate()`
 in-process like `cc-hook`. Its hook ABI is not vendor-published — the contract was
@@ -279,7 +293,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **304 tests** green.
+Builds clean offline with `clippy -D warnings`; **309 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -298,7 +312,7 @@ crates/               the harness implementation
   trace-store/        append-only audit, redaction, replay (E4)
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
-  cli-harness/        terminal entrypoint + `serve`/`gate`/`mcp-gateway`/`cc-hook`/`agy-hook`/`mock-jira` (binary `harness`) (E9, E11, E16, D48)
+  cli-harness/        terminal entrypoint + `serve`/`gate`/`project`/`mcp-gateway`/host adapters (binary `harness`) (E9, E11, E16, D48, D72)
   harness-preview/    pure design-time preview + runtime gate() ABI, shared by serve + wasm + `harness gate` (E11/E14, D24)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
 docs/                 architecture (harness-architecture.md is canonical; one-kernel-many-hosts.md = cross-host parity)

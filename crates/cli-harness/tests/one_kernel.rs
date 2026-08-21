@@ -16,7 +16,7 @@
 //!       keys), so the adapter's shape translation is inside the parity claim
 //!
 //! Plus the classifier-consistency test pinning the D36 `command_classes`
-//! pattern lists byte-identical across the three host manifests.
+//! pattern lists byte-identical across every shipped host manifest.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -644,6 +644,7 @@ fn command_class_patterns_are_identical_across_host_manifests() {
         "docs/demos/opencode/opencode-world.yaml",
         "scripts/starter-world.yaml",
         ".agents/agy-world.yaml",
+        "docs/demos/deepseek-harness/deepseek-world.yaml",
     ];
     let mut pattern_sets: Vec<Vec<Vec<String>>> = Vec::new();
     let mut default_targets: Vec<String> = Vec::new();
@@ -691,6 +692,10 @@ fn command_class_patterns_are_identical_across_host_manifests() {
     assert_eq!(
         pattern_sets[0], pattern_sets[4],
         "demo-world vs agy-world pattern drift"
+    );
+    assert_eq!(
+        pattern_sets[0], pattern_sets[5],
+        "demo-world vs deepseek-world pattern drift"
     );
     assert!(
         default_targets.iter().all(|d| d.ends_with("_unclassified")),

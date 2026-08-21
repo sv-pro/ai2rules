@@ -9,10 +9,10 @@
  *   AI2R_HARNESS  -> built `harness` binary
  *   AI2R_WORLD    -> docs/demos/deepseek-harness/deepseek-world.yaml
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -29,6 +29,13 @@ function stateFile(): string {
   const d = mkdtempSync(join(tmpdir(), 'ai2r-gate-'))
   dirs.push(d)
   return join(d, 'state.json')
+}
+function mutableWorld(): string {
+  const d = mkdtempSync(join(tmpdir(), 'ai2r-world-'))
+  dirs.push(d)
+  const path = join(d, 'world.yaml')
+  writeFileSync(path, readFileSync(WORLD, 'utf8'))
+  return path
 }
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }) })
 
@@ -114,6 +121,62 @@ describe.runIf(HARNESS && WORLD)('ai2rules-gate adapter (#55) — real kernel, r
     t.ctx.tools.register(t.tool('todo_write')) // real dsh tool, but not in deepseek-world.yaml
     const r = await t.call('todo_write', {})
     expect(r.isError).toBe(true); expect(text(r)).toContain('[ai2rules] ABSENT'); expect(t.ran).toEqual([])
+    t.restore()
+  })
+
+  it('DISCOVERY: system-prompt assembly omits ABSENT schemas and binds manifest/schema evidence', async () => {
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const t = await tree(base())
+    try {
+      t.ctx.tools.register(t.tool('read'))
+      t.ctx.tools.register(t.tool('todo_write'))
+      const assembly = await t.ctx.systemPrompt.assemble()
+      expect(assembly.tools.map(tool => tool.name)).toEqual(['read'])
+      const evidence = logs.mock.calls.flat().join('\n')
+      expect(evidence).toMatch(/discovery offered=2 visible=1 absent=1/)
+      expect(evidence).toMatch(/manifest=[0-9a-f]{12} schema=[0-9a-f]{12}/)
+    } finally {
+      logs.mockRestore(); t.restore()
+    }
+  })
+
+  it('REVOCATION: a fresh assembly drops the tool and a stale direct call retains no authority', async () => {
+    const world = mutableWorld()
+    const t = await tree({ ...base(), AI2RULES_WORLD: world })
+    t.ctx.tools.register(t.tool('read'))
+    const before = await t.ctx.systemPrompt.assemble()
+    expect(before.tools.map(tool => tool.name)).toContain('read')
+
+    const revoked = readFileSync(world, 'utf8').replace(
+      '  - { name: read, action_type: Read, side_effect: Read }\n', '',
+    )
+    writeFileSync(world, revoked)
+
+    // The model may still hold the old schema, but only the current gate decides.
+    const stale = await t.call('read', {})
+    expect(stale.isError).toBe(true); expect(text(stale)).toContain('[ai2rules] ABSENT'); expect(t.ran).toEqual([])
+    const after = await t.ctx.systemPrompt.assemble()
+    expect(after.tools.map(tool => tool.name)).not.toContain('read')
+    t.restore()
+  })
+
+  it('CODE MODE DISCOVERY: an unprojected run_code transport cannot leak its SDK catalog', async () => {
+    const t = await tree(base())
+    t.ctx.systemPrompt.section({ name: 'tools:code-only', order: 99, text: 'run_code only' })
+    t.ctx.systemPrompt.section({ name: 'tools:sdk', order: 200, text: 'declare todo_write' })
+    t.ctx.systemPrompt.tools(() => ({ schemas: [{ name: 'run_code', description: 'transport', parameters: { type: 'object' } }] }))
+    const assembly = await t.ctx.systemPrompt.assemble()
+    expect(assembly.tools.map(tool => tool.name)).not.toContain('run_code')
+    expect(assembly.sections.map(section => section.name)).not.toContain('tools:sdk')
+    expect(assembly.sections.map(section => section.name)).not.toContain('tools:code-only')
+    t.restore()
+  })
+
+  it('DISCOVERY FAIL-CLOSED: projector unavailable exposes an empty surface', async () => {
+    const t = await tree({ ...base(), AI2RULES_HARNESS: '/nonexistent/harness' })
+    t.ctx.tools.register(t.tool('read'))
+    const assembly = await t.ctx.systemPrompt.assemble()
+    expect(assembly.tools).toEqual([])
     t.restore()
   })
 

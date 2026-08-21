@@ -15,10 +15,33 @@
 //! boundary, so project-local symlinks cannot choose their own root. Keep that
 //! property — it is the reason these are shared rather than copied.
 
-use harness_types::RootsDef;
+use compiler::{compile, loader::load_yaml, resolve_root_paths};
+use harness_types::{CompiledWorld, RootsDef};
 use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+/// Load, normalize, and compile one world at a CLI I/O boundary.
+///
+/// `gate` and `project` must mint the same immutable world from the same file.
+/// Keeping root expansion and filesystem canonicalization here prevents the two
+/// wire operations from correlating different manifest hashes for one path.
+pub fn load_compiled_world(world_path: &Path) -> Result<CompiledWorld, String> {
+    let content = std::fs::read_to_string(world_path)
+        .map_err(|e| format!("cannot read world {}: {e}", world_path.display()))?;
+    let mut manifest = load_yaml(&content)
+        .map_err(|e| format!("cannot parse world {}: {e}", world_path.display()))?;
+    if let Some(roots) = &manifest.roots {
+        let base = std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string());
+        let home = std::env::var("HOME").ok();
+        let resolved = resolve_root_paths(roots, home.as_deref(), base.as_deref());
+        manifest.roots = Some(canonicalize_root_paths(&resolved));
+    }
+    compile(&manifest)
+        .map_err(|e| format!("cannot compile world {}: {e}", world_path.display()))
+}
 
 /// Filesystem-safe form of a host session identifier, for the taint sidecar
 /// filename. Host session ids are untrusted input (Claude Code's `session_id`,

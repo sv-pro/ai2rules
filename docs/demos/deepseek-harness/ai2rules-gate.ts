@@ -1,10 +1,12 @@
 /**
  * ai2rules-gate — DeepSeek Harness (dsh) native-tool governance adapter.
- * ai2rules issue #55 (adapter spike); DECISIONS D24 / D34 / D35 / D36.
+ * ai2rules issue #55; DECISIONS D24 / D34 / D35 / D36 / D72.
  *
- * A native cordis plugin that subscribes to dsh's `tools/pre-execute` waterfall
- * and routes every native tool call through the REAL ai2rules kernel via the
- * `harness gate` wire ABI (D24) — the same engine that governs Claude Code
+ * A native cordis plugin that subscribes to dsh's authoritative
+ * `system-prompt/assemble` waterfall AND its `tools/pre-execute` waterfall.
+ * Discovery is shaped by `harness project`; every invocation is decided by
+ * `harness gate` (D24/D72) — the same compiled world governs both boundaries and
+ * the same engine governs Claude Code
  * (`cc-hook`), OpenCode, and the MCP gateway. No policy, taint, or command
  * classification logic lives here; this is transport + session-state plumbing
  * only (the one-kernel / thin-adapter rule, D35). The plugin sends the RAW dsh
@@ -16,7 +18,7 @@
  *   ALLOW    -> { kind: 'allow' }               dsh runs the tool
  *   DENY     -> { kind: 'deny', reason }         binding rejection before effect
  *   ASK      -> { kind: 'ask',  reason }         dsh's ctx.approval one-shot prompt
- *   ABSENT   -> { kind: 'deny', reason }         invocation denied (discovery-shaping is #55 follow-up)
+ *   ABSENT   -> omitted from prompt assembly; stale/direct invocation still denied
  *   REPLAN   -> { kind: 'deny', reason }         best-effort: no faithful pre-execute REPLAN primitive
  *   <unknown>-> { kind: 'deny', reason }         unmappable verdict -> fail closed, ABI mismatch noted
  *
@@ -50,8 +52,8 @@
  *
  * This module intentionally imports nothing from dsh: the `apply(ctx)` contract
  * is structural, so the plugin compiles and mounts against any cordis Context
- * that exposes `ctx.on('tools/pre-execute', …)`. That keeps the adapter a leaf
- * with no dsh version coupling.
+ * that exposes the two documented waterfalls. That keeps the adapter a leaf
+ * with no dsh package/version dependency.
  */
 import { spawnSync } from 'node:child_process'
 import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -67,12 +69,27 @@ type PreToolDecision =
 interface ToolExecutionLike {
   readonly name: string
   readonly arguments: unknown
-  readonly agent?: { session?: { id?: string; header?: { cwd?: string } } }
+  readonly agent?: { id?: string; session?: { id?: string; header?: { cwd?: string } } }
 }
+
+interface ToolSchemaLike {
+  readonly name: string
+  readonly description?: string
+  readonly parameters: unknown
+}
+
+interface PromptAssemblyLike {
+  sections: Array<{ name: string; text: string }>
+  tools: ToolSchemaLike[]
+  [key: string]: unknown
+}
+
+interface AssembleContextLike { readonly scope?: unknown }
 
 /** The minimal cordis Context surface the adapter binds to. */
 interface ContextLike {
   on(event: 'tools/pre-execute', handler: (exec: ToolExecutionLike, next: () => Promise<PreToolDecision>) => Promise<PreToolDecision>): unknown
+  on(event: 'system-prompt/assemble', handler: (assembly: PromptAssemblyLike, context: AssembleContextLike, next: () => Promise<PromptAssemblyLike>) => Promise<PromptAssemblyLike>): unknown
 }
 
 interface GateResponse {
@@ -83,6 +100,14 @@ interface GateResponse {
   context?: { taint?: string; usage?: Record<string, number> }
   approval?: { token?: string; required?: boolean } | null
   manifest_hash?: string
+}
+
+interface ProjectionResponse {
+  v?: number
+  tools?: ToolSchemaLike[]
+  absent?: string[]
+  manifest_hash?: string
+  schema_hash?: string
 }
 
 interface Sidecar {
@@ -100,6 +125,38 @@ function isExecutable(path: string | undefined): path is string {
 
 function statePath(): string {
   return process.env.AI2RULES_STATE ?? join(process.cwd(), '.dsh-ai2rules-state.json')
+}
+
+function worldPath(): string {
+  return process.env.AI2RULES_WORLD ?? join(process.cwd(), 'deepseek-world.yaml')
+}
+
+function executionMode(): 'interactive' | 'background' {
+  return process.env.AI2RULES_MODE === 'background' ? 'background' : 'interactive'
+}
+
+function sourceChannel(): string {
+  return process.env.AI2RULES_SOURCE_CHANNEL ?? 'user_cli'
+}
+
+function scopeSessionId(scope: unknown): string {
+  if (scope !== null && typeof scope === 'object') {
+    const value = scope as { id?: unknown; session?: { id?: unknown } }
+    if (typeof value.session?.id === 'string') return value.session.id
+    if (typeof value.id === 'string') return value.id
+  }
+  return 'dsh-session'
+}
+
+function failClosedAssembly(assembly: PromptAssemblyLike, sessionId: string, reason: string): PromptAssemblyLike {
+  evidence(`session=${sessionId} discovery -> EMPTY (fail-closed): ${reason}`)
+  return {
+    ...assembly,
+    tools: [],
+    // A code-mode SDK is another discovery surface. If projection cannot prove
+    // it, remove the transport instructions as well as the wire tool schemas.
+    sections: assembly.sections.filter(section => section.name !== 'tools:sdk' && section.name !== 'tools:code-only'),
+  }
 }
 
 function loadSidecar(): Sidecar {
@@ -139,12 +196,57 @@ function evidence(line: string): void {
  * it with `ctx.plugin(Ai2rulesGate, config?)` or via a `cordis.yml` entry.
  */
 export const name = 'ai2rules-gate'
-export const inject: string[] = ['tools']
+export const inject: string[] = ['tools', 'systemPrompt']
 
 export function apply(ctx: ContextLike): void {
-  const world = process.env.AI2RULES_WORLD ?? join(process.cwd(), 'deepseek-world.yaml')
-  const mode = process.env.AI2RULES_MODE === 'background' ? 'background' : 'interactive'
-  const sourceChannel = process.env.AI2RULES_SOURCE_CHANNEL ?? 'user_cli'
+  ctx.on('system-prompt/assemble', async (assembly, context, next): Promise<PromptAssemblyLike> => {
+    const assembled = await next()
+    if (DISABLED()) return assembled
+
+    const sessionId = scopeSessionId(context.scope)
+    const harness = process.env.AI2RULES_HARNESS
+    if (!isExecutable(harness)) {
+      return failClosedAssembly(assembled, sessionId,
+        'governance projector unavailable (harness binary missing or not executable)')
+    }
+    const run = spawnSync(harness, ['project', '--world', worldPath()], {
+      input: JSON.stringify({
+        v: 1,
+        context: { source_channel: sourceChannel() },
+        tools: assembled.tools,
+      }),
+      encoding: 'utf8',
+      timeout: 30_000,
+    })
+    if (run.error !== undefined) return failClosedAssembly(assembled, sessionId, `project process failed to start: ${run.error.message}`)
+    if (run.status !== 0) return failClosedAssembly(assembled, sessionId, `project failed (exit ${run.status}): ${(run.stderr || '').trim()}`)
+
+    let projected: ProjectionResponse
+    try { projected = JSON.parse(run.stdout) as ProjectionResponse } catch {
+      return failClosedAssembly(assembled, sessionId, 'project returned unparseable output')
+    }
+    if (projected.v !== 1 || !Array.isArray(projected.tools) || !Array.isArray(projected.absent)
+      || typeof projected.manifest_hash !== 'string' || typeof projected.schema_hash !== 'string') {
+      return failClosedAssembly(assembled, sessionId, 'project returned an invalid projection response')
+    }
+    const offered = new Set(assembled.tools.map(tool => tool.name))
+    if (projected.tools.some(tool => typeof tool?.name !== 'string' || !offered.has(tool.name))) {
+      return failClosedAssembly(assembled, sessionId, 'project returned a tool that was not offered by this assembly')
+    }
+
+    const absent = new Set(projected.absent)
+    let sections = assembled.sections
+    // `tools:sdk` is an unstructured second catalog in code/both presentation.
+    // This adapter never parses or rewrites host prompt text. If the compiled
+    // world does not expose the reserved run_code transport, remove its SDK and
+    // collapse instruction. Native tools in `both` remain available normally;
+    // code-only mode therefore narrows to an empty surface, fail closed.
+    if (absent.has('run_code')) {
+      sections = sections.filter(section => section.name !== 'tools:sdk' && section.name !== 'tools:code-only')
+    }
+    evidence(`session=${sessionId} discovery offered=${assembled.tools.length} visible=${projected.tools.length} absent=${projected.absent.length} manifest=${projected.manifest_hash} schema=${projected.schema_hash.slice(0, 12)}`)
+    return { ...assembled, tools: projected.tools, sections }
+  })
 
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
     // The not-activated case: operator opted this session out of governance.
@@ -174,9 +276,9 @@ export function apply(ctx: ContextLike): void {
       path: null,
       context: {
         session_id: sessionId,
-        mode,
+        mode: executionMode(),
         taint: tainted ? 'tainted' : 'clean',
-        source_channel: sourceChannel,
+        source_channel: sourceChannel(),
         approval_token: null,
         usage,
       },
@@ -184,7 +286,7 @@ export function apply(ctx: ContextLike): void {
 
     // Run the pure kernel out-of-process (D34). spawnSync keeps the waterfall
     // handler simple; the gate is a short-lived single-shot process.
-    const run = spawnSync(harness, ['gate', '--world', world], {
+    const run = spawnSync(harness, ['gate', '--world', worldPath()], {
       input: JSON.stringify(req),
       encoding: 'utf8',
       timeout: 30_000,
@@ -233,8 +335,8 @@ export function apply(ctx: ContextLike): void {
         evidence(`session=${sessionId} tool=${exec.name} -> ASK ${tail}`)
         return { kind: 'ask', reason: `[ai2rules] approval required (${action}): ${verdict.reason ?? ''}`.trim() }
       case 'ABSENT':
-        // Invocation is denied; shaping model-visible discovery from the same
-        // world is the #55 discovery follow-up, not this invocation slice.
+        // A stale assembly or direct/sub-call may still name a now-revoked tool;
+        // discovery never grants authority, so invocation remains binding.
         evidence(`session=${sessionId} tool=${exec.name} -> ABSENT ${tail}`)
         return { kind: 'deny', reason: `[ai2rules] ABSENT (${action}): ${verdict.reason ?? 'action is not in this world'}` }
       case 'REPLAN':

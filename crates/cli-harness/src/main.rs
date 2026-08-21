@@ -19,6 +19,7 @@ mod hostkit;
 mod init;
 mod mcp_gateway;
 mod mock_jira;
+mod project;
 mod serve;
 
 /// ai2rules
@@ -81,6 +82,14 @@ enum Command {
     /// (D24). A host adapter wraps this. See `docs/harness-gate-abi.md`.
     Gate {
         /// Path to the world manifest (YAML/JSON) to govern against.
+        #[arg(long)]
+        world: PathBuf,
+    },
+    /// Shape a host's offered tool schemas through a compiled world: read a
+    /// projection request on stdin and write the visible schemas plus manifest
+    /// and schema identities on stdout (D72).
+    Project {
+        /// Path to the world manifest (YAML/JSON) whose projected actions govern discovery.
         #[arg(long)]
         world: PathBuf,
     },
@@ -317,6 +326,10 @@ fn main() {
         std::process::exit(run_gate(world));
     }
 
+    if let Some(Command::Project { world }) = &cli.command {
+        std::process::exit(project::run(world));
+    }
+
     if let Some(Command::MockJira {
         rovo,
         poisoned,
@@ -454,39 +467,10 @@ fn main() {
 /// error. The verdict is never encoded in the exit code (D24): mapping it to a
 /// host's decision shape is the adapter's job.
 fn run_gate(world_path: &Path) -> i32 {
-    let content = match std::fs::read_to_string(world_path) {
-        Ok(c) => c,
+    let world = match hostkit::load_compiled_world(world_path) {
+        Ok(world) => world,
         Err(e) => {
-            eprintln!("gate: cannot read world {}: {e}", world_path.display());
-            return 2;
-        }
-    };
-    let mut manifest = match load_yaml(&content) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("gate: cannot parse world {}: {e}", world_path.display());
-            return 2;
-        }
-    };
-    // Resolve and canonicalize the manifest's roots at this I/O boundary, exactly
-    // as `cc-hook` and `agy-hook` do (finding #26). `run_gate` compiles the world
-    // itself, so a caller of the wire ABI has no other place to do it — and roots
-    // left lexical silently stop matching whenever a rule path is relative, uses
-    // `~`, or traverses a symlink, which drops its `Deny` through to the policy
-    // `default`. The kernel stays pure; this is the adapter half of the same
-    // boundary, and it must not differ per entry point.
-    if let Some(roots) = &manifest.roots {
-        let base = std::env::current_dir()
-            .ok()
-            .map(|p| p.display().to_string());
-        let home = std::env::var("HOME").ok();
-        let resolved = compiler::resolve_root_paths(roots, home.as_deref(), base.as_deref());
-        manifest.roots = Some(hostkit::canonicalize_root_paths(&resolved));
-    }
-    let world = match compile(&manifest) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("gate: cannot compile world {}: {e}", world_path.display());
+            eprintln!("gate: {e}");
             return 2;
         }
     };

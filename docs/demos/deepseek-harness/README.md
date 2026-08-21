@@ -2,10 +2,11 @@
 
 **The point:** the *same* deterministic kernel and Gate ABI that govern Claude Code
 (`cc-hook`), OpenCode, and the MCP gateway also govern **DeepSeek Harness (dsh)
-native tool calls** — through a thin cordis plugin that subscribes to dsh's
-`tools/pre-execute` waterfall and calls `harness gate`. No policy, taint, or
-command classification lives in the plugin; world policy stays in the compiled
-`WorldManifest` and the kernel (the one-kernel / thin-adapter rule, D35).
+native tool calls** — through a thin cordis plugin that shapes the authoritative
+`system-prompt/assemble` result with `harness project`, then subscribes to
+`tools/pre-execute` and calls `harness gate`. No policy, taint, or command
+classification lives in the plugin; world policy stays in the compiled
+`WorldManifest` and the kernel (the one-kernel / thin-adapter rule, D35/D72).
 
 This is the **P1 adapter spike** for [issue #55], the implementation companion to
 the [#54 governor-integrity benchmark](../../benchmarks/deepseek-harness/). It
@@ -15,19 +16,18 @@ deliberately closes the failure-semantics gap that the #54 review flagged: an
 [issue #55]: https://github.com/sv-pro/ai2rules/issues/55
 
 ```
-dsh model → tools/pre-execute waterfall
-          → ai2rules-gate.ts  (build GateRequest, run `harness gate --world W`, map verdict)
-          → external deterministic kernel + compiled deepseek-world.yaml
-          → PreToolDecision (allow / deny / ask) back into dsh's own pipeline
+dsh prompt assembly → system-prompt/assemble → harness project --world W → visible schemas
+dsh tool call       → tools/pre-execute      → harness gate --world W    → allow/deny/ask
+                                                     same compiled world
 ```
 
 ## Files
 
 | File | What it is |
 |---|---|
-| [`ai2rules-gate.ts`](ai2rules-gate.ts) | The cordis plugin. Subscribes to `tools/pre-execute`, builds a `GateRequest`, shells to `harness gate` (D34, out-of-process wire ABI), maps the verdict to dsh's `PreToolDecision`, and persists monotonic taint + budget usage. Imports **nothing** from dsh — the `apply(ctx)` contract is structural. |
-| [`deepseek-world.yaml`](deepseek-world.yaml) | A **real** `WorldManifest` compiled by the same kernel as `cc-world.yaml`. Its `command_classes` block is copied byte-identical from the pinned host worlds (`cc-world.yaml` / `opencode-world.yaml` / the one-kernel demo world, which `tests/one_kernel.rs` pins); adding this world to that pin is follow-up. Action names are dsh's real registered tool names (`bash`, `edit`, `glob`, `grep`, `read`, `read_image`, `write`, `web_fetch`, `web_search`). |
-| [`ai2rules-gate.spec.ts`](ai2rules-gate.spec.ts) | Runs the adapter against the **real** dsh `ToolRegistry` pipeline **and** the real `harness gate` binary + this world. 9 cases: the verdict mapping and the fail-closed contract. |
+| [`ai2rules-gate.ts`](ai2rules-gate.ts) | The cordis plugin. Rewrites the final prompt assembly through `harness project`, gates invocation through `harness gate`, maps verdicts to dsh's `PreToolDecision`, and persists monotonic taint + budget usage. Imports **nothing** from dsh — both contracts are structural. |
+| [`deepseek-world.yaml`](deepseek-world.yaml) | A **real** `WorldManifest` whose action names are dsh's real registered names. The same file also governs the OpenCode adapter because that host uses the same lowercase names; its classifier patterns are pinned with every host world in `tests/one_kernel.rs`. |
+| [`ai2rules-gate.spec.ts`](ai2rules-gate.spec.ts) | Runs discovery and invocation against the **real** dsh `SystemPrompt` + `ToolRegistry` pipeline and the real binary/world. 13 cases include revocation, stale invocation, projection evidence, Code Mode fail-closed, and gate/project outage. |
 
 ## Verdict mapping (issue #55)
 
@@ -39,7 +39,7 @@ without inventing a second policy vocabulary:
 | `ALLOW` | `next()` → `{kind:'allow'}` | dsh runs the tool |
 | `DENY` | `{kind:'deny', reason}` | binding rejection before any effect |
 | `ASK` | `{kind:'ask', reason}` | resolved by dsh's own `ctx.approval` one-shot prompt (the narrowest primitive that preserves exact-call binding) |
-| `ABSENT` | `{kind:'deny', reason}` | invocation denied. Shaping model-visible **discovery** from the same world (so the model never sees the tool) is the #55 discovery follow-up, not this invocation slice. |
+| `ABSENT` | omitted from `PromptAssembly.tools`; stale/direct invocation → `{kind:'deny'}` | discovery is advisory, invocation remains the authority after revocation |
 | `REPLAN` | `{kind:'deny', reason}` | **best-effort.** dsh's pre-execute seam has only allow/deny/ask — no faithful non-effecting "continue without executing" primitive — so REPLAN denies and says so. Documented here as an ABI/host mismatch rather than silently weakened (#55). |
 | *(unknown)* | `{kind:'deny', reason}` | unmappable verdict → fail closed, ABI mismatch noted |
 
@@ -69,6 +69,41 @@ Once mounted, **every** path that cannot produce a trustworthy `ALLOW` denies th
 governed effect. That is the property #54's review said the benchmark could not yet
 claim; here it is implemented and tested.
 
+Discovery fails closed independently: a missing projector, malformed response, or
+uncompilable world produces an **empty tool surface**. It never falls back to dsh's
+unfiltered registry.
+
+## Discovery projection — `ABSENT` before the model
+
+DeepSeek's implemented architecture makes `system-prompt/assemble` the single
+authoritative interception point for prompt sections and wire tool schemas. The
+adapter calls the host-neutral projection wire operation with the schemas from
+that exact assembly:
+
+```json
+{"v":1,"context":{"source_channel":"user_cli"},"tools":[{"name":"read","description":"…","parameters":{}}]}
+```
+
+`harness project --world W` compiles `W` through the same loader and root
+normalization as `harness gate`, keeps only names in `world.projected_actions()`
+that the declared source channel's compiled capability matrix can see, and
+returns those host-owned schema values unchanged plus `manifest_hash` and a
+SHA-256 `schema_hash` of the visible array. The world owns **existence**; dsh's
+registry owns its operational schema. Parsing or regenerating dsh schemas in the
+adapter would create a second tool-definition engine.
+
+Projection runs on every assembly. A world file change therefore changes the next
+visible surface. A model may retain an earlier schema in its context, but the
+current `tools/pre-execute` call recompiles the current world and denies the stale
+name as `ABSENT`; discovery never grants authority.
+
+Code Mode also publishes an SDK catalog in the `tools:sdk` prompt section. The
+adapter does not parse or rewrite host prompt text. Unless the world explicitly
+projects dsh's reserved `run_code` transport, it removes that SDK and transport
+instruction; code-only presentation consequently narrows to an empty surface,
+while `both` retains projected native tools. This is a deliberate fail-closed
+degradation, not a claim that an unstructured SDK was safely filtered.
+
 ## The seven-step host-adapter contract (Gate ABI §6)
 
 The plugin does exactly the host-neutral steps, nothing more:
@@ -96,11 +131,14 @@ Every decision emits one write-through line tagged `[ai2rules-gate]`:
 ```
 [ai2rules-gate] session=S1 tool=bash -> ALLOW action=bash_network rule=none manifest=6d48cdef96eb
 [ai2rules-gate] session=S1 tool=web_fetch -> DENY action=web_fetch rule=no_tainted_network manifest=6d48cdef96eb
+[ai2rules-gate] session=S1 discovery offered=10 visible=9 absent=1 manifest=6d48cdef96eb schema=98d3c40b21aa
 [ai2rules-gate] session=S1 tool=read -> DENY (fail-closed): governance gate unavailable …
 ```
 
-session/tool → GateRequest → verdict (decision, effective action, rule,
-manifest hash) → host decision → effect/no-effect.
+Discovery evidence binds session → offered/visible/ABSENT counts → manifest and
+schema identities. Invocation evidence binds session/tool → GateRequest → verdict
+(decision, effective action, rule, the same manifest hash) → host decision →
+effect/no-effect.
 
 ## Running the spike
 
@@ -116,7 +154,7 @@ cargo build -p cli-harness            # -> target/debug/harness
 AI2R_HARNESS=<ai2rules>/target/debug/harness \
 AI2R_WORLD=<ai2rules>/docs/demos/deepseek-harness/deepseek-world.yaml \
   npx vitest run packages/extensions/cordis-host-runner/tests/ai2rules-gate.spec.ts
-# → 9 passed  (ALLOW×2, DENY, ASK allow/reject, ABSENT, FAIL-CLOSED×2, BYPASS)
+# → 13 passed (invocation mapping/outage + discovery/revocation/Code Mode/outage)
 ```
 
 To govern a real dsh session instead of the test harness, add the plugin to the
@@ -126,11 +164,17 @@ model's own tool loop is untouched.
 
 ## Cross-host acceptance (issue #55) — status
 
-- [x] **One compiled `WorldManifest` governs dsh and other hosts.** `deepseek-world.yaml`'s
-      `command_classes` is copied byte-identical from the pinned host worlds
-      (`cc-world.yaml` / `opencode-world.yaml`); equivalent normalized actions get
-      equivalent kernel decisions independent of host. (Adding this world to the
-      `tests/one_kernel.rs` conformance pin is follow-up.)
+- [x] **One compiled `WorldManifest` governs dsh and another host.**
+      `deepseek-world.yaml` uses the same lowercase tool vocabulary as the shipped
+      OpenCode adapter, so the identical compiled artifact governs both; its D36
+      patterns are now pinned with every host manifest in `tests/one_kernel.rs`.
+- [x] **`ABSENT` is removed before prompt delivery.** The real dsh assembly is
+      filtered on every step; the test changes the configured world, proves the
+      next assembly drops `read`, then proves an invocation from the stale
+      assembly still receives binding `ABSENT` with no effect.
+- [x] **Projection evidence is joinable.** Discovery and invocation record the
+      same 12-hex manifest identity; discovery additionally records the exact
+      visible schema hash.
 - [x] **The dsh adapter is translation/plumbing only** (no independent rules, no
       duplicate shell classification; imports nothing from dsh).
 - [x] **A kernel `DENY` produces no downstream effect** even where dsh-native
@@ -141,13 +185,13 @@ model's own tool loop is untouched.
       sub-call path shares the same `tools/pre-execute` seam (the registry runs
       the waterfall for sub-dispatches too — see the #54 E5 probe).
 
-### Deferred (honest follow-up, not claimed done here)
+### Residual host mismatches (not hidden by the completed slice)
 
-- **`ABSENT` discovery shaping.** This slice denies ABSENT at *invocation*; shaping
-  the model-visible tool schema from the same compiled world (so an absent tool is
-  never offered, and revocation stays consistent between discovery and invocation)
-  is the #55 "Discovery / ABSENT follow-up" and needs the dsh tool-schema/scoped-
-  registry seam.
+- **Code-only presentation degrades to an empty surface.** dsh puts the native
+  catalog inside generated SDK prose, not in structured `PromptAssembly.tools`.
+  The adapter removes it instead of parsing host text. A usable *filtered* Code
+  Mode needs dsh to expose the SDK's source schemas structurally at the assembly
+  waterfall; direct Code Mode sub-dispatches remain governed by pre-execute.
 - **`REPLAN`** has no faithful dsh pre-execute mapping (denied best-effort); a
   faithful mapping would need a host primitive that returns a non-effecting
   "continue the loop without executing", recorded as an ABI/host mismatch.
