@@ -1,0 +1,96 @@
+# DeepSeek Harness world for the host-neutral projection + gate ABIs
+# (DECISIONS D24 / D34 / D36 / D72; issue #55).
+#
+# A REAL WorldManifest — compiled by the same kernel as Claude Code's cc-world.yaml
+# and OpenCode's opencode-world.yaml — governed per DeepSeek Harness (dsh) native
+# discovery assembly and every native tool call by the `ai2rules-gate.ts` cordis
+# plugin. It subscribes to dsh's `system-prompt/assemble` waterfall and calls
+# `harness project`, then subscribes to `tools/pre-execute` and calls `harness
+# gate` (the sibling wire ABIs for non-Rust hosts, D34/D72).
+#
+# The adapter maps dsh's native tool names onto these actions 1:1 and holds NO
+# governance logic (the one-kernel / thin-adapter rule, D35). `bash` is classified
+# by the KERNEL from the `command_classes` block below (D36) into plain `bash`
+# (Process), `bash_network` (egress: curl/wget/nc/ssh/…), `bash_destructive`
+# (rm -rf/sudo/mkfs/… → approval), or `bash_unclassified` (unmatched shell →
+# approval + taint floor). Classification is world data, so every host shares
+# byte-identical classification; the *policy* for each action is declared in
+# `base_actions` / `transition_policies`.
+#
+# Action names below are dsh's REAL registered tool names (bash, edit, glob,
+# grep, read, read_image, write, web_fetch, web_search — verified against the
+# pinned dsh checkout 141eb6f), so the adapter sends `exec.name` verbatim.
+world_id: deepseek-harness-default
+
+actors:
+  - { name: developer, kind: User }
+  - { name: dsh, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: workspace_files, trust: SemiTrusted, taint: true }
+  - { name: shell_output, trust: SemiTrusted, taint: true }
+  - { name: web_fetch, trust: Untrusted, taint: true }
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  # --- read-only (dsh: read, read_image, grep, glob) ---
+  - { name: read, action_type: Read, side_effect: Read }
+  - { name: read_image, action_type: Read, side_effect: Read }
+  - { name: grep, action_type: Read, side_effect: Read }
+  - { name: glob, action_type: Read, side_effect: Read }
+  # --- workspace writes (FilesystemWrite: not under the taint floor, matching
+  #     cc-world — only PersistentWrite is denied when tainted) ---
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: edit, action_type: Patch, side_effect: FilesystemWrite }
+  # --- network / egress (taint floor: tainted context → DENY no_tainted_network) ---
+  - { name: web_fetch, action_type: Web, side_effect: Network }
+  - { name: web_search, action_type: Web, side_effect: Network }
+  # --- shell, classified by the KERNEL from command_classes (D36) ---
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+
+# Kernel-side command classification (D36): the shared pattern lists — kept
+# byte-identical with .claude/cc-world.yaml, docs/demos/opencode/opencode-world.yaml,
+# and docs/demos/one-kernel/demo-world.yaml (pinned by tests/one_kernel.rs).
+command_classes:
+  - action: bash
+    arg: command
+    default_to: bash_unclassified
+    classes:
+      - to: bash_network
+        patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
+      - to: bash_destructive
+        patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+
+# Tainted data cannot reach externally-effectful surfaces (the taint floor,
+# invariant 7). Tainted web_fetch / web_search / bash_network / bash_unclassified
+# DENY here.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000
+
+observability:
+  redact:
+    - "env.*_TOKEN"
+    - "env.*_KEY"
+    - "**/.env"

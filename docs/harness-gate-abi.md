@@ -1,6 +1,6 @@
 # `harness gate` — the host-neutral governance ABI
 
-Status: **shipped (v1 + the D36 `action` addition)**, updated 2026-07-23.
+Status: **shipped (gate v1 + discovery projection v1)**, updated 2026-08-21.
 Decisions: `DECISIONS.md` **D24** (refines D19), **D34** (in-process vs wire),
 **D36** (kernel-side classification), **D37** (live-hook cutover), **D41**
 (approval tokens are correlation ids, not bearer grants), **D42** (gate context
@@ -232,3 +232,40 @@ breaking for a caller relying on the omission — but such a caller was silently
 running ungoverned, which is the condition being removed, and a version bump would
 let it keep doing so by pinning v1. A caller that sends the full context is
 unaffected by all of them.
+
+## 9. Discovery projection wire operation (D72)
+
+`gate` decides a proposed invocation; it cannot make a host stop advertising an
+ABSENT tool. Non-Rust hosts use the sibling operation at their authoritative
+prompt/tool-schema seam:
+
+```bash
+harness project --world world.yaml
+```
+
+stdin:
+
+```json
+{"v":1,"context":{"source_channel":"user_cli"},"tools":[{"name":"read","description":"Read a file","parameters":{"type":"object"}}]}
+```
+
+stdout:
+
+```json
+{"v":1,"tools":[…],"absent":[],"manifest_hash":"ab12cd34ef56","schema_hash":"<sha256>"}
+```
+
+The operation compiles the world through the same loader/root-normalization path
+as `gate`, keeps only offered names in `CompiledWorld::projected_actions()` that
+the declared source channel's capability matrix can see, and preserves each
+surviving host schema as the same JSON value. The compiled world owns
+whether a capability exists; the host registry owns its operational schema. The
+response binds the exact visible schema array to a deterministic SHA-256 identity
+and uses the same 12-hex manifest identity as `GateResponse`, so discovery and
+invocation evidence join directly.
+
+Missing/undeclared source context, malformed input, duplicate names,
+world/compiler failure, or serialization failure
+is a process error (`2` for request/world, `1` for internal output). An engaged
+adapter must fail discovery closed—normally an empty surface—rather than restore
+the host's unfiltered catalog.
