@@ -11,10 +11,10 @@
 
 use executor::{ExecOutput, Executor};
 use harness_types::{
-    ActionType, ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision, EffectMode,
-    ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, PrincipalId, Provenance,
-    RedactionPolicy, SessionId, SideEffectClass, SourceChannel, Taint, TaintContext, TraceId,
-    TrustLevel,
+    ActionName, ActionType, ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision,
+    EffectMode, ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, PrincipalId,
+    Provenance, RedactionPolicy, SessionId, SideEffectClass, SourceChannel, Taint, TaintContext,
+    TraceId, TrustLevel,
 };
 use provider_adapters::{anthropic, ToolOutcome};
 use trace_store::{
@@ -224,7 +224,10 @@ pub fn run(
             ),
 
             // Needs approval (interactive) → mint, resolve, maybe resume.
-            KernelOutcome::Evaluated { disposition, .. }
+            KernelOutcome::Evaluated {
+                intent,
+                disposition,
+            }
                 if disposition.decision == Decision::Ask =>
             {
                 resolve_approval(
@@ -235,6 +238,7 @@ pub fn run(
                     store,
                     config,
                     &call,
+                    intent.action(),
                     &provenance,
                     base,
                     action,
@@ -288,6 +292,7 @@ fn resolve_approval(
     store: &mut ApprovalStore,
     config: &SessionConfig,
     call: &harness_types::ToolCall,
+    effective_action: &ActionName,
     provenance: &Provenance,
     base: EvalContext,
     action: String,
@@ -298,12 +303,12 @@ fn resolve_approval(
     records: &mut usize,
 ) -> TranscriptEntry {
     let descriptor_hash = world
-        .descriptor_hash(&call.action_name)
+        .descriptor_hash(effective_action)
         .cloned()
         .unwrap_or_default();
     let binding = effect_binding(
         config.principal.clone(),
-        call.action_name.clone(),
+        effective_action.clone(),
         &call.arguments,
         effect_resource(&call.arguments),
         world.world_id().clone(),

@@ -275,6 +275,39 @@ mod tests {
     }
 
     #[test]
+    fn authorization_binds_the_kernel_effective_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = compile_default();
+        let executor = default_executor(&world);
+        let trace = TraceStore::open(dir.path().join("t.jsonl"));
+        let approval_path = dir.path().join("a.jsonl");
+        let mut store = ApprovalStore::open(&approval_path).unwrap();
+        let mut model = ScriptedModel::new([ModelTurn::ToolUse(tool_use_block(
+            "t1",
+            "run_command",
+            json!({"command": "rm -rf ./generated"}),
+        ))]);
+        let config = SessionConfig {
+            approval: ApprovalPolicy::AutoApprove,
+            ..SessionConfig::default()
+        };
+
+        let outcome = run(
+            &world,
+            &ExecEnv::default(),
+            &executor,
+            &trace,
+            &mut store,
+            &mut model,
+            &config,
+            None,
+        );
+        assert_eq!(outcome.transcript[0].verdict, "ASK → APPROVED → ALLOW");
+        let evidence = std::fs::read_to_string(approval_path).unwrap();
+        assert!(evidence.contains("\"action\":\"run_command_destructive\""));
+    }
+
+    #[test]
     fn background_denies_pty() {
         // Invariant 10: no human in BACKGROUND → fail closed, no token minted.
         let config = SessionConfig {
