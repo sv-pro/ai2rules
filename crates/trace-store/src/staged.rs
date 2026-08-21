@@ -583,8 +583,14 @@ fn apply_event(state: &mut CommitState, event: CommitEvent) {
             state
                 .attempts
                 .insert(receipt.idempotency_key.clone(), receipt.attempt);
-            state.started.remove(&receipt.idempotency_key);
-            if !matches!(receipt.outcome, ReceiptOutcome::Duplicate) {
+            let crossed_reservation = state
+                .started
+                .remove(&receipt.idempotency_key)
+                .is_some();
+            // A malformed pre-reservation request leaves evidence but must not
+            // poison the valid staged artifact's idempotency key. Terminal
+            // ownership begins only at the durable AttemptStarted boundary.
+            if crossed_reservation && !matches!(receipt.outcome, ReceiptOutcome::Duplicate) {
                 state
                     .primary
                     .entry(receipt.idempotency_key.clone())
@@ -780,6 +786,19 @@ mod tests {
             Some("staged_effect_hash_mismatch")
         );
         assert_eq!(actuator.effect_count(), 0);
+
+        let valid = fixture
+            .stages
+            .commit(
+                &fixture.staged,
+                &fixture.world,
+                &mut fixture.authorizations,
+                &mut actuator,
+                NOW + 1,
+            )
+            .unwrap();
+        assert_eq!(valid.outcome, ReceiptOutcome::Committed);
+        assert_eq!(actuator.effect_count(), 1);
     }
 
     #[test]
