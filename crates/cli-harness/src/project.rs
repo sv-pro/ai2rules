@@ -121,11 +121,14 @@ mod tests {
     fn filters_absent_without_rewriting_host_schema() {
         let read = json!({"name":"read","description":"host-owned","parameters":{"type":"object"}});
         let ghost = json!({"name":"ghost","parameters":{"type":"object"}});
-        let response = project(&world(), &json!({
-            "v": 1,
-            "context": {"source_channel": "user_cli"},
-            "tools": [read.clone(), ghost]
-        }))
+        let response = project(
+            &world(),
+            &json!({
+                "v": 1,
+                "context": {"source_channel": "user_cli"},
+                "tools": [read.clone(), ghost]
+            }),
+        )
         .unwrap();
         assert_eq!(response["tools"], json!([read]));
         assert_eq!(response["absent"], json!(["ghost"]));

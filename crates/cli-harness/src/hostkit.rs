@@ -39,8 +39,7 @@ pub fn load_compiled_world(world_path: &Path) -> Result<CompiledWorld, String> {
         let resolved = resolve_root_paths(roots, home.as_deref(), base.as_deref());
         manifest.roots = Some(canonicalize_root_paths(&resolved));
     }
-    compile(&manifest)
-        .map_err(|e| format!("cannot compile world {}: {e}", world_path.display()))
+    compile(&manifest).map_err(|e| format!("cannot compile world {}: {e}", world_path.display()))
 }
 
 /// Filesystem-safe form of a host session identifier, for the taint sidecar
