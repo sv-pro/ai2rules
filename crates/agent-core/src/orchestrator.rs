@@ -227,28 +227,24 @@ pub fn run(
             KernelOutcome::Evaluated {
                 intent,
                 disposition,
-            }
-                if disposition.decision == Decision::Ask =>
-            {
-                resolve_approval(
-                    world,
-                    env,
-                    executor,
-                    trace,
-                    store,
-                    config,
-                    &call,
-                    intent.action(),
-                    &provenance,
-                    base,
-                    action,
-                    &mut perceptions,
-                    &mut taint,
-                    &mut usage,
-                    &session,
-                    &mut records,
-                )
-            }
+            } if disposition.decision == Decision::Ask => resolve_approval(
+                world,
+                env,
+                executor,
+                trace,
+                store,
+                config,
+                &call,
+                intent.action(),
+                &provenance,
+                base,
+                action,
+                &mut perceptions,
+                &mut taint,
+                &mut usage,
+                &session,
+                &mut records,
+            ),
 
             // Everything else is feedback the model would receive as an error.
             other => {
