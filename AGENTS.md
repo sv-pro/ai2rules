@@ -114,6 +114,13 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
 
 ## Conventions
 
+- **Task tracking spans GitHub *and* Linear.** The maintainer
+  (sergeyvlasov.pro@gmail.com) manages this project's work in **both** GitHub
+  (issues/PRs) and Linear — the two are kept in sync by hand, not mirrored
+  automatically. When picking up, closing out, or cross-referencing a task,
+  check and update **both** systems; an item done on one side is not done until
+  the other reflects it. `PLAN.md` remains the epic-level source of truth for
+  scope; GitHub + Linear track the live task state.
 - **Keep `README.md` current on every commit.** If a change affects project
   status, capabilities, crate layout, build/run instructions, or test counts,
   update the README's Status / layout / Build & test sections in the *same*
