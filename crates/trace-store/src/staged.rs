@@ -19,9 +19,7 @@ use harness_types::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::approval::{
-    key_path, load_or_create_key, lock_path, private_append, StoreLock,
-};
+use crate::approval::{key_path, load_or_create_key, lock_path, private_append, StoreLock};
 use crate::integrity::{constant_time_eq, hmac_hex};
 use crate::{effect_binding, ApprovalStore, AuthorizationRejection, ConsumeOutcome, EffectBinding};
 
@@ -293,20 +291,14 @@ impl StagedEffectStore {
         }
 
         let (outcome, reason, result_hash) = match actuator.commit(presented) {
-            ActuatorResult::Applied(value) => (
-                ReceiptOutcome::Committed,
-                None,
-                Some(value_hash(&value)),
-            ),
-            ActuatorResult::Simulated(value) => (
-                ReceiptOutcome::Simulated,
-                None,
-                Some(value_hash(&value)),
-            ),
-            ActuatorResult::Failed(reason) => (ReceiptOutcome::Failed, Some(reason), None),
-            ActuatorResult::Ambiguous(reason) => {
-                (ReceiptOutcome::Ambiguous, Some(reason), None)
+            ActuatorResult::Applied(value) => {
+                (ReceiptOutcome::Committed, None, Some(value_hash(&value)))
             }
+            ActuatorResult::Simulated(value) => {
+                (ReceiptOutcome::Simulated, None, Some(value_hash(&value)))
+            }
+            ActuatorResult::Failed(reason) => (ReceiptOutcome::Failed, Some(reason), None),
+            ActuatorResult::Ambiguous(reason) => (ReceiptOutcome::Ambiguous, Some(reason), None),
         };
         let receipt = receipt(
             presented,
@@ -468,9 +460,7 @@ fn validate_for_commit(
     if now_unix_ms >= presented.valid_until_unix_ms {
         return Some("staged_effect_expired".to_string());
     }
-    if presented.world_id != *world.world_id()
-        || presented.world_epoch != *world.manifest_hash()
-    {
+    if presented.world_id != *world.world_id() || presented.world_epoch != *world.manifest_hash() {
         return Some("world_epoch_drift".to_string());
     }
     if world.descriptor_hash(&presented.action) != Some(&presented.schema_epoch) {
@@ -482,7 +472,10 @@ fn validate_for_commit(
     {
         return Some("canonical_effect_mismatch".to_string());
     }
-    if !matches!(presented.effect_mode, EffectMode::Execute | EffectMode::Simulate) {
+    if !matches!(
+        presented.effect_mode,
+        EffectMode::Execute | EffectMode::Simulate
+    ) {
         return Some("unsupported_staged_effect_mode".to_string());
     }
     if !actuator.supports(&presented.actuator_operation) {
@@ -782,7 +775,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(receipt.outcome, ReceiptOutcome::Rejected);
-        assert_eq!(receipt.reason.as_deref(), Some("staged_effect_hash_mismatch"));
+        assert_eq!(
+            receipt.reason.as_deref(),
+            Some("staged_effect_hash_mismatch")
+        );
         assert_eq!(actuator.effect_count(), 0);
     }
 
@@ -837,8 +833,14 @@ mod tests {
     #[test]
     fn world_and_schema_drift_force_readmission() {
         for (current, expected_reason) in [
-            (world("world-epoch-2", "schema-epoch-1"), "world_epoch_drift"),
-            (world("world-epoch-1", "schema-epoch-2"), "schema_epoch_drift"),
+            (
+                world("world-epoch-2", "schema-epoch-1"),
+                "world_epoch_drift",
+            ),
+            (
+                world("world-epoch-1", "schema-epoch-2"),
+                "schema_epoch_drift",
+            ),
         ] {
             let mut fixture = Fixture::new(
                 EffectMode::Execute,
@@ -964,8 +966,7 @@ mod tests {
             2_000,
             2_000,
         );
-        let mut actuator =
-            FakePrivilegedActuator::with_mode(FakeActuatorMode::TimeoutAfterApply);
+        let mut actuator = FakePrivilegedActuator::with_mode(FakeActuatorMode::TimeoutAfterApply);
         let first = fixture
             .stages
             .commit(
