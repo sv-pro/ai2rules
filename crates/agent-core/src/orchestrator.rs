@@ -159,7 +159,7 @@ pub fn run(
             ModelTurn::ToolUse(block) => block,
         };
 
-        let call = match anthropic::tool_use_to_call(&block, session.clone()) {
+        let mut call = match anthropic::tool_use_to_call(&block, session.clone()) {
             Ok(call) => call,
             Err(e) => {
                 transcript.push(TranscriptEntry {
@@ -174,6 +174,12 @@ pub fn run(
                 continue;
             }
         };
+
+        // Normalize shell-shaped actions through the compiled world's classifier
+        // before both decision and authorization. This is the same kernel-owned
+        // classification used by the Gate ABI; the provider adapter stays free of
+        // policy and a destructive command cannot retain the base action's identity.
+        call.action_name = world.classify_command(&call.action_name, &call.arguments);
 
         let action = call.action_name.as_str().to_string();
         // PACT L2 producer: derive per-argument taint from the actual data flow —
