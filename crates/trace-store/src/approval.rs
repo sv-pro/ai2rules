@@ -433,10 +433,7 @@ impl StoreLock {
                         _file: file,
                     })
                 }
-                Err(e)
-                    if e.kind() == io::ErrorKind::AlreadyExists
-                        && Instant::now() < deadline =>
-                {
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists && Instant::now() < deadline => {
                     std::thread::sleep(RETRY_DELAY);
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
