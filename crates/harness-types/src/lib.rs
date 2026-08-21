@@ -20,6 +20,7 @@ pub mod ids;
 pub mod manifest;
 pub mod perception;
 pub mod provenance;
+pub mod staged;
 pub mod tool_call;
 
 pub use action::*;
@@ -33,6 +34,7 @@ pub use ids::*;
 pub use manifest::*;
 pub use perception::*;
 pub use provenance::*;
+pub use staged::*;
 pub use tool_call::*;
 
 #[cfg(test)]

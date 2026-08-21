@@ -45,6 +45,7 @@ pub enum ApprovalEvent {
     Minted(Box<ApprovalToken>),
     Approved(ApprovalTokenId),
     Rejected(ApprovalTokenId),
+    Revoked(ApprovalTokenId),
     Consumed(ApprovalTokenId),
     ConsumptionRejected {
         id: ApprovalTokenId,
@@ -74,6 +75,7 @@ pub struct EffectBinding {
 #[serde(rename_all = "snake_case")]
 pub enum AuthorizationRejection {
     NotApproved,
+    Revoked,
     Exhausted,
     Expired,
     PrincipalMismatch,
@@ -252,6 +254,15 @@ impl ApprovalStore {
         )
     }
 
+    /// Withdraw a pending or approved authorization before it is consumed.
+    pub fn revoke(&mut self, id: &ApprovalTokenId) -> io::Result<()> {
+        self.transition(
+            id,
+            ApprovalToken::revoke,
+            ApprovalEvent::Revoked(id.clone()),
+        )
+    }
+
     pub fn mark_executed(&mut self, id: &ApprovalTokenId) -> io::Result<()> {
         self.transition(
             id,
@@ -335,6 +346,9 @@ fn rejection_reason(
     binding: &EffectBinding,
     now_unix_ms: u64,
 ) -> Option<AuthorizationRejection> {
+    if token.state == ApprovalState::Revoked {
+        return Some(AuthorizationRejection::Revoked);
+    }
     if token.state != ApprovalState::Approved {
         return Some(
             if token.remaining_uses == 0
@@ -383,13 +397,13 @@ fn rejection_reason(
 }
 
 /// The key lives beside the log: `approvals.jsonl` -> `approvals.jsonl.key`.
-fn key_path(store: &Path) -> PathBuf {
+pub(crate) fn key_path(store: &Path) -> PathBuf {
     let mut name = store.as_os_str().to_os_string();
     name.push(".key");
     PathBuf::from(name)
 }
 
-fn lock_path(store: &Path) -> PathBuf {
+pub(crate) fn lock_path(store: &Path) -> PathBuf {
     let mut name = store.as_os_str().to_os_string();
     name.push(".lock");
     PathBuf::from(name)
@@ -399,13 +413,13 @@ fn lock_path(store: &Path) -> PathBuf {
 /// A crashed holder leaves a visible stale lock and therefore fails closed; an
 /// operator may remove that one exact `.lock` file after verifying no process is
 /// using the store.
-struct StoreLock {
+pub(crate) struct StoreLock {
     path: PathBuf,
     _file: File,
 }
 
 impl StoreLock {
-    fn acquire(path: &Path) -> io::Result<Self> {
+    pub(crate) fn acquire(path: &Path) -> io::Result<Self> {
         const ATTEMPTS: usize = 10_000;
         for _ in 0..ATTEMPTS {
             match private_create_new(path) {
@@ -439,7 +453,7 @@ impl Drop for StoreLock {
 /// `O_NOFOLLOW` matters because the store's directory may be more reachable than
 /// the store: replacing `approvals.jsonl` with a link to somewhere else is a way
 /// to make the harness write, or read, a file it did not choose.
-fn private_append(path: &Path) -> io::Result<File> {
+pub(crate) fn private_append(path: &Path) -> io::Result<File> {
     let mut opts = OpenOptions::new();
     opts.create(true).append(true);
     #[cfg(unix)]
@@ -469,7 +483,7 @@ fn libc_o_nofollow() -> i32 {
 /// The key is `0600` and owned by us, and both are *checked* on every open: a key
 /// another account can read is a key that can forge grants, and silently using it
 /// would be worse than refusing.
-fn load_or_create_key(path: &Path) -> io::Result<Vec<u8>> {
+pub(crate) fn load_or_create_key(path: &Path) -> io::Result<Vec<u8>> {
     match std::fs::read(path) {
         Ok(key) => {
             check_key_permissions(path)?;
@@ -642,6 +656,11 @@ fn apply_event(tokens: &mut BTreeMap<ApprovalTokenId, ApprovalToken>, event: App
         ApprovalEvent::Rejected(id) => {
             if let Some(t) = tokens.get_mut(&id) {
                 let _ = t.reject();
+            }
+        }
+        ApprovalEvent::Revoked(id) => {
+            if let Some(t) = tokens.get_mut(&id) {
+                let _ = t.revoke();
             }
         }
         ApprovalEvent::Consumed(id) => {

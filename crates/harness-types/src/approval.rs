@@ -16,6 +16,7 @@ pub enum ApprovalState {
     /// The single-use grant was durably claimed before the external effect.
     Consumed,
     Rejected,
+    Revoked,
     Executed,
 }
 
@@ -119,6 +120,13 @@ impl AuthorizationInstance {
 
     pub fn reject(&mut self) -> Result<(), ApprovalTransitionError> {
         self.transition(ApprovalState::Rejected, &[ApprovalState::Pending])
+    }
+
+    pub fn revoke(&mut self) -> Result<(), ApprovalTransitionError> {
+        self.transition(
+            ApprovalState::Revoked,
+            &[ApprovalState::Pending, ApprovalState::Approved],
+        )
     }
 
     pub fn consume(&mut self) -> Result<(), ApprovalTransitionError> {

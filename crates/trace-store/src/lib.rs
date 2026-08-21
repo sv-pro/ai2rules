@@ -17,6 +17,7 @@ mod record;
 mod redact;
 mod replay;
 pub mod secrets;
+mod staged;
 mod store;
 
 pub use approval::{
@@ -30,6 +31,10 @@ pub use record::{
 };
 pub use redact::redact;
 pub use replay::{drift_report, replay, Mismatch, ReplayReport};
+pub use staged::{
+    stage_effect, staged_effect_hash, ActuatorResult, FakeActuatorMode,
+    FakePrivilegedActuator, PrivilegedActuator, StagedEffectStore,
+};
 pub use store::TraceStore;
 
 use harness_types::{CompiledWorld, Provenance, ToolCall, TraceId};

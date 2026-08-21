@@ -334,12 +334,20 @@ end.
   mismatch is signed evidence; any drift voids reuse.
 - [x] **E6.5** `BACKGROUND` fails closed — an approval-required action collapses
   `ASK → DENY` ("background_denies_ask"); no token minted.
+- [x] **E6.6** Staged external finality prototype: seal and durably persist a
+  non-effective `StagedEffect`; independently revalidate exact artifact,
+  world/schema epochs, consequence and actuator metadata at commit; reserve the
+  idempotency key, consume its `AuthorizationInstance`, invoke a fake privileged
+  actuator, and persist a causal `ExecutionReceipt`. Ambiguous finality never
+  auto-retries; SIMULATE produces a receipt and no external effect (D74).
 
 **Exit:** interactive approvals resume execution; background denies;
 authorizations are effect-bound, single-use, and invalidated by drift. Satisfies
 invariants **9, 10**. **Met** — kernel mode tests + store tests covering
 substitution, replay, principal/resource, expiry, epoch drift, concurrency,
-tamper evidence, and restart + orchestrator resume/deny tests;
+tamper evidence, restart, staged mutation, authorization expiry/revocation,
+epoch drift, duplicate commit, malformed evidence, ambiguous timeout,
+consequence metadata, and simulation + orchestrator resume/deny tests;
 full workspace at 82, `clippy -D warnings` + fmt clean offline; `approvals_demo`
 shows both paths. **Milestone M2 complete (E5–E6).** Decisions logged in
 `DECISIONS.md`.
