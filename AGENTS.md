@@ -224,6 +224,7 @@ marker in the same commit as the kernel change.
 | `docs/demos/antigravity/` | Antigravity host runbook + the verified hook contract |
 | `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
 | `docs/benchmarks/deepseek-harness/` | Governor-integrity benchmark of DeepSeek Harness (issue #54): where final authority lives, monotonic-guard integrity, approval integrity, execution-seam matrix, ai2rules comparison — with reproducible probes |
+| `docs/demos/deepseek-harness/` | DeepSeek Harness `tools/pre-execute` gate adapter (issue #55 spike): a thin cordis plugin → `harness gate` → dsh `PreToolDecision`. Fail-closed when engaged (D71); real world manifest + a spec run against the real dsh registry + real gate binary |
 | `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source). Path-scope lives in the `roots-world.yaml` / `roots-cases.yaml` pair — a second world because enabling `roots` changes every pathless file action's verdict (D61) |
 | `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
 | `scripts/assemble-npm-packages.sh` | Fills the four platform packages from `dist/`. Shared by `release.yml` and CI's `release-dry-run` so they cannot diverge (D70) |
