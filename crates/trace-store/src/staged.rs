@@ -583,10 +583,7 @@ fn apply_event(state: &mut CommitState, event: CommitEvent) {
             state
                 .attempts
                 .insert(receipt.idempotency_key.clone(), receipt.attempt);
-            let crossed_reservation = state
-                .started
-                .remove(&receipt.idempotency_key)
-                .is_some();
+            let crossed_reservation = state.started.remove(&receipt.idempotency_key).is_some();
             // A malformed pre-reservation request leaves evidence but must not
             // poison the valid staged artifact's idempotency key. Terminal
             // ownership begins only at the durable AttemptStarted boundary.
