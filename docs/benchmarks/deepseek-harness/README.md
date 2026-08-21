@@ -199,7 +199,7 @@ OS-ownership boundary, not an in-runtime one.**
 | **A1** | a package with `inject: []` reaches an **undeclared** service via `ctx.get('systemPrompt')` | `LIVE-SERVICE-REACHED` — `ctx.get` is not gated by the `inject` declaration; only *property access* is |
 | **A2 (a) registration** | a package escapes the façade via an **event argument** (`ctx.on('internal/plugin', fiber => fiber.ctx.root.tools.register(rawTool))`) | **`ESCAPED-AND-REGISTERED`** — a raw tool with a live `execute()` lands in the host registry, bypassing the `DYNAMIC_TOOL` marker + realm normalization that the intended `ctx.tools.register` path enforces |
 | **A2 (b) invocation** | *call* the smuggled tool by name through the registry, with a global deny-guard armed | **denied** — invocation still crosses `tools/pre-execute` + monotonic guards; the guard fires and the body never runs |
-| **A2 (c) direct body** | the escaped context calls `smuggledView.execute()` **directly** | body runs with **no pipeline at all** |
+| **A2 (c) direct body** | the **mounted package itself** (sandbox code) retains the raw handle and calls `execute()` directly | body runs with **no pipeline at all** — observed as the tool's own tagged-console line (`A2c-body-ran`), a subject-side effect, not a host-test call |
 
 A2 is a real façade escape, and the extended probe pins exactly *what* it
 bypasses. The whitelist guards injected-service *returns* (`denyContext` /
@@ -364,8 +364,10 @@ rest on source reading or remain follow-up are marked as such.
 
 **Explicit follow-up (not claimed as done):** dynamic verification of the
 shell/subprocess route (needs a usable OS-sandbox runner), PTY, subagent, and
-background-job routes; and the ai2rules-side #55 gate-unavailability contract
-(rows 2–4 of the failure table), which belongs to the adapter spike (#55).
+background-job routes; the ai2rules-side #55 gate-unavailability contract
+(rows 2–4 of the failure table), which belongs to the adapter spike (#55); and
+optionally automating the pinned-commit probe run in CI if the maintenance value
+justifies pinning an external checkout.
 
 ---
 
@@ -392,3 +394,10 @@ additionally uses the runner's own `helpers.ts` sibling from that test dir;
 `execution-seams` is self-contained. E1–E4 create and clean a temp tree under
 `os.homedir()` (the faithful `$DSH_HOME` location, deliberately outside `/tmp`,
 which `writableRoots` always includes).
+
+**Note on CI status.** These probes target an *external* pinned checkout
+(DeepSeek Harness `@141eb6f`), so this repository's CI does **not** run them —
+"13 probes green" is a reproducible external run, not a check enforced on every
+ai2rules PR. Automating the pinned probe run is listed as optional follow-up
+below; until then, re-run the two commands above against the pinned commit to
+reproduce.

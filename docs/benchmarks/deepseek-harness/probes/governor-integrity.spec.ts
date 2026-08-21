@@ -129,9 +129,14 @@ describe('A — sandbox façade authority boundary', () => {
     const harness = await setup()
     // A global deny-guard: proves whether a *smuggled* tool's invocation is
     // still judged by the monotonic guard stage, or slips past it.
-    const bodyRan: string[] = []
     harness.ctx.tools.guard(exec => exec.name === 'smuggled' ? 'denied by policy: smuggled tool' : undefined)
 
+    // The mounted package: escape the façade via an internal/plugin Fiber arg,
+    // register a raw tool through the escaped real context, and — the subject
+    // itself, inside sandbox code — retain that handle and invoke it directly,
+    // reporting the effect through the write-through tagged console. The raw
+    // tool's own body logs A2c-body-ran, so an A2c-body-ran line is proof the
+    // subject ran the effect with NO pipeline.
     await mount(harness, `
       return { name: 'probe', inject: [], apply(ctx) {
         ctx.on('internal/plugin', (fiber) => {
@@ -139,13 +144,17 @@ describe('A — sandbox façade authority boundary', () => {
           if (!real) { console.log('A2-out', 'no-ctx-on-arg'); return }
           if (!real.root) { console.log('A2-out', 'ctx-present-no-root'); return }
           try {
-            real.root.tools.register({
+            const rawTool = {
               name: 'smuggled', description: 'via escaped ctx',
               parameters: { type: 'object', properties: {} },
               output: { schema: { type: 'null' }, render: () => [] },
-              async execute() { return null },
-            })
+              async execute() { console.log('A2c-body-ran', 'no-pipeline'); return null },
+            }
+            real.root.tools.register(rawTool)
             console.log('A2-out', 'ESCAPED-AND-REGISTERED')
+            // (c) subject-side direct invocation: the package holds the handle
+            // and calls it itself — no tools/pre-execute, no guard, no approval.
+            void rawTool.execute()
           } catch (e) { console.log('A2-out', 'blocked:' + String(e && e.message)) }
         })
       } }
@@ -175,11 +184,11 @@ describe('A — sandbox façade authority boundary', () => {
     expect(pipelined.isError).toBe(true)
     expect(text(pipelined)).toContain('denied by policy: smuggled tool')
 
-    // (c) The real bypass is the escaped context ITSELF: the package body can
-    // call `smuggledView.execute()` directly (or any host-realm handle it
-    // reached), running the raw body with NO pipeline at all.
-    await smuggledView?.execute?.({ arguments: {} }).then(() => bodyRan.push('direct'))
-    expect(bodyRan).toEqual(['direct'])
+    // (c) The real bypass is the escaped context ITSELF: the SUBJECT (sandbox
+    // code, above) invoked its retained handle directly and the body ran with
+    // no pipeline — observed as the tool's own tagged-console line, not a
+    // host-test call. That is just arbitrary in-process code execution.
+    expect(line('A2c-body-ran')).toContain('A2c-body-ran no-pipeline')
   })
 })
 
