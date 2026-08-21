@@ -167,7 +167,14 @@ pub fn effect_binding(
 /// A stable evidence label for the most specific common resource argument.
 /// The complete argument object remains covered by `canonical_effect_hash`.
 pub fn effect_resource(params: &Value) -> String {
-    for key in ["resource", "path", "file_path", "notebook_path", "url", "key"] {
+    for key in [
+        "resource",
+        "path",
+        "file_path",
+        "notebook_path",
+        "url",
+        "key",
+    ] {
         if let Some(value) = params.get(key).and_then(Value::as_str) {
             return format!("{key}:{value}");
         }
@@ -329,13 +336,18 @@ fn rejection_reason(
     now_unix_ms: u64,
 ) -> Option<AuthorizationRejection> {
     if token.state != ApprovalState::Approved {
-        return Some(if token.remaining_uses == 0
-            || matches!(token.state, ApprovalState::Consumed | ApprovalState::Executed)
-        {
-            AuthorizationRejection::Exhausted
-        } else {
-            AuthorizationRejection::NotApproved
-        });
+        return Some(
+            if token.remaining_uses == 0
+                || matches!(
+                    token.state,
+                    ApprovalState::Consumed | ApprovalState::Executed
+                )
+            {
+                AuthorizationRejection::Exhausted
+            } else {
+                AuthorizationRejection::NotApproved
+            },
+        );
     }
     if token.remaining_uses == 0 {
         return Some(AuthorizationRejection::Exhausted);
@@ -718,16 +730,22 @@ mod tests {
         let params = json!({"shell": "bash"});
         let id = store.mint(token("t1", &params, "desc-1")).unwrap();
         assert_eq!(
-            store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap(),
             ConsumeOutcome::Rejected(AuthorizationRejection::NotApproved)
         );
         store.approve(&id).unwrap();
         assert_eq!(
-            store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap(),
             ConsumeOutcome::Consumed(id.clone())
         );
         assert_eq!(
-            store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap(),
             ConsumeOutcome::Rejected(AuthorizationRejection::Exhausted)
         );
     }
@@ -740,7 +758,9 @@ mod tests {
         let id = store.mint(token("t1", &params, "desc-1")).unwrap();
         store.approve(&id).unwrap();
         assert_eq!(
-            store.consume(&id, &binding(&params, "desc-2"), NOW).unwrap(),
+            store
+                .consume(&id, &binding(&params, "desc-2"), NOW)
+                .unwrap(),
             ConsumeOutcome::Rejected(AuthorizationRejection::SchemaEpochMismatch)
         );
         assert_eq!(
@@ -767,7 +787,9 @@ mod tests {
         let id = store.mint(token("t1", &params, "desc-1")).unwrap();
         store.reject(&id).unwrap();
         assert_eq!(
-            store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap(),
             ConsumeOutcome::Rejected(AuthorizationRejection::NotApproved)
         );
     }
@@ -944,7 +966,9 @@ mod tests {
             joins.push(std::thread::spawn(move || {
                 let mut store = ApprovalStore::open(path).unwrap();
                 barrier.wait();
-                store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap()
+                store
+                    .consume(&id, &binding(&params, "desc-1"), NOW)
+                    .unwrap()
             }));
         }
         barrier.wait();
@@ -1011,7 +1035,9 @@ mod tests {
             let id = store.mint(token("t1", &params, "desc-1")).unwrap();
             store.approve(&id).unwrap();
             assert!(matches!(
-                store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+                store
+                    .consume(&id, &binding(&params, "desc-1"), NOW)
+                    .unwrap(),
                 ConsumeOutcome::Consumed(_)
             ));
         }
@@ -1019,7 +1045,11 @@ mod tests {
         let mut store = ApprovalStore::open(&path).unwrap();
         assert_eq!(
             store
-                .consume(&ApprovalTokenId::new("t1"), &binding(&params, "desc-1"), NOW)
+                .consume(
+                    &ApprovalTokenId::new("t1"),
+                    &binding(&params, "desc-1"),
+                    NOW,
+                )
                 .unwrap(),
             ConsumeOutcome::Rejected(AuthorizationRejection::Exhausted)
         );

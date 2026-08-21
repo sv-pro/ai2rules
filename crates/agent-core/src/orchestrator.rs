@@ -12,9 +12,9 @@
 use executor::{ExecOutput, Executor};
 use harness_types::{
     ActionType, ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision, EffectMode,
-    ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, Provenance,
-    PrincipalId, RedactionPolicy, SessionId, SideEffectClass, SourceChannel, Taint, TaintContext,
-    TraceId, TrustLevel,
+    ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, PrincipalId, Provenance,
+    RedactionPolicy, SessionId, SideEffectClass, SourceChannel, Taint, TaintContext, TraceId,
+    TrustLevel,
 };
 use provider_adapters::{anthropic, ToolOutcome};
 use trace_store::{
