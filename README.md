@@ -176,6 +176,14 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   before execution, so substitution, replay, concurrent reuse, and restart fail
   closed; the orchestrator then re-decides the `ASK` under the unchanged world
   ceiling. Honors invariants 9, 10 — **completing Milestone 2.**
+- **Staged external finality (AI2-8 / D74):** `StagedEffect` is a sealed,
+  explicitly non-effective artifact between admission and an external actuator.
+  Its independent durable commit path revalidates the artifact, current
+  world/schema epochs, consequence metadata, actuator operation, and the exact
+  `AuthorizationInstance`; reserves the idempotency key before actuation; and
+  emits a causal `ExecutionReceipt`. Known completion, simulation, failure,
+  duplicate, rejection, and ambiguous finality remain receipt states rather than
+  new kernel verdicts. See [`docs/staged-effect-commit.md`](docs/staged-effect-commit.md).
 - **E7 — MCP, Web & Scoped Capabilities:** broader reach through the one gate.
   Scoped capabilities narrow a base action — `build_execution_spec` strips
   locked/unknown args and injects literals (so `run_tests` always runs `pytest`,
@@ -296,7 +304,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **313 tests** green.
+Builds clean offline with `clippy -D warnings`; **321 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

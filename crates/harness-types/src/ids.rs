@@ -83,6 +83,14 @@ id_newtype!(
     PrincipalId
 );
 id_newtype!(
+    /// Identifier of a non-effective staged external operation.
+    StagedEffectId
+);
+id_newtype!(
+    /// Identifier of one causal commit-attempt receipt.
+    ExecutionReceiptId
+);
+id_newtype!(
     /// Name of an action in the world ontology.
     ActionName
 );
