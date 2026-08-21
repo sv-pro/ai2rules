@@ -28,6 +28,7 @@ dsh tool call       → tools/pre-execute      → harness gate --world W    →
 | [`ai2rules-gate.ts`](ai2rules-gate.ts) | The cordis plugin. Rewrites the final prompt assembly through `harness project`, gates invocation through `harness gate`, maps verdicts to dsh's `PreToolDecision`, and persists monotonic taint + budget usage. Imports **nothing** from dsh — both contracts are structural. |
 | [`deepseek-world.yaml`](deepseek-world.yaml) | A **real** `WorldManifest` whose action names are dsh's real registered names. The same file also governs the OpenCode adapter because that host uses the same lowercase names; its classifier patterns are pinned with every host world in `tests/one_kernel.rs`. |
 | [`ai2rules-gate.spec.ts`](ai2rules-gate.spec.ts) | Runs discovery and invocation against the **real** dsh `SystemPrompt` + `ToolRegistry` pipeline and the real binary/world. 13 cases include revocation, stale invocation, projection evidence, Code Mode fail-closed, and gate/project outage. |
+| [`.github/workflows/deepseek-integration.yml`](../../../.github/workflows/deepseek-integration.yml) | Reproduces those 13 cases in CI against the immutable dsh commit `141eb6fef83422698aef7a981029e843e8161534`. |
 
 ## Verdict mapping (issue #55)
 
@@ -142,8 +143,10 @@ effect/no-effect.
 
 ## Running the spike
 
-Build the kernel, then run the spec against it (the spec self-skips if the two env
-vars are unset, so it never runs in unrelated CI):
+The path-filtered `DeepSeek integration` workflow runs this recipe on every
+relevant pull request. To reproduce it locally, build the kernel and run the spec
+against the same pinned dsh checkout (the spec self-skips if either env variable
+is unset):
 
 ```bash
 # 1. build the gate binary from this repo
