@@ -322,20 +322,24 @@ end.
 - [x] **E6.1** `ExecutionMode` threaded into `evaluate` (`EvalContext.mode`); an
   approval-required action branches on it.
 - [x] **E6.2** Durable `ApprovalStore` (`trace-store/approval.rs`): append-only
-  JSONL of lifecycle transitions folded on load; `pending → approved/rejected →
-  executed`. Persisted, not in-memory.
-- [x] **E6.3** `ASK` lifecycle in the orchestrator: mint a pending token →
-  resolve via `ApprovalPolicy` → on approve, re-decide with the grant → `ALLOW`
-  → execute → `mark_executed`; reject path surfaces a refusal.
-- [x] **E6.4** Binding: `is_granted` matches an Approved token on action +
-  params hash + world id + descriptor hash + provenance + effect mode; any drift
-  voids reuse.
+  signed JSONL of lifecycle transitions folded on load; `pending →
+  approved/rejected → consumed → executed`. Persisted, not in-memory.
+- [x] **E6.3** `ASK` lifecycle in the orchestrator: mint a pending
+  `AuthorizationInstance` → resolve via `ApprovalPolicy` → atomically consume
+  before the external effect → re-decide with the grant → `ALLOW` → execute →
+  `mark_executed`; rejection/store failures surface and fail closed.
+- [x] **E6.4** Binding: `consume` matches one explicit Approved instance on
+  trusted principal + normalized action/arguments/resource + world and schema
+  epochs + provenance + effect mode + expiry + remaining-use budget. Every
+  mismatch is signed evidence; any drift voids reuse.
 - [x] **E6.5** `BACKGROUND` fails closed — an approval-required action collapses
   `ASK → DENY` ("background_denies_ask"); no token minted.
 
-**Exit:** interactive approvals resume execution; background denies; tokens
-invalidated by drift. Satisfies invariants **9, 10**. **Met** — kernel mode tests
-+ 4 store tests (mint/approve/drift/reopen) + orchestrator resume/deny tests;
+**Exit:** interactive approvals resume execution; background denies;
+authorizations are effect-bound, single-use, and invalidated by drift. Satisfies
+invariants **9, 10**. **Met** — kernel mode tests + store tests covering
+substitution, replay, principal/resource, expiry, epoch drift, concurrency,
+tamper evidence, and restart + orchestrator resume/deny tests;
 full workspace at 82, `clippy -D warnings` + fmt clean offline; `approvals_demo`
 shows both paths. **Milestone M2 complete (E5–E6).** Decisions logged in
 `DECISIONS.md`.

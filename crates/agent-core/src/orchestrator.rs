@@ -11,13 +11,15 @@
 
 use executor::{ExecOutput, Executor};
 use harness_types::{
-    ActionType, ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision, EffectMode,
-    ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, Provenance,
-    RedactionPolicy, SessionId, SideEffectClass, SourceChannel, Taint, TaintContext, TraceId,
-    TrustLevel,
+    ActionName, ActionType, ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision,
+    EffectMode, ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, PrincipalId,
+    Provenance, RedactionPolicy, SessionId, SideEffectClass, SourceChannel, Taint, TaintContext,
+    TraceId, TrustLevel,
 };
 use provider_adapters::{anthropic, ToolOutcome};
-use trace_store::{params_hash, record_decision, ApprovalStore, TraceStore};
+use trace_store::{
+    effect_binding, effect_resource, record_decision, ApprovalStore, ConsumeOutcome, TraceStore,
+};
 use world_kernel::{
     build_execution_spec, charge, decide, BudgetUsage, EvalContext, ExecEnv, IntentIR,
     KernelOutcome,
@@ -62,12 +64,18 @@ pub struct TranscriptEntry {
 
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
+    /// Principal authenticated by the trusted host, never inferred from model data.
+    pub principal: PrincipalId,
+    /// Host-assigned session identity, also bound through provenance.
+    pub session_id: SessionId,
     /// Effect mode for allowed actions — `Simulate` for safe demos.
     pub effect_mode: EffectMode,
     /// Whether a human is available to approve (`ASK` fails closed in background).
     pub mode: ExecutionMode,
     /// How an interactive `ASK` is resolved.
     pub approval: ApprovalPolicy,
+    /// Lifetime of one exact, single-use authorization instance.
+    pub approval_ttl_ms: u64,
     pub max_steps: u64,
     /// The trusted user request seeding the clean provenance corpus (PACT L2).
     /// A value that appears verbatim here is provably clean-origin, so an
@@ -80,9 +88,12 @@ pub struct SessionConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
+            principal: PrincipalId::new("user:local"),
+            session_id: SessionId::new("agent-session"),
             effect_mode: EffectMode::Simulate,
             mode: ExecutionMode::Interactive,
             approval: ApprovalPolicy::Manual,
+            approval_ttl_ms: 5 * 60 * 1_000,
             max_steps: 16,
             user_request: None,
         }
@@ -111,7 +122,7 @@ pub fn run(
     config: &SessionConfig,
     mut observer: Option<&mut dyn FnMut(&TranscriptEntry)>,
 ) -> SessionOutcome {
-    let session = SessionId::new("agent-session");
+    let session = config.session_id.clone();
     // The agent proposes with the developer's (trusted) authority; containment
     // comes from taint, which accumulates from perceived results.
     let provenance = Provenance::from_channel(
@@ -148,7 +159,7 @@ pub fn run(
             ModelTurn::ToolUse(block) => block,
         };
 
-        let call = match anthropic::tool_use_to_call(&block, session.clone()) {
+        let mut call = match anthropic::tool_use_to_call(&block, session.clone()) {
             Ok(call) => call,
             Err(e) => {
                 transcript.push(TranscriptEntry {
@@ -163,6 +174,12 @@ pub fn run(
                 continue;
             }
         };
+
+        // Normalize shell-shaped actions through the compiled world's classifier
+        // before both decision and authorization. This is the same kernel-owned
+        // classification used by the Gate ABI; the provider adapter stays free of
+        // policy and a destructive command cannot retain the base action's identity.
+        call.action_name = world.classify_command(&call.action_name, &call.arguments);
 
         let action = call.action_name.as_str().to_string();
         // PACT L2 producer: derive per-argument taint from the actual data flow —
@@ -213,27 +230,27 @@ pub fn run(
             ),
 
             // Needs approval (interactive) → mint, resolve, maybe resume.
-            KernelOutcome::Evaluated { disposition, .. }
-                if disposition.decision == Decision::Ask =>
-            {
-                resolve_approval(
-                    world,
-                    env,
-                    executor,
-                    trace,
-                    store,
-                    config,
-                    &call,
-                    &provenance,
-                    base,
-                    action,
-                    &mut perceptions,
-                    &mut taint,
-                    &mut usage,
-                    &session,
-                    &mut records,
-                )
-            }
+            KernelOutcome::Evaluated {
+                intent,
+                disposition,
+            } if disposition.decision == Decision::Ask => resolve_approval(
+                world,
+                env,
+                executor,
+                trace,
+                store,
+                config,
+                &call,
+                intent.action(),
+                &provenance,
+                base,
+                action,
+                &mut perceptions,
+                &mut taint,
+                &mut usage,
+                &session,
+                &mut records,
+            ),
 
             // Everything else is feedback the model would receive as an error.
             other => {
@@ -277,6 +294,7 @@ fn resolve_approval(
     store: &mut ApprovalStore,
     config: &SessionConfig,
     call: &harness_types::ToolCall,
+    effective_action: &ActionName,
     provenance: &Provenance,
     base: EvalContext,
     action: String,
@@ -287,20 +305,38 @@ fn resolve_approval(
     records: &mut usize,
 ) -> TranscriptEntry {
     let descriptor_hash = world
-        .descriptor_hash(&call.action_name)
+        .descriptor_hash(effective_action)
         .cloned()
         .unwrap_or_default();
-    let token = ApprovalToken::pending(
-        ApprovalTokenId::new(format!("appr-{records}")),
-        call.action_name.clone(),
-        params_hash(&call.arguments),
+    let binding = effect_binding(
+        config.principal.clone(),
+        effective_action.clone(),
+        &call.arguments,
+        effect_resource(&call.arguments),
         world.world_id().clone(),
-        // Bind the approval to this exact compiled policy, not just to the world's
-        // name (finding #15): a manifest can be rewritten while keeping its id.
         world.manifest_hash().clone(),
-        descriptor_hash.clone(),
+        descriptor_hash,
         provenance.clone(),
         config.effect_mode,
+    );
+    let now = now_unix_ms();
+    let token = ApprovalToken::pending(
+        ApprovalTokenId::new(format!(
+            "auth-{now}-{}-{}",
+            *records,
+            &binding.canonical_effect_hash.as_str()[..12]
+        )),
+        binding.principal.clone(),
+        binding.action.clone(),
+        binding.params_hash.clone(),
+        binding.canonical_effect_hash.clone(),
+        binding.resource.clone(),
+        binding.world_id.clone(),
+        binding.manifest_hash.clone(),
+        binding.descriptor_hash.clone(),
+        binding.provenance.clone(),
+        binding.effect_mode,
+        now.saturating_add(config.approval_ttl_ms.max(1)),
     );
     let id = match store.mint(token) {
         Ok(id) => id,
@@ -350,17 +386,39 @@ fn resolve_approval(
                 );
             }
 
-            let _ = store.approve(&id);
-            let granted = store.is_granted(
-                &call.action_name,
-                &call.arguments,
-                world.world_id(),
-                world.manifest_hash(),
-                &descriptor_hash,
-                provenance,
-                config.effect_mode,
-            );
-            let resumed_ctx = base.with_approval(granted);
+            if let Err(e) = store.approve(&id) {
+                return entry_with(
+                    action,
+                    format!("ASK (approval store error: {e})"),
+                    Decision::Ask,
+                    "authorization_store_error",
+                    None,
+                );
+            }
+            // Claim before the external effect. A crash after this point burns the
+            // grant (at-most-once/fail-closed) rather than permitting replay.
+            let consumed = match store.consume(&id, &binding, now_unix_ms()) {
+                Ok(ConsumeOutcome::Consumed(_)) => true,
+                Ok(ConsumeOutcome::Rejected(reason)) => {
+                    return entry_with(
+                        action,
+                        format!("ASK (authorization rejected: {reason:?})"),
+                        Decision::Ask,
+                        "authorization_rejected",
+                        None,
+                    );
+                }
+                Err(e) => {
+                    return entry_with(
+                        action,
+                        format!("ASK (authorization store error: {e})"),
+                        Decision::Ask,
+                        "authorization_store_error",
+                        None,
+                    );
+                }
+            };
+            let resumed_ctx = base.with_approval(consumed);
             let resumed = decide(world, call, provenance.clone(), &resumed_ctx);
             append(
                 trace,
@@ -392,7 +450,9 @@ fn resolve_approval(
                         Decision::Allow,
                         disposition.rule,
                     );
-                    let _ = store.mark_executed(&id);
+                    if e.result != "(not executed)" {
+                        let _ = store.mark_executed(&id);
+                    }
                     e.verdict = "ASK → APPROVED → ALLOW".to_string();
                     e
                 }
@@ -409,6 +469,16 @@ fn resolve_approval(
             }
         }
     }
+}
+
+fn now_unix_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 /// The payloads of every tainted perception so far — the tainted corpus the L2

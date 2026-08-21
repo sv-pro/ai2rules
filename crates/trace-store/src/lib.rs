@@ -19,7 +19,10 @@ mod replay;
 pub mod secrets;
 mod store;
 
-pub use approval::{params_hash, ApprovalEvent, ApprovalStore};
+pub use approval::{
+    effect_binding, effect_resource, params_hash, ApprovalEvent, ApprovalStore,
+    AuthorizationRejection, ConsumeOutcome, EffectBinding,
+};
 pub use bundle::{export_bundle, import_bundle, replay_bundle, Bundle};
 pub use record::{
     ContextSnapshot, DecisionRecord, ExecSummary, ExecutionRecord, OutcomeKind, OutcomeSummary,

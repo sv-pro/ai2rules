@@ -59,7 +59,7 @@ harness-types (foundation — language-neutral contracts, pure data)
 
 | Crate | Primary public API |
 |---|---|
-| **harness-types** | `Taint`, `TaintedValue<T>`, `Perception`, `ToolCall`, `CompiledWorld`, `WorldManifest`, `Decision`, `ExecutionSpec`, `BuildError`, `ApprovalToken` |
+| **harness-types** | `Taint`, `TaintedValue<T>`, `Perception`, `ToolCall`, `CompiledWorld`, `WorldManifest`, `Decision`, `ExecutionSpec`, `BuildError`, `AuthorizationInstance` (`ApprovalToken` compatibility alias) |
 | **world-kernel** | `IRBuilder::build`, `disposition::evaluate`, `decide`, `build_execution_spec` |
 | **compiler** | `compile`, `compile_default`, `load_yaml`, `load_json`, `validate`, `hash_manifest` |
 | **executor** | `Executor::builder()`, `ExecutorBuilder::register`, `Executor::run` |
@@ -71,9 +71,9 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
 
 **Test counts (all passing, native):**
-harness-types 5 · world-kernel 46 · compiler 18 · executor 16 · trace-store 13 ·
-provider-adapters 5 · agent-core 16 · harness-preview 45 · cli-harness 95 ·
-harness-wasm 0 · **total 309** (plus the harness-wasm Node smoke tests, run via
+harness-types 5 · world-kernel 46 · compiler 18 · executor 16 · trace-store 16 ·
+provider-adapters 5 · agent-core 17 · harness-preview 45 · cli-harness 95 ·
+harness-wasm 0 · **total 313** (plus the harness-wasm Node smoke tests, run via
 wasm-pack)
 
 ---

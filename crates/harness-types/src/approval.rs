@@ -1,15 +1,20 @@
-//! Durable approval tokens (architecture §5 `ApprovalToken`).
+//! Durable, effect-bound authorization instances for approved `ASK` decisions.
 
 use serde::{Deserialize, Serialize};
 
 use crate::decision::EffectMode;
-use crate::ids::{ActionName, ApprovalTokenId, ContentHash, DescriptorHash, ManifestHash, WorldId};
+use crate::ids::{
+    ActionName, AuthorizationInstanceId, ContentHash, DescriptorHash, ManifestHash, PrincipalId,
+    WorldId,
+};
 use crate::provenance::Provenance;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApprovalState {
     Pending,
     Approved,
+    /// The single-use grant was durably claimed before the external effect.
+    Consumed,
     Rejected,
     Executed,
 }
@@ -33,49 +38,78 @@ impl std::fmt::Display for ApprovalTransitionError {
 
 impl std::error::Error for ApprovalTransitionError {}
 
-/// An approval is bound to the exact action, params, world, **compiled manifest**,
-/// descriptor hash, provenance, and effect mode. It cannot be reused after any
-/// drift in those.
+/// A durable, narrowing authorization for one exact effect.
+///
+/// The compiled world remains the capability ceiling. This artifact can satisfy
+/// an `ASK`, but cannot turn a world `DENY`/`ABSENT` into permission. It is bound
+/// to principal, canonical effect, resource, world/schema epochs, provenance,
+/// effect mode, expiry, and a single-use consumption budget.
 ///
 /// `manifest_hash` is the binding that `world_id` does not provide (finding #15):
 /// a world keeps its id while its rules are rewritten, so an approval granted
 /// under one policy stayed valid under the next. Both are kept — `world_id` says
 /// *which* world, `manifest_hash` says *which version of it*.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ApprovalToken {
-    pub id: ApprovalTokenId,
+pub struct AuthorizationInstance {
+    pub id: AuthorizationInstanceId,
     pub state: ApprovalState,
+    /// Authenticated runtime principal. An empty legacy value never consumes.
+    #[serde(default)]
+    pub principal: PrincipalId,
     pub action: ActionName,
     pub params_hash: ContentHash,
+    /// SHA-256 over the versioned canonical effect envelope.
+    #[serde(default)]
+    pub canonical_effect_hash: ContentHash,
+    /// Normalized resource label for evidence and exact binding.
+    #[serde(default)]
+    pub resource: String,
     pub world_id: WorldId,
+    /// World epoch: the exact compiled manifest hash.
     pub manifest_hash: ManifestHash,
+    /// Schema epoch: the exact effective action descriptor hash.
     pub descriptor_hash: DescriptorHash,
     pub provenance: Provenance,
     pub effect_mode: EffectMode,
+    /// Exclusive expiry instant. Zero marks a legacy/non-consumable artifact.
+    #[serde(default)]
+    pub valid_until_unix_ms: u64,
+    /// Remaining successful claims. AI2-10 mints exactly one.
+    #[serde(default)]
+    pub remaining_uses: u32,
 }
 
-impl ApprovalToken {
+impl AuthorizationInstance {
     #[allow(clippy::too_many_arguments)]
     pub fn pending(
-        id: ApprovalTokenId,
+        id: AuthorizationInstanceId,
+        principal: PrincipalId,
         action: ActionName,
         params_hash: ContentHash,
+        canonical_effect_hash: ContentHash,
+        resource: String,
         world_id: WorldId,
         manifest_hash: ManifestHash,
         descriptor_hash: DescriptorHash,
         provenance: Provenance,
         effect_mode: EffectMode,
+        valid_until_unix_ms: u64,
     ) -> Self {
         Self {
             id,
             state: ApprovalState::Pending,
+            principal,
             action,
             params_hash,
+            canonical_effect_hash,
+            resource,
             world_id,
             manifest_hash,
             descriptor_hash,
             provenance,
             effect_mode,
+            valid_until_unix_ms,
+            remaining_uses: 1,
         }
     }
 
@@ -87,8 +121,14 @@ impl ApprovalToken {
         self.transition(ApprovalState::Rejected, &[ApprovalState::Pending])
     }
 
+    pub fn consume(&mut self) -> Result<(), ApprovalTransitionError> {
+        self.transition(ApprovalState::Consumed, &[ApprovalState::Approved])?;
+        self.remaining_uses = self.remaining_uses.saturating_sub(1);
+        Ok(())
+    }
+
     pub fn mark_executed(&mut self) -> Result<(), ApprovalTransitionError> {
-        self.transition(ApprovalState::Executed, &[ApprovalState::Approved])
+        self.transition(ApprovalState::Executed, &[ApprovalState::Consumed])
     }
 
     fn transition(
@@ -107,3 +147,7 @@ impl ApprovalToken {
         }
     }
 }
+
+/// Canonical public name. `ApprovalToken` remains as a source-compatible alias
+/// while host integrations move to the effect-bound vocabulary.
+pub type ApprovalToken = AuthorizationInstance;
