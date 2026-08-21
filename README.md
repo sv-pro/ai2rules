@@ -169,10 +169,13 @@ the stochastic–deterministic border* — that unifies it with sibling projects
 - **E6 — Approvals & Execution Modes:** human-in-the-loop as durable state. The
   kernel branches on `ExecutionMode` — an approval-required action `ASK`s
   interactively but **fails closed to `DENY` in background**; a durable
-  `ApprovalStore` (`trace-store`) mints/persists tokens (`pending → approved →
-  executed`) bound to the exact call, so drift voids reuse; the orchestrator
-  resumes an approved `ASK` to `ALLOW`. Honors invariants 9, 10 — **completing
-  Milestone 2.**
+  `ApprovalStore` (`trace-store`) mints/persists single-use
+  `AuthorizationInstance`s (`pending → approved → consumed → executed`). Each
+  is bound to the trusted principal, canonical effect, resource, world/schema
+  epochs, provenance, effect mode, and expiry. Consumption is atomic and durable
+  before execution, so substitution, replay, concurrent reuse, and restart fail
+  closed; the orchestrator then re-decides the `ASK` under the unchanged world
+  ceiling. Honors invariants 9, 10 — **completing Milestone 2.**
 - **E7 — MCP, Web & Scoped Capabilities:** broader reach through the one gate.
   Scoped capabilities narrow a base action — `build_execution_spec` strips
   locked/unknown args and injects literals (so `run_tests` always runs `pytest`,
@@ -293,7 +296,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **309 tests** green.
+Builds clean offline with `clippy -D warnings`; **312 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -429,8 +432,9 @@ cargo run -p agent-core --example approvals_demo
 ```
 
 A `start_pty` (approval-required) action: interactive + auto-approve resumes it
-`ASK → APPROVED → ALLOW` (a durable token minted → approved → executed); in
-background it fails closed to `DENY` with no token minted.
+`ASK → APPROVED → ALLOW` (a durable authorization is minted → approved →
+atomically consumed → executed); in background it fails closed to `DENY` with
+no authorization minted.
 
 For **scoped capabilities + MCP + web**, run:
 

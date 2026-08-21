@@ -2,7 +2,7 @@
 //!
 //! Human-in-the-loop approval as durable state, not memory. The store is an
 //! append-only JSONL log of lifecycle transitions (`Minted → Approved/Rejected →
-//! Executed`), folded into the current token set on load — same shape as the
+//! Consumed → Executed`), folded into the current token set on load — same shape as the
 //! trace store, and replayable. An approval is bound to the exact call (action,
 //! params, world, **compiled manifest**, descriptor hash, provenance, effect
 //! mode); any drift in those voids reuse (E6.4).
@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use compiler::sha256_hex;
 use harness_types::{
     ActionName, ApprovalState, ApprovalToken, ApprovalTokenId, ApprovalTransitionError,
-    ContentHash, DescriptorHash, EffectMode, ManifestHash, Provenance, WorldId,
+    ContentHash, DescriptorHash, EffectMode, ManifestHash, PrincipalId, Provenance, WorldId,
 };
 
 use crate::integrity::{constant_time_eq, hmac_hex};
@@ -45,7 +45,50 @@ pub enum ApprovalEvent {
     Minted(Box<ApprovalToken>),
     Approved(ApprovalTokenId),
     Rejected(ApprovalTokenId),
+    Consumed(ApprovalTokenId),
+    ConsumptionRejected {
+        id: ApprovalTokenId,
+        reason: AuthorizationRejection,
+    },
     Executed(ApprovalTokenId),
+}
+
+/// Exact effect identity presented when a runtime consumes an authorization.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EffectBinding {
+    pub principal: PrincipalId,
+    pub action: ActionName,
+    pub params_hash: ContentHash,
+    pub canonical_effect_hash: ContentHash,
+    pub resource: String,
+    pub world_id: WorldId,
+    pub manifest_hash: ManifestHash,
+    pub descriptor_hash: DescriptorHash,
+    pub provenance: Provenance,
+    pub effect_mode: EffectMode,
+}
+
+/// Why an exact authorization could not be consumed. These values are durable
+/// evidence, not policy verdicts; the caller still re-runs the kernel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizationRejection {
+    NotApproved,
+    Exhausted,
+    Expired,
+    PrincipalMismatch,
+    EffectMismatch,
+    ResourceMismatch,
+    WorldEpochMismatch,
+    SchemaEpochMismatch,
+    ProvenanceMismatch,
+    EffectModeMismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConsumeOutcome {
+    Consumed(ApprovalTokenId),
+    Rejected(AuthorizationRejection),
 }
 
 /// One line of the log: the event plus the MAC that makes it ours.
@@ -62,11 +105,77 @@ fn event_bytes(event: &ApprovalEvent) -> io::Result<String> {
 
 /// The canonical params hash used in an approval binding.
 pub fn params_hash(params: &Value) -> ContentHash {
-    let canonical = serde_json::to_string(params).unwrap_or_default();
-    ContentHash::new(sha256_hex(canonical.as_bytes()))
+    let canonical = serde_json::to_vec(params).expect("JSON Value serialization is infallible");
+    ContentHash::new(sha256_hex(&canonical))
 }
 
-/// Durable, append-only store of approval tokens and their lifecycle.
+/// Build the versioned, canonical identity of one proposed effect.
+#[allow(clippy::too_many_arguments)]
+pub fn effect_binding(
+    principal: PrincipalId,
+    action: ActionName,
+    params: &Value,
+    resource: String,
+    world_id: WorldId,
+    manifest_hash: ManifestHash,
+    descriptor_hash: DescriptorHash,
+    provenance: Provenance,
+    effect_mode: EffectMode,
+) -> EffectBinding {
+    #[derive(Serialize)]
+    struct CanonicalEffect<'a> {
+        v: u32,
+        principal: &'a PrincipalId,
+        action: &'a ActionName,
+        arguments: &'a Value,
+        resource: &'a str,
+        world_id: &'a WorldId,
+        world_epoch: &'a ManifestHash,
+        schema_epoch: &'a DescriptorHash,
+        provenance: &'a Provenance,
+        effect_mode: EffectMode,
+    }
+
+    let envelope = CanonicalEffect {
+        v: 1,
+        principal: &principal,
+        action: &action,
+        arguments: params,
+        resource: &resource,
+        world_id: &world_id,
+        world_epoch: &manifest_hash,
+        schema_epoch: &descriptor_hash,
+        provenance: &provenance,
+        effect_mode,
+    };
+    let canonical = serde_json::to_vec(&envelope)
+        .expect("canonical effect contains only serializable contract values");
+    EffectBinding {
+        principal,
+        action,
+        params_hash: params_hash(params),
+        canonical_effect_hash: ContentHash::new(sha256_hex(&canonical)),
+        resource,
+        world_id,
+        manifest_hash,
+        descriptor_hash,
+        provenance,
+        effect_mode,
+    }
+}
+
+/// A stable evidence label for the most specific common resource argument.
+/// The complete argument object remains covered by `canonical_effect_hash`.
+pub fn effect_resource(params: &Value) -> String {
+    for key in ["resource", "path", "file_path", "notebook_path", "url", "key"] {
+        if let Some(value) = params.get(key).and_then(Value::as_str) {
+            return format!("{key}:{value}");
+        }
+    }
+    format!("arguments:{}", params_hash(params).as_str())
+}
+
+/// Durable, append-only store of effect-bound authorization instances.
 pub struct ApprovalStore {
     path: PathBuf,
     key: Vec<u8>,
@@ -93,8 +202,30 @@ impl ApprovalStore {
     /// Persist a freshly-minted pending token.
     pub fn mint(&mut self, token: ApprovalToken) -> io::Result<ApprovalTokenId> {
         let id = token.id.clone();
-        self.append(&ApprovalEvent::Minted(Box::new(token.clone())))?;
-        self.tokens.insert(id.clone(), token);
+        if token.state != ApprovalState::Pending
+            || token.remaining_uses != 1
+            || token.principal.as_str().is_empty()
+            || token.canonical_effect_hash.as_str().is_empty()
+            || token.resource.is_empty()
+            || token.valid_until_unix_ms == 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "authorization must be pending, exact, unexpired, and single-use",
+            ));
+        }
+        let _lock = StoreLock::acquire(&lock_path(&self.path))?;
+        let mut tokens = load(&self.path, &self.key)?;
+        if tokens.contains_key(&id) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "authorization id already exists",
+            ));
+        }
+        let event = ApprovalEvent::Minted(Box::new(token));
+        self.append(&event)?;
+        apply_event(&mut tokens, event);
+        self.tokens = tokens;
         Ok(id)
     }
 
@@ -122,31 +253,40 @@ impl ApprovalStore {
         )
     }
 
-    /// True iff an **Approved** token binds to this exact call (E6.4). Any drift
-    /// — different world, descriptor hash, params, provenance, or effect mode —
-    /// means no match, so an approval is never reused after the world changes.
-    #[allow(clippy::too_many_arguments)]
-    pub fn is_granted(
-        &self,
-        action: &ActionName,
-        params: &Value,
-        world_id: &WorldId,
-        manifest_hash: &ManifestHash,
-        descriptor_hash: &DescriptorHash,
-        provenance: &Provenance,
-        effect_mode: EffectMode,
-    ) -> bool {
-        let ph = params_hash(params);
-        self.tokens.values().any(|t| {
-            t.state == ApprovalState::Approved
-                && t.action == *action
-                && t.params_hash == ph
-                && t.world_id == *world_id
-                && t.manifest_hash == *manifest_hash
-                && t.descriptor_hash == *descriptor_hash
-                && t.provenance == *provenance
-                && t.effect_mode == effect_mode
-        })
+    /// Atomically claim one exact authorization before any external effect.
+    ///
+    /// The lock serializes independent store instances. State is reloaded while
+    /// holding it, so two processes cannot both consume the same approved event.
+    /// Every mismatch that reaches the lock is appended as signed evidence.
+    pub fn consume(
+        &mut self,
+        id: &ApprovalTokenId,
+        binding: &EffectBinding,
+        now_unix_ms: u64,
+    ) -> io::Result<ConsumeOutcome> {
+        let _lock = StoreLock::acquire(&lock_path(&self.path))?;
+        let mut tokens = load(&self.path, &self.key)?;
+        let token = tokens
+            .get(id)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown authorization"))?;
+        if let Some(reason) = rejection_reason(token, binding, now_unix_ms) {
+            self.append(&ApprovalEvent::ConsumptionRejected {
+                id: id.clone(),
+                reason,
+            })?;
+            self.tokens = tokens;
+            return Ok(ConsumeOutcome::Rejected(reason));
+        }
+
+        let mut candidate = token.clone();
+        candidate
+            .consume()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+        let event = ApprovalEvent::Consumed(id.clone());
+        self.append(&event)?;
+        apply_event(&mut tokens, event);
+        self.tokens = tokens;
+        Ok(ConsumeOutcome::Consumed(id.clone()))
     }
 
     fn transition(
@@ -155,14 +295,18 @@ impl ApprovalStore {
         apply: impl FnOnce(&mut ApprovalToken) -> Result<(), ApprovalTransitionError>,
         event: ApprovalEvent,
     ) -> io::Result<()> {
-        {
-            let token = self
-                .tokens
-                .get_mut(id)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown approval token"))?;
-            apply(token).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
-        }
-        self.append(&event)
+        let _lock = StoreLock::acquire(&lock_path(&self.path))?;
+        let mut tokens = load(&self.path, &self.key)?;
+        let mut candidate = tokens
+            .get(id)
+            .cloned()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown authorization"))?;
+        apply(&mut candidate)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+        self.append(&event)?;
+        apply_event(&mut tokens, event);
+        self.tokens = tokens;
+        Ok(())
     }
 
     fn append(&self, event: &ApprovalEvent) -> io::Result<()> {
@@ -174,8 +318,56 @@ impl ApprovalStore {
         let line = serde_json::to_string(&signed).map_err(io::Error::other)?;
         let mut file = private_append(&self.path)?;
         writeln!(file, "{line}")?;
-        file.flush()
+        file.flush()?;
+        file.sync_data()
     }
+}
+
+fn rejection_reason(
+    token: &ApprovalToken,
+    binding: &EffectBinding,
+    now_unix_ms: u64,
+) -> Option<AuthorizationRejection> {
+    if token.state != ApprovalState::Approved {
+        return Some(if token.remaining_uses == 0
+            || matches!(token.state, ApprovalState::Consumed | ApprovalState::Executed)
+        {
+            AuthorizationRejection::Exhausted
+        } else {
+            AuthorizationRejection::NotApproved
+        });
+    }
+    if token.remaining_uses == 0 {
+        return Some(AuthorizationRejection::Exhausted);
+    }
+    if token.valid_until_unix_ms == 0 || now_unix_ms >= token.valid_until_unix_ms {
+        return Some(AuthorizationRejection::Expired);
+    }
+    if token.principal != binding.principal {
+        return Some(AuthorizationRejection::PrincipalMismatch);
+    }
+    if token.resource != binding.resource {
+        return Some(AuthorizationRejection::ResourceMismatch);
+    }
+    if token.world_id != binding.world_id || token.manifest_hash != binding.manifest_hash {
+        return Some(AuthorizationRejection::WorldEpochMismatch);
+    }
+    if token.descriptor_hash != binding.descriptor_hash {
+        return Some(AuthorizationRejection::SchemaEpochMismatch);
+    }
+    if token.provenance != binding.provenance {
+        return Some(AuthorizationRejection::ProvenanceMismatch);
+    }
+    if token.effect_mode != binding.effect_mode {
+        return Some(AuthorizationRejection::EffectModeMismatch);
+    }
+    if token.action != binding.action
+        || token.params_hash != binding.params_hash
+        || token.canonical_effect_hash != binding.canonical_effect_hash
+    {
+        return Some(AuthorizationRejection::EffectMismatch);
+    }
+    None
 }
 
 /// The key lives beside the log: `approvals.jsonl` -> `approvals.jsonl.key`.
@@ -183,6 +375,51 @@ fn key_path(store: &Path) -> PathBuf {
     let mut name = store.as_os_str().to_os_string();
     name.push(".key");
     PathBuf::from(name)
+}
+
+fn lock_path(store: &Path) -> PathBuf {
+    let mut name = store.as_os_str().to_os_string();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+/// Cross-process critical section for authorization lifecycle mutations.
+/// A crashed holder leaves a visible stale lock and therefore fails closed; an
+/// operator may remove that one exact `.lock` file after verifying no process is
+/// using the store.
+struct StoreLock {
+    path: PathBuf,
+    _file: File,
+}
+
+impl StoreLock {
+    fn acquire(path: &Path) -> io::Result<Self> {
+        const ATTEMPTS: usize = 10_000;
+        for _ in 0..ATTEMPTS {
+            match private_create_new(path) {
+                Ok(file) => {
+                    return Ok(Self {
+                        path: path.to_path_buf(),
+                        _file: file,
+                    })
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    std::thread::yield_now();
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!("authorization store lock {} is busy", path.display()),
+        ))
+    }
+}
+
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// Open a file for appending, creating it `0600`, refusing to follow a symlink.
@@ -395,6 +632,12 @@ fn apply_event(tokens: &mut BTreeMap<ApprovalTokenId, ApprovalToken>, event: App
                 let _ = t.reject();
             }
         }
+        ApprovalEvent::Consumed(id) => {
+            if let Some(t) = tokens.get_mut(&id) {
+                let _ = t.consume();
+            }
+        }
+        ApprovalEvent::ConsumptionRejected { .. } => {}
         ApprovalEvent::Executed(id) => {
             if let Some(t) = tokens.get_mut(&id) {
                 let _ = t.mark_executed();
@@ -408,17 +651,55 @@ mod tests {
     use super::*;
     use harness_types::{ContentHash, EffectMode, Provenance, SessionId, SourceChannel};
     use serde_json::json;
+    use std::sync::{Arc, Barrier};
 
-    fn token(id: &str, params: &Value, descriptor: &str) -> ApprovalToken {
-        ApprovalToken::pending(
-            ApprovalTokenId::new(id),
+    const NOW: u64 = 1_000;
+
+    fn binding(params: &Value, descriptor: &str) -> EffectBinding {
+        binding_for(
+            PrincipalId::new("session:s"),
+            params,
+            "resource:pty",
+            "m1",
+            descriptor,
+        )
+    }
+
+    fn binding_for(
+        principal: PrincipalId,
+        params: &Value,
+        resource: &str,
+        manifest: &str,
+        descriptor: &str,
+    ) -> EffectBinding {
+        effect_binding(
+            principal,
             ActionName::new("start_pty"),
-            params_hash(params),
+            params,
+            resource.to_string(),
             WorldId::new("w"),
-            ManifestHash::new("m1"),
+            ManifestHash::new(manifest),
             DescriptorHash::new(descriptor),
             prov(),
             EffectMode::Simulate,
+        )
+    }
+
+    fn token(id: &str, params: &Value, descriptor: &str) -> ApprovalToken {
+        let binding = binding(params, descriptor);
+        ApprovalToken::pending(
+            ApprovalTokenId::new(id),
+            binding.principal,
+            binding.action,
+            binding.params_hash,
+            binding.canonical_effect_hash,
+            binding.resource,
+            binding.world_id,
+            binding.manifest_hash,
+            binding.descriptor_hash,
+            binding.provenance,
+            binding.effect_mode,
+            NOW + 1_000,
         )
     }
 
@@ -430,27 +711,25 @@ mod tests {
         )
     }
 
-    fn granted(store: &ApprovalStore, params: &Value, descriptor: &str) -> bool {
-        store.is_granted(
-            &ActionName::new("start_pty"),
-            params,
-            &WorldId::new("w"),
-            &ManifestHash::new("m1"),
-            &DescriptorHash::new(descriptor),
-            &prov(),
-            EffectMode::Simulate,
-        )
-    }
-
     #[test]
-    fn mint_approve_then_granted() {
+    fn mint_approve_then_consumed_once() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = ApprovalStore::open(dir.path().join("approvals.jsonl")).unwrap();
         let params = json!({"shell": "bash"});
         let id = store.mint(token("t1", &params, "desc-1")).unwrap();
-        assert!(!granted(&store, &params, "desc-1")); // pending, not yet approved
+        assert_eq!(
+            store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::NotApproved)
+        );
         store.approve(&id).unwrap();
-        assert!(granted(&store, &params, "desc-1"));
+        assert_eq!(
+            store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+            ConsumeOutcome::Consumed(id.clone())
+        );
+        assert_eq!(
+            store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::Exhausted)
+        );
     }
 
     #[test]
@@ -460,10 +739,24 @@ mod tests {
         let params = json!({"shell": "bash"});
         let id = store.mint(token("t1", &params, "desc-1")).unwrap();
         store.approve(&id).unwrap();
-        // Descriptor drift → the approval no longer matches.
-        assert!(!granted(&store, &params, "desc-2"));
-        // Param change → no match either.
-        assert!(!granted(&store, &json!({"shell": "zsh"}), "desc-1"));
+        assert_eq!(
+            store.consume(&id, &binding(&params, "desc-2"), NOW).unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::SchemaEpochMismatch)
+        );
+        assert_eq!(
+            store
+                .consume(&id, &binding(&json!({"shell": "zsh"}), "desc-1"), NOW)
+                .unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::EffectMismatch)
+        );
+    }
+
+    #[test]
+    fn canonical_effect_is_stable_across_object_key_order() {
+        let first = binding(&json!({"b": 2, "a": 1}), "desc-1");
+        let second = binding(&json!({"a": 1, "b": 2}), "desc-1");
+        assert_eq!(first.params_hash, second.params_hash);
+        assert_eq!(first.canonical_effect_hash, second.canonical_effect_hash);
     }
 
     #[test]
@@ -473,7 +766,10 @@ mod tests {
         let params = json!({});
         let id = store.mint(token("t1", &params, "desc-1")).unwrap();
         store.reject(&id).unwrap();
-        assert!(!granted(&store, &params, "desc-1"));
+        assert_eq!(
+            store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::NotApproved)
+        );
     }
 
     // ---- finding #15: the log grants things, so forging it must not work ----
@@ -557,20 +853,118 @@ mod tests {
         let params = json!({"shell": "bash"});
         let id = store.mint(token("t1", &params, "desc-1")).unwrap();
         store.approve(&id).unwrap();
-        assert!(granted(&store, &params, "desc-1"));
-
-        let under_new_policy = store.is_granted(
-            &ActionName::new("start_pty"),
-            &params,
-            &WorldId::new("w"),
-            &ManifestHash::new("m2"), // same world, rewritten rules
-            &DescriptorHash::new("desc-1"),
-            &prov(),
-            EffectMode::Simulate,
+        assert_eq!(
+            store
+                .consume(
+                    &id,
+                    &binding_for(
+                        PrincipalId::new("session:s"),
+                        &params,
+                        "resource:pty",
+                        "m2",
+                        "desc-1",
+                    ),
+                    NOW,
+                )
+                .unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::WorldEpochMismatch),
+            "an authorization must not survive the policy it was granted under"
         );
-        assert!(
-            !under_new_policy,
-            "an approval must not survive the policy it was granted under"
+    }
+
+    #[test]
+    fn principal_resource_and_expiry_are_enforced() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ApprovalStore::open(dir.path().join("approvals.jsonl")).unwrap();
+        let params = json!({"shell": "bash"});
+        let id = store.mint(token("t1", &params, "desc-1")).unwrap();
+        store.approve(&id).unwrap();
+
+        let other_principal = binding_for(
+            PrincipalId::new("session:other"),
+            &params,
+            "resource:pty",
+            "m1",
+            "desc-1",
+        );
+        assert_eq!(
+            store.consume(&id, &other_principal, NOW).unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::PrincipalMismatch)
+        );
+
+        let mut other_session = binding(&params, "desc-1");
+        other_session.provenance.session_id = SessionId::new("other");
+        assert_eq!(
+            store.consume(&id, &other_session, NOW).unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::ProvenanceMismatch)
+        );
+
+        let other_resource = binding_for(
+            PrincipalId::new("session:s"),
+            &params,
+            "resource:other",
+            "m1",
+            "desc-1",
+        );
+        assert_eq!(
+            store.consume(&id, &other_resource, NOW).unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::ResourceMismatch)
+        );
+        assert_eq!(
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW + 1_000)
+                .unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::Expired)
+        );
+
+        let evidence = std::fs::read_to_string(store.path()).unwrap();
+        assert!(evidence.contains("ConsumptionRejected"));
+        assert!(evidence.contains("principal_mismatch"));
+        assert!(evidence.contains("expired"));
+    }
+
+    #[test]
+    fn concurrent_consumers_get_exactly_one_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl");
+        let params = json!({"shell": "bash"});
+        let id = {
+            let mut store = ApprovalStore::open(&path).unwrap();
+            let id = store.mint(token("t1", &params, "desc-1")).unwrap();
+            store.approve(&id).unwrap();
+            id
+        };
+        let barrier = Arc::new(Barrier::new(3));
+        let mut joins = Vec::new();
+        for _ in 0..2 {
+            let path = path.clone();
+            let params = params.clone();
+            let id = id.clone();
+            let barrier = Arc::clone(&barrier);
+            joins.push(std::thread::spawn(move || {
+                let mut store = ApprovalStore::open(path).unwrap();
+                barrier.wait();
+                store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap()
+            }));
+        }
+        barrier.wait();
+        let outcomes: Vec<_> = joins.into_iter().map(|join| join.join().unwrap()).collect();
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, ConsumeOutcome::Consumed(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(
+                    outcome,
+                    ConsumeOutcome::Rejected(AuthorizationRejection::Exhausted)
+                ))
+                .count(),
+            1
         );
     }
 
@@ -616,9 +1010,18 @@ mod tests {
             let mut store = ApprovalStore::open(&path).unwrap();
             let id = store.mint(token("t1", &params, "desc-1")).unwrap();
             store.approve(&id).unwrap();
+            assert!(matches!(
+                store.consume(&id, &binding(&params, "desc-1"), NOW).unwrap(),
+                ConsumeOutcome::Consumed(_)
+            ));
         }
-        // Reopen from disk — the approval is still in force (durable).
-        let store = ApprovalStore::open(&path).unwrap();
-        assert!(granted(&store, &params, "desc-1"));
+        // Reopen from disk — the successful claim remains exhausted.
+        let mut store = ApprovalStore::open(&path).unwrap();
+        assert_eq!(
+            store
+                .consume(&ApprovalTokenId::new("t1"), &binding(&params, "desc-1"), NOW)
+                .unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::Exhausted)
+        );
     }
 }

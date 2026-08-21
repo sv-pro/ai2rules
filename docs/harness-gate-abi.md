@@ -107,11 +107,14 @@ evaluated verdict (exit `0`), not a malformed-process error, so every host
 handles it through the same verdict channel.
 
 `context.approval_token` is not a bearer credential. A host that supports
-approval resumption must validate a durable approval-store binding at a trusted
-adapter/orchestrator boundary (action, params, world, descriptor, provenance, and
-effect mode) before setting `EvalContext.approval_granted`. The public
-`harness gate` ABI has no verifier or store access, so a non-null token still
-returns `ASK` for approval-required actions.
+approval resumption must use it only to locate a durable `AuthorizationInstance`
+at a trusted adapter/orchestrator boundary. That boundary atomically consumes one
+explicit instance before execution and validates trusted principal, canonical
+effect (action + complete arguments), resource, world/schema epochs, provenance,
+effect mode, expiry, and remaining-use budget. It then re-runs the kernel; the
+instance can narrow an `ASK`, never expand the compiled world's ceiling. The
+public `harness gate` ABI has no verifier or store access, so a non-null token
+still returns `ASK` for approval-required actions.
 
 ## 4. `GateResponse` (stdout)
 
