@@ -340,6 +340,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "govbench"
+version = "0.4.2-rc.2"
+dependencies = [
+ "compiler",
+ "harness-preview",
+ "harness-types",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "trace-store",
+]
+
+[[package]]
 name = "harness-preview"
 version = "0.4.2-rc.2"
 dependencies = [

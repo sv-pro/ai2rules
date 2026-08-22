@@ -93,7 +93,7 @@ JetBrains) **and Claude Code**, via the Safe MCP Proxy. This brings the MCP-prox
 | **M1 — Deterministic Core** | Kernel works in simulation | E0, E1, E2, E3, E4 | Vertical slice: `read_file` → kernel → sim executor → trace → replay, all deterministic |
 | **M2 — Live Agent** | A real model drives the loop | E5, E6 | One provider proposes through the projected surface; interactive approvals work; background fails closed |
 | **M3 — Full Tool Surface** | Real-world capabilities | E7, E9 | MCP + web + scoped capabilities behind one gate; usable interactive CLI/TUI |
-| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11, E12, E13 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design; establish industry authority via tech blog; dogfood the governance onto the Claude Code host |
+| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11, E12, E13, E18 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design; establish industry authority via tech blog; dogfood the governance onto the Claude Code host |
 | **M5 — Interactive Advocacy** | The product, in the reader's browser | E14, E15 | The real kernel compiled to WASM powers a same-origin, TensorFlow-Playground-class visualization suite — led by the Taint-Flow Simulator — that lets anyone drive the governance live, with CI proving the in-browser verdicts match the native kernel |
 
 ### Dependency sketch
@@ -682,6 +682,83 @@ the adapter writes trace records).
 
 ---
 
+### E18 — Public MCP Governance Benchmark (executable seed)
+**Goal:** Turn the Public MCP Governance Benchmark plan into its smallest *executable*
+evidence pack inside this repository, before building a separate broad framework. Compare an
+intentionally weak reference gateway against ai2rules under one deterministic oracle, with no
+LLM anywhere in the loop. **Issue:** [#64](https://github.com/sv-pro/ai2rules/issues/64) /
+Linear AI2-5. **Depends on:** D24 (gate ABI), D72 (discovery projection), D73 (effect-bound
+authorization instance). **Status:** ✅ seed delivered — three scenarios, both targets, both
+transports, CI-gated.
+
+**Design — the three questions a permission list cannot answer:**
+
+1. *Discovery-cache isolation* — a privileged `tools/list` is cached; a lower-privilege
+   principal asks next; privileged capabilities must not leak.
+2. *Approval substitution and replay* — one normalized effect is approved; an
+   authority-bearing argument is mutated and retried; the exact approval is submitted twice.
+   Expected: the mutation refused and exactly one downstream effect.
+3. *Cross-principal handle reuse* — principal A holds an authorization handle; principal B,
+   equally privileged, presents it. Expected: an ownership violation and no effect.
+
+**Rules the pack is built to (issue #64):** adapters translate only, never scenario-specific
+pass logic; PASS requires an observed decision *and* an observed downstream effect count *and*
+evidence; `ABSENT`/`DENY`/`ASK`/`ERROR_CLOSED`/`ERROR_OPEN`/`UNKNOWN` stay distinct; results
+are published per scenario with no reassuring aggregate score.
+
+- [x] **E18.1** Three versioned YAML scenarios —
+  `docs/benchmarks/mcp-governance/pack/scenarios/*.yaml`, schema v1, walked by a generic
+  runner that enumerates nothing.
+- [x] **E18.2** Deterministic scripted client + oracle — `crates/govbench` (`run.rs`,
+  `oracle.rs`). The oracle has no target identity; targets have no scenario identity.
+- [x] **E18.3** Minimal mock MCP upstream + external-effect counter — `upstream.rs`, owned by
+  the runner, so `effect_applied` is observed rather than reported.
+- [x] **E18.4** Intentionally weak reference gateway with documented expected failures —
+  `targets/weak.rs` + `pack/weak-gateway.yaml`: same policy intent, three enforcement defects
+  (cache keyed on the upstream, bearer grant naming a tool, grant bound to no principal and
+  never consumed). Asserted non-strawman: its policy is applied correctly wherever the cache
+  and the bearer grant are not in the way.
+- [x] **E18.5** ai2rules adapter — `harness project` (D72) + `harness gate` (D24) +
+  `trace_store::ApprovalStore` (D73), run over **both** the linked and the wire transport
+  with a step-for-step parity check. Named `ai2rules-reference-host`, and its
+  `metadata.composition` states what is shipped by ai2rules and what the benchmark supplies,
+  so a PASS is never read as a claim about a shipped command.
+- [x] **E18.6a** The evidence contract is mechanical, not prose: `evidence_invariants` checks
+  every step of every run (a refusal names a rule; a grant says what it covers; a presented
+  handle says what identity was checked and, on refusal, why; the ledger's record matches the
+  call the target was handed), and `binding_distinguishes` compares the identities a target
+  says it checked. A target that decides correctly and shows nothing fails —
+  `a_correct_verdict_without_evidence_is_not_a_pass` proves it.
+- [x] **E18.6** JSON result + evidence schema v1 (`result.rs`) and generated Markdown report
+  (`report.rs`); `results/` regenerated by the runner, never hand-edited.
+- [x] **E18.7** One command, offline, no LLM — `scripts/run-governance-bench.sh`; CI job
+  `governance-bench` runs it over the wire transport and fails if the committed report has
+  drifted (the finding-#18 shape).
+- [x] **E18.8** Two-directional acceptance — `--assert-contrast` first requires exactly one
+  result for every `scenario × {weak, ai2rules}` cell (otherwise it is an assertion about a
+  comparison, passed without the comparison), then fails both when ai2rules fails a scenario
+  and when the reference gateway *passes* one, because a baseline that stops failing has
+  stopped measuring anything. It lives in `accept.rs`, outside the oracle.
+- [ ] **E18.9** Exercise `ERROR_CLOSED` / `ERROR_OPEN`: the vocabulary is in the schema and
+  the adapters, but no scenario yet breaks a governor to prove the direction it fails in.
+- [ ] **E18.10** Ship the trusted authorization boundary as a command. The pack's honest
+  finding: `harness gate` deliberately has no verifier or store access, so consuming one exact
+  authorization before an effect is ~40 lines every host writes itself. A host that omits it
+  gets the weak gateway's defect 3 from a correct kernel.
+- [ ] **E18.11** Second-wave scenarios: D74 staged-commit finality (crash ambiguity,
+  idempotency reservation), schema/world epoch drift mid-approval, expiry, and a stdio
+  upstream over `harness mcp-gateway`.
+- [ ] **E18.12** External reproduction (AI2-9): one engineer outside this repository runs the
+  pack from `docs/benchmarks/mcp-governance/README.md` alone and reports what was unclear.
+
+**Exit:** the runner detects every intentional weak-baseline failure, ai2rules produces
+evidence-backed expected outcomes without an LLM, and an external engineer can reproduce the
+run from the documentation.
+
+Relates to acceptance invariants 2 (ABSENT-over-DENY), 9/10 (approval, fail-closed) and 14/15
+(audit/evidence).
+
+---
 
 ## Acceptance invariant coverage
 

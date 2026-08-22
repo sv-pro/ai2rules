@@ -22,6 +22,28 @@ than pressing on: two candidates published end to end, and a cold install of
 denies egress under taint, and refuses when it cannot record either. **Cut `0.4.2`
 when real code lands, not before.**
 
+### Added
+
+- **The MCP governance benchmark seed** (issue #64, D76): three scenarios —
+  cross-principal discovery-cache leakage, approval argument substitution and
+  replay, cross-principal handle reuse — run against an intentionally weak
+  reference gateway and against this kernel under one deterministic oracle, with
+  no LLM. `bash scripts/run-governance-bench.sh`; see
+  `docs/benchmarks/mcp-governance/`. Not shipped in the `harness` binary: the
+  runner is a separate, unpublished workspace crate. The measured target is named
+  `ai2rules-reference-host` — kernel components composed with the benchmark's own
+  trusted-host wiring — because `harness` does not yet ship the consume-then-invoke
+  boundary as a command (E18.10).
+
+### Changed
+
+- **Discovery projection moved into `harness-preview`, beside `gate`** (D75).
+  `harness project` is now a wire skin over `harness_preview::project`, so an
+  in-process Rust host, the CLI and (when exported) WASM cannot answer a
+  discovery question differently. **No wire behaviour changed** — `harness
+  project` answers byte-identically, and the benchmark runs every scenario over
+  both transports to keep it that way.
+
 ## [0.4.2-rc.2] — 2026-08-15
 
 **rc.1 stopped at its own guard, one step before publishing.** Nothing reached npm;
