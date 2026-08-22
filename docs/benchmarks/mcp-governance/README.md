@@ -154,7 +154,7 @@ so nobody has to take the name on trust.
 
 | Question | Surface |
 |---|---|
-| which tools exist for this principal | `harness project` — discovery projection ABI ([D72](../../../DECISIONS.md)) |
+| which tools exist for this principal | `harness project` — discovery projection ABI ([D72](../../../decisions/D072-discovery-projection-is-a-sibling-wire-abi-the-world-owns-ex.md)) |
 | may this exact call proceed | `harness gate` — host-neutral gate ABI ([D24](../../harness-gate-abi.md)) |
 | is this human "yes" the one being spent | `trace_store::ApprovalStore` — durable effect-bound authorization instance (D73) |
 

@@ -331,6 +331,8 @@ docs/                 architecture (harness-architecture.md is canonical; one-ke
   benchmarks/mcp-governance/  the governance smoke pack + its generated report (issue #64)
 scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
+decisions/            ADR-lite decision log — one file per decision, D1–D76
+  INDEX.md            generated index (node scripts/build-decisions-index.mjs)
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
 CLAUDE.md             Claude Code pointer → AGENTS.md
@@ -497,7 +499,8 @@ first — along with the exfil attempt — by `no_tainted_network` (invariant 7)
 Knowledge-layer provenance drives action-layer enforcement; the layers compose.
 
 > Architectural decisions and the alternatives weighed are logged in
-> [`DECISIONS.md`](DECISIONS.md).
+> [`decisions/`](decisions/) — one file per decision, indexed at
+> [`decisions/INDEX.md`](decisions/INDEX.md).
 
 ---
 

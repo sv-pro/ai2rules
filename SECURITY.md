@@ -124,7 +124,7 @@ Live limitations we would rather write down than have someone find:
 
 The full list, open and fixed, is in [`docs/reviews/`](docs/reviews/); the
 reasoning behind each design decision is in
-[`DECISIONS.md`](DECISIONS.md).
+[`decisions/`](decisions/INDEX.md).
 
 ## Disclosure
 

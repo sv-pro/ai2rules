@@ -2,7 +2,7 @@
 
 *Operator attestations that a specific read source is trusted, pinned to its
 content identity.* The principled alternative to deleting taint state or blanket-
-trusting a directory. Decision: [`DECISIONS.md`](../DECISIONS.md) **D29** (extends
+trusting a directory. Decision: [**D29**](../decisions/D029-trust-pins-operator-trust-attestations-pinned-to-content-ide.md) (extends
 **D25**). Concept home in the thesis: [`THESIS.md`](THESIS.md) §3 (taint), §5
 (provenance / descriptor drift).
 

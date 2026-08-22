@@ -15,7 +15,7 @@ instead of leaving it to be discovered later. → [`SCORECARD.md`](SCORECARD.md)
 Rust-only, one binary (`harness`). No Python, no Node, no creds — the upstream is a
 self-contained mock JIRA. Real Atlassian is a later *skin* (E16.E), not a rewrite.
 
-Decision: [`DECISIONS.md` D33](../../../DECISIONS.md) · Epic: [`PLAN.md` E16](../../../PLAN.md).
+Decision: [`D33`](../../../decisions/D033-pivot-one-rust-binary-lead-with-the-governability-gap-not-th.md) · Epic: [`PLAN.md` E16](../../../PLAN.md).
 
 ## Quick start (offline)
 

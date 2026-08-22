@@ -412,7 +412,7 @@ So you don't mistake a demo for a guarantee:
   as typed manifest fields.
 
 Milestone-level state is in the [README status table](../README.md#status); the
-reasoning behind every choice is in [`DECISIONS.md`](../DECISIONS.md).
+reasoning behind every choice is in [`decisions/`](../decisions/INDEX.md).
 
 ## Where to go next
 
@@ -423,4 +423,4 @@ reasoning behind every choice is in [`DECISIONS.md`](../DECISIONS.md).
 | Wiring a new host | [`docs/harness-gate-abi.md`](harness-gate-abi.md) + [`docs/one-kernel-many-hosts.md`](one-kernel-many-hosts.md) |
 | A realistic end-to-end scenario | [`docs/demos/jira-copilot/`](demos/jira-copilot/) |
 | OpenCode / Antigravity CLI instead of Claude Code | [`docs/demos/opencode/`](demos/opencode/), [`docs/demos/antigravity/`](demos/antigravity/) |
-| Why a decision was made | [`DECISIONS.md`](../DECISIONS.md) |
+| Why a decision was made | [`decisions/INDEX.md`](../decisions/INDEX.md) |

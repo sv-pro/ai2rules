@@ -27,7 +27,9 @@ ai2rules/
 │   ├── safe-mcp-proxy/
 │   └── mcp-tool-projection/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
-├── DECISIONS.md              # ADR-lite decision log (D1–D69+)
+├── decisions/                # ADR-lite decision log — one file per decision
+│   └── INDEX.md              # generated; `node scripts/build-decisions-index.mjs`
+├── DECISIONS.md              # signpost to decisions/ (the old single-file log)
 ├── README.md                 # Project overview, milestone status, build instructions
 ├── rustfmt.toml              # max_width 100, edition 2021
 └── rust-toolchain.toml       # the pinned compiler — same one locally and in CI
@@ -134,9 +136,18 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
   `safe-mcp-proxy/`, and `mcp-tool-projection/` — separate git repositories kept
   only as references, not Cargo workspace members. Never `git add repos/`; stage
   harness paths explicitly.
-- **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
-  a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
-  can be revisited later. Currently D1–D69.
+- **Record architectural decisions in `decisions/`.** When a choice closes off a
+  real alternative, add `decisions/D<nnn>-<slug>.md` with a `# D<n> — Title`
+  heading (decision + alternatives + why) so it can be revisited later, then run
+  `node scripts/build-decisions-index.mjs` to refresh `decisions/INDEX.md`. CI
+  checks the index and refuses gaps or duplicate numbers. Currently D1–D76.
+
+  **One file per decision, deliberately.** The log used to be a single 212 KB
+  `DECISIONS.md` — the only hand-edited file here large enough to exceed a tool's
+  read budget. In #59 something read it truncated and wrote the truncation back;
+  it was an unreadable blob for three commits with 689 lines of entries gone
+  (#70). Never reconstruct the log as one file again, and never whole-file-rewrite
+  an entry: edit the one small file that holds it.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
@@ -234,7 +245,7 @@ marker in the same commit as the kernel change.
 | `README.md` | Project overview, milestone table, build/run instructions |
 | `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D69+; consult before choosing alternatives |
+| `decisions/INDEX.md` | ADR-lite log D1–D76, one file per decision; consult before choosing alternatives. Generated — edit the `decisions/D*.md` files and re-run `scripts/build-decisions-index.mjs` |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |

@@ -39,6 +39,13 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: Test
         run: cargo test --workspace
+      # `decisions/INDEX.md` is generated from the per-decision files. It is a
+      # build output living in git, so it gets the same treatment as the others:
+      # regenerate-and-diff, or it quietly stops describing the log it indexes.
+      # Also enforces gapless, unduplicated D-numbering — two people claiming D77
+      # means one entry is about to be lost.
+      - name: Decision index is current
+        run: node scripts/build-decisions-index.mjs --check
 
   demos:
     # Guard what the demos *print*. The unit tests cover the kernel; they stayed

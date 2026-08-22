@@ -1,7 +1,7 @@
 # Use cases & delivery model
 
 What a user actually **gets when they install ai2rules**, who each package is for, and
-the order we ship. Decision of record: [`DECISIONS.md`](../DECISIONS.md) **D31**. Builds
+the order we ship. Decision of record: [**D31**](../decisions/D031-ship-as-infrastructure-plugin-sidecar-not-a-standalone-agent.md). Builds
 on the five-layer thesis ([`THESIS.md`](THESIS.md)) and the host-neutral gate ABI
 ([`harness-gate-abi.md`](harness-gate-abi.md), D24).
 

@@ -6,7 +6,7 @@ ideas / a protocol / code into harness paths), what to **publish against** (use 
 related-work and Flywheel fuel), and what to **ignore**. Framed against the five
 layers of [`THESIS.md`](THESIS.md) (Action · Capability · Knowledge · Intent ·
 Substrate). The two repos that occupy our ground get their own decisions —
-[`DECISIONS.md`](../DECISIONS.md) **D27** (Agent Governance Toolkit) and **D28**
+[**D27**](../decisions/D027-position-against-agent-governance-toolkit-govern-by-ontology.md) (Agent Governance Toolkit) and [**D28**](../decisions/D028-knowledge-layer-treats-mgp-as-an-interop-vocabulary-target-n.md)
 (MGP) — and a related-work section in [`THESIS.md`](THESIS.md) §8.
 
 Status: **plan v0.1 (2026-06-27).** Maturities differ wildly; nothing here is
