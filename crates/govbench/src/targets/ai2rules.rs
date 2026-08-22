@@ -90,7 +90,7 @@ pub struct Ai2rules {
 }
 
 impl Ai2rules {
-    pub const ID: &'static str = "ai2rules";
+    pub const ID: &'static str = "ai2rules-reference-host";
 
     pub fn new(
         upstream: Rc<RefCell<Upstream>>,
@@ -252,16 +252,35 @@ impl Target for Ai2rules {
     }
 
     fn description(&self) -> &str {
-        "ai2rules kernel via `harness project` (D72), `harness gate` (D24) and the durable authorization store (D73)"
+        "ai2rules kernel components (`harness project` D72, `harness gate` D24, the durable \
+         authorization store D73) composed with this benchmark's reference trusted-host \
+         integration — the consume-then-invoke boundary ai2rules does not yet ship as a command"
     }
 
     fn metadata(&self) -> Value {
         json!({
-            "kind": "ai2rules",
+            "kind": "ai2rules-reference-host",
             "transport": self.transport.label(),
             "world_id": self.world.world_id().as_str(),
             "manifest_hash": self.world.manifest_hash().as_str(),
             "version": env!("CARGO_PKG_VERSION"),
+            // What this target actually is, so a reader of results.json never has
+            // to take the name on trust. A result here is a statement about the
+            // composition, not about a shipped ai2rules command.
+            "composition": {
+                "shipped_by_ai2rules": [
+                    "harness project — discovery projection ABI (D72)",
+                    "harness gate — host-neutral gate ABI (D24)",
+                    "trace_store::ApprovalStore — durable effect-bound authorization (D73)",
+                ],
+                "supplied_by_this_benchmark": [
+                    "the trusted host boundary: consume one exact authorization, \
+                     then invoke the upstream — see crates/govbench/src/targets/ai2rules.rs",
+                ],
+                "proves": "ai2rules components composed with the reference trusted-host \
+                           integration hold these lines",
+                "does_not_prove": "that a shipped ai2rules command holds them (PLAN.md E18.10)",
+            },
         })
     }
 
@@ -342,6 +361,7 @@ impl Target for Ai2rules {
                     verdict: Verdict::ErrorClosed,
                     rule: Some("gate_unavailable".to_string()),
                     handle: None,
+                    grant_binding: None,
                     evidence: json!({"error": error, "transport": self.transport.label()}),
                 }
             }
@@ -352,6 +372,7 @@ impl Target for Ai2rules {
                 verdict,
                 rule: response.rule.clone(),
                 handle: None,
+                grant_binding: None,
                 evidence: json!({
                     "surface": "harness gate",
                     "transport": self.transport.label(),
@@ -368,6 +389,7 @@ impl Target for Ai2rules {
                     verdict: Verdict::ErrorClosed,
                     rule: Some("unbindable_effect".to_string()),
                     handle: None,
+                    grant_binding: None,
                     evidence: json!({"error": error}),
                 }
             }
@@ -397,6 +419,7 @@ impl Target for Ai2rules {
                 verdict: Verdict::ErrorClosed,
                 rule: Some("authorization_store_unavailable".to_string()),
                 handle: None,
+                grant_binding: None,
                 evidence: json!({"error": error.to_string()}),
             };
         }
@@ -404,6 +427,10 @@ impl Target for Ai2rules {
             verdict: Verdict::Ask,
             rule: response.rule.clone(),
             handle: Some(id.as_str().to_string()),
+            // The canonical effect hash covers principal, action, complete
+            // arguments, resource, both epochs, provenance and effect mode — so
+            // any change to the approved call changes this string.
+            grant_binding: Some(binding_identity(&binding)),
             evidence: json!({
                 "surface": "harness gate",
                 "transport": self.transport.label(),
@@ -430,6 +457,8 @@ impl Target for Ai2rules {
                 return Invocation {
                     verdict: Verdict::ErrorClosed,
                     rule: Some("gate_unavailable".to_string()),
+                    presented_binding: None,
+                    rejection: Some("gate_unavailable".to_string()),
                     evidence: json!({"error": error, "transport": self.transport.label()}),
                 }
             }
@@ -449,6 +478,8 @@ impl Target for Ai2rules {
                 Invocation {
                     verdict: Verdict::Allow,
                     rule: response.rule,
+                    presented_binding: None,
+                    rejection: None,
                     evidence,
                 }
             }
@@ -458,6 +489,8 @@ impl Target for Ai2rules {
                     return Invocation {
                         verdict: Verdict::Deny,
                         rule: Some("approval_required".to_string()),
+                        presented_binding: None,
+                        rejection: Some("no_authorization_presented".to_string()),
                         evidence,
                     };
                 };
@@ -468,6 +501,8 @@ impl Target for Ai2rules {
                         return Invocation {
                             verdict: Verdict::ErrorClosed,
                             rule: Some("unbindable_effect".to_string()),
+                            presented_binding: None,
+                            rejection: Some("unbindable_effect".to_string()),
                             evidence,
                         };
                     }
@@ -487,6 +522,8 @@ impl Target for Ai2rules {
                         Invocation {
                             verdict: Verdict::Allow,
                             rule: Some("authorization_consumed".to_string()),
+                            presented_binding: Some(binding_identity(&binding)),
+                            rejection: None,
                             evidence,
                         }
                     }
@@ -498,6 +535,8 @@ impl Target for Ai2rules {
                         Invocation {
                             verdict: Verdict::Deny,
                             rule: Some(format!("authorization_{label}")),
+                            presented_binding: Some(binding_identity(&binding)),
+                            rejection: Some(label),
                             evidence,
                         }
                     }
@@ -506,6 +545,8 @@ impl Target for Ai2rules {
                         Invocation {
                             verdict: Verdict::ErrorClosed,
                             rule: Some("unknown_authorization".to_string()),
+                            presented_binding: Some(binding_identity(&binding)),
+                            rejection: Some("unknown_authorization".to_string()),
                             evidence,
                         }
                     }
@@ -513,11 +554,22 @@ impl Target for Ai2rules {
             }
             other => Invocation {
                 verdict: other,
-                rule: response.rule,
+                rule: response.rule.clone(),
+                presented_binding: None,
+                rejection: response.rule,
                 evidence,
             },
         }
     }
+}
+
+/// The identity an authorization is bound to and compared on, in the form the
+/// benchmark's evidence contract expects. The canonical effect hash covers
+/// principal, action, complete normalized arguments, resource, world and schema
+/// epochs, provenance and effect mode (D73), so any change to any of those is a
+/// different string here.
+fn binding_identity(binding: &EffectBinding) -> String {
+    format!("effect:{}", binding.canonical_effect_hash.as_str())
 }
 
 /// Exposed for the pack's own tests: an authorization is single-use, so its state

@@ -61,6 +61,14 @@ expect:
     assert: handle_issued
     step: approve
 
+  # The mechanical form of "bound to the exact effect": whatever identity the
+  # target checks, it must not be the same string for the approved call and for
+  # the call with a mutated amount. A target that binds to the tool name fails
+  # here on its own evidence, before any effect is counted.
+  - id: the_grant_is_bound_to_more_than_the_tool_name
+    assert: binding_distinguishes
+    steps: [approve, mutated]
+
   - id: substituted_arguments_are_refused
     assert: verdict
     step: mutated

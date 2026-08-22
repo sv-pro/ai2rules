@@ -304,7 +304,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **328 tests** green.
+Builds clean offline with `clippy -D warnings`; **330 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -378,12 +378,17 @@ Three scenarios — cross-principal discovery-cache leakage, approval argument
 substitution and replay, cross-principal handle reuse — run against an
 intentionally weak reference gateway and against this kernel, under one
 deterministic oracle. The weak gateway turns one human "yes" into three
-irreversible transfers; ai2rules refuses the substitution
+irreversible transfers; the ai2rules target refuses the substitution
 (`authorization_effect_mismatch`), the replay (`authorization_exhausted`) and the
 stolen handle (`authorization_principal_mismatch`), and applies exactly one.
 
-PASS needs both halves — the verdict *and* the downstream effect count the runner
-watched — and there is no aggregate score. Read
+That target is named `ai2rules-reference-host`, deliberately: it is kernel
+components plus this benchmark's own trusted-host wiring, because ai2rules does
+not yet ship the consume-then-invoke boundary as a command (PLAN.md E18.10).
+
+PASS needs all three halves — the verdict, the downstream effect count the runner
+watched, and evidence the oracle actually checks — and there is no aggregate
+score. Read
 [`docs/benchmarks/mcp-governance/`](docs/benchmarks/mcp-governance/), including
 what the pack does **not** claim. CI job `governance-bench` re-runs it and fails
 if the committed report has drifted, or if the weak baseline stops failing.

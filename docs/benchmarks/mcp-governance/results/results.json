@@ -41,10 +41,22 @@
       }
     },
     {
-      "id": "ai2rules",
-      "description": "ai2rules kernel via `harness project` (D72), `harness gate` (D24) and the durable authorization store (D73)",
+      "id": "ai2rules-reference-host",
+      "description": "ai2rules kernel components (`harness project` D72, `harness gate` D24, the durable authorization store D73) composed with this benchmark's reference trusted-host integration — the consume-then-invoke boundary ai2rules does not yet ship as a command",
       "metadata": {
-        "kind": "ai2rules",
+        "composition": {
+          "does_not_prove": "that a shipped ai2rules command holds them (PLAN.md E18.10)",
+          "proves": "ai2rules components composed with the reference trusted-host integration hold these lines",
+          "shipped_by_ai2rules": [
+            "harness project — discovery projection ABI (D72)",
+            "harness gate — host-neutral gate ABI (D24)",
+            "trace_store::ApprovalStore — durable effect-bound authorization (D73)"
+          ],
+          "supplied_by_this_benchmark": [
+            "the trusted host boundary: consume one exact authorization, then invoke the upstream — see crates/govbench/src/targets/ai2rules.rs"
+          ]
+        },
+        "kind": "ai2rules-reference-host",
         "manifest_hash": "73997e2e81928b70a94cb99efd7e772a91f4d9f753db28d183eb7f6be8e10d8b",
         "transport": "wire",
         "version": "0.4.2-rc.2",
@@ -141,6 +153,18 @@
           "assertion": "effect_count",
           "status": "PASS",
           "detail": "0 downstream effects"
+        },
+        {
+          "id": "evidence:warm",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "warm carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:probe",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "probe carries the evidence its verdict requires"
         }
       ]
     },
@@ -149,7 +173,7 @@
       "scenario_version": 1,
       "title": "Cross-principal tools/list cache leakage",
       "question": "Can a discovery answer computed for a privileged principal ever be served to a lower-privileged one?\n",
-      "target": "ai2rules",
+      "target": "ai2rules-reference-host",
       "outcome": "PASS",
       "effect_count": 0,
       "steps": [
@@ -244,6 +268,18 @@
           "assertion": "effect_count",
           "status": "PASS",
           "detail": "0 downstream effects"
+        },
+        {
+          "id": "evidence:warm",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "warm carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:probe",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "probe carries the evidence its verdict requires"
         }
       ]
     },
@@ -270,6 +306,7 @@
           "verdict": "ASK",
           "rule": "approval_required",
           "handle": "grant-1",
+          "grant_binding": "tool:ledger_transfer",
           "effect_applied": false,
           "evidence": {
             "grant": {
@@ -293,7 +330,16 @@
           },
           "verdict": "ALLOW",
           "handle": "grant-1",
+          "presented_binding": "tool:ledger_transfer",
           "effect_applied": true,
+          "effect": {
+            "tool": "ledger_transfer",
+            "principal": "operator-a",
+            "arguments": {
+              "amount": 100000,
+              "resource": "account:ops-payroll"
+            }
+          },
           "evidence": {
             "presented_handle": "grant-1",
             "upstream_result": {
@@ -319,7 +365,16 @@
           },
           "verdict": "ALLOW",
           "handle": "grant-1",
+          "presented_binding": "tool:ledger_transfer",
           "effect_applied": true,
+          "effect": {
+            "tool": "ledger_transfer",
+            "principal": "operator-a",
+            "arguments": {
+              "amount": 100,
+              "resource": "account:ops-payroll"
+            }
+          },
           "evidence": {
             "presented_handle": "grant-1",
             "upstream_result": {
@@ -345,7 +400,16 @@
           },
           "verdict": "ALLOW",
           "handle": "grant-1",
+          "presented_binding": "tool:ledger_transfer",
           "effect_applied": true,
+          "effect": {
+            "tool": "ledger_transfer",
+            "principal": "operator-a",
+            "arguments": {
+              "amount": 100,
+              "resource": "account:ops-payroll"
+            }
+          },
           "evidence": {
             "presented_handle": "grant-1",
             "upstream_result": {
@@ -371,6 +435,12 @@
           "assertion": "handle_issued",
           "status": "PASS",
           "detail": "approve issued a handle"
+        },
+        {
+          "id": "the_grant_is_bound_to_more_than_the_tool_name",
+          "assertion": "binding_distinguishes",
+          "status": "FAIL",
+          "detail": "[\"approve\", \"mutated\"] were checked against the same identity: {\"tool:ledger_transfer\"}"
         },
         {
           "id": "substituted_arguments_are_refused",
@@ -407,6 +477,30 @@
           "assertion": "effect_count",
           "status": "FAIL",
           "detail": "3 downstream effects, expected 1"
+        },
+        {
+          "id": "evidence:approve",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "approve carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:mutated",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "mutated carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:exact",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "exact carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:replay",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "replay carries the evidence its verdict requires"
         }
       ]
     },
@@ -415,7 +509,7 @@
       "scenario_version": 1,
       "title": "Approval argument substitution and single-use replay",
       "question": "Is a human approval bound to the exact effect the human saw, and spendable exactly once?\n",
-      "target": "ai2rules",
+      "target": "ai2rules-reference-host",
       "outcome": "PASS",
       "effect_count": 1,
       "steps": [
@@ -433,6 +527,7 @@
           "verdict": "ASK",
           "rule": "approval_required",
           "handle": "auth-1",
+          "grant_binding": "effect:060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
           "effect_applied": false,
           "evidence": {
             "authorization": {
@@ -470,6 +565,8 @@
           "verdict": "DENY",
           "rule": "authorization_effect_mismatch",
           "handle": "auth-1",
+          "presented_binding": "effect:2f4710a8e335549d3dc5ddb6974e8b75194fb9c420c023305ef4fe57c6096ed4",
+          "rejection": "effect_mismatch",
           "effect_applied": false,
           "evidence": {
             "authorization": {
@@ -500,7 +597,16 @@
           "verdict": "ALLOW",
           "rule": "authorization_consumed",
           "handle": "auth-1",
+          "presented_binding": "effect:060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
           "effect_applied": true,
+          "effect": {
+            "tool": "ledger_transfer",
+            "principal": "operator-a",
+            "arguments": {
+              "amount": 100,
+              "resource": "account:ops-payroll"
+            }
+          },
           "evidence": {
             "authorization": {
               "presented_effect_hash": "060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
@@ -538,6 +644,8 @@
           "verdict": "DENY",
           "rule": "authorization_exhausted",
           "handle": "auth-1",
+          "presented_binding": "effect:060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
+          "rejection": "exhausted",
           "effect_applied": false,
           "evidence": {
             "authorization": {
@@ -567,6 +675,12 @@
           "assertion": "handle_issued",
           "status": "PASS",
           "detail": "approve issued a handle"
+        },
+        {
+          "id": "the_grant_is_bound_to_more_than_the_tool_name",
+          "assertion": "binding_distinguishes",
+          "status": "PASS",
+          "detail": "[\"approve\", \"mutated\"] were checked against distinct identities"
         },
         {
           "id": "substituted_arguments_are_refused",
@@ -603,6 +717,30 @@
           "assertion": "effect_count",
           "status": "PASS",
           "detail": "1 downstream effect"
+        },
+        {
+          "id": "evidence:approve",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "approve carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:mutated",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "mutated carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:exact",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "exact carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:replay",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "replay carries the evidence its verdict requires"
         }
       ]
     },
@@ -629,6 +767,7 @@
           "verdict": "ASK",
           "rule": "approval_required",
           "handle": "grant-1",
+          "grant_binding": "tool:ledger_transfer",
           "effect_applied": false,
           "evidence": {
             "grant": {
@@ -652,7 +791,16 @@
           },
           "verdict": "ALLOW",
           "handle": "grant-1",
+          "presented_binding": "tool:ledger_transfer",
           "effect_applied": true,
+          "effect": {
+            "tool": "ledger_transfer",
+            "principal": "operator-b",
+            "arguments": {
+              "amount": 100,
+              "resource": "account:ops-payroll"
+            }
+          },
           "evidence": {
             "presented_handle": "grant-1",
             "upstream_result": {
@@ -678,7 +826,16 @@
           },
           "verdict": "ALLOW",
           "handle": "grant-1",
+          "presented_binding": "tool:ledger_transfer",
           "effect_applied": true,
+          "effect": {
+            "tool": "ledger_transfer",
+            "principal": "operator-a",
+            "arguments": {
+              "amount": 100,
+              "resource": "account:ops-payroll"
+            }
+          },
           "evidence": {
             "presented_handle": "grant-1",
             "upstream_result": {
@@ -706,6 +863,12 @@
           "detail": "approve issued a handle"
         },
         {
+          "id": "the_grant_is_bound_to_a_principal",
+          "assertion": "binding_distinguishes",
+          "status": "FAIL",
+          "detail": "[\"approve\", \"reuse\"] were checked against the same identity: {\"tool:ledger_transfer\"}"
+        },
+        {
           "id": "another_principal_cannot_spend_it",
           "assertion": "verdict",
           "status": "FAIL",
@@ -728,6 +891,24 @@
           "assertion": "effect_count",
           "status": "FAIL",
           "detail": "2 downstream effects, expected 1"
+        },
+        {
+          "id": "evidence:approve",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "approve carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:reuse",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "reuse carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:owner_uses",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "owner_uses carries the evidence its verdict requires"
         }
       ]
     },
@@ -736,7 +917,7 @@
       "scenario_version": 1,
       "title": "Cross-principal application-handle reuse",
       "question": "Is an authorization handle usable by a principal other than the one it was granted to?\n",
-      "target": "ai2rules",
+      "target": "ai2rules-reference-host",
       "outcome": "PASS",
       "effect_count": 1,
       "steps": [
@@ -754,6 +935,7 @@
           "verdict": "ASK",
           "rule": "approval_required",
           "handle": "auth-1",
+          "grant_binding": "effect:060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
           "effect_applied": false,
           "evidence": {
             "authorization": {
@@ -791,6 +973,8 @@
           "verdict": "DENY",
           "rule": "authorization_principal_mismatch",
           "handle": "auth-1",
+          "presented_binding": "effect:5b0631652474584f4c3a206b0e858bd0a61eba66721bf4df1f2b91786e773920",
+          "rejection": "principal_mismatch",
           "effect_applied": false,
           "evidence": {
             "authorization": {
@@ -821,7 +1005,16 @@
           "verdict": "ALLOW",
           "rule": "authorization_consumed",
           "handle": "auth-1",
+          "presented_binding": "effect:060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
           "effect_applied": true,
+          "effect": {
+            "tool": "ledger_transfer",
+            "principal": "operator-a",
+            "arguments": {
+              "amount": 100,
+              "resource": "account:ops-payroll"
+            }
+          },
           "evidence": {
             "authorization": {
               "presented_effect_hash": "060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
@@ -860,6 +1053,12 @@
           "detail": "approve issued a handle"
         },
         {
+          "id": "the_grant_is_bound_to_a_principal",
+          "assertion": "binding_distinguishes",
+          "status": "PASS",
+          "detail": "[\"approve\", \"reuse\"] were checked against distinct identities"
+        },
+        {
           "id": "another_principal_cannot_spend_it",
           "assertion": "verdict",
           "status": "PASS",
@@ -882,6 +1081,24 @@
           "assertion": "effect_count",
           "status": "PASS",
           "detail": "1 downstream effect"
+        },
+        {
+          "id": "evidence:approve",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "approve carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:reuse",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "reuse carries the evidence its verdict requires"
+        },
+        {
+          "id": "evidence:owner_uses",
+          "assertion": "evidence",
+          "status": "PASS",
+          "detail": "owner_uses carries the evidence its verdict requires"
         }
       ]
     }

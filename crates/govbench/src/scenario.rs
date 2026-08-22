@@ -176,6 +176,14 @@ pub enum Expectation {
     },
     /// The step handed back an authorization handle.
     HandleIssued { id: String, step: String },
+    /// The identities the target *checked* at these steps must all differ.
+    ///
+    /// This is what turns "the approval is bound to the exact effect" from a
+    /// README claim into a check. A target that binds an approval to a tool name
+    /// reports the same identity for the approved call and for a call with a
+    /// mutated argument, and fails here — on its own evidence, before any
+    /// downstream effect is counted.
+    BindingDistinguishes { id: String, steps: Vec<String> },
     /// The step did (or did not) reach the downstream effect target.
     EffectApplied {
         id: String,
@@ -192,6 +200,7 @@ impl Expectation {
             Expectation::VisibleIncludes { id, .. }
             | Expectation::VisibleExcludes { id, .. }
             | Expectation::SurfaceDiffers { id, .. }
+            | Expectation::BindingDistinguishes { id, .. }
             | Expectation::Verdict { id, .. }
             | Expectation::HandleIssued { id, .. }
             | Expectation::EffectApplied { id, .. }
@@ -204,6 +213,7 @@ impl Expectation {
             Expectation::VisibleIncludes { .. } => "visible_includes",
             Expectation::VisibleExcludes { .. } => "visible_excludes",
             Expectation::SurfaceDiffers { .. } => "surface_differs",
+            Expectation::BindingDistinguishes { .. } => "binding_distinguishes",
             Expectation::Verdict { .. } => "verdict",
             Expectation::HandleIssued { .. } => "handle_issued",
             Expectation::EffectApplied { .. } => "effect_applied",
@@ -219,7 +229,10 @@ impl Expectation {
             | Expectation::Verdict { step, .. }
             | Expectation::HandleIssued { step, .. }
             | Expectation::EffectApplied { step, .. } => vec![step.as_str()],
-            Expectation::SurfaceDiffers { steps, .. } => steps.iter().map(String::as_str).collect(),
+            Expectation::SurfaceDiffers { steps, .. }
+            | Expectation::BindingDistinguishes { steps, .. } => {
+                steps.iter().map(String::as_str).collect()
+            }
             Expectation::EffectCount { .. } => Vec::new(),
         }
     }

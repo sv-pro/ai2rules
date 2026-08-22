@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
 
+use govbench::accept::contrast;
 use govbench::report;
 use govbench::result::{
     BenchResult, PackIdentity, RunResult, Status, TargetIdentity, TransportParity, RESULT_VERSION,
@@ -196,7 +197,7 @@ fn real_main() -> Result<ExitCode, String> {
     }
 
     if args.assert_contrast {
-        if let Err(problem) = contrast(&result) {
+        if let Err(problem) = contrast(&result, WeakGateway::ID, Ai2rules::ID) {
             eprintln!("govbench: {problem}");
             return Ok(ExitCode::from(2));
         }
@@ -291,30 +292,6 @@ fn compare(linked: &RunResult, wire: &RunResult) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// The acceptance check, stated at the call site rather than in the oracle: the
-/// weak baseline's intentional failures are all detected, and ai2rules produces
-/// the expected outcome everywhere.
-fn contrast(result: &BenchResult) -> Result<(), String> {
-    let mut problems = Vec::new();
-    for run in &result.runs {
-        match (run.target.as_str(), run.outcome) {
-            (WeakGateway::ID, Status::Pass) => problems.push(format!(
-                "`{}` passed `{}`; the reference gateway's defect there is no longer detected",
-                run.target, run.scenario
-            )),
-            (Ai2rules::ID, Status::Fail) => {
-                problems.push(format!("`{}` failed `{}`", run.target, run.scenario))
-            }
-            _ => {}
-        }
-    }
-    if problems.is_empty() {
-        Ok(())
-    } else {
-        Err(problems.join("; "))
-    }
 }
 
 fn print_matrix(result: &BenchResult) {

@@ -30,7 +30,10 @@ when real code lands, not before.**
   reference gateway and against this kernel under one deterministic oracle, with
   no LLM. `bash scripts/run-governance-bench.sh`; see
   `docs/benchmarks/mcp-governance/`. Not shipped in the `harness` binary: the
-  runner is a separate, unpublished workspace crate.
+  runner is a separate, unpublished workspace crate. The measured target is named
+  `ai2rules-reference-host` — kernel components composed with the benchmark's own
+  trusted-host wiring — because `harness` does not yet ship the consume-then-invoke
+  boundary as a command (E18.10).
 
 ### Changed
 

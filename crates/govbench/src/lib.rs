@@ -27,6 +27,7 @@
 //!   `ERROR_OPEN`, `UNKNOWN` are distinct outcomes and are never collapsed.
 //! - Results are published per scenario. There is deliberately no aggregate score.
 
+pub mod accept;
 pub mod oracle;
 pub mod pack;
 pub mod report;

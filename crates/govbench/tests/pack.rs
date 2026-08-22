@@ -212,6 +212,134 @@ fn the_weak_baseline_is_not_a_strawman() {
     );
 }
 
+/// A target that decides correctly and says nothing about why.
+///
+/// This exists to prove the evidence contract bites. Before it, `oracle.rs`
+/// examined verdicts, visibility, handles and effect counts but never evidence,
+/// so a target could answer `{}` everywhere and still pass all three scenarios —
+/// which is not what issue #64 asks for (PASS requires an observed decision,
+/// a downstream effect count **and** evidence).
+struct SilentTarget {
+    inner: Ai2rules,
+}
+
+impl govbench::target::Target for SilentTarget {
+    fn id(&self) -> &str {
+        "silent"
+    }
+    fn description(&self) -> &str {
+        "answers exactly like ai2rules, and shows nothing"
+    }
+    fn metadata(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    fn discover(&mut self, principal: &govbench::target::Principal) -> govbench::target::Discovery {
+        let mut out = self.inner.discover(principal);
+        out.evidence = serde_json::json!({});
+        out
+    }
+    fn authorize(
+        &mut self,
+        principal: &govbench::target::Principal,
+        call: &govbench::target::Call,
+    ) -> govbench::target::Authorization {
+        let mut out = self.inner.authorize(principal, call);
+        out.evidence = serde_json::json!({});
+        out.grant_binding = None;
+        out
+    }
+    fn invoke(
+        &mut self,
+        principal: &govbench::target::Principal,
+        call: &govbench::target::Call,
+        handle: Option<&str>,
+    ) -> govbench::target::Invocation {
+        let mut out = self.inner.invoke(principal, call, handle);
+        out.evidence = serde_json::json!({});
+        out.presented_binding = None;
+        out.rejection = None;
+        out
+    }
+}
+
+#[test]
+fn assert_contrast_refuses_to_pass_without_running_the_contrast() {
+    use govbench::accept::contrast;
+    use govbench::result::{BenchResult, PackIdentity, RESULT_VERSION};
+
+    let pack = pack();
+    let scenarios: Vec<String> = pack.scenarios.iter().map(|s| s.id.clone()).collect();
+    let half = BenchResult {
+        v: RESULT_VERSION,
+        pack: PackIdentity {
+            path: "pack".to_string(),
+            world_id: pack.world.world_id().as_str().to_string(),
+            manifest_hash: pack.world.manifest_hash().as_str().to_string(),
+            scenarios: scenarios.clone(),
+        },
+        targets: Vec::new(),
+        // Only ai2rules ran. Every run in it passes, so judging the runs that
+        // exist would call this a held contrast — an assertion about a
+        // comparison, passed without the comparison.
+        runs: run_all(Ai2rules::ID),
+        transport_parity: None,
+    };
+    let refused = contrast(&half, WeakGateway::ID, Ai2rules::ID)
+        .expect_err("a half-run matrix must not satisfy --assert-contrast");
+    for scenario in &scenarios {
+        assert!(
+            refused.contains(scenario.as_str()),
+            "the refusal should name the missing cell {scenario}: {refused}"
+        );
+    }
+
+    // The whole matrix, and it is satisfied.
+    let mut runs = run_all(WeakGateway::ID);
+    runs.extend(run_all(Ai2rules::ID));
+    let full = BenchResult { runs, ..half };
+    contrast(&full, WeakGateway::ID, Ai2rules::ID).expect("the full matrix holds the contrast");
+}
+
+#[test]
+fn a_correct_verdict_without_evidence_is_not_a_pass() {
+    let pack = pack();
+    let scenario = pack
+        .scenarios
+        .iter()
+        .find(|s| s.id == "approval-substitution-and-replay")
+        .expect("the approval scenario");
+    let upstream = Rc::new(RefCell::new(Upstream::new(pack.tools.clone())));
+    let inner = Ai2rules::new(
+        upstream.clone(),
+        pack.world.clone(),
+        &pack.world_path,
+        Transport::Linked,
+    )
+    .expect("the ai2rules target starts");
+    let mut silent = SilentTarget { inner };
+    let run = run_scenario(scenario, &mut silent, &upstream);
+
+    // It decides exactly as ai2rules does, and applies exactly one effect...
+    assert_eq!(run.effect_count, 1);
+    // ...and still fails, on evidence alone.
+    assert_eq!(run.outcome, Status::Fail);
+    let failed: Vec<&str> = run
+        .checks
+        .iter()
+        .filter(|c| c.status == Status::Fail)
+        .map(|c| c.id.as_str())
+        .collect();
+    assert!(
+        failed.iter().all(|id| id.starts_with("evidence:")
+            || *id == "the_grant_is_bound_to_more_than_the_tool_name"),
+        "every failure should be an evidence failure, got {failed:?}"
+    );
+    assert!(
+        failed.iter().any(|id| id.starts_with("evidence:")),
+        "the evidence invariant must fire, got {failed:?}"
+    );
+}
+
 fn assert_failed(run: &RunResult, check: &str) {
     let found = run
         .checks

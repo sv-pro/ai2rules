@@ -13,7 +13,7 @@ bash scripts/run-governance-bench.sh      # offline, ~10s, writes results/
 **Results:** [`results/REPORT.md`](results/REPORT.md) ·
 [`results/results.json`](results/results.json)
 
-|  | `weak-reference-gateway` | `ai2rules` |
+|  | `weak-reference-gateway` | `ai2rules-reference-host` |
 |---|---|---|
 | `discovery-cache-isolation` | FAIL — 0 effects | PASS — 0 effects |
 | `approval-substitution-and-replay` | FAIL — **3** effects | PASS — 1 effect |
@@ -65,9 +65,32 @@ expectations check two independent things:
   upstream's ledger, before and after every single step. `effect_applied` is
   never something a target reports about itself. A target that answers `DENY` and
   then calls the upstream anyway fails on the second half.
+- **the evidence** — checked on every step of every run, whatever the scenario
+  asked for (`oracle.rs`, `evidence_invariants`). A refusal that cannot name a
+  rule is a shrug; a grant that cannot say what it covers has not shown it covers
+  anything; a call presenting a handle must say which identity it checked, and on
+  a refusal must give a structured reason; and what the ledger recorded must be
+  the call the target was handed. `a_correct_verdict_without_evidence_is_not_a_pass`
+  proves this bites: a target that decides exactly as ai2rules does, applies
+  exactly one effect, and says nothing about why still **fails**.
 
-Plus the evidence: every step records the acting principal, the verdict, the rule
-that fired and the target's own justification, all of it in `results.json`.
+The evidence is not prose. `binding_distinguishes` compares the identity each
+target says it *checked* at two steps, which is the mechanical form of "an
+approval is bound to the exact effect":
+
+```
+weak-reference-gateway    approve → tool:ledger_transfer
+                          mutated → tool:ledger_transfer      same string → FAIL
+ai2rules-reference-host   approve → effect:060f0805…
+                          mutated → effect:2f4710a8…         distinct → PASS
+                          replay  → effect:060f0805…         the approved effect, refused
+                                                             only because the grant is spent
+```
+
+Every step records the acting principal, the verdict, the rule that fired, the
+binding the target checked, the structured rejection, the ledger's own record of
+what reached the upstream, and the target's free-form justification — all of it
+in `results.json`.
 
 ## 3. Why the result is believable
 
@@ -86,9 +109,14 @@ Four structural properties, none of them a promise:
    [`upstream.rs`](../../../crates/govbench/src/upstream.rs), which the runner
    owns and both targets share.
 
-The acceptance check runs in **both directions**. `--assert-contrast` fails if
-ai2rules fails a scenario *and* if the reference gateway passes one: a baseline
-that stops failing has stopped measuring anything.
+The acceptance check runs in **both directions**, and insists the contrast was
+actually run. `--assert-contrast` requires exactly one result for every
+`scenario × {weak, ai2rules}` cell before it judges anything — otherwise
+`--target ai2rules --assert-contrast` would be an assertion about a comparison,
+passed without the comparison. It then fails if ai2rules fails a scenario *and*
+if the reference gateway passes one: a baseline that stops failing has stopped
+measuring anything. It lives in `accept.rs`, outside the oracle, so "expected to
+fail here" cannot leak into the judging.
 
 ## 4. The targets
 
@@ -111,7 +139,18 @@ Defect 1 is not even a *privilege* bug in one direction only: a low-privilege
 principal that asks first denies the operator its own tools. That is asserted
 too — the gateway is wrong about caching, not simply permissive.
 
-### 4.2 `ai2rules` — the kernel, through its shipped surfaces
+### 4.2 `ai2rules-reference-host` — kernel components plus this benchmark's host wiring
+
+**Read the name literally.** This target is not a shipped ai2rules command. It is
+ai2rules' kernel components composed with the reference trusted-host integration
+below, and a PASS here says:
+
+> ai2rules components composed with the reference trusted-host integration hold
+> these lines.
+
+It does **not** say that a shipped ai2rules command holds them. The composition is
+recorded in the target's identity in `results.json`, under `metadata.composition`,
+so nobody has to take the name on trust.
 
 | Question | Surface |
 |---|---|
@@ -119,8 +158,11 @@ too — the gateway is wrong about caching, not simply permissive.
 | may this exact call proceed | `harness gate` — host-neutral gate ABI ([D24](../../harness-gate-abi.md)) |
 | is this human "yes" the one being spent | `trace_store::ApprovalStore` — durable effect-bound authorization instance (D73) |
 
-The adapter translates and plumbs; it holds no rule of its own. Every verdict
-below comes from one of those three:
+The adapter holds no policy of its own — every verdict below is a `gate` decision,
+a `project` visibility answer, or a store rejection. But it is not merely
+translation: the consume-then-invoke ordering in `invoke()` is security-critical
+host wiring this benchmark supplies, which is exactly why the target is named
+`-reference-host` and why §5 lists it as a finding rather than a footnote.
 
 ```
 mutated  → DENY  authorization_effect_mismatch
@@ -131,6 +173,9 @@ reuse    → DENY  authorization_principal_mismatch
 
 Those labels are `trace_store::AuthorizationRejection` variants, not benchmark
 strings.
+
+The third row is the benchmark's own wiring — see the finding in §5. The first two
+are shipped surfaces.
 
 **Both transports are run.** The two wire operations are exercised in-process
 (`harness_preview::{project, gate}`) *and* by spawning the shipped `harness`
@@ -150,8 +195,9 @@ quoted out of it:
   `tools/call` shapes and counts effects. A stdio subprocess would add framing
   and scheduling noise without changing a single verdict; `harness mock-jira`
   remains the repo's stdio-level mock, and moving to it is a transport change.
-- **ai2rules does not ship the trusted boundary as a command.** This is the
-  finding the pack records rather than hides. `harness gate` deliberately has no
+- **ai2rules does not ship the trusted boundary as a command, so the measured
+  target is a composition.** This is the finding the pack records rather than
+  hides, and the reason the target is called `ai2rules-reference-host`. `harness gate` deliberately has no
   verifier or store access ([gate ABI §3](../../harness-gate-abi.md)); the store
   and the binding ship, but the boundary that consumes one exact authorization
   before an effect is wiring every host supplies itself today. In this pack that

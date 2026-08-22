@@ -54,6 +54,11 @@ expect:
     assert: handle_issued
     step: approve
 
+  # The identity the target checks must depend on who is presenting the handle.
+  - id: the_grant_is_bound_to_a_principal
+    assert: binding_distinguishes
+    steps: [approve, reuse]
+
   - id: another_principal_cannot_spend_it
     assert: verdict
     step: reuse

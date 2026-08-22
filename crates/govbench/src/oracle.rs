@@ -24,7 +24,111 @@ pub fn judge(
         .expect
         .iter()
         .map(|expectation| check(expectation, steps, effect_count))
+        .chain(evidence_invariants(steps))
         .collect()
+}
+
+/// The evidence contract, checked on **every step of every run**, whatever the
+/// scenario asked for.
+///
+/// Issue #64's rule is that PASS requires an observed decision, a downstream
+/// effect count *and* evidence. Without this, a target could answer every
+/// evidence field with `{}` and still pass all three scenarios — the decision
+/// and the effect count would carry the whole result, and "evidence" would be a
+/// field nobody read. These invariants are deliberately about the *shape* of
+/// what a target must be able to say, never about a particular target's keys:
+///
+/// - a refusal that cannot name a rule is not a refusal, it is a shrug;
+/// - a grant that cannot say what it covers has not shown it covers anything;
+/// - a call presenting a handle must say what identity it checked;
+/// - and what the ledger recorded must match the call the target was given, so a
+///   target cannot answer about one call and execute another.
+fn evidence_invariants(steps: &[StepObservation]) -> Vec<CheckResult> {
+    let mut checks = Vec::new();
+    for step in steps {
+        let mut fail = |detail: String| {
+            checks.push(CheckResult {
+                id: format!("evidence:{}", step.id),
+                assertion: "evidence",
+                status: Status::Fail,
+                detail,
+            });
+        };
+
+        if step.evidence.as_object().is_none_or(|e| e.is_empty()) {
+            fail(format!("{} produced no evidence at all", step.id));
+            continue;
+        }
+        if matches!(
+            step.verdict,
+            Verdict::Deny | Verdict::Absent | Verdict::ErrorClosed | Verdict::ErrorOpen
+        ) && step.rule.as_deref().unwrap_or_default().is_empty()
+        {
+            fail(format!(
+                "{} answered {} without naming a rule",
+                step.id,
+                step.verdict.as_str()
+            ));
+            continue;
+        }
+        if step.op == "authorize"
+            && step.handle.is_some()
+            && step.grant_binding.as_deref().unwrap_or_default().is_empty()
+        {
+            fail(format!(
+                "{} issued a handle without saying what the grant covers",
+                step.id
+            ));
+            continue;
+        }
+        if step.op == "invoke" && step.handle.is_some() {
+            if step
+                .presented_binding
+                .as_deref()
+                .unwrap_or_default()
+                .is_empty()
+            {
+                fail(format!(
+                    "{} presented a handle but did not say what identity it checked",
+                    step.id
+                ));
+                continue;
+            }
+            if step.verdict == Verdict::Deny
+                && step.rejection.as_deref().unwrap_or_default().is_empty()
+            {
+                fail(format!(
+                    "{} refused a presented authorization without a structured reason",
+                    step.id
+                ));
+                continue;
+            }
+        }
+        match (&step.effect, step.effect_applied) {
+            (Some(effect), true) if Some(&effect.tool) != step.tool.as_ref() => {
+                fail(format!(
+                    "{} was asked for {:?} but the ledger recorded {:?}",
+                    step.id, step.tool, effect.tool
+                ));
+                continue;
+            }
+            (None, true) => {
+                fail(format!(
+                    "{} reached the effect target with no ledger record",
+                    step.id
+                ));
+                continue;
+            }
+            _ => {}
+        }
+        checks.push(CheckResult {
+            id: format!("evidence:{}", step.id),
+            assertion: "evidence",
+            status: Status::Pass,
+            detail: format!("{} carries the evidence its verdict requires", step.id),
+        });
+    }
+    checks
 }
 
 /// A run passes only when every expectation holds.
@@ -97,6 +201,43 @@ fn check(expectation: &Expectation, steps: &[StepObservation], effect_count: u32
                 (
                     Status::Fail,
                     format!("{named:?} shared a surface identity: {ids:?}"),
+                )
+            }
+        }
+        Expectation::BindingDistinguishes { steps: named, .. } => {
+            let mut bindings = BTreeSet::new();
+            let mut missing = Vec::new();
+            for name in named {
+                match steps.iter().find(|observed| &observed.id == name) {
+                    // A step binds through whichever field its operation uses:
+                    // a grant declares what it covers, a call declares what it
+                    // checked. Both are the same vocabulary by contract.
+                    Some(observed) => {
+                        let binding = observed
+                            .grant_binding
+                            .clone()
+                            .or_else(|| observed.presented_binding.clone());
+                        match binding {
+                            Some(binding) => {
+                                bindings.insert(binding);
+                            }
+                            None => missing.push(name.clone()),
+                        }
+                    }
+                    None => missing.push(name.clone()),
+                }
+            }
+            if !missing.is_empty() {
+                (Status::Fail, format!("no binding recorded for {missing:?}"))
+            } else if bindings.len() == named.len() {
+                (
+                    Status::Pass,
+                    format!("{named:?} were checked against distinct identities"),
+                )
+            } else {
+                (
+                    Status::Fail,
+                    format!("{named:?} were checked against the same identity: {bindings:?}"),
                 )
             }
         }

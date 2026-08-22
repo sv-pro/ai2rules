@@ -47,7 +47,11 @@ pub fn run_scenario(
             visible: None,
             surface_id: None,
             handle: None,
+            grant_binding: None,
+            presented_binding: None,
+            rejection: None,
             effect_applied: false,
+            effect: None,
             evidence: json!({}),
         };
 
@@ -72,6 +76,7 @@ pub fn run_scenario(
                 observation.verdict = authorization.verdict;
                 observation.rule = authorization.rule;
                 observation.handle = authorization.handle;
+                observation.grant_binding = authorization.grant_binding;
                 observation.evidence = authorization.evidence;
             }
             Step::Invoke {
@@ -96,12 +101,19 @@ pub fn run_scenario(
                 observation.arguments = Some(call.arguments);
                 observation.verdict = invocation.verdict;
                 observation.rule = invocation.rule;
+                observation.presented_binding = invocation.presented_binding;
+                observation.rejection = invocation.rejection;
                 observation.handle = presented;
                 observation.evidence = invocation.evidence;
             }
         }
 
-        observation.effect_applied = upstream.borrow().effect_count() > before;
+        // The independent half of the evidence: whatever the target claims, this
+        // is the ledger's own record of what reached the upstream.
+        let ledger = upstream.borrow();
+        observation.effect_applied = ledger.effect_count() > before;
+        observation.effect = ledger.effects().get(before).cloned();
+        drop(ledger);
         steps.push(observation);
     }
 

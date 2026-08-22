@@ -94,6 +94,14 @@ pub struct Authorization {
     pub rule: Option<String>,
     /// The handle the principal now holds, if one was issued.
     pub handle: Option<String>,
+    /// **The identity of what this grant covers** — whatever the target will
+    /// actually check when the handle comes back. This is a required piece of
+    /// evidence, not a description: a target that cannot say what its grant is
+    /// bound to has not shown that it bound it to anything, and the oracle
+    /// fails the step. Targets that bind little report little, honestly (a tool
+    /// name is a legitimate answer; it is simply a weak one, and
+    /// `binding_distinguishes` is what exposes that).
+    pub grant_binding: Option<String>,
     pub evidence: Value,
 }
 
@@ -102,6 +110,16 @@ pub struct Authorization {
 pub struct Invocation {
     pub verdict: Verdict,
     pub rule: Option<String>,
+    /// The identity the target checked **for this presented call**, in the same
+    /// vocabulary as [`Authorization::grant_binding`]. Required whenever a
+    /// handle was presented. Comparing this against the grant's binding is how
+    /// "bound to the exact effect" becomes a mechanical check rather than a
+    /// claim in a README.
+    pub presented_binding: Option<String>,
+    /// The structured reason a presented authorization was refused — for
+    /// ai2rules this is a `trace_store::AuthorizationRejection` variant.
+    /// Required on a refusal, so "DENY" can never stand as its own explanation.
+    pub rejection: Option<String>,
     pub evidence: Value,
 }
 

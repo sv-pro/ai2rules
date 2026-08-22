@@ -46,6 +46,14 @@ pub struct WeakPolicy {
     pub approval_required: Vec<String>,
 }
 
+/// The identity this gateway binds an approval to, and compares on the way back
+/// in: the tool name, and nothing else. Two calls to the same tool with
+/// different arguments — or from different principals — produce the same string,
+/// which is precisely why `binding_distinguishes` catches it.
+fn binding(tool: &str) -> String {
+    format!("tool:{tool}")
+}
+
 /// A bearer grant. Everything this struct does *not* carry is the vulnerability:
 /// no principal, no arguments, no remaining-use count, no expiry.
 #[derive(Debug, Clone)]
@@ -157,6 +165,7 @@ impl Target for WeakGateway {
                 verdict: Verdict::Absent,
                 rule: Some("not_exposed".to_string()),
                 handle: None,
+                grant_binding: None,
                 evidence: json!({"visible": visible}),
             };
         }
@@ -165,6 +174,7 @@ impl Target for WeakGateway {
                 verdict: Verdict::Allow,
                 rule: None,
                 handle: None,
+                grant_binding: None,
                 evidence: json!({"approval_required": false}),
             };
         }
@@ -181,6 +191,9 @@ impl Target for WeakGateway {
             verdict: Verdict::Ask,
             rule: Some("approval_required".to_string()),
             handle: Some(handle.clone()),
+            // Honest, and damning: the tool name is the whole of what this grant
+            // covers, so this is the identity it will compare against later.
+            grant_binding: Some(binding(&call.tool)),
             evidence: json!({"grant": {"handle": handle, "bound_to": ["tool"]}}),
         }
     }
@@ -191,6 +204,8 @@ impl Target for WeakGateway {
             return Invocation {
                 verdict: Verdict::Absent,
                 rule: Some("not_exposed".to_string()),
+                presented_binding: handle.map(|_| binding(&call.tool)),
+                rejection: Some("not_exposed".to_string()),
                 evidence: json!({"visible": visible}),
             };
         }
@@ -200,6 +215,8 @@ impl Target for WeakGateway {
                 return Invocation {
                     verdict: Verdict::Deny,
                     rule: Some("approval_required".to_string()),
+                    presented_binding: None,
+                    rejection: Some("no_grant_presented".to_string()),
                     evidence: json!({"presented_handle": handle}),
                 };
             };
@@ -209,6 +226,8 @@ impl Target for WeakGateway {
                 return Invocation {
                     verdict: Verdict::Deny,
                     rule: Some("grant_tool_mismatch".to_string()),
+                    presented_binding: Some(binding(&call.tool)),
+                    rejection: Some("grant_tool_mismatch".to_string()),
                     evidence: json!({"grant_tool": grant.tool}),
                 };
             }
@@ -220,6 +239,8 @@ impl Target for WeakGateway {
         Invocation {
             verdict: Verdict::Allow,
             rule: None,
+            presented_binding: handle.map(|_| binding(&call.tool)),
+            rejection: None,
             evidence: json!({"presented_handle": handle, "upstream_result": result}),
         }
     }

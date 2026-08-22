@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::target::Verdict;
+use crate::upstream::AppliedEffect;
 
 /// Result-schema version. Bump on any incompatible field change.
 pub const RESULT_VERSION: u32 = 1;
@@ -93,9 +94,24 @@ pub struct StepObservation {
     pub surface_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
+    /// What the target says its grant covers (`authorize`), and what it checked
+    /// for this presented call (`invoke`). Required evidence — see
+    /// [`crate::target::Authorization::grant_binding`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grant_binding: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presented_binding: Option<String>,
+    /// The structured reason a presented authorization was refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rejection: Option<String>,
     /// Observed by the runner from the upstream's effect ledger — never reported
     /// by the target.
     pub effect_applied: bool,
+    /// The ledger's own record of what reached the upstream, when one did. This
+    /// is the independent half of the evidence: the target says what it decided,
+    /// this says what actually happened, and the oracle checks they agree.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect: Option<AppliedEffect>,
     pub evidence: Value,
 }
 

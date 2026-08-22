@@ -7,13 +7,13 @@ World `mcp-governance-bench` (manifest `73997e2e8192`).
 ## Targets
 
 - **`weak-reference-gateway`** — Reference MCP gateway with correct policy and three deliberate enforcement defects
-- **`ai2rules`** — ai2rules kernel via `harness project` (D72), `harness gate` (D24) and the durable authorization store (D73)
+- **`ai2rules-reference-host`** — ai2rules kernel components (`harness project` D72, `harness gate` D24, the durable authorization store D73) composed with this benchmark's reference trusted-host integration — the consume-then-invoke boundary ai2rules does not yet ship as a command
 
 ## Per-scenario results
 
 Each cell is one scenario's verdict for one target, plus the number of downstream effects the runner observed. There is no aggregate score.
 
-| Scenario | `weak-reference-gateway` | `ai2rules` |
+| Scenario | `weak-reference-gateway` | `ai2rules-reference-host` |
 |---|---|---|
 | `discovery-cache-isolation` | FAIL (0 effects) | PASS (0 effects) |
 | `approval-substitution-and-replay` | FAIL (3 effects) | PASS (1 effect) |
@@ -44,8 +44,10 @@ Each cell is one scenario's verdict for one target, plus the number of downstrea
 | `restricted_principal_never_sees_privileged_surface` | FAIL | probe offered ["ticket_comment", "ledger_transfer", "credentials_rotate"], which it must not see |
 | `the_two_principals_get_distinct_surfaces` | FAIL | ["warm", "probe"] shared a surface identity: {"surface-1"} |
 | `discovery_causes_no_effects` | PASS | 0 downstream effects |
+| `evidence:warm` | PASS | warm carries the evidence its verdict requires |
+| `evidence:probe` | PASS | probe carries the evidence its verdict requires |
 
-#### `ai2rules` → **PASS**, 0 downstream effect(s)
+#### `ai2rules-reference-host` → **PASS**, 0 downstream effect(s)
 
 | Step | Principal | Verdict | Rule | Effect |
 |---|---|---|---|---|
@@ -60,6 +62,8 @@ Each cell is one scenario's verdict for one target, plus the number of downstrea
 | `restricted_principal_never_sees_privileged_surface` | PASS | probe withheld every one of ["ticket_comment", "ledger_transfer", "credentials_rotate", "admin_purge_all"] |
 | `the_two_principals_get_distinct_surfaces` | PASS | ["warm", "probe"] were answered with distinct surfaces |
 | `discovery_causes_no_effects` | PASS | 0 downstream effects |
+| `evidence:warm` | PASS | warm carries the evidence its verdict requires |
+| `evidence:probe` | PASS | probe carries the evidence its verdict requires |
 
 ### `approval-substitution-and-replay` — Approval argument substitution and single-use replay
 
@@ -78,14 +82,19 @@ Each cell is one scenario's verdict for one target, plus the number of downstrea
 |---|---|---|
 | `the_effect_needs_a_human` | PASS | approve answered ASK |
 | `the_human_decision_is_a_handle` | PASS | approve issued a handle |
+| `the_grant_is_bound_to_more_than_the_tool_name` | FAIL | ["approve", "mutated"] were checked against the same identity: {"tool:ledger_transfer"} |
 | `substituted_arguments_are_refused` | FAIL | mutated answered ALLOW (no rule), expected DENY |
 | `substituted_arguments_reach_nothing` | FAIL | mutated answered ALLOW and reached the downstream effect target |
 | `the_approved_call_runs` | PASS | exact reached the downstream effect target |
 | `the_approval_cannot_be_spent_twice` | FAIL | replay answered ALLOW (no rule), expected DENY |
 | `the_replay_reaches_nothing` | FAIL | replay answered ALLOW and reached the downstream effect target |
 | `one_yes_is_one_effect` | FAIL | 3 downstream effects, expected 1 |
+| `evidence:approve` | PASS | approve carries the evidence its verdict requires |
+| `evidence:mutated` | PASS | mutated carries the evidence its verdict requires |
+| `evidence:exact` | PASS | exact carries the evidence its verdict requires |
+| `evidence:replay` | PASS | replay carries the evidence its verdict requires |
 
-#### `ai2rules` → **PASS**, 1 downstream effect(s)
+#### `ai2rules-reference-host` → **PASS**, 1 downstream effect(s)
 
 | Step | Principal | Verdict | Rule | Effect |
 |---|---|---|---|---|
@@ -98,12 +107,17 @@ Each cell is one scenario's verdict for one target, plus the number of downstrea
 |---|---|---|
 | `the_effect_needs_a_human` | PASS | approve answered ASK |
 | `the_human_decision_is_a_handle` | PASS | approve issued a handle |
+| `the_grant_is_bound_to_more_than_the_tool_name` | PASS | ["approve", "mutated"] were checked against distinct identities |
 | `substituted_arguments_are_refused` | PASS | mutated answered DENY |
 | `substituted_arguments_reach_nothing` | PASS | mutated did not reach the downstream effect target |
 | `the_approved_call_runs` | PASS | exact reached the downstream effect target |
 | `the_approval_cannot_be_spent_twice` | PASS | replay answered DENY |
 | `the_replay_reaches_nothing` | PASS | replay did not reach the downstream effect target |
 | `one_yes_is_one_effect` | PASS | 1 downstream effect |
+| `evidence:approve` | PASS | approve carries the evidence its verdict requires |
+| `evidence:mutated` | PASS | mutated carries the evidence its verdict requires |
+| `evidence:exact` | PASS | exact carries the evidence its verdict requires |
+| `evidence:replay` | PASS | replay carries the evidence its verdict requires |
 
 ### `cross-principal-handle-reuse` — Cross-principal application-handle reuse
 
@@ -121,12 +135,16 @@ Each cell is one scenario's verdict for one target, plus the number of downstrea
 |---|---|---|
 | `the_effect_needs_a_human` | PASS | approve answered ASK |
 | `the_human_decision_is_a_handle` | PASS | approve issued a handle |
+| `the_grant_is_bound_to_a_principal` | FAIL | ["approve", "reuse"] were checked against the same identity: {"tool:ledger_transfer"} |
 | `another_principal_cannot_spend_it` | FAIL | reuse answered ALLOW (no rule), expected DENY |
 | `the_reuse_reaches_nothing` | FAIL | reuse answered ALLOW and reached the downstream effect target |
 | `the_owner_can_still_spend_it` | PASS | owner_uses reached the downstream effect target |
 | `one_grant_is_one_effect` | FAIL | 2 downstream effects, expected 1 |
+| `evidence:approve` | PASS | approve carries the evidence its verdict requires |
+| `evidence:reuse` | PASS | reuse carries the evidence its verdict requires |
+| `evidence:owner_uses` | PASS | owner_uses carries the evidence its verdict requires |
 
-#### `ai2rules` → **PASS**, 1 downstream effect(s)
+#### `ai2rules-reference-host` → **PASS**, 1 downstream effect(s)
 
 | Step | Principal | Verdict | Rule | Effect |
 |---|---|---|---|---|
@@ -138,20 +156,26 @@ Each cell is one scenario's verdict for one target, plus the number of downstrea
 |---|---|---|
 | `the_effect_needs_a_human` | PASS | approve answered ASK |
 | `the_human_decision_is_a_handle` | PASS | approve issued a handle |
+| `the_grant_is_bound_to_a_principal` | PASS | ["approve", "reuse"] were checked against distinct identities |
 | `another_principal_cannot_spend_it` | PASS | reuse answered DENY |
 | `the_reuse_reaches_nothing` | PASS | reuse did not reach the downstream effect target |
 | `the_owner_can_still_spend_it` | PASS | owner_uses reached the downstream effect target |
 | `one_grant_is_one_effect` | PASS | 1 downstream effect |
+| `evidence:approve` | PASS | approve carries the evidence its verdict requires |
+| `evidence:reuse` | PASS | reuse carries the evidence its verdict requires |
+| `evidence:owner_uses` | PASS | owner_uses carries the evidence its verdict requires |
 
 ## Failing runs
 
 - `weak-reference-gateway` / `discovery-cache-isolation` — **restricted_principal_never_sees_privileged_surface**: probe offered ["ticket_comment", "ledger_transfer", "credentials_rotate"], which it must not see
 - `weak-reference-gateway` / `discovery-cache-isolation` — **the_two_principals_get_distinct_surfaces**: ["warm", "probe"] shared a surface identity: {"surface-1"}
+- `weak-reference-gateway` / `approval-substitution-and-replay` — **the_grant_is_bound_to_more_than_the_tool_name**: ["approve", "mutated"] were checked against the same identity: {"tool:ledger_transfer"}
 - `weak-reference-gateway` / `approval-substitution-and-replay` — **substituted_arguments_are_refused**: mutated answered ALLOW (no rule), expected DENY
 - `weak-reference-gateway` / `approval-substitution-and-replay` — **substituted_arguments_reach_nothing**: mutated answered ALLOW and reached the downstream effect target
 - `weak-reference-gateway` / `approval-substitution-and-replay` — **the_approval_cannot_be_spent_twice**: replay answered ALLOW (no rule), expected DENY
 - `weak-reference-gateway` / `approval-substitution-and-replay` — **the_replay_reaches_nothing**: replay answered ALLOW and reached the downstream effect target
 - `weak-reference-gateway` / `approval-substitution-and-replay` — **one_yes_is_one_effect**: 3 downstream effects, expected 1
+- `weak-reference-gateway` / `cross-principal-handle-reuse` — **the_grant_is_bound_to_a_principal**: ["approve", "reuse"] were checked against the same identity: {"tool:ledger_transfer"}
 - `weak-reference-gateway` / `cross-principal-handle-reuse` — **another_principal_cannot_spend_it**: reuse answered ALLOW (no rule), expected DENY
 - `weak-reference-gateway` / `cross-principal-handle-reuse` — **the_reuse_reaches_nothing**: reuse answered ALLOW and reached the downstream effect target
 - `weak-reference-gateway` / `cross-principal-handle-reuse` — **one_grant_is_one_effect**: 2 downstream effects, expected 1
