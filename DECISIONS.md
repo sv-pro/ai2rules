@@ -2768,3 +2768,86 @@ verdicts was rejected because it would mix two different state machines.
 fake independently-held actuator and durable causal evidence. Production use still
 requires protected actuator credentials and downstream idempotency. The API is not
 yet wired into the default agent loop; AI2-7 can now exercise it in TradingWorld.
+
+## D75 — Discovery projection lives beside `gate`, in `harness-preview`
+
+**Context.** D72 introduced discovery projection as the sibling wire ABI to `gate`:
+the world owns which names exist, the host owns the schema. The implementation,
+however, landed inside `cli-harness/src/project.rs` — a *wire skin* that also held
+the projection logic. `gate` had already been split the other way (pure function in
+`harness-preview`, stdin/stdout skin in `cli-harness`) precisely so that native,
+WASM, and in-process Rust hosts could not answer differently.
+
+The asymmetry became visible the moment a second caller appeared. The governance
+benchmark (E18) needs to ask the projection question from Rust; with the logic in a
+`[[bin]]`-only crate its only options were to spawn the CLI or to reimplement the
+filter — and an adapter that reimplements a governance filter is exactly what the
+one-kernel model exists to prevent.
+
+**Decision.** Move the pure projection into `harness_preview::project`, beside
+`gate` and `preview`. `cli-harness/src/project.rs` keeps the wire operation —
+argument parsing, manifest loading, stdin/stdout — and delegates. The three
+projection tests moved with the function.
+
+**Alternatives.** (a) Leave it and let the benchmark spawn `harness project` for
+every call: correct, but it makes an in-process Rust host a second-class citizen
+and forbids a linked/wire parity check. (b) Give `cli-harness` a `[lib]` target and
+depend on that: works, but it makes a terminal entrypoint into a library other
+crates link, and puts governance logic in the crate whose job is host plumbing.
+(c) Duplicate the filter in the benchmark: rejected outright — the drift would be
+undetectable and the benchmark would be measuring its own copy.
+
+**Consequence.** One projection implementation, reachable from the CLI, from
+in-process Rust, and (when exported) from WASM. E18 exercises both transports on
+every scenario and compares them step for step, so a future divergence is a test
+failure rather than a discovery. No wire behaviour changed: `harness project`
+answers byte-identically.
+
+## D76 — A governance benchmark publishes per-scenario evidence, and asserts its baseline still fails
+
+**Context.** E18 needed a shape for the Public MCP Governance Benchmark's
+executable seed. Governance benchmarks fail in two characteristic ways. They
+produce a **score**, which lets a target trade a line it holds against a line it
+loses. And their **baseline silently improves** — someone fixes the deliberately
+weak reference implementation, every run goes green, and the suite keeps reporting
+success while measuring nothing.
+
+**Decision.** Four rules, enforced structurally rather than by convention:
+
+1. **No aggregate score, anywhere.** Results are a scenario × target matrix of
+   PASS/FAIL plus the observed downstream effect count. Neither `results.json` nor
+   the generated report contains a total.
+2. **PASS requires an observed decision *and* an observed effect count.** The
+   effect counter lives in the runner's mock upstream, not in either target, and
+   is read before and after every step. A target that answers `DENY` and calls the
+   upstream anyway fails the second half.
+3. **Neither side of the judgement knows the other.** Scenarios are data; the
+   oracle sees observations and expectations but no target identity; targets
+   implement three operations and never learn which case is running. "Expected to
+   fail here" is not expressible.
+4. **Acceptance is two-directional.** `--assert-contrast` (and the CI job) fails
+   when ai2rules fails a scenario *and* when the weak reference gateway passes one.
+
+The full verdict vocabulary — `ABSENT`, `ALLOW`, `DENY`, `ASK`, `ERROR_CLOSED`,
+`ERROR_OPEN`, `UNKNOWN` — is preserved in the schema even where no scenario yet
+produces the last three, because a governor that *broke* must never be recorded as
+a governor that *decided*.
+
+**Alternatives.** (a) A single "governance score" per target: rejected as above; it
+is the format that made every prior comparison unciteable. (b) Encoding expected
+failures per target in the scenario files: rejected — the oracle would then be
+grading against its own answer key, and a real regression in ai2rules would be
+indistinguishable from an intended weak-baseline failure. (c) Letting each target
+report whether an effect occurred: rejected; that is the one fact a target under
+test must not be trusted for. (d) Skipping the weak baseline entirely and asserting
+only that ai2rules passes: rejected — without a target that fails, a green suite is
+evidence of nothing, which is precisely finding #18's lesson applied to evidence
+rather than to artifacts.
+
+**Consequence.** The seed pack is small (three scenarios) and honest about it: its
+README states what it does not claim, including that ai2rules does not yet ship the
+trusted authorization boundary as a command, so a host that omits ~40 lines of
+wiring gets the weak gateway's third defect from a correct kernel. The committed
+`results/` directory is a build output in git — the shape that let the WASM artifact
+rot for seven weeks (finding #18) — so the `governance-bench` CI job regenerates it
+and fails on drift.

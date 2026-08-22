@@ -16,7 +16,7 @@ design), and `PLAN.md` (epic-level execution plan; the task source of truth).
 
 ```
 ai2rules/
-├── crates/                   # 10 Rust crates (the harness implementation)
+├── crates/                   # 11 Rust crates (the harness implementation + the benchmark runner)
 ├── docs/                     # 17 architecture/design markdown files
 ├── blog/                     # Astro website (Node sub-project, separate from Rust workspace)
 ├── docker/                   # Containerisation: Dockerfile, compose, egress proxy
@@ -53,8 +53,10 @@ harness-types (foundation — language-neutral contracts, pure data)
     ├─ harness-preview   pure preview: manifest → surface + decision matrix
     │       └─ shared by both harness-wasm and cli-harness serve
     ├─ harness-wasm      cdylib/rlib compiled to WebAssembly (wasm-bindgen)
-    └─ cli-harness       binary `harness` — REPL, serve, gate, project, host adapters
-                         (cc-hook / agy-hook), shared shape helpers in `hostkit`
+    ├─ cli-harness       binary `harness` — REPL, serve, gate, project, host adapters
+    │                    (cc-hook / agy-hook), shared shape helpers in `hostkit`
+    └─ govbench          binary `govbench` — the MCP governance benchmark runner
+                         (E18). Not part of the product; `publish = false`.
 ```
 
 | Crate | Primary public API |
@@ -69,12 +71,13 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
 | **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
+| **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all passing, native):**
-harness-types 5 · world-kernel 46 · compiler 18 · executor 16 · trace-store 24 ·
-provider-adapters 5 · agent-core 17 · harness-preview 45 · cli-harness 95 ·
-harness-wasm 0 · **total 321** (plus the harness-wasm Node smoke tests, run via
-wasm-pack)
+harness-types 5 · world-kernel 46 · compiler 20 · executor 28 · trace-store 43 ·
+provider-adapters 5 · agent-core 17 · harness-preview 56 · cli-harness 101 ·
+harness-wasm 0 · govbench 7 · **total 328** (plus the harness-wasm Node smoke
+tests, run via wasm-pack)
 
 ---
 
@@ -86,7 +89,9 @@ wasm-pack)
 - Only `ExecutionSpec` crosses the kernel→executor boundary.
 - The `executor` never imports `world-kernel` — decisions and execution are separate.
 - `harness-preview` and `harness-wasm` expose the same logic: no drift between
-  native and WASM gate/preview functions.
+  native and WASM gate/preview/project functions. Discovery projection lives in
+  `harness-preview` beside `gate` (D75); `cli-harness/src/project.rs` is the wire
+  skin only.
 
 The five conceptual layers (bottom to top): **substrate** → **capability** →
 **knowledge** → **intent** → **action**. The harness sits at the intent/action
@@ -102,7 +107,7 @@ the executor.
 | **M1 — Deterministic Core** | E0–E4 | Complete ✅ |
 | **M2 — Live Agent** | E5–E6 | Complete ✅ |
 | **M3 — Full Tool Surface** | E7, E9 | Complete ✅ |
-| **M4 — Isolation & Hardening** | E8, E10–E13 | In progress 🚧 |
+| **M4 — Isolation & Hardening** | E8, E10–E13, E18 | In progress 🚧 (E18 governance-benchmark seed done ✅) |
 | **M5 — Interactive Advocacy** | E14–E15 | E14 (WASM) done; E15 visualization planned |
 
 **Immediate priority:** E16 — internal JIRA MCP demo on GitHub Copilot + Claude
@@ -194,6 +199,18 @@ bash scripts/assemble-npm-packages.sh
 node npm/verify-packages.js && node scripts/check-npm-pack.mjs
 ```
 
+**When you change the kernel, the gate ABI, the projection, or the approval
+store, re-run the governance benchmark** — its `results/` directory is a build
+output committed to git, and CI (`governance-bench`) fails on drift:
+
+```bash
+bash scripts/run-governance-bench.sh   # regenerates results/{results.json,REPORT.md}
+```
+
+It also fails when the *weak baseline stops failing* (D76): a benchmark whose
+baseline goes green has stopped measuring anything, so fixing the reference
+gateway is a deliberate act with a scenario change beside it.
+
 **Demo binaries** (run via `cargo run --example <name> --offline`):
 - `kernel_demo` — taint + disposition walkthrough
 - `execution_demo` — executor boundary
@@ -230,6 +247,8 @@ marker in the same commit as the kernel change.
 | `.agents/hooks.json` + `.agents/hooks/world-gate.sh` | Antigravity PreToolUse wiring → `harness agy-hook` (D48) |
 | `docs/demos/antigravity/` | Antigravity host runbook + the verified hook contract |
 | `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
+| `docs/benchmarks/mcp-governance/` | Public MCP Governance Benchmark seed (issue #64 / AI2-5, E18): three scenarios, an intentionally weak reference gateway, ai2rules over both transports, and the generated per-scenario report. Runner: `crates/govbench` |
+| `scripts/run-governance-bench.sh` | The one command for the benchmark. Builds, runs both targets over both transports, regenerates `docs/benchmarks/mcp-governance/results/`, and fails if either half of the contrast stops holding (CI job `governance-bench`) |
 | `docs/benchmarks/deepseek-harness/` | Governor-integrity benchmark of DeepSeek Harness (issue #54): where final authority lives, monotonic-guard integrity, approval integrity, execution-seam matrix, ai2rules comparison — with reproducible probes |
 | `docs/demos/deepseek-harness/` | DeepSeek Harness discovery + invocation adapter (issue #55): `system-prompt/assemble` → `harness project`, `tools/pre-execute` → `harness gate`. Fail-closed when engaged (D71/D72); revocation and stale-call tests against real dsh services |
 | `.github/workflows/deepseek-integration.yml` | Path-filtered 13-case adapter test against immutable DeepSeek Harness commit `141eb6fef83422698aef7a981029e843e8161534` |

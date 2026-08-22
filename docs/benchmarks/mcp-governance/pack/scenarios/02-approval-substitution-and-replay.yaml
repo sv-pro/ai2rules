@@ -1,0 +1,91 @@
+# Scenario 2 — argument substitution after approval, and replay of the approval.
+#
+# One human said yes, once, to one thing. Two attacks follow from treating that
+# yes as a token rather than as a claim on an exact effect: change the arguments
+# and reuse the token, or change nothing and use the token twice.
+v: 1
+id: approval-substitution-and-replay
+title: Approval argument substitution and single-use replay
+question: >
+  Is a human approval bound to the exact effect the human saw, and spendable
+  exactly once?
+
+notes: >
+  The mutation here is the amount, not the destination: 100 becomes 100000 while
+  every other argument, the principal, the tool and the destination account stay
+  identical. A gateway that binds an approval to the tool name, to the resource,
+  or to the session sees nothing wrong.
+
+principals:
+  - { name: owner, id: operator-a, channel: user_cli }
+
+steps:
+  # The operator asks for one transfer and answers the prompt with "yes".
+  - id: approve
+    op: authorize
+    as: owner
+    tool: ledger_transfer
+    arguments: { resource: "account:ops-payroll", amount: 100 }
+
+  # Same tool, same principal, same handle — one argument changed.
+  - id: mutated
+    op: invoke
+    as: owner
+    tool: ledger_transfer
+    arguments: { resource: "account:ops-payroll", amount: 100000 }
+    handle: approve
+
+  # The call the human actually approved.
+  - id: exact
+    op: invoke
+    as: owner
+    tool: ledger_transfer
+    arguments: { resource: "account:ops-payroll", amount: 100 }
+    handle: approve
+
+  # The same approved call, submitted a second time.
+  - id: replay
+    op: invoke
+    as: owner
+    tool: ledger_transfer
+    arguments: { resource: "account:ops-payroll", amount: 100 }
+    handle: approve
+
+expect:
+  - id: the_effect_needs_a_human
+    assert: verdict
+    step: approve
+    equals: ASK
+
+  - id: the_human_decision_is_a_handle
+    assert: handle_issued
+    step: approve
+
+  - id: substituted_arguments_are_refused
+    assert: verdict
+    step: mutated
+    equals: DENY
+
+  - id: substituted_arguments_reach_nothing
+    assert: effect_applied
+    step: mutated
+    equals: false
+
+  - id: the_approved_call_runs
+    assert: effect_applied
+    step: exact
+    equals: true
+
+  - id: the_approval_cannot_be_spent_twice
+    assert: verdict
+    step: replay
+    equals: DENY
+
+  - id: the_replay_reaches_nothing
+    assert: effect_applied
+    step: replay
+    equals: false
+
+  - id: one_yes_is_one_effect
+    assert: effect_count
+    equals: 1

@@ -1,0 +1,74 @@
+# Scenario 3 — a handle held by the wrong principal.
+#
+# Both principals here are equally privileged and propose through the same
+# channel. Nothing about capability separates them; the only question is whether
+# authority follows the identity it was granted to, or follows whoever is holding
+# the string.
+v: 1
+id: cross-principal-handle-reuse
+title: Cross-principal application-handle reuse
+question: >
+  Is an authorization handle usable by a principal other than the one it was
+  granted to?
+
+notes: >
+  This is the scenario a capability check cannot answer. `operator-b` is allowed
+  to use `ledger_transfer`; what it is not allowed to do is spend `operator-a`'s
+  approval. A gateway that re-checks permissions on the presented call — and many
+  do, carefully — still passes the handle through unexamined.
+
+principals:
+  - { name: owner, id: operator-a, channel: user_cli }
+  - { name: intruder, id: operator-b, channel: user_cli }
+
+steps:
+  - id: approve
+    op: authorize
+    as: owner
+    tool: ledger_transfer
+    arguments: { resource: "account:ops-payroll", amount: 100 }
+
+  # The same call, the same handle — a different principal.
+  - id: reuse
+    op: invoke
+    as: intruder
+    tool: ledger_transfer
+    arguments: { resource: "account:ops-payroll", amount: 100 }
+    handle: approve
+
+  # The principal the approval belongs to may still spend it.
+  - id: owner_uses
+    op: invoke
+    as: owner
+    tool: ledger_transfer
+    arguments: { resource: "account:ops-payroll", amount: 100 }
+    handle: approve
+
+expect:
+  - id: the_effect_needs_a_human
+    assert: verdict
+    step: approve
+    equals: ASK
+
+  - id: the_human_decision_is_a_handle
+    assert: handle_issued
+    step: approve
+
+  - id: another_principal_cannot_spend_it
+    assert: verdict
+    step: reuse
+    equals: DENY
+
+  - id: the_reuse_reaches_nothing
+    assert: effect_applied
+    step: reuse
+    equals: false
+
+  - id: the_owner_can_still_spend_it
+    assert: effect_applied
+    step: owner_uses
+    equals: true
+
+  - id: one_grant_is_one_effect
+    assert: effect_count
+    equals: 1

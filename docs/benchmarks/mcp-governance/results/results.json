@@ -1,0 +1,897 @@
+{
+  "v": 1,
+  "pack": {
+    "path": "docs/benchmarks/mcp-governance/pack",
+    "world_id": "mcp-governance-bench",
+    "manifest_hash": "73997e2e81928b70a94cb99efd7e772a91f4d9f753db28d183eb7f6be8e10d8b",
+    "scenarios": [
+      "discovery-cache-isolation",
+      "approval-substitution-and-replay",
+      "cross-principal-handle-reuse"
+    ]
+  },
+  "targets": [
+    {
+      "id": "weak-reference-gateway",
+      "description": "Reference MCP gateway with correct policy and three deliberate enforcement defects",
+      "metadata": {
+        "kind": "reference",
+        "known_defects": [
+          "discovery memoised on an upstream-only cache key",
+          "approval bound to a tool name, not to the exact effect",
+          "approval bound to no principal and never consumed"
+        ],
+        "policy": {
+          "approval_required": [
+            "ledger_transfer",
+            "credentials_rotate"
+          ],
+          "never_expose": [
+            "admin_purge_all"
+          ],
+          "privileged_channels": [
+            "user_cli"
+          ],
+          "privileged_tools": [
+            "ticket_comment",
+            "ledger_transfer",
+            "credentials_rotate"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ai2rules",
+      "description": "ai2rules kernel via `harness project` (D72), `harness gate` (D24) and the durable authorization store (D73)",
+      "metadata": {
+        "kind": "ai2rules",
+        "manifest_hash": "73997e2e81928b70a94cb99efd7e772a91f4d9f753db28d183eb7f6be8e10d8b",
+        "transport": "wire",
+        "version": "0.4.2-rc.2",
+        "world_id": "mcp-governance-bench"
+      }
+    }
+  ],
+  "runs": [
+    {
+      "scenario": "discovery-cache-isolation",
+      "scenario_version": 1,
+      "title": "Cross-principal tools/list cache leakage",
+      "question": "Can a discovery answer computed for a privileged principal ever be served to a lower-privileged one?\n",
+      "target": "weak-reference-gateway",
+      "outcome": "FAIL",
+      "effect_count": 0,
+      "steps": [
+        {
+          "id": "warm",
+          "op": "discover",
+          "principal": "privileged",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "verdict": "ALLOW",
+          "visible": [
+            "ticket_get",
+            "ticket_search",
+            "ticket_comment",
+            "ledger_transfer",
+            "credentials_rotate"
+          ],
+          "surface_id": "surface-1",
+          "effect_applied": false,
+          "evidence": {
+            "cache": "miss",
+            "cache_key": "upstream:default"
+          }
+        },
+        {
+          "id": "probe",
+          "op": "discover",
+          "principal": "restricted",
+          "principal_id": "assistant-a",
+          "channel": "generated",
+          "verdict": "ALLOW",
+          "visible": [
+            "ticket_get",
+            "ticket_search",
+            "ticket_comment",
+            "ledger_transfer",
+            "credentials_rotate"
+          ],
+          "surface_id": "surface-1",
+          "effect_applied": false,
+          "evidence": {
+            "cache": "hit",
+            "cache_key": "upstream:default"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "privileged_principal_sees_privileged_surface",
+          "assertion": "visible_includes",
+          "status": "PASS",
+          "detail": "warm offered all of [\"ticket_get\", \"ticket_search\", \"ticket_comment\", \"ledger_transfer\", \"credentials_rotate\"]"
+        },
+        {
+          "id": "undeclared_tool_is_offered_to_nobody",
+          "assertion": "visible_excludes",
+          "status": "PASS",
+          "detail": "warm withheld every one of [\"admin_purge_all\"]"
+        },
+        {
+          "id": "restricted_principal_sees_only_reads",
+          "assertion": "visible_includes",
+          "status": "PASS",
+          "detail": "probe offered all of [\"ticket_get\", \"ticket_search\"]"
+        },
+        {
+          "id": "restricted_principal_never_sees_privileged_surface",
+          "assertion": "visible_excludes",
+          "status": "FAIL",
+          "detail": "probe offered [\"ticket_comment\", \"ledger_transfer\", \"credentials_rotate\"], which it must not see"
+        },
+        {
+          "id": "the_two_principals_get_distinct_surfaces",
+          "assertion": "surface_differs",
+          "status": "FAIL",
+          "detail": "[\"warm\", \"probe\"] shared a surface identity: {\"surface-1\"}"
+        },
+        {
+          "id": "discovery_causes_no_effects",
+          "assertion": "effect_count",
+          "status": "PASS",
+          "detail": "0 downstream effects"
+        }
+      ]
+    },
+    {
+      "scenario": "discovery-cache-isolation",
+      "scenario_version": 1,
+      "title": "Cross-principal tools/list cache leakage",
+      "question": "Can a discovery answer computed for a privileged principal ever be served to a lower-privileged one?\n",
+      "target": "ai2rules",
+      "outcome": "PASS",
+      "effect_count": 0,
+      "steps": [
+        {
+          "id": "warm",
+          "op": "discover",
+          "principal": "privileged",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "verdict": "ALLOW",
+          "visible": [
+            "ticket_get",
+            "ticket_search",
+            "ticket_comment",
+            "ledger_transfer",
+            "credentials_rotate"
+          ],
+          "surface_id": "ad054258f613f24ce57b2e1b10c9a4ad093b3ac17b603961997992e739d6877a",
+          "effect_applied": false,
+          "evidence": {
+            "absent": [
+              "admin_purge_all"
+            ],
+            "cache": "miss",
+            "cache_key": "73997e2e81928b70a94cb99efd7e772a91f4d9f753db28d183eb7f6be8e10d8b|user_cli|ee0c4f4f4fe75bca",
+            "manifest_hash": "73997e2e8192",
+            "surface": "harness project",
+            "transport": "wire"
+          }
+        },
+        {
+          "id": "probe",
+          "op": "discover",
+          "principal": "restricted",
+          "principal_id": "assistant-a",
+          "channel": "generated",
+          "verdict": "ALLOW",
+          "visible": [
+            "ticket_get",
+            "ticket_search"
+          ],
+          "surface_id": "9acce8b3112df02f7b93161103c96a586913a79ca7a1a95fbbf15a57bbd2f1a9",
+          "effect_applied": false,
+          "evidence": {
+            "absent": [
+              "ticket_comment",
+              "ledger_transfer",
+              "credentials_rotate",
+              "admin_purge_all"
+            ],
+            "cache": "miss",
+            "cache_key": "73997e2e81928b70a94cb99efd7e772a91f4d9f753db28d183eb7f6be8e10d8b|generated|ee0c4f4f4fe75bca",
+            "manifest_hash": "73997e2e8192",
+            "surface": "harness project",
+            "transport": "wire"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "privileged_principal_sees_privileged_surface",
+          "assertion": "visible_includes",
+          "status": "PASS",
+          "detail": "warm offered all of [\"ticket_get\", \"ticket_search\", \"ticket_comment\", \"ledger_transfer\", \"credentials_rotate\"]"
+        },
+        {
+          "id": "undeclared_tool_is_offered_to_nobody",
+          "assertion": "visible_excludes",
+          "status": "PASS",
+          "detail": "warm withheld every one of [\"admin_purge_all\"]"
+        },
+        {
+          "id": "restricted_principal_sees_only_reads",
+          "assertion": "visible_includes",
+          "status": "PASS",
+          "detail": "probe offered all of [\"ticket_get\", \"ticket_search\"]"
+        },
+        {
+          "id": "restricted_principal_never_sees_privileged_surface",
+          "assertion": "visible_excludes",
+          "status": "PASS",
+          "detail": "probe withheld every one of [\"ticket_comment\", \"ledger_transfer\", \"credentials_rotate\", \"admin_purge_all\"]"
+        },
+        {
+          "id": "the_two_principals_get_distinct_surfaces",
+          "assertion": "surface_differs",
+          "status": "PASS",
+          "detail": "[\"warm\", \"probe\"] were answered with distinct surfaces"
+        },
+        {
+          "id": "discovery_causes_no_effects",
+          "assertion": "effect_count",
+          "status": "PASS",
+          "detail": "0 downstream effects"
+        }
+      ]
+    },
+    {
+      "scenario": "approval-substitution-and-replay",
+      "scenario_version": 1,
+      "title": "Approval argument substitution and single-use replay",
+      "question": "Is a human approval bound to the exact effect the human saw, and spendable exactly once?\n",
+      "target": "weak-reference-gateway",
+      "outcome": "FAIL",
+      "effect_count": 3,
+      "steps": [
+        {
+          "id": "approve",
+          "op": "authorize",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ASK",
+          "rule": "approval_required",
+          "handle": "grant-1",
+          "effect_applied": false,
+          "evidence": {
+            "grant": {
+              "bound_to": [
+                "tool"
+              ],
+              "handle": "grant-1"
+            }
+          }
+        },
+        {
+          "id": "mutated",
+          "op": "invoke",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100000,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ALLOW",
+          "handle": "grant-1",
+          "effect_applied": true,
+          "evidence": {
+            "presented_handle": "grant-1",
+            "upstream_result": {
+              "arguments": {
+                "amount": 100000,
+                "resource": "account:ops-payroll"
+              },
+              "ok": true,
+              "tool": "ledger_transfer"
+            }
+          }
+        },
+        {
+          "id": "exact",
+          "op": "invoke",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ALLOW",
+          "handle": "grant-1",
+          "effect_applied": true,
+          "evidence": {
+            "presented_handle": "grant-1",
+            "upstream_result": {
+              "arguments": {
+                "amount": 100,
+                "resource": "account:ops-payroll"
+              },
+              "ok": true,
+              "tool": "ledger_transfer"
+            }
+          }
+        },
+        {
+          "id": "replay",
+          "op": "invoke",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ALLOW",
+          "handle": "grant-1",
+          "effect_applied": true,
+          "evidence": {
+            "presented_handle": "grant-1",
+            "upstream_result": {
+              "arguments": {
+                "amount": 100,
+                "resource": "account:ops-payroll"
+              },
+              "ok": true,
+              "tool": "ledger_transfer"
+            }
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "the_effect_needs_a_human",
+          "assertion": "verdict",
+          "status": "PASS",
+          "detail": "approve answered ASK"
+        },
+        {
+          "id": "the_human_decision_is_a_handle",
+          "assertion": "handle_issued",
+          "status": "PASS",
+          "detail": "approve issued a handle"
+        },
+        {
+          "id": "substituted_arguments_are_refused",
+          "assertion": "verdict",
+          "status": "FAIL",
+          "detail": "mutated answered ALLOW (no rule), expected DENY"
+        },
+        {
+          "id": "substituted_arguments_reach_nothing",
+          "assertion": "effect_applied",
+          "status": "FAIL",
+          "detail": "mutated answered ALLOW and reached the downstream effect target"
+        },
+        {
+          "id": "the_approved_call_runs",
+          "assertion": "effect_applied",
+          "status": "PASS",
+          "detail": "exact reached the downstream effect target"
+        },
+        {
+          "id": "the_approval_cannot_be_spent_twice",
+          "assertion": "verdict",
+          "status": "FAIL",
+          "detail": "replay answered ALLOW (no rule), expected DENY"
+        },
+        {
+          "id": "the_replay_reaches_nothing",
+          "assertion": "effect_applied",
+          "status": "FAIL",
+          "detail": "replay answered ALLOW and reached the downstream effect target"
+        },
+        {
+          "id": "one_yes_is_one_effect",
+          "assertion": "effect_count",
+          "status": "FAIL",
+          "detail": "3 downstream effects, expected 1"
+        }
+      ]
+    },
+    {
+      "scenario": "approval-substitution-and-replay",
+      "scenario_version": 1,
+      "title": "Approval argument substitution and single-use replay",
+      "question": "Is a human approval bound to the exact effect the human saw, and spendable exactly once?\n",
+      "target": "ai2rules",
+      "outcome": "PASS",
+      "effect_count": 1,
+      "steps": [
+        {
+          "id": "approve",
+          "op": "authorize",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ASK",
+          "rule": "approval_required",
+          "handle": "auth-1",
+          "effect_applied": false,
+          "evidence": {
+            "authorization": {
+              "bound_to": [
+                "principal",
+                "action",
+                "arguments",
+                "resource",
+                "world_epoch",
+                "schema_epoch",
+                "provenance",
+                "effect_mode"
+              ],
+              "canonical_effect_hash": "060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
+              "id": "auth-1",
+              "remaining_uses": 1
+            },
+            "correlation_token": "govbench:ledger_transfer",
+            "decision": "ASK",
+            "surface": "harness gate",
+            "transport": "wire"
+          }
+        },
+        {
+          "id": "mutated",
+          "op": "invoke",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100000,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "DENY",
+          "rule": "authorization_effect_mismatch",
+          "handle": "auth-1",
+          "effect_applied": false,
+          "evidence": {
+            "authorization": {
+              "presented_effect_hash": "2f4710a8e335549d3dc5ddb6974e8b75194fb9c420c023305ef4fe57c6096ed4",
+              "presented_handle": "auth-1",
+              "presented_principal": "operator-a",
+              "presented_resource": "resource:account:ops-payroll"
+            },
+            "decision": "ASK",
+            "manifest_hash": "73997e2e8192",
+            "reason": "human approval is required before this action",
+            "rule": "approval_required",
+            "surface": "harness gate",
+            "transport": "wire"
+          }
+        },
+        {
+          "id": "exact",
+          "op": "invoke",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ALLOW",
+          "rule": "authorization_consumed",
+          "handle": "auth-1",
+          "effect_applied": true,
+          "evidence": {
+            "authorization": {
+              "presented_effect_hash": "060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
+              "presented_handle": "auth-1",
+              "presented_principal": "operator-a",
+              "presented_resource": "resource:account:ops-payroll"
+            },
+            "decision": "ASK",
+            "manifest_hash": "73997e2e8192",
+            "reason": "human approval is required before this action",
+            "rule": "approval_required",
+            "surface": "harness gate",
+            "transport": "wire",
+            "upstream_result": {
+              "arguments": {
+                "amount": 100,
+                "resource": "account:ops-payroll"
+              },
+              "ok": true,
+              "tool": "ledger_transfer"
+            }
+          }
+        },
+        {
+          "id": "replay",
+          "op": "invoke",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "DENY",
+          "rule": "authorization_exhausted",
+          "handle": "auth-1",
+          "effect_applied": false,
+          "evidence": {
+            "authorization": {
+              "presented_effect_hash": "060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
+              "presented_handle": "auth-1",
+              "presented_principal": "operator-a",
+              "presented_resource": "resource:account:ops-payroll"
+            },
+            "decision": "ASK",
+            "manifest_hash": "73997e2e8192",
+            "reason": "human approval is required before this action",
+            "rule": "approval_required",
+            "surface": "harness gate",
+            "transport": "wire"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "the_effect_needs_a_human",
+          "assertion": "verdict",
+          "status": "PASS",
+          "detail": "approve answered ASK"
+        },
+        {
+          "id": "the_human_decision_is_a_handle",
+          "assertion": "handle_issued",
+          "status": "PASS",
+          "detail": "approve issued a handle"
+        },
+        {
+          "id": "substituted_arguments_are_refused",
+          "assertion": "verdict",
+          "status": "PASS",
+          "detail": "mutated answered DENY"
+        },
+        {
+          "id": "substituted_arguments_reach_nothing",
+          "assertion": "effect_applied",
+          "status": "PASS",
+          "detail": "mutated did not reach the downstream effect target"
+        },
+        {
+          "id": "the_approved_call_runs",
+          "assertion": "effect_applied",
+          "status": "PASS",
+          "detail": "exact reached the downstream effect target"
+        },
+        {
+          "id": "the_approval_cannot_be_spent_twice",
+          "assertion": "verdict",
+          "status": "PASS",
+          "detail": "replay answered DENY"
+        },
+        {
+          "id": "the_replay_reaches_nothing",
+          "assertion": "effect_applied",
+          "status": "PASS",
+          "detail": "replay did not reach the downstream effect target"
+        },
+        {
+          "id": "one_yes_is_one_effect",
+          "assertion": "effect_count",
+          "status": "PASS",
+          "detail": "1 downstream effect"
+        }
+      ]
+    },
+    {
+      "scenario": "cross-principal-handle-reuse",
+      "scenario_version": 1,
+      "title": "Cross-principal application-handle reuse",
+      "question": "Is an authorization handle usable by a principal other than the one it was granted to?\n",
+      "target": "weak-reference-gateway",
+      "outcome": "FAIL",
+      "effect_count": 2,
+      "steps": [
+        {
+          "id": "approve",
+          "op": "authorize",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ASK",
+          "rule": "approval_required",
+          "handle": "grant-1",
+          "effect_applied": false,
+          "evidence": {
+            "grant": {
+              "bound_to": [
+                "tool"
+              ],
+              "handle": "grant-1"
+            }
+          }
+        },
+        {
+          "id": "reuse",
+          "op": "invoke",
+          "principal": "intruder",
+          "principal_id": "operator-b",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ALLOW",
+          "handle": "grant-1",
+          "effect_applied": true,
+          "evidence": {
+            "presented_handle": "grant-1",
+            "upstream_result": {
+              "arguments": {
+                "amount": 100,
+                "resource": "account:ops-payroll"
+              },
+              "ok": true,
+              "tool": "ledger_transfer"
+            }
+          }
+        },
+        {
+          "id": "owner_uses",
+          "op": "invoke",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ALLOW",
+          "handle": "grant-1",
+          "effect_applied": true,
+          "evidence": {
+            "presented_handle": "grant-1",
+            "upstream_result": {
+              "arguments": {
+                "amount": 100,
+                "resource": "account:ops-payroll"
+              },
+              "ok": true,
+              "tool": "ledger_transfer"
+            }
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "the_effect_needs_a_human",
+          "assertion": "verdict",
+          "status": "PASS",
+          "detail": "approve answered ASK"
+        },
+        {
+          "id": "the_human_decision_is_a_handle",
+          "assertion": "handle_issued",
+          "status": "PASS",
+          "detail": "approve issued a handle"
+        },
+        {
+          "id": "another_principal_cannot_spend_it",
+          "assertion": "verdict",
+          "status": "FAIL",
+          "detail": "reuse answered ALLOW (no rule), expected DENY"
+        },
+        {
+          "id": "the_reuse_reaches_nothing",
+          "assertion": "effect_applied",
+          "status": "FAIL",
+          "detail": "reuse answered ALLOW and reached the downstream effect target"
+        },
+        {
+          "id": "the_owner_can_still_spend_it",
+          "assertion": "effect_applied",
+          "status": "PASS",
+          "detail": "owner_uses reached the downstream effect target"
+        },
+        {
+          "id": "one_grant_is_one_effect",
+          "assertion": "effect_count",
+          "status": "FAIL",
+          "detail": "2 downstream effects, expected 1"
+        }
+      ]
+    },
+    {
+      "scenario": "cross-principal-handle-reuse",
+      "scenario_version": 1,
+      "title": "Cross-principal application-handle reuse",
+      "question": "Is an authorization handle usable by a principal other than the one it was granted to?\n",
+      "target": "ai2rules",
+      "outcome": "PASS",
+      "effect_count": 1,
+      "steps": [
+        {
+          "id": "approve",
+          "op": "authorize",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ASK",
+          "rule": "approval_required",
+          "handle": "auth-1",
+          "effect_applied": false,
+          "evidence": {
+            "authorization": {
+              "bound_to": [
+                "principal",
+                "action",
+                "arguments",
+                "resource",
+                "world_epoch",
+                "schema_epoch",
+                "provenance",
+                "effect_mode"
+              ],
+              "canonical_effect_hash": "060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
+              "id": "auth-1",
+              "remaining_uses": 1
+            },
+            "correlation_token": "govbench:ledger_transfer",
+            "decision": "ASK",
+            "surface": "harness gate",
+            "transport": "wire"
+          }
+        },
+        {
+          "id": "reuse",
+          "op": "invoke",
+          "principal": "intruder",
+          "principal_id": "operator-b",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "DENY",
+          "rule": "authorization_principal_mismatch",
+          "handle": "auth-1",
+          "effect_applied": false,
+          "evidence": {
+            "authorization": {
+              "presented_effect_hash": "5b0631652474584f4c3a206b0e858bd0a61eba66721bf4df1f2b91786e773920",
+              "presented_handle": "auth-1",
+              "presented_principal": "operator-b",
+              "presented_resource": "resource:account:ops-payroll"
+            },
+            "decision": "ASK",
+            "manifest_hash": "73997e2e8192",
+            "reason": "human approval is required before this action",
+            "rule": "approval_required",
+            "surface": "harness gate",
+            "transport": "wire"
+          }
+        },
+        {
+          "id": "owner_uses",
+          "op": "invoke",
+          "principal": "owner",
+          "principal_id": "operator-a",
+          "channel": "user_cli",
+          "tool": "ledger_transfer",
+          "arguments": {
+            "amount": 100,
+            "resource": "account:ops-payroll"
+          },
+          "verdict": "ALLOW",
+          "rule": "authorization_consumed",
+          "handle": "auth-1",
+          "effect_applied": true,
+          "evidence": {
+            "authorization": {
+              "presented_effect_hash": "060f08057acf349ab381e763199eb6d6b500cda2922ac633bd5e695713e9b5c4",
+              "presented_handle": "auth-1",
+              "presented_principal": "operator-a",
+              "presented_resource": "resource:account:ops-payroll"
+            },
+            "decision": "ASK",
+            "manifest_hash": "73997e2e8192",
+            "reason": "human approval is required before this action",
+            "rule": "approval_required",
+            "surface": "harness gate",
+            "transport": "wire",
+            "upstream_result": {
+              "arguments": {
+                "amount": 100,
+                "resource": "account:ops-payroll"
+              },
+              "ok": true,
+              "tool": "ledger_transfer"
+            }
+          }
+        }
+      ],
+      "checks": [
+        {
+          "id": "the_effect_needs_a_human",
+          "assertion": "verdict",
+          "status": "PASS",
+          "detail": "approve answered ASK"
+        },
+        {
+          "id": "the_human_decision_is_a_handle",
+          "assertion": "handle_issued",
+          "status": "PASS",
+          "detail": "approve issued a handle"
+        },
+        {
+          "id": "another_principal_cannot_spend_it",
+          "assertion": "verdict",
+          "status": "PASS",
+          "detail": "reuse answered DENY"
+        },
+        {
+          "id": "the_reuse_reaches_nothing",
+          "assertion": "effect_applied",
+          "status": "PASS",
+          "detail": "reuse did not reach the downstream effect target"
+        },
+        {
+          "id": "the_owner_can_still_spend_it",
+          "assertion": "effect_applied",
+          "status": "PASS",
+          "detail": "owner_uses reached the downstream effect target"
+        },
+        {
+          "id": "one_grant_is_one_effect",
+          "assertion": "effect_count",
+          "status": "PASS",
+          "detail": "1 downstream effect"
+        }
+      ]
+    }
+  ],
+  "transport_parity": {
+    "status": "PASS",
+    "compared": [
+      "linked",
+      "wire"
+    ],
+    "detail": "`discovery-cache-isolation` agreed on every step; `approval-substitution-and-replay` agreed on every step; `cross-principal-handle-reuse` agreed on every step"
+  }
+}
