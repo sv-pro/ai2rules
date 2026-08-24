@@ -2,16 +2,31 @@
 //!
 //! The model is shown only the tools the compiled world *projects* — dangerous
 //! actions that exist in the ontology but aren't projected are never offered. Raw
-//! payloads never enter context; the model sees typed [`Perception`]s.
+//! execution payloads never enter context directly; the model sees typed
+//! [`Perception`]s plus explicit governance feedback for non-executed calls.
 
-use harness_types::{ActionName, CompiledWorld, Descriptor, Perception};
+use harness_types::{ActionName, CompiledWorld, Decision, Descriptor, Perception};
 use provider_adapters::anthropic;
 use serde_json::Value;
 
-/// What the model sees this turn: prior perceptions and the tool surface.
+/// Deterministic policy/execution feedback for a proposed tool call that did not
+/// produce a normal executor perception (DENY, ABSENT, pending ASK, spec/exec
+/// failure, and similar outcomes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolFeedback {
+    pub action: String,
+    pub verdict: String,
+    pub decision: Option<Decision>,
+    pub rule: Option<String>,
+    pub is_error: bool,
+}
+
+/// What the model sees this turn: prior perceptions, governance feedback, and
+/// the currently projected tool surface.
 #[derive(Debug, Clone)]
 pub struct TurnContext {
     pub perceptions: Vec<Perception>,
+    pub feedback: Vec<ToolFeedback>,
     /// Anthropic-format tool definitions for exactly the projected actions.
     pub tools: Value,
 }
@@ -26,10 +41,27 @@ pub fn tool_surface(world: &CompiledWorld) -> Vec<(ActionName, &Descriptor)> {
 }
 
 /// Pack typed perceptions plus the projected surface into a turn context.
+/// Existing callers that do not need explicit governance feedback keep using
+/// this convenience entry point.
 pub fn pack(world: &CompiledWorld, perceptions: Vec<Perception>) -> TurnContext {
+    pack_with_feedback(world, perceptions, Vec::new())
+}
+
+/// Pack perceptions, deterministic governance feedback, and the projected tool
+/// surface. The orchestrator uses this form so a model can genuinely react to a
+/// refusal rather than merely having that refusal printed in a transcript.
+pub fn pack_with_feedback(
+    world: &CompiledWorld,
+    perceptions: Vec<Perception>,
+    feedback: Vec<ToolFeedback>,
+) -> TurnContext {
     let surface = tool_surface(world);
     let tools = anthropic::tool_definitions(&surface);
-    TurnContext { perceptions, tools }
+    TurnContext {
+        perceptions,
+        feedback,
+        tools,
+    }
 }
 
 #[cfg(test)]
@@ -41,10 +73,8 @@ mod tests {
     fn surface_is_only_projected_actions() {
         let world = compile_default();
         let surface = tool_surface(&world);
-        // Every entry is projected, and the count matches the projected set.
         assert!(surface.iter().all(|(a, _)| world.is_projected(a)));
         assert_eq!(surface.len(), world.projected_actions().count());
-        // The default world projects its base actions — read_workspace is offered.
         assert!(surface.iter().any(|(a, _)| a.as_str() == "read_workspace"));
     }
 
@@ -57,5 +87,20 @@ mod tests {
         assert!(tools
             .iter()
             .all(|t| t.get("name").is_some() && t.get("input_schema").is_some()));
+        assert!(ctx.feedback.is_empty());
+    }
+
+    #[test]
+    fn pack_with_feedback_preserves_governance_result() {
+        let world = compile_default();
+        let expected = ToolFeedback {
+            action: "fetch_web".into(),
+            verdict: "Deny (taint_invariant)".into(),
+            decision: Some(Decision::Deny),
+            rule: Some("taint_invariant".into()),
+            is_error: true,
+        };
+        let ctx = pack_with_feedback(&world, Vec::new(), vec![expected.clone()]);
+        assert_eq!(ctx.feedback, vec![expected]);
     }
 }
