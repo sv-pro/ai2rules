@@ -162,10 +162,12 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   `provider-adapters` Anthropic adapter normalizes `tool_use`/`tool_result`/tool
   defs ↔ the neutral `ToolCall`; `agent-core` exposes only the projected tool
   surface, then runs propose → adapt → `decide` → execute (simulated) → perceive
-  (tainted) → repeat, recording every decision to the trace. A `ModelClient`
-  trait + deterministic `ScriptedModel` keep it fully offline (a live HTTP client
-  is a later, feature-gated add). Reinforces invariants 3 and 4 — starting
-  Milestone 2.
+  (tainted) → return the correlated provider `tool_result` → repeat, recording
+  every decision to the trace. Non-executed `DENY`/`ABSENT`/`ASK` outcomes use
+  that same first-class feedback path, with structured decision/rule evidence;
+  observers remain presentation-only. A `ModelClient` trait + deterministic
+  `ScriptedModel` keep it fully offline (a live HTTP client is a later,
+  feature-gated add). Reinforces invariants 3 and 4 — starting Milestone 2.
 - **E6 — Approvals & Execution Modes:** human-in-the-loop as durable state. The
   kernel branches on `ExecutionMode` — an approval-required action `ASK`s
   interactively but **fails closed to `DENY` in background**; a durable
@@ -304,7 +306,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **330 tests** green.
+Builds clean offline with `clippy -D warnings`; **331 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

@@ -301,7 +301,10 @@ record → redact → replay → drift. **Milestone M1 complete (E0–E4).**
   actions are exposed.
 - [x] **E5.5** Model loop (`orchestrator.rs`): propose → adapt → `decide` →
   record (E4) → on ALLOW build spec + execute (SIMULATE) → perceive tainted
-  result → feed back; a `ModelClient` trait + deterministic `ScriptedModel`
+  result → feed back; the previous neutral `ToolOutcome` is correlated by call
+  ID and formatted into the next `TurnContext` as the provider `tool_result`, so
+  non-executed `DENY`/`ABSENT`/`ASK` decisions re-enter the model loop without an
+  observer side channel. A `ModelClient` trait + deterministic `ScriptedModel`
   stand in for an LLM.
 - [ ] **E5.6** Additional adapters (OpenAI, Gemini) — deferred. A real Anthropic
   HTTP client is also deferred (feature-gated, out of the offline core).

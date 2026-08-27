@@ -1,8 +1,8 @@
 //! End-to-end governed coding workflow showcase (AI2-12 / #71).
 //!
 //! This first slice is deliberately deterministic and offline. A tiny model
-//! drives the real agent-core loop, observes a governance refusal through an
-//! observer-owned state channel, and changes its next action because of that
+//! drives the real agent-core loop, receives a governance refusal as a
+//! provider-formatted tool result, and changes its next action because of that
 //! refusal. The executor performs the final patch for real inside a disposable
 //! fixture; a deterministic verifier proves the broken state became fixed.
 //!
@@ -13,11 +13,8 @@
 //! ```
 
 use std::fs;
-use std::sync::{Arc, Mutex};
 
-use agent_core::{
-    default_executor, run, ModelClient, ModelTurn, SessionConfig, TranscriptEntry, TurnContext,
-};
+use agent_core::{default_executor, run, ModelClient, ModelTurn, SessionConfig, TurnContext};
 use compiler::compile_default;
 use harness_types::EffectMode;
 use provider_adapters::anthropic::tool_use_block;
@@ -28,25 +25,18 @@ use world_kernel::ExecEnv;
 const BROKEN: &str = "def add(a, b):\n    return a - b\n";
 const FIXED: &str = "def add(a, b):\n    return a + b\n";
 
-#[derive(Debug, Default)]
-struct ObservedState {
-    last_action: Option<String>,
-    last_verdict: Option<String>,
-}
-
 struct ReplanningDemoModel {
     phase: u8,
-    observed: Arc<Mutex<ObservedState>>,
 }
 
 impl ReplanningDemoModel {
-    fn new(observed: Arc<Mutex<ObservedState>>) -> Self {
-        Self { phase: 0, observed }
+    fn new() -> Self {
+        Self { phase: 0 }
     }
 }
 
 impl ModelClient for ReplanningDemoModel {
-    fn next(&mut self, _ctx: &TurnContext) -> ModelTurn {
+    fn next(&mut self, ctx: &TurnContext) -> ModelTurn {
         let turn = match self.phase {
             // Inspect the broken implementation. The resulting file perception
             // taints the session, as workspace content is not trusted authority.
@@ -67,11 +57,14 @@ impl ModelClient for ReplanningDemoModel {
             // This branch is the point of the demo: the next action depends on
             // the *actual* governance result from the previous step.
             2 => {
-                let state = self.observed.lock().expect("observer state");
-                let denied = state
-                    .last_verdict
-                    .as_deref()
-                    .is_some_and(|v| v.starts_with("Deny"));
+                let denied = ctx.last_tool_result.as_ref().is_some_and(|result| {
+                    let Some(content) = result.get("content").and_then(serde_json::Value::as_str)
+                    else {
+                        return false;
+                    };
+                    serde_json::from_str::<serde_json::Value>(content)
+                        .is_ok_and(|feedback| feedback["decision"] == "DENY")
+                });
                 if denied {
                     ModelTurn::ToolUse(tool_use_block(
                         "local-fix",
@@ -142,18 +135,7 @@ fn main() {
         ..SessionConfig::default()
     };
 
-    let observed = Arc::new(Mutex::new(ObservedState::default()));
-    let mut model = ReplanningDemoModel::new(Arc::clone(&observed));
-    let observer_state = Arc::clone(&observed);
-    let mut observer = move |entry: &TranscriptEntry| {
-        println!(
-            "{:>16} -> {:<30} {}",
-            entry.action, entry.verdict, entry.result
-        );
-        let mut state = observer_state.lock().expect("observer state");
-        state.last_action = Some(entry.action.clone());
-        state.last_verdict = Some(entry.verdict.clone());
-    };
+    let mut model = ReplanningDemoModel::new();
 
     let outcome = run(
         &world,
@@ -163,8 +145,15 @@ fn main() {
         &mut approvals,
         &mut model,
         &config,
-        Some(&mut observer),
+        None,
     );
+
+    for entry in &outcome.transcript {
+        println!(
+            "{:>16} -> {:<30} {}",
+            entry.action, entry.verdict, entry.result
+        );
+    }
 
     let final_pass = fixture_test(fixture.path());
     println!(
