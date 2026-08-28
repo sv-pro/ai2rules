@@ -59,7 +59,7 @@
         "kind": "ai2rules-reference-host",
         "manifest_hash": "73997e2e81928b70a94cb99efd7e772a91f4d9f753db28d183eb7f6be8e10d8b",
         "transport": "wire",
-        "version": "0.4.2-rc.2",
+        "version": "0.5.0",
         "world_id": "mcp-governance-bench"
       }
     }

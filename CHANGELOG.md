@@ -12,17 +12,30 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
-The tree carries `0.4.2-rc.2`, and **`0.4.2` is deliberately unreleased.** Everything
-between it and `0.4.1` is CI and packaging — no kernel, adapter or CLI behaviour
-changed — so moving `latest` would ask every installed copy to update for nothing.
+## [0.5.0] — 2026-08-28
 
-The machinery it exercises is verified, which is the point of stopping here rather
-than pressing on: two candidates published end to end, and a cold install of
-`0.4.2-rc.2` from the public registry governs a project, denies a write outside it,
-denies egress under taint, and refuses when it cannot record either. **Cut `0.4.2`
-when real code lands, not before.**
+**The `0.4.2` hold is lifted, because the thing it was waiting for happened.** The
+hold had one condition: everything between `0.4.1` and the tree was CI and
+packaging, so moving `latest` would have asked every installed copy to update for
+nothing, and the note said to cut when real code landed. It has. `harness` grew a
+command, and the artifact that authorizes an `ASK` was replaced.
+
+**`0.4.2` stays permanently unreleased**, and this is a minor rather than the
+patch that number reserved: a new command and changed authorization semantics are
+not a patch. `0.4.2-rc.1` and `-rc.2` remain on npm under `next`, where they did
+the job they were cut for — proving the publish path end to end before a real
+release depended on it.
 
 ### Added
+
+- **`harness project` — shape a host's offered tool schemas through a compiled
+  world** (D72). Reads a projection request on stdin, writes the visible schemas
+  plus the manifest and schema identities on stdout. Discovery is a sibling of the
+  gate ABI rather than a second opinion inside it: the world owns which actions
+  exist and the host owns their schema, so an action the world does not project is
+  never offered, instead of being offered and then denied. `gate` and `project`
+  mint the world through one shared loader, so the two wire operations cannot
+  correlate different manifest hashes for the same file.
 
 - **The MCP governance benchmark seed** (issue #64, D76): three scenarios —
   cross-principal discovery-cache leakage, approval argument substitution and
@@ -35,7 +48,37 @@ when real code lands, not before.**
   trusted-host wiring — because `harness` does not yet ship the consume-then-invoke
   boundary as a command (E18.10).
 
+- **`StagedEffect` and independent external commit** (D74), in `harness-types` and
+  `trace-store` only. Staging, commit and receipt states exist as durable types
+  with their own tests; **no command reaches them**, so nothing the binary does
+  changes. Listed here because the store's on-disk vocabulary grew, and a reader
+  comparing versions will see it.
+
 ### Changed
+
+- **An `ASK` authorization is now an exact, durable, single-use claim** (D73). This
+  is the entry an existing caller should read. `ApprovalToken` survives as an alias
+  for `AuthorizationInstance`, so source still compiles — but it is no longer the
+  same artifact. It binds a trusted-runtime principal, the normalized action and
+  complete arguments, a stable resource label, world and schema epochs, provenance,
+  effect mode, an exclusive expiry, and exactly one remaining use. The store
+  appends `Consumed` **before** the external effect, and appends signed
+  `ConsumptionRejected` evidence with a specific reason when it will not.
+
+  *What this changes for a caller:* one authorization admits at most one attempt at
+  its exact effect. Substitution, cross-principal or cross-session reuse, expiry,
+  epoch drift, concurrent reuse and restart replay all fail closed with durable
+  evidence. **A retry after a failed effect needs a fresh human authorization.**
+  The old `is_granted → execute → mark_executed` sequence let two runtimes observe
+  one approved token and both execute, and a crash inside that window resurrected
+  the grant after restart; burning the claim is the only deterministic fail-closed
+  recovery without a transactional effect sink. Recovery is at-most-once, not an
+  unsafe promise of exactly-once external I/O.
+
+  *Upgrading:* an approval log written by `0.4.1` cannot be read by this version —
+  see **Fixed** below for what it says when it refuses. Delete the log and its key;
+  pending approvals are simply asked again. The `harness` CLI keeps its store in a
+  per-run tempdir, so this reaches embedders rather than CLI users.
 
 - **Discovery projection moved into `harness-preview`, beside `gate`** (D75).
   `harness project` is now a wire skin over `harness_preview::project`, so an
@@ -43,6 +86,38 @@ when real code lands, not before.**
   discovery question differently. **No wire behaviour changed** — `harness
   project` answers byte-identically, and the benchmark runs every scenario over
   both transports to keep it that way.
+
+- **An *engaged* host adapter fails closed on gate unavailability** (D71, issue
+  #55). The DeepSeek Harness `tools/pre-execute` adapter
+  (`docs/demos/deepseek-harness/`) now denies on every path that cannot produce a
+  trustworthy `ALLOW` — missing binary, non-zero exit, unparseable stdout,
+  unmappable verdict, unpersistable sidecar — with `AI2RULES_DISABLE=1` as the only
+  sanctioned bypass. **Not a change to the shipped binary:** `cc-hook` and the
+  OpenCode plugin stay fail-open on purpose (D37), because a bootstrap shim that
+  cannot locate the kernel never governed the session in the first place. The rule
+  attaches to an adapter that has already engaged.
+
+### Fixed
+
+- **The authorization store's lock no longer expires on a scheduler's whim**
+  (#68). Acquisition spun for 10,000 `yield_now()` attempts — a count, not a
+  duration, so it could run out in milliseconds while the competing consumer was
+  still flushing and syncing its durable event. It turned `main` red once. The wait
+  is now a five-second monotonic deadline with a 1 ms backoff, and still fails
+  closed with `WouldBlock` once the deadline passes.
+
+- **An approval log written by `0.4.1` is refused as old, not as forged.** The five
+  fields D73 added each carry a `#[serde(default)]` describing a legacy record — an
+  empty principal "never consumes", a zero expiry marks a "non-consumable
+  artifact". Those defaults were unreachable: the MAC covers a re-serialization of
+  the *parsed* event rather than the bytes on disk, so an old record parses and then
+  hashes to something its own version never wrote, and it is refused one step
+  earlier, at authentication. Refusing is correct and is unchanged. What was wrong
+  was the message — "the log has been modified by something without the key" sends
+  an operator hunting an intruder when the cause is an upgrade. **Same
+  fail-open/fail-closed confusion as the rc.2 pack guard, a third time:** a failure
+  to *read* an artifact reported as a verdict *about* it. `tests/legacy_upgrade.rs`
+  pins it with a genuine 0.4.1 line, MAC'd over its own bytes.
 
 ## [0.4.2-rc.2] — 2026-08-15
 
@@ -678,7 +753,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sv-pro/ai2rules/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/sv-pro/ai2rules/compare/v0.3.0...v0.3.1

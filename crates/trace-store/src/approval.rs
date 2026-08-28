@@ -633,12 +633,25 @@ fn load(path: &Path, key: &[u8]) -> io::Result<BTreeMap<ApprovalTokenId, Approva
         })?;
         let expected = hmac_hex(key, event_bytes(&signed.event)?.as_bytes());
         if !constant_time_eq(&expected, &signed.mac) {
+            // The MAC covers a re-serialization of the parsed event, not the bytes
+            // on disk, so a record written before D73 can never verify: it parses
+            // (every field it lacks has a default) and then hashes to something its
+            // own version never wrote. Refusing is right either way — but reporting
+            // a version change as tampering is the rc.2 pack-guard confusion again,
+            // aimed at the operator this time instead of at the artifact.
+            let cause = if predates_authorization_instance(&signed.event) {
+                "it was written before the authorization record carried a principal, \
+                 an expiry and a use budget, so this version cannot authenticate it. \
+                 Delete the log and its key; pending approvals will simply be asked \
+                 again"
+            } else {
+                "the log has been modified by something without the key. Refusing to \
+                 load it; pending approvals will simply be asked again"
+            };
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "approval log {} line {}: MAC does not verify — the log has been \
-                     modified by something without the key. Refusing to load it; \
-                     pending approvals will simply be asked again",
+                    "approval log {} line {}: MAC does not verify — {cause}",
                     path.display(),
                     n + 1
                 ),
@@ -647,6 +660,21 @@ fn load(path: &Path, key: &[u8]) -> io::Result<BTreeMap<ApprovalTokenId, Approva
         apply_event(&mut tokens, signed.event);
     }
     Ok(tokens)
+}
+
+/// A record from before D73: it parsed only because every field that version
+/// lacked carries a `#[serde(default)]`, and those defaults are exactly what it
+/// shows. This is a shape test for a better message, never a reason to admit the
+/// line — it stays refused.
+fn predates_authorization_instance(event: &ApprovalEvent) -> bool {
+    match event {
+        ApprovalEvent::Minted(token) => {
+            token.principal == PrincipalId::default()
+                && token.valid_until_unix_ms == 0
+                && token.remaining_uses == 0
+        }
+        _ => false,
+    }
 }
 
 fn apply_event(tokens: &mut BTreeMap<ApprovalTokenId, ApprovalToken>, event: ApprovalEvent) {
