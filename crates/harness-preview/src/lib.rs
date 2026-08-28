@@ -13,16 +13,20 @@
 //!
 //! Alongside the design-time [`preview`], [`gate`] is the *runtime* half: it
 //! governs one concrete proposed call (the host-neutral `harness gate` ABI,
-//! DECISIONS D24). Both run the real kernel and share this crate so native,
-//! WASM, and the per-host adapters can never diverge.
+//! DECISIONS D24), and [`project`] is its discovery sibling (D72): it shapes the
+//! tool surface a host is about to offer one proposing channel. All three run
+//! the real kernel and share this crate, so native, WASM, and the per-host
+//! adapters can never diverge.
 
 pub mod gate;
 pub mod host;
+pub mod project;
 
 pub use gate::{
     gate, GateApproval, GateContext, GateRequest, GateResponse, GateUsage, ABI_VERSION,
 };
 pub use host::{host_outcome, BlockKind, HostOutcome};
+pub use project::{project, PROJECTION_VERSION};
 
 use compiler::{compile, loader::load_yaml};
 use harness_types::{

@@ -128,7 +128,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
-| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10 planned |
+| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; **E18 governance benchmark seed delivered**; E8, E10 planned |
 | M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (576 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
 
 **Done so far:**
@@ -304,7 +304,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **321 tests** green.
+Builds clean offline with `clippy -D warnings`; **330 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -324,10 +324,12 @@ crates/               the harness implementation
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
   cli-harness/        terminal entrypoint + `serve`/`gate`/`project`/`mcp-gateway`/host adapters (binary `harness`) (E9, E11, E16, D48, D72)
-  harness-preview/    pure design-time preview + runtime gate() ABI, shared by serve + wasm + `harness gate` (E11/E14, D24)
+  harness-preview/    pure preview + runtime gate() ABI + discovery projection, shared by serve, wasm, `harness gate` and `harness project` (E11/E14, D24, D75)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
+  govbench/           MCP governance benchmark runner: 3 scenarios, weak baseline vs ai2rules (E18)
 docs/                 architecture (harness-architecture.md is canonical; one-kernel-many-hosts.md = cross-host parity)
-scripts/              runnable demos (demo-one-kernel-many-hosts.sh)
+  benchmarks/mcp-governance/  the governance smoke pack + its generated report (issue #64)
+scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
@@ -365,6 +367,31 @@ CI runs all four checks on every push and PR
 runs `scripts/check-demos.sh` — every example and demo script, asserting the
 verdict lines each one claims to show. The unit tests cover the kernel; that
 script covers what a reader actually sees.
+
+### The governance benchmark
+
+```bash
+bash scripts/run-governance-bench.sh      # offline, no LLM, ~10s
+```
+
+Three scenarios — cross-principal discovery-cache leakage, approval argument
+substitution and replay, cross-principal handle reuse — run against an
+intentionally weak reference gateway and against this kernel, under one
+deterministic oracle. The weak gateway turns one human "yes" into three
+irreversible transfers; the ai2rules target refuses the substitution
+(`authorization_effect_mismatch`), the replay (`authorization_exhausted`) and the
+stolen handle (`authorization_principal_mismatch`), and applies exactly one.
+
+That target is named `ai2rules-reference-host`, deliberately: it is kernel
+components plus this benchmark's own trusted-host wiring, because ai2rules does
+not yet ship the consume-then-invoke boundary as a command (PLAN.md E18.10).
+
+PASS needs all three halves — the verdict, the downstream effect count the runner
+watched, and evidence the oracle actually checks — and there is no aggregate
+score. Read
+[`docs/benchmarks/mcp-governance/`](docs/benchmarks/mcp-governance/), including
+what the pack does **not** claim. CI job `governance-bench` re-runs it and fails
+if the committed report has drifted, or if the weak baseline stops failing.
 
 ### Release binaries (no local toolchain needed)
 
