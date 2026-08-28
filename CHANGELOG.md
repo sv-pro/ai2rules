@@ -12,15 +12,19 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-28
+
 **The `0.4.2` hold is lifted, because the thing it was waiting for happened.** The
 hold had one condition: everything between `0.4.1` and the tree was CI and
 packaging, so moving `latest` would have asked every installed copy to update for
 nothing, and the note said to cut when real code landed. It has. `harness` grew a
 command, and the artifact that authorizes an `ASK` was replaced.
 
-The tree still carries `0.4.2-rc.2`; the release commit assigns the number. A new
-command and changed authorization semantics are not a patch, whatever the held
-number suggested.
+**`0.4.2` stays permanently unreleased**, and this is a minor rather than the
+patch that number reserved: a new command and changed authorization semantics are
+not a patch. `0.4.2-rc.1` and `-rc.2` remain on npm under `next`, where they did
+the job they were cut for — proving the publish path end to end before a real
+release depended on it.
 
 ### Added
 
@@ -749,7 +753,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sv-pro/ai2rules/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/sv-pro/ai2rules/compare/v0.3.0...v0.3.1
