@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use compiler::sha256_hex;
 use harness_types::{
@@ -420,8 +421,11 @@ pub(crate) struct StoreLock {
 
 impl StoreLock {
     pub(crate) fn acquire(path: &Path) -> io::Result<Self> {
-        const ATTEMPTS: usize = 10_000;
-        for _ in 0..ATTEMPTS {
+        const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+        const RETRY_DELAY: Duration = Duration::from_millis(1);
+        let deadline = Instant::now() + WAIT_TIMEOUT;
+
+        loop {
             match private_create_new(path) {
                 Ok(file) => {
                     return Ok(Self {
@@ -429,16 +433,18 @@ impl StoreLock {
                         _file: file,
                     })
                 }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists && Instant::now() < deadline => {
+                    std::thread::sleep(RETRY_DELAY);
+                }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                    std::thread::yield_now();
+                    return Err(io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        format!("authorization store lock {} is busy", path.display()),
+                    ));
                 }
                 Err(e) => return Err(e),
             }
         }
-        Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            format!("authorization store lock {} is busy", path.display()),
-        ))
     }
 }
 
@@ -990,6 +996,25 @@ mod tests {
         assert!(evidence.contains("ConsumptionRejected"));
         assert!(evidence.contains("principal_mismatch"));
         assert!(evidence.contains("expired"));
+    }
+
+    #[test]
+    fn lock_waits_for_current_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl.lock");
+        let owner = StoreLock::acquire(&path).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let waiter_barrier = Arc::clone(&barrier);
+        let waiter_path = path.clone();
+        let waiter = std::thread::spawn(move || {
+            waiter_barrier.wait();
+            StoreLock::acquire(&waiter_path).unwrap()
+        });
+
+        barrier.wait();
+        std::thread::sleep(Duration::from_millis(25));
+        drop(owner);
+        drop(waiter.join().unwrap());
     }
 
     #[test]
