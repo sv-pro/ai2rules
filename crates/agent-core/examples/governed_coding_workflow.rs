@@ -107,8 +107,7 @@ fn fixture_test(root: &Path) -> bool {
 }
 
 fn fresh_fixture() -> PathBuf {
-    let artifact_parent = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/demo-artifacts");
+    let artifact_parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/demo-artifacts");
     fs::create_dir_all(&artifact_parent).expect("create demo artifact directory");
     let artifact_parent = fs::canonicalize(artifact_parent).expect("canonical artifact directory");
     tempfile::Builder::new()
