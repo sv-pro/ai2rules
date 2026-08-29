@@ -3,8 +3,9 @@
 //! This first slice is deliberately deterministic and offline. A tiny model
 //! drives the real agent-core loop, receives a governance refusal as a
 //! provider-formatted tool result, and changes its next action because of that
-//! refusal. The executor performs the final patch for real inside a disposable
-//! fixture; a deterministic verifier proves the broken state became fixed.
+//! refusal. The executor performs the final patch for real inside a fresh
+//! fixture retained under `target/demo-artifacts/`; a deterministic verifier
+//! proves the broken state became fixed and the trace replays without drift.
 //!
 //! Run:
 //!
@@ -13,17 +14,21 @@
 //! ```
 
 use std::fs;
+use std::path::{Path, PathBuf};
 
-use agent_core::{default_executor, run, ModelClient, ModelTurn, SessionConfig, TurnContext};
+use agent_core::{
+    default_executor, run, tool_surface, ModelClient, ModelTurn, SessionConfig, TurnContext,
+};
 use compiler::compile_default;
 use harness_types::EffectMode;
 use provider_adapters::anthropic::tool_use_block;
 use serde_json::json;
-use trace_store::{ApprovalStore, TraceStore};
+use trace_store::{replay, ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
 const BROKEN: &str = "def add(a, b):\n    return a - b\n";
 const FIXED: &str = "def add(a, b):\n    return a + b\n";
+const EXPECTED_DIFF: &str = "--- calc.py (before)\n+++ calc.py (after)\n@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n";
 
 struct ReplanningDemoModel {
     phase: u8,
@@ -95,21 +100,33 @@ impl ModelClient for ReplanningDemoModel {
     }
 }
 
-fn fixture_test(root: &std::path::Path) -> bool {
+fn fixture_test(root: &Path) -> bool {
     fs::read_to_string(root.join("calc.py"))
         .map(|content| content == FIXED)
         .unwrap_or(false)
 }
 
+fn fresh_fixture() -> PathBuf {
+    let artifact_parent = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/demo-artifacts");
+    fs::create_dir_all(&artifact_parent).expect("create demo artifact directory");
+    let artifact_parent = fs::canonicalize(artifact_parent).expect("canonical artifact directory");
+    tempfile::Builder::new()
+        .prefix("governed-coding-workflow-")
+        .tempdir_in(artifact_parent)
+        .expect("create clean fixture")
+        .keep()
+}
+
 fn main() {
-    let fixture = tempfile::tempdir().expect("fixture");
-    fs::write(fixture.path().join("calc.py"), BROKEN).expect("write broken fixture");
+    let fixture = fresh_fixture();
+    fs::write(fixture.join("calc.py"), BROKEN).expect("write broken fixture");
 
     println!("ai2rules — governed coding workflow showcase");
     println!("task: fix calc.py without treating untrusted context as external authority\n");
     println!(
         "baseline fixture test: {}",
-        if fixture_test(fixture.path()) {
+        if fixture_test(&fixture) {
             "PASS"
         } else {
             "FAIL"
@@ -117,16 +134,23 @@ fn main() {
     );
 
     let world = compile_default();
+    let projected_tools = tool_surface(&world)
+        .into_iter()
+        .map(|(action, _)| action.as_str().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("projected tools: {projected_tools}\n");
+
     let executor = default_executor(&world);
-    let trace_path = fixture.path().join("trace.jsonl");
+    let trace_path = fixture.join("trace.jsonl");
     let trace = TraceStore::open(&trace_path);
     let mut approvals =
-        ApprovalStore::open(fixture.path().join("approvals.jsonl")).expect("approval store");
+        ApprovalStore::open(fixture.join("approvals.jsonl")).expect("approval store");
 
     let env = ExecEnv {
-        cwd: fixture.path().to_path_buf(),
-        readable_roots: vec![fixture.path().to_path_buf()],
-        writable_roots: vec![fixture.path().to_path_buf()],
+        cwd: fixture.clone(),
+        readable_roots: vec![fixture.clone()],
+        writable_roots: vec![fixture.clone()],
         ..ExecEnv::default()
     };
     let config = SessionConfig {
@@ -155,12 +179,13 @@ fn main() {
         );
     }
 
-    let final_pass = fixture_test(fixture.path());
+    let final_pass = fixture_test(&fixture);
+    fs::write(fixture.join("final.diff"), EXPECTED_DIFF).expect("write final diff");
+    println!("\nfinal diff:\n{EXPECTED_DIFF}");
     println!(
-        "\nfinal fixture test: {}",
+        "final fixture test: {}",
         if final_pass { "PASS" } else { "FAIL" }
     );
-    println!("decisions recorded: {}", outcome.records);
     if let Some(text) = outcome.final_text {
         println!("agent: {text}");
     }
@@ -184,12 +209,23 @@ fn main() {
         "the repaired fixture must pass deterministic verification"
     );
 
-    let trace_lines = fs::read_to_string(trace_path)
-        .expect("trace")
-        .lines()
-        .count();
+    let records = TraceStore::read(&trace_path).expect("read trace artifact");
+    let replay_report = replay(&records, &world);
+    println!("trace artifact: {}", trace_path.display());
+    println!(
+        "replay: {}/{} decisions reproduced",
+        replay_report.matched, replay_report.total
+    );
     assert!(
-        trace_lines >= 4,
-        "expected a decision trace for the workflow"
+        replay_report.total >= 4,
+        "expected a complete decision trace for the workflow"
+    );
+    assert_eq!(
+        replay_report.total, outcome.records,
+        "every recorded workflow decision must enter replay"
+    );
+    assert!(
+        replay_report.is_reproducible(),
+        "the workflow decisions must replay without drift"
     );
 }

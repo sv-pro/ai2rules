@@ -412,6 +412,44 @@ git tag v0.1.0 && git push gh v0.1.0   # → cross-OS binaries on the v0.1.0 Rel
 The demos below are the raw list; [`docs/TUTORIAL.md`](docs/TUTORIAL.md) walks the
 same ground in a deliberate order, with what each one is meant to prove.
 
+### Five-minute governed coding workflow
+
+Run one deterministic, credential-free scenario from a fresh fixture:
+
+```bash
+cargo run -p agent-core --example governed_coding_workflow
+```
+
+The example starts with a broken `calc.py`, then drives the real `agent-core`
+loop through four dependent tool calls:
+
+```text
+read_repo_file → fetch_web (DENY) → apply_workspace_patch → read_repo_file
+```
+
+The first read adds workspace-derived taint. The model then asks for external
+help; the kernel returns `DENY (taint_invariant)` as a correlated Anthropic
+`tool_result`. The next model turn reads that structured result and replans to a
+permitted local patch. The example prints the final diff, verifies the fixture
+moved from `FAIL` to `PASS`, reads its JSONL trace back, and replays every
+recorded decision against the same compiled world.
+
+| Workflow behavior | Evidence in the run |
+|---|---|
+| Multi-step orchestration | Four dependent calls complete before the final answer |
+| Tool use and projection | The full projected tool surface and each selected call are printed |
+| State / observation feedback | The first read taints the session; each result returns to the next model turn |
+| Governance boundary | External help is not executed: `DENY`, rule `taint_invariant` |
+| Approval / replanning | This shortest path exercises replanning after `DENY`; approval is not invoked because a hard denial is not approvable |
+| Evaluation | The expected unified diff is emitted and the fixture test changes `FAIL → PASS` |
+| Traceability | The retained `trace.jsonl` path is printed and replay must report `4/4 decisions reproduced` |
+
+The printed artifact directory remains under `target/demo-artifacts/` for
+inspection and also contains `final.diff`. Replay deliberately re-runs the pure
+governance decisions, not model sampling or side effects. `scripts/check-demos.sh`
+runs this same path in CI, so the walkthrough fails if the refusal, replan,
+verification, or replay evidence disappears.
+
 For a quick noninteractive demo, run the kernel plus the execution boundary. It
 compiles the default world, feeds it a handful of
 proposed tool calls — printing `ALLOW` / `ASK` / `DENY` / `ABSENT` / `REPLAN`
