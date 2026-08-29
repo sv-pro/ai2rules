@@ -37,6 +37,17 @@ classifier being right 100% of the time, you are already compromised. (See
 [`blog/.../ai-aikido.md`](../blog/src/content/blog/ai-aikido.md) and
 [`why-deny-is-dangerous.md`](../blog/src/content/blog/why-deny-is-dangerous.md).)
 
+The same problem now appears **before reasoning** when one agent or workflow is
+reachable through multiple ingress protocols. An authenticated principal, a
+channel-specific identity, a session or continuation identifier, and
+caller-controlled request options are authorization **context**; they are not
+capability grants. They may select or restrict a projected world, but they may not
+make an `ABSENT` capability present or weaken an existing `DENY` / `ASK` boundary.
+Otherwise the protocol adapter becomes a side door around the compiled world.
+This is the ingress-authority invariant formalized as P12 in
+[`PRINCIPLES.md`](PRINCIPLES.md) and tracked by
+[`#74`](https://github.com/sv-pro/ai2rules/issues/74).
+
 The same problem recurs above the action layer. An agent that *retrieves* from a
 knowledge base can be poisoned by a malicious document; an agent that *remembers*
 can have its memory corrupted; an agent that *plans* can be redirected. Each is an
@@ -90,6 +101,10 @@ Every fragment is the same border move applied to a different governed resource.
   per-agent capability surface, resolving to `ALLOW / DENY / ABSENT / SIMULATE`.
   Asks "what executable world exists for this actor?" rather than "can this actor
   do this action?"
+- **Ingress rule:** channel/protocol context is an input to projection, not a fifth
+  authority layer. Different authenticated ingress contexts may legitimately
+  select narrower worlds or different verdicts, but no adapter may project beyond
+  the compiled-world authority ceiling.
 - **Status:** conceptual + executable demo (TS). The clearest *illustration* of
   the harness's `CompiledWorld` idea, and the origin of the `ABSENT≠DENY`
   vocabulary.
