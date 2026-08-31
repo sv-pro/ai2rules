@@ -751,7 +751,7 @@ are published per scenario with no reassuring aggregate score.
 - [ ] **E18.12** External reproduction (AI2-9): one engineer outside this repository runs the
   pack from `docs/benchmarks/mcp-governance/README.md` alone and reports what was unclear.
 - [ ] **E18.13** OpenClaw 2.0 external target ([#77](https://github.com/sv-pro/ai2rules/issues/77)
-  / Linear AI2-21): pin `v2026.8.1` and run identical probes against documented
+  / [Linear AI2-21](https://linear.app/ai2rules/issue/AI2-21/benchmark-evaluate-openclaw-20-default-vs-hardened-execution)): pin `v2026.8.1` and run identical probes against documented
   `default-personal` and `hardened-team` profiles. Measure capability shaping, execution
   placement, approval binding/replay, protected-secret egress, shared-session role limits,
   and failure direction with runner-owned effect counts. The registered target profile is
