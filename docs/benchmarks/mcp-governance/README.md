@@ -193,6 +193,7 @@ confused with effective posture.
 This registration adds **no row** to the table or generated report above. A profile enters
 the executable target count only after its adapter, runner-owned effect observations,
 reproduction command, and limitations satisfy the target profile's evidence contract.
+
 ## 5. What this pack does not claim
 
 Stated plainly, because a benchmark's limitations are the part most likely to be
