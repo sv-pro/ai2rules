@@ -7,7 +7,6 @@
 
 use crate::hostkit;
 use harness_preview::{gate, GateContext, GateRequest, GateResponse, GateUsage, ABI_VERSION};
-use harness_types::CompiledWorld;
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -50,7 +49,8 @@ pub fn run(world_override: Option<&Path>) -> i32 {
             return 1;
         }
     };
-    let local_target = match hostkit::canonicalize_action_path(&cwd.join("ai2rules-demo-local.txt")) {
+    let local_target = match hostkit::canonicalize_action_path(&cwd.join("ai2rules-demo-local.txt"))
+    {
         Some(path) => hostkit::path_to_string(path),
         None => {
             eprintln!("demo: cannot resolve a safe workspace-local test path");
@@ -166,7 +166,10 @@ pub fn run(world_override: Option<&Path>) -> i32 {
         return 1;
     }
 
-    println!("\nReplay: {matched}/{} decisions reproduced", observed.len());
+    println!(
+        "\nReplay: {matched}/{} decisions reproduced",
+        observed.len()
+    );
     println!("Next: harness doctor");
     0
 }
