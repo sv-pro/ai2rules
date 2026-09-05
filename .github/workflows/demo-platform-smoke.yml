@@ -1,0 +1,108 @@
+name: Demo platform smoke
+
+on:
+  pull_request:
+    paths:
+      - "crates/cli-harness/**"
+      - "crates/harness-preview/**"
+      - "crates/world-kernel/**"
+      - "crates/compiler/**"
+      - "scripts/starter-world.yaml"
+      - "npm/**"
+      - ".github/workflows/demo-platform-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/cli-harness/**"
+      - "crates/harness-preview/**"
+      - "crates/world-kernel/**"
+      - "crates/compiler/**"
+      - "scripts/starter-world.yaml"
+      - "npm/**"
+      - ".github/workflows/demo-platform-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  npm-demo:
+    name: npm demo (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Build the native harness
+        run: cargo build --release --locked -p cli-harness
+
+      - name: Exercise the npm launcher and native platform package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          key="$(node -p 'process.platform + "-" + process.arch')"
+          case "$key" in
+            linux-x64)
+              platform_dir=linux-x64
+              platform_pkg=ai2rules-harness-linux-x64
+              binary=target/release/harness
+              exe=harness
+              ;;
+            darwin-x64)
+              platform_dir=darwin-x64
+              platform_pkg=ai2rules-harness-darwin-x64
+              binary=target/release/harness
+              exe=harness
+              ;;
+            darwin-arm64)
+              platform_dir=darwin-arm64
+              platform_pkg=ai2rules-harness-darwin-arm64
+              binary=target/release/harness
+              exe=harness
+              ;;
+            win32-x64)
+              platform_dir=windows-x64
+              platform_pkg=ai2rules-harness-windows-x64
+              binary=target/release/harness.exe
+              exe=harness.exe
+              ;;
+            *)
+              echo "::error::unsupported smoke runner $key"
+              exit 1
+              ;;
+          esac
+
+          root="$RUNNER_TEMP/ai2rules-demo-npm"
+          rm -rf "$root"
+          mkdir -p \
+            "$root/node_modules/ai2rules-harness/bin" \
+            "$root/node_modules/$platform_pkg" \
+            "$root/project"
+
+          cp npm/bin/harness.js "$root/node_modules/ai2rules-harness/bin/harness.js"
+          cp npm/package.json "$root/node_modules/ai2rules-harness/package.json"
+          cp "npm/platforms/$platform_dir/package.json" "$root/node_modules/$platform_pkg/package.json"
+          cp "$binary" "$root/node_modules/$platform_pkg/$exe"
+          chmod +x "$root/node_modules/$platform_pkg/$exe" || true
+
+          cd "$root/project"
+          launcher="$root/node_modules/ai2rules-harness/bin/harness.js"
+
+          node "$launcher" init
+          output="$(node "$launcher" demo)"
+          printf '%s\n' "$output"
+
+          grep -F "1. workspace-local write" <<<"$output"
+          grep -F "verdict: ALLOW" <<<"$output"
+          grep -F "3. tainted input -> network effect" <<<"$output"
+          grep -F "verdict: ASK" <<<"$output"
+          grep -F "Replay: 5/5 decisions reproduced" <<<"$output"
+          grep -F "Next: harness doctor" <<<"$output"
+          test ! -e ai2rules-demo-local.txt
