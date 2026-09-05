@@ -194,8 +194,20 @@ pub fn canonicalize_root_paths(roots: &RootsDef) -> RootsDef {
     out
 }
 
+/// Convert a filesystem-native path into the kernel's path vocabulary.
+///
+/// Root matching in `harness-types` is deliberately pure and uses `/` as the
+/// component separator (`root/…`). Windows canonicalization returns native
+/// `\\?\C:\…` paths; passing those through verbatim means a descendant never
+/// matches `root/…` and silently degrades to the roots default. Normalize only
+/// representation here, after filesystem canonicalization, so the D46 symlink
+/// property remains intact and the kernel stays platform-neutral.
+fn normalize_kernel_path_string(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 pub fn path_to_string(path: PathBuf) -> String {
-    path.to_string_lossy().into_owned()
+    normalize_kernel_path_string(&path.to_string_lossy())
 }
 
 /// Host-tool-name normalization — a *mapping*, not policy: use the exact host
@@ -226,6 +238,22 @@ mod tests {
     }
 
     #[test]
+    fn kernel_path_strings_use_the_platform_neutral_separator() {
+        assert_eq!(
+            normalize_kernel_path_string(r"\\?\D:\repo\project\file.txt"),
+            "//?/D:/repo/project/file.txt"
+        );
+        assert_eq!(
+            normalize_kernel_path_string(r"D:\repo\project\file.txt"),
+            "D:/repo/project/file.txt"
+        );
+        assert_eq!(
+            normalize_kernel_path_string("/repo/project/file.txt"),
+            "/repo/project/file.txt"
+        );
+    }
+
+    #[test]
     fn resolve_action_path_reads_file_path_and_absolutizes() {
         let dir = tempfile::tempdir().unwrap();
         let base = std::fs::canonicalize(dir.path()).unwrap();
@@ -248,6 +276,7 @@ mod tests {
 
     /// The D46 property (findings #8/#9): a project-local symlink cannot choose
     /// its own root — the target resolves to the symlink's real destination.
+    #[cfg(unix)]
     #[test]
     fn resolve_action_path_canonicalizes_through_symlinks() {
         let dir = tempfile::tempdir().unwrap();
