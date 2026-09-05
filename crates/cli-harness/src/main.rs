@@ -15,6 +15,7 @@ use world_kernel::ExecEnv;
 
 mod agy_hook;
 mod cc_hook;
+mod demo;
 mod hostkit;
 mod init;
 mod mcp_gateway;
@@ -70,6 +71,8 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Run the safe first-proof scenarios over the real compiled project world.
+    Demo,
     /// Launch the World Authoring Tool: a local browser editor for world
     /// manifests, backed by the real compiler + kernel (E11).
     Serve {
@@ -188,7 +191,7 @@ enum Command {
         /// table.
         ///
         /// **Declared, not derived (finding #22).** An Antigravity PreToolUse
-        /// payload carries `toolCall`, `modelName` and `stepIdx` — what is about to
+        /// payload carries `toolCall`/`modelName`/`stepIdx` — what is about to
         /// run, never who asked for it — so an adapter claiming to know the
         /// proposer would be guessing. What it can do is let you *state* the
         /// posture: a supervised session as `user_prompt`, an unattended one as a
@@ -312,6 +315,10 @@ fn main() {
     }) = &cli.command
     {
         std::process::exit(init::run(target, *grant, *force, *dry_run));
+    }
+
+    if matches!(&cli.command, Some(Command::Demo)) {
+        std::process::exit(demo::run(cli.world.as_deref()));
     }
 
     if let Some(Command::Serve { port }) = cli.command {
