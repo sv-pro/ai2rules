@@ -191,7 +191,7 @@ enum Command {
         /// table.
         ///
         /// **Declared, not derived (finding #22).** An Antigravity PreToolUse
-        /// payload carries `toolCall`/`modelName`/`stepIdx` — what is about to
+        /// payload carries `toolCall`, `modelName` and `stepIdx` — what is about to
         /// run, never who asked for it — so an adapter claiming to know the
         /// proposer would be guessing. What it can do is let you *state* the
         /// posture: a supervised session as `user_prompt`, an unattended one as a
