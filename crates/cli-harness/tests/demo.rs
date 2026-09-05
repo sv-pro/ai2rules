@@ -24,7 +24,10 @@ fn init_then_demo_proves_kernel_without_side_effects() {
         .expect("run harness demo");
     let stdout = String::from_utf8_lossy(&demo.stdout);
     let stderr = String::from_utf8_lossy(&demo.stderr);
-    assert!(demo.status.success(), "demo failed:\nstdout={stdout}\nstderr={stderr}");
+    assert!(
+        demo.status.success(),
+        "demo failed:\nstdout={stdout}\nstderr={stderr}"
+    );
 
     assert!(stdout.contains("1. workspace-local write"));
     assert!(stdout.contains("verdict: ALLOW"));
