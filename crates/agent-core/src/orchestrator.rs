@@ -17,6 +17,7 @@ use harness_types::{
     TraceId, TrustLevel,
 };
 use provider_adapters::{anthropic, ToolOutcome};
+use serde_json::json;
 use trace_store::{
     effect_binding, effect_resource, record_decision, ApprovalStore, ConsumeOutcome, TraceStore,
 };
@@ -141,13 +142,18 @@ pub fn run(
     // so the cost and the limit cannot drift apart.
     let mut usage = BudgetUsage::default();
     let mut records = 0usize;
+    // A `ModelClient` is stateful and the current model contract permits one
+    // tool call per turn, so the provider feedback path is a single consumed
+    // result slot rather than a second conversation history.
+    let mut pending_outcome: Option<ToolOutcome> = None;
     // The trusted user request seeds the clean provenance corpus for the L2
     // producer. It is the one source we can assert is clean-origin by construction
     // (a Trusted, untainted channel — the developer's own words).
     let clean_sources: Vec<String> = config.user_request.iter().cloned().collect();
 
     for _ in 0..config.max_steps {
-        let ctx = context::pack(world, perceptions.clone());
+        let previous_outcome = pending_outcome.take();
+        let ctx = context::pack(world, perceptions.clone(), previous_outcome.as_ref());
         let block = match model.next(&ctx) {
             ModelTurn::Final(text) => {
                 return SessionOutcome {
@@ -256,11 +262,6 @@ pub fn run(
             other => {
                 let verdict = verdict_label(&other);
                 let (decision, rule, effect_mode) = verdict_metadata(&other);
-                let _feedback = anthropic::format_tool_result(&ToolOutcome {
-                    call_id: call.call_id.clone(),
-                    content: verdict.clone(),
-                    is_error: true,
-                });
                 TranscriptEntry {
                     action,
                     verdict,
@@ -272,6 +273,11 @@ pub fn run(
                 }
             }
         };
+        pending_outcome = Some(ToolOutcome {
+            call_id: call.call_id.clone(),
+            content: model_feedback(&entry),
+            is_error: entry.decision != Some(Decision::Allow) || entry.result == "(not executed)",
+        });
         if let Some(ref mut obs) = observer {
             obs(&entry);
         }
@@ -589,6 +595,36 @@ fn entry_with(
         effect_mode,
         result: "(not executed)".to_string(),
         taint: Taint::Clean,
+    }
+}
+
+/// Produce stable, structured model feedback while keeping the provider adapter
+/// free of kernel types and policy. The outer provider block preserves the call
+/// identity; this content preserves the canonical decision and its evidence.
+fn model_feedback(entry: &TranscriptEntry) -> String {
+    let result = if entry.result == "(not executed)" {
+        "not_executed"
+    } else {
+        entry.result.as_str()
+    };
+    json!({
+        "action": entry.action.as_str(),
+        "decision": entry.decision.map(decision_name),
+        "rule": entry.rule.as_deref(),
+        "effect_mode": entry.effect_mode,
+        "verdict": entry.verdict.as_str(),
+        "result": result,
+    })
+    .to_string()
+}
+
+fn decision_name(decision: Decision) -> &'static str {
+    match decision {
+        Decision::Absent => "ABSENT",
+        Decision::Allow => "ALLOW",
+        Decision::Deny => "DENY",
+        Decision::Ask => "ASK",
+        Decision::Replan => "REPLAN",
     }
 }
 

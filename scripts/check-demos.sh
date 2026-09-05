@@ -82,6 +82,15 @@ check "agent_loop — propose/decide/perceive" \
   "cargo run -q -p agent-core --example agent_loop" \
   'Deny (taint_invariant)' 'UNKNOWN_TO_ONTOLOGY' 'ASK (pending approval)'
 
+check "governed_coding_workflow — deny, replan, replay" \
+  "cargo run -q -p agent-core --example governed_coding_workflow" \
+  'baseline fixture test: FAIL' \
+  'projected tools:' \
+  'fetch_web -> Deny (taint_invariant)' \
+  'apply_workspace_patch -> ALLOW' \
+  'final fixture test: PASS' \
+  'replay: 4/4 decisions reproduced'
+
 check "tools_demo — scoped caps, MCP, web" \
   "cargo run -q -p agent-core --example tools_demo" \
   'lowered argv: ["pytest"]' 'Deny (taint_invariant)'

@@ -2885,3 +2885,39 @@ class the benchmark measures — a control nothing checks is not a control. The 
 `results/` directory is a build output in git — the shape that let the WASM artifact
 rot for seven weeks (finding #18) — so the `governance-bench` CI job regenerates it
 and fails on drift.
+
+## D77 — Tool outcomes re-enter the model loop through provider results; observers stay read-only
+
+**Context.** The orchestrator already constructed a neutral `ToolOutcome` and the
+Anthropic adapter already knew how to format it as a correlated `tool_result`, but
+the non-executed path assigned that value to `_feedback` and discarded it. Allowed
+execution results reached later turns indirectly as perceptions; `DENY`, `ABSENT`,
+and pending or rejected `ASK` decisions reached only the transcript. The first
+governed coding-workflow slice therefore used an observer callback plus shared
+memory to make a real refusal change the scripted model's next action. That proved
+the kernel decision but not the production feedback loop.
+
+**Decision.** The orchestrator retains the immediately preceding neutral
+`ToolOutcome`. `context::pack` consumes it on the next turn and uses the provider
+adapter to expose one correlated `tool_result` in `TurnContext`. Its content is
+stable structured JSON carrying action, canonical decision, rule, effect mode,
+display flow, and result; `is_error` distinguishes every non-executed or failed
+call. The slot is singular because `ModelTurn` currently permits one tool call per
+turn and `ModelClient` is stateful; it is a delta, not a duplicate conversation
+history. Observer callbacks remain presentation and telemetry only.
+
+**Alternatives.** Passing `TranscriptEntry` into the model was rejected because it
+is a display/audit shape and lacks the provider call identity. Letting the provider
+adapter import `KernelOutcome` was rejected because adapters translate formats and
+must not acquire policy dependencies. Keeping the observer-owned shared state was
+rejected because disabling observability would then change agent behavior. Packing
+the entire provider conversation into every `TurnContext` was deferred because the
+stateful model seam already owns that history; if a future `ModelTurn` supports
+parallel calls, the single result slot can become an ordered vector without
+changing the kernel contract.
+
+**Consequence.** `ALLOW`, `DENY`, `ABSENT`, and `ASK` now cross the same neutral
+outcome/provider-result seam and become direct input to the next model turn. The
+AI2-12 showcase replans with `observer: None`, and a regression model asserts call
+correlation plus the full verdict range. No kernel, Gate ABI, trace, policy, or
+executor semantics changed.

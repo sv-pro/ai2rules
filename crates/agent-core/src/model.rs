@@ -21,7 +21,8 @@ pub enum ModelTurn {
 }
 
 pub trait ModelClient {
-    /// Produce the next turn given the packed context (perceptions + tools).
+    /// Produce the next turn given packed perceptions, projected tools, and the
+    /// provider-formatted result of the immediately preceding tool call.
     fn next(&mut self, ctx: &TurnContext) -> ModelTurn;
 }
 
