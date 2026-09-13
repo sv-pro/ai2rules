@@ -40,10 +40,10 @@ harness init --dry-run            # print the plan, write nothing
 ```
 
 Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
-**no dependencies and no install script.** The binary ships in a per-platform
-package that npm resolves by `os`/`cpu`, so installing performs no network access,
-no shell execution and no chmod, and the binary is covered by the integrity hash
-npm writes into your lockfile.
+**no install script.** The binary ships in a per-platform package that npm
+resolves by `os`/`cpu`. Downloading the npm packages requires network access;
+there is no package install script that downloads or modifies a binary. The
+binary is covered by the integrity hash npm writes into your lockfile.
 
 > **Install globally, not into a project.** `harness init` **refuses** when the
 > binary sits inside the project it would govern — a local `node_modules` install

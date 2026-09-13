@@ -6,6 +6,6 @@ export const SITE_TITLE = 'ai2rules';
 // says so on the front page. A meta description that promises containment is the
 // overclaim the project spends its time avoiding.
 export const SITE_DESCRIPTION =
-	'A deterministic governance kernel for local AI coding agents. One manifest decides every tool call — before it runs, by code rather than by a model.';
+	'Execution governance for AI coding agents. Evaluate tool calls through a connected hook or MCP gateway. Try the kernel, then set up Claude Code CLI.';
 // Author/publisher for Article JSON-LD (E-E-A-T signals). TODO: confirm display name.
 export const SITE_AUTHOR = 'Sergey Vlasov';
