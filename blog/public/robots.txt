@@ -1,0 +1,2 @@
+# Sitemap discovery only. Crawler permissions are managed at the hosting layer.
+Sitemap: https://ai2rules.dev/sitemap-index.xml

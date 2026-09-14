@@ -40,10 +40,10 @@ harness init --dry-run            # print the plan, write nothing
 ```
 
 Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
-**no dependencies and no install script.** The binary ships in a per-platform
-package that npm resolves by `os`/`cpu`, so installing performs no network access,
-no shell execution and no chmod, and the binary is covered by the integrity hash
-npm writes into your lockfile.
+**no install script.** The binary ships in a per-platform package that npm
+resolves by `os`/`cpu`. Downloading the npm packages requires network access;
+there is no package install script that downloads or modifies a binary. The
+binary is covered by the integrity hash npm writes into your lockfile.
 
 > **Install globally, not into a project.** `harness init` **refuses** when the
 > binary sits inside the project it would govern — a local `node_modules` install
@@ -369,6 +369,12 @@ CI runs all four checks on every push and PR
 runs `scripts/check-demos.sh` — every example and demo script, asserting the
 verdict lines each one claims to show. The unit tests cover the kernel; that
 script covers what a reader actually sees.
+
+The blog CI job also checks the homepage-to-playground journey in Chromium at
+390px and 1440px widths, including the real WASM taint/tool-toggle transitions.
+The `homepage-browser-qa` artifact retains screenshots and JSON results for
+14 days. Browser tooling is version-pinned and installed outside the blog; it
+is not a production dependency.
 
 ### The governance benchmark
 
