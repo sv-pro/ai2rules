@@ -103,9 +103,20 @@ ranking benefit from this source change.
   manual guide are present in the generated sitemap; robots.txt is copied.
 - Published npm binary `init` and the four direct hook probes passed as recorded.
 - Published npm binary `demo` failed as recorded; it is excluded from homepage instructions.
-- Browser visual QA was unavailable: the local Chromium executable was absent
-  and its download timed out. Layout was inspected in source, not visually certified.
-- No runtime/kernel changes; no release, deployment or live-session claim.
+- Initial local browser QA was unavailable because Chromium was absent and its
+  download timed out. On 2026-09-14, a pinned Playwright/Chromium journey was added
+  to the existing blog CI job, with screenshots and JSON results retained.
+- The [first remote run](https://github.com/sv-pro/ai2rules/actions/runs/34878043627)
+  passed desktop navigation and the real WASM ALLOW → DENY → ABSENT interaction,
+  but caught horizontal overflow on the mobile playground (456px at 390px width).
+  The follow-up bounds playground padding/width, wraps tool metadata and stacks
+  verdict buckets on phones. No kernel behavior changes.
+- The browser check covers 390×844 and 1440×1000: first-screen primary CTA,
+  installation anchor, manual guide, playground engine load, verdict transitions,
+  horizontal overflow, metadata consistency and sitemap delivery. Screenshots
+  support visual review; merge requires a successful run on the final PR commit.
+- Package release and live Claude-session proof remain outside this change.
+  Cloudflare preview deployment is automatic; production follows merge.
 
 ## Next decision
 
