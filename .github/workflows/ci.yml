@@ -321,3 +321,21 @@ jobs:
       # hidden while being fully reachable at its URL.
       - run: npm run check:drafts
       - run: npm run check:spacing
+
+      - name: Install pinned browser tooling outside the blog
+        run: |
+          npm install --prefix "$RUNNER_TEMP/ai2rules-browser-qa" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund playwright@1.63.0
+          node "$RUNNER_TEMP/ai2rules-browser-qa/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Browser journey on phone and desktop
+        env:
+          AI2RULES_INLINE_SCREENSHOTS: "1"
+        run: |
+          AI2RULES_BROWSER_MODULE="$RUNNER_TEMP/ai2rules-browser-qa/node_modules/playwright" node scripts/check-homepage-browser.mjs
+      - name: Retain browser screenshots and results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: homepage-browser-qa
+          path: blog/browser-qa/
+          if-no-files-found: warn
+          retention-days: 14

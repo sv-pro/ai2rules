@@ -370,6 +370,12 @@ runs `scripts/check-demos.sh` — every example and demo script, asserting the
 verdict lines each one claims to show. The unit tests cover the kernel; that
 script covers what a reader actually sees.
 
+The blog CI job also checks the homepage-to-playground journey in Chromium at
+390px and 1440px widths, including the real WASM taint/tool-toggle transitions.
+The `homepage-browser-qa` artifact retains screenshots and JSON results for
+14 days. Browser tooling is version-pinned and installed outside the blog; it
+is not a production dependency.
+
 ### The governance benchmark
 
 ```bash
