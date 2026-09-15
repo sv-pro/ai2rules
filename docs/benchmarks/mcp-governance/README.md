@@ -182,6 +182,18 @@ are shipped surfaces.
 binary, and the runner compares the two step for step. A benchmark that only
 proves the library right proves nothing about the product.
 
+### 4.3 `openclaw-2-*` — registered external target, not executed yet
+
+OpenClaw 2.0 is registered as a two-profile external target in
+[`../openclaw-2/README.md`](../openclaw-2/README.md) (GitHub #77 / Linear AI2-21).
+The same pinned `v2026.8.1` build will be exercised under its documented
+`default-personal` and `hardened-team` configurations so mechanism presence is not
+confused with effective posture.
+
+This registration adds **no row** to the table or generated report above. A profile enters
+the executable target count only after its adapter, runner-owned effect observations,
+reproduction command, and limitations satisfy the target profile's evidence contract.
+
 ## 5. What this pack does not claim
 
 Stated plainly, because a benchmark's limitations are the part most likely to be
