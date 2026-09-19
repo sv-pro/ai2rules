@@ -842,8 +842,11 @@ impl DoctorReport {
             });
         }
 
-        // Check manifest
+        // Check manifest - compile it the same way cc-hook does
         let manifest_path = project_root.join(".claude/cc-world.yaml");
+        let mut compiled_world: Option<harness_types::CompiledWorld> = None;
+        let mut projected_actions_list: Vec<String> = vec![];
+
         let (manifest_status, manifest_hash) = if !manifest_path.exists() {
             findings.push(Finding {
                 code: "CC_MANIFEST_MISSING".into(),
@@ -862,17 +865,53 @@ impl DoctorReport {
         } else {
             match std::fs::read_to_string(&manifest_path) {
                 Ok(content) => match load_yaml(&content) {
-                    Ok(_manifest) => {
-                        // Successfully compiled
-                        let hash = format!("{:x}", md5::compute(&content));
-                        (CompileStatus::Ok, Some(hash))
+                    Ok(mut manifest) => {
+                        // Resolve root paths the same way cc-hook does
+                        if let Some(roots) = &manifest.roots {
+                            let resolved = compiler::resolve_root_paths(
+                                roots,
+                                ctx.home.as_deref(),
+                                Some(project_root.to_string_lossy().as_ref()),
+                            );
+                            manifest.roots =
+                                Some(crate::hostkit::canonicalize_root_paths(&resolved));
+                        }
+
+                        // Compile the manifest
+                        match compiler::compile(&manifest) {
+                            Ok(world) => {
+                                let hash = world.manifest_hash().as_str().to_string();
+
+                                // Extract projected actions
+                                projected_actions_list = world
+                                    .projected_actions()
+                                    .map(|a| a.as_str().to_string())
+                                    .collect::<Vec<_>>();
+                                projected_actions_list.sort();
+
+                                compiled_world = Some(world);
+                                (CompileStatus::Ok, Some(hash))
+                            }
+                            Err(e) => {
+                                findings.push(Finding {
+                                    code: "CC_MANIFEST_COMPILE_FAILED".into(),
+                                    severity: Severity::Error,
+                                    component: "manifest".into(),
+                                    message: format!("Manifest compilation failed: {}", e),
+                                    evidence_paths: vec![manifest_path.to_string_lossy().into()],
+                                    affects_installation: true,
+                                    next_action: None,
+                                });
+                                (CompileStatus::Invalid, None)
+                            }
+                        }
                     }
                     Err(e) => {
                         findings.push(Finding {
                             code: "CC_MANIFEST_INVALID".into(),
                             severity: Severity::Error,
                             component: "manifest".into(),
-                            message: format!("Manifest compilation failed: {}", e),
+                            message: format!("Manifest parsing failed: {}", e),
                             evidence_paths: vec![manifest_path.to_string_lossy().into()],
                             affects_installation: true,
                             next_action: None,
@@ -894,6 +933,47 @@ impl DoctorReport {
                 }
             }
         };
+
+        // Policy/coverage findings
+
+        // Report ABSENT passthrough behavior
+        if shim_profile_name.is_some() {
+            findings.push(Finding {
+                code: "CC_ABSENT_PASSTHROUGH".into(),
+                severity: Severity::Info,
+                component: "coverage".into(),
+                message: "ABSENT actions pass through to host permission flow (no --enforce-absent observed)".into(),
+                evidence_paths: shim_path.as_ref().map(|p| vec![p.to_string_lossy().into()]).unwrap_or_default(),
+                affects_installation: false,
+                next_action: None,
+            });
+        }
+
+        // Report runtime enforcement unknown for different binary
+        if harness_version_source != VersionSource::SameExecutable
+            && harness_binary_info.resolved_path.is_some()
+        {
+            findings.push(Finding {
+                code: "CC_RUNTIME_UNVERIFIED".into(),
+                severity: Severity::Info,
+                component: "coverage".into(),
+                message: "Selected harness binary differs from doctor; runtime adapter semantics not verified".into(),
+                evidence_paths: harness_binary_info.resolved_path.as_ref().map(|p| vec![p.to_string_lossy().into()]).unwrap_or_default(),
+                affects_installation: false,
+                next_action: None,
+            });
+        }
+
+        // Report downstream execution not individually mediated
+        findings.push(Finding {
+            code: "CC_DOWNSTREAM_NOT_MEDIATED".into(),
+            severity: Severity::Info,
+            component: "coverage".into(),
+            message: "Shell subprocess effects are not individually intercepted; Bash classification is not an OS execution boundary".into(),
+            evidence_paths: vec![],
+            affects_installation: false,
+            next_action: None,
+        });
 
         // Boundary honesty: list uninspected sources
         let uninspected = vec![
@@ -1049,9 +1129,17 @@ impl DoctorReport {
                 hash: manifest_hash,
                 hash_kind: HashKind::ResolvedWorldManifestSha256,
                 resolution_context: ResolutionContext {
-                    project_dir: Some(project_root.to_string_lossy().into()),
+                    project_dir: if ctx.claude_project_dir.is_some() {
+                        ctx.claude_project_dir.clone()
+                    } else {
+                        Some(project_root.to_string_lossy().into())
+                    },
                     home: ctx.home.clone(),
-                    base_source: None,
+                    base_source: if ctx.claude_project_dir.is_some() {
+                        Some("CLAUDE_PROJECT_DIR".into())
+                    } else {
+                        Some("cwd".into())
+                    },
                 },
             },
             switches: Switches {
@@ -1067,16 +1155,31 @@ impl DoctorReport {
                     .iter()
                     .filter_map(|h| h.matcher.clone())
                     .collect(),
-                projected_actions: vec![],
-                projected_actions_status: ProjectedActionsStatus::Unknown,
+                projected_actions: projected_actions_list,
+                projected_actions_status: if compiled_world.is_some() {
+                    ProjectedActionsStatus::Known
+                } else {
+                    ProjectedActionsStatus::Unknown
+                },
                 live_native_inventory: LiveInventory::Unknown,
                 live_mcp_inventory: LiveInventory::Unknown,
-                absent_behavior: AbsentBehavior::Unknown,
-                downstream_execution: DownstreamExecution::Unknown,
+                absent_behavior: if shim_profile_name.is_some() {
+                    // cc-hook passes ABSENT through unless --enforce-absent is set
+                    if grant_flag == Some(true) {
+                        // With --grant, ABSENT still passes through (no flag observed for enforce-absent)
+                        AbsentBehavior::PassThrough
+                    } else {
+                        AbsentBehavior::PassThrough
+                    }
+                } else {
+                    AbsentBehavior::Unknown
+                },
+                downstream_execution: DownstreamExecution::NotIndividuallyMediated,
                 limitations: vec![
                     "Static inspection only; no runtime session".into(),
                     "Claude candidate version unknown without invocation".into(),
-                    "Coverage analysis not yet implemented (#86)".into(),
+                    "Shell subprocess effects not individually intercepted by PreToolUse".into(),
+                    "Bash classification is not an OS execution boundary".into(),
                 ],
             },
             failure_behavior: FailureBehavior {
@@ -1085,15 +1188,31 @@ impl DoctorReport {
                 } else {
                     FailureMode::Unknown
                 },
-                adapter_process_error: FailureMode::Open,
-                state_persistence_error: FailureMode::ConditionalDeny,
-                evidence: if shim_profile_name.is_some() {
-                    vec![
-                        "Recognized shim pattern: fail-open on missing binary".into(),
-                        "Adapter errors fail open (exit 0)".into(),
-                    ]
+                adapter_process_error: if harness_version_source == VersionSource::SameExecutable {
+                    FailureMode::Open
                 } else {
-                    vec![]
+                    FailureMode::Unknown
+                },
+                state_persistence_error: if harness_version_source == VersionSource::SameExecutable
+                {
+                    FailureMode::ConditionalDeny
+                } else {
+                    FailureMode::Unknown
+                },
+                evidence: {
+                    let mut ev = vec![];
+                    if shim_profile_name.is_some() {
+                        ev.push("Recognized shim pattern: fail-open on missing binary".into());
+                    }
+                    if harness_version_source == VersionSource::SameExecutable {
+                        ev.push("Adapter errors fail open (exit 0)".into());
+                        ev.push("State persistence errors fail closed (conditional deny)".into());
+                    } else if harness_binary_info.resolved_path.is_some() {
+                        ev.push(
+                            "Selected binary differs from doctor; adapter semantics unknown".into(),
+                        );
+                    }
+                    ev
                 },
             },
             findings,
