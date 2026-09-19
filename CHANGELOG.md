@@ -12,7 +12,7 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
-## [0.6.0] — DATE-TBD
+## [0.6.0] — 2026-09-19
 
 ### Added
 
