@@ -390,7 +390,9 @@ impl DoctorReport {
             hook_status = HookStatus::Missing;
         } else {
             // Check for narrow matchers
-            let has_match_all = pretooluse_hooks.iter().any(|h| h.matcher.as_deref() == Some("*"));
+            let has_match_all = pretooluse_hooks
+                .iter()
+                .any(|h| h.matcher.as_deref() == Some("*"));
             let narrow_matchers: Vec<_> = pretooluse_hooks
                 .iter()
                 .filter_map(|h| {
@@ -608,11 +610,7 @@ impl DoctorReport {
                             affects_installation: true,
                             next_action: None,
                         });
-                        (
-                            resolve_path(&hb_path),
-                            None,
-                            VersionSource::NotProbed,
-                        )
+                        (resolve_path(&hb_path), None, VersionSource::NotProbed)
                     } else {
                         let resolved = resolve_path(&hb_path);
                         if resolved.executable != Some(true) {
@@ -929,11 +927,7 @@ impl DoctorReport {
             .iter()
             .any(|f| f.severity == Severity::Error && f.affects_installation)
         {
-            if settings_status == SettingsStatus::Missing || hook_status == HookStatus::Missing {
-                InstallationStatus::Broken
-            } else {
-                InstallationStatus::Broken
-            }
+            InstallationStatus::Broken
         } else if findings
             .iter()
             .any(|f| f.severity == Severity::Warning && f.affects_installation)
@@ -1149,6 +1143,7 @@ fn reduce_exit_code_from_status(status: InstallationStatus) -> i32 {
 }
 
 /// Exit code reduction from report (backward compat with skeleton)
+#[allow(dead_code)]
 pub fn reduce_exit_code(report: &DoctorReport) -> i32 {
     report.summary.exit_code
 }

@@ -14,6 +14,7 @@ const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1 MiB
 
 /// Immutable inspection context captured at entry
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct InspectionContext {
     pub cwd: PathBuf,
     pub current_exe: Option<PathBuf>,
@@ -56,6 +57,7 @@ pub enum SettingsStatus {
 
 /// One PreToolUse registration found in settings
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct HookRegistration {
     pub json_pointer: String,
     pub matcher: Option<String>,
@@ -67,6 +69,7 @@ pub struct HookRegistration {
 
 /// Shim recognition result
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ShimInfo {
     pub path: PathBuf,
     pub profile: Option<ShimProfile>,
@@ -85,6 +88,7 @@ pub enum ShimProfile {
 
 /// Binary resolution result
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct BinaryInfo {
     pub logical_path: Option<PathBuf>,
     pub resolved_path: Option<PathBuf>,
@@ -194,7 +198,7 @@ pub fn inspect_settings(project_root: &Path) -> SettingsInfo {
                                 .get("matcher")
                                 .and_then(|v| v.as_str())
                                 .map(String::from);
-                            
+
                             // Extract hooks array within each entry
                             if let Some(hooks_arr) = obj.get("hooks").and_then(|h| h.as_array()) {
                                 for (j, hook) in hooks_arr.iter().enumerate() {
@@ -215,7 +219,10 @@ pub fn inspect_settings(project_root: &Path) -> SettingsInfo {
                                         .map(String::from);
 
                                     hooks.push(HookRegistration {
-                                        json_pointer: format!("/hooks/PreToolUse/{}/hooks/{}", i, j),
+                                        json_pointer: format!(
+                                            "/hooks/PreToolUse/{}/hooks/{}",
+                                            i, j
+                                        ),
                                         matcher: matcher.clone(),
                                         command,
                                         kind: format!("PreToolUse/{}", hook_type),
@@ -336,7 +343,9 @@ fn extract_sh_quoted_var(content: &str, prefix: &str) -> Option<String> {
 /// Extract the off_file path from the if condition
 fn extract_off_file(content: &str) -> Option<String> {
     // Look for: if [ -f {path} ] || [ -f "$HOME/.claude/gate-off" ]
-    let if_line = content.lines().find(|l| l.contains("[ -f") && l.contains(".claude/gate-off"))?;
+    let if_line = content
+        .lines()
+        .find(|l| l.contains("[ -f") && l.contains(".claude/gate-off"))?;
 
     // Extract first -f test path (may be quoted or unquoted)
     let after_f = if_line.split("[ -f ").nth(1)?;
