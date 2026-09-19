@@ -17,6 +17,7 @@ mod agy_hook;
 mod cc_hook;
 mod demo;
 mod doctor;
+mod doctor_collector;
 mod hostkit;
 mod init;
 mod mcp_gateway;
