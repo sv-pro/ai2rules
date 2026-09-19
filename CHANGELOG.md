@@ -12,6 +12,30 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+## [0.6.0] — DATE-TBD
+
+### Added
+
+- **`harness demo` — deterministic first-proof over the real compiled world**
+  (issue #82). Runs eight cases — `Read`, `Write`, `Shell`, `JIRA_CREATE_ISSUE`,
+  scoped actions, path roots, poisoned knowledge, and classification — through the
+  same host-neutral gate used by live adapters, records every request/response pair,
+  and immediately replays the requests to prove deterministic decisions. The command
+  intentionally does not execute host tools, so it is safe to run after `harness
+  init` with no credentials, network, or live model. Added CI job
+  `demo-platform-smoke` to prove `npx ai2rules-harness demo` on native platforms
+  (darwin-arm64, darwin-x64, linux-x64, windows-x64) under the npm shim.
+
+### Changed
+
+- **`agent-core` now feeds governance outcomes into model turns** (PR #72). The
+  orchestrator exposes governance feedback context (decisions, verdicts, and trace
+  provenance) to the model client through `SessionState` and `context::build`. This
+  enables governed agentic workflows where the model can observe and react to
+  governance decisions. **No user-facing CLI capabilities changed** — the binary
+  still ships the same commands; this is an internal agent-core capability for
+  embedders and demonstration workflows.
+
 ## [0.5.0] — 2026-08-28
 
 **The `0.4.2` hold is lifted, because the thing it was waiting for happened.** The
@@ -753,7 +777,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sv-pro/ai2rules/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sv-pro/ai2rules/compare/v0.3.1...v0.4.0
