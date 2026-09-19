@@ -151,6 +151,7 @@ dependencies = [
  "harness-types",
  "inquire",
  "provider-adapters",
+ "serde",
  "serde_json",
  "serde_yaml",
  "tempfile",
