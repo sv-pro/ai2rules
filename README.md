@@ -37,6 +37,7 @@ npm install -g ai2rules-harness   # or: cargo install --git https://github.com/s
 harness init                      # additive: adds deny/ask on top of the host's permissions
 harness init --grant              # replace: the manifest becomes the allowlist
 harness init --dry-run            # print the plan, write nothing
+harness demo                      # decision-only proof: 8 cases through the real kernel, no execution
 ```
 
 Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
@@ -62,8 +63,17 @@ you just ran. It writes four things and is safe to run twice:
 .gitignore                    .claude/state/   (the runtime taint state)
 ```
 
-**Prove it is real in five seconds**, without starting an agent session — ask the
-kernel directly:
+**Prove it is real**, without starting an agent session or supplying credentials:
+
+```bash
+harness demo
+# Runs 8 cases (Read, Write, Shell, JIRA_CREATE_ISSUE, scoped actions, path roots,
+# poisoned knowledge, classification) through the real kernel, records each verdict,
+# and replays them to prove determinism. Decision-only, no tool execution.
+# Footer: "Next: harness doctor" (planned, not yet shipped; see issue AI2-25).
+```
+
+Or ask the kernel directly about one proposed call:
 
 ```bash
 echo '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd"}}' \

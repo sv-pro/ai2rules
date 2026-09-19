@@ -44,12 +44,20 @@ const title = `${SITE_TITLE} — Execution governance for AI coding agents`;
 			<pre><code>npm install -g ai2rules-harness
 mkdir ai2rules-demo
 cd ai2rules-demo
-harness init</code></pre>
+harness init
+harness demo</code></pre>
 			<p>
 				<code>init</code> writes the starter manifest and Claude Code hook configuration.
 				By default, it adds deny/ask decisions on top of the host's permissions.
 				The npm package ships platform binaries with <strong>no install script</strong>;
 				downloading the package still requires network access.
+			</p>
+			<p>
+				<code>harness demo</code> is the credential-free first proof: it runs eight cases
+				through the real kernel (Read, Write, Shell, JIRA_CREATE_ISSUE, scoped actions,
+				path roots, poisoned knowledge, classification), records each verdict, and replays
+				them to prove deterministic decisions. Decision-only, no tool execution.
+				The footer says "Next: harness doctor" — that command is planned but not yet shipped.
 			</p>
 			<p>
 				Then <a href="/blog/govern-your-coding-agent-in-one-command/">follow the manual
