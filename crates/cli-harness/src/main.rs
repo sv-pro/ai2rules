@@ -16,6 +16,7 @@ use world_kernel::ExecEnv;
 mod agy_hook;
 mod cc_hook;
 mod demo;
+mod doctor;
 mod hostkit;
 mod init;
 mod mcp_gateway;
@@ -73,6 +74,13 @@ enum Command {
     },
     /// Run the safe first-proof scenarios over the real compiled project world.
     Demo,
+    /// Inspect effective coverage: report on installation, hook, manifest, and
+    /// projected actions in the current project (AI2-25 / #84 skeleton).
+    Doctor {
+        /// Emit JSON report on stdout instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Launch the World Authoring Tool: a local browser editor for world
     /// manifests, backed by the real compiler + kernel (E11).
     Serve {
@@ -319,6 +327,10 @@ fn main() {
 
     if matches!(&cli.command, Some(Command::Demo)) {
         std::process::exit(demo::run(cli.world.as_deref()));
+    }
+
+    if let Some(Command::Doctor { json }) = &cli.command {
+        std::process::exit(doctor::run(*json));
     }
 
     if let Some(Command::Serve { port }) = cli.command {

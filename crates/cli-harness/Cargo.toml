@@ -19,6 +19,7 @@ world-kernel = { workspace = true }
 executor = { workspace = true }
 provider-adapters = { workspace = true }
 trace-store = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 clap = { version = "4.6.1", features = ["derive"] }
