@@ -12,6 +12,15 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+Planned as **0.7.0**: D78 breaks persisted approval and staged-commit logs (see
+below), which is more than a patch release should carry.
+
+### Upgrading
+
+- Stores written by 0.6.x or earlier are refused as written by an older version.
+  Delete the approval log, the commit log, their keys and any `.head` files; pending
+  approvals are simply asked again.
+
 ### Security
 
 - **Approval and staged-commit logs are chained and head-anchored** (D78). Deleting a
