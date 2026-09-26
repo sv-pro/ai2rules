@@ -98,7 +98,7 @@ pub fn build_execution_spec(
     // actor-input, inject literals, resolve context refs (invariant 12). A base
     // action keeps its params, but local-handler lowering may only read fields
     // explicitly declared by the sealed descriptor.
-    let params = effective_params(world, &action, intent.params(), descriptor, env)?;
+    let params = effective_params(world, intent, descriptor, env)?;
 
     let operation = match &backing {
         BackingIdentity::LocalHandler(handler) => {
@@ -203,52 +203,120 @@ impl ParamContract {
     }
 }
 
-/// Resolve the effective params a scoped capability runs with: keep only
-/// declared actor-input args (stripping locked/unknown ones), inject literals,
-/// and resolve context refs. A non-scoped action passes its params through.
-fn effective_params(
-    world: &CompiledWorld,
-    action: &ActionName,
-    actor_params: &Value,
-    descriptor: &harness_types::Descriptor,
-    env: &ExecEnv,
-) -> Result<EffectiveParams, SpecError> {
-    let cap = match world.scoped_capability(action) {
-        None => {
-            return Ok(EffectiveParams {
-                value: actor_params.clone(),
-                contract: ParamContract::for_descriptor(descriptor),
-            });
-        }
-        Some(cap) => cap,
+/// The call a host must actually make for an admitted intent (D80).
+///
+/// The kernel decides on the *proposed* call, but a scoped capability runs with
+/// different arguments: locked and unknown actor arguments are stripped,
+/// literals injected, context refs resolved (invariant 12). A host that executes
+/// the proposal instead of this — the wire gate is decision-only, so every
+/// out-of-process host does — silently drops the scoping: the model's `repo`
+/// reaches the upstream in place of the manifest's literal.
+///
+/// Pure in `(world, intent)`. Context refs cannot be resolved here (they are
+/// runtime values); they are left out of `arguments` and listed in
+/// `context_refs` for the host to fill from its own trusted context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveCall {
+    /// The base action the call lowers to (itself, for a base action).
+    pub base_action: ActionName,
+    /// What executes it: a local handler or an MCP server's tool.
+    pub backing: BackingIdentity,
+    /// Arguments to execute with: actor input that survived scoping, plus literals.
+    pub arguments: Value,
+    /// Argument name → context key, for `ContextRef` arguments.
+    pub context_refs: BTreeMap<String, String>,
+    /// Actor-supplied argument names the scoping dropped. Empty for a clean call;
+    /// non-empty means something tried to set what the world fixes — worth
+    /// recording as a signal, not just discarding.
+    pub stripped: Vec<String>,
+}
+
+/// Lower an admitted intent to the call the host must execute (D80). See
+/// [`EffectiveCall`]. `None` only if the world has no descriptor for the
+/// intent's action, which a sealed intent rules out.
+pub fn effective_call(world: &CompiledWorld, intent: &IntentIR) -> Option<EffectiveCall> {
+    let action = intent.action();
+    let descriptor = world.descriptor(action)?;
+    let actor_params = intent.params();
+    let Some(cap) = world.scoped_capability(action) else {
+        return Some(EffectiveCall {
+            base_action: action.clone(),
+            backing: descriptor.backing.clone(),
+            arguments: actor_params.clone(),
+            context_refs: BTreeMap::new(),
+            stripped: Vec::new(),
+        });
     };
     let actor = actor_params.as_object();
-    let mut out = Map::new();
+    let mut arguments = Map::new();
+    let mut context_refs = BTreeMap::new();
     for (name, source) in &cap.args {
         match source {
             // Copy only what the actor is allowed to set; anything else they
             // sent is never read here, so it is stripped.
             ArgSource::ActorInput => {
                 if let Some(value) = actor.and_then(|o| o.get(name)) {
-                    out.insert(name.clone(), value.clone());
+                    arguments.insert(name.clone(), value.clone());
                 }
             }
             ArgSource::Literal(value) => {
-                out.insert(name.clone(), Value::String(value.clone()));
+                arguments.insert(name.clone(), Value::String(value.clone()));
             }
             ArgSource::ContextRef(key) => {
-                let value = env
-                    .context
-                    .get(key)
-                    .ok_or_else(|| SpecError::MissingArgument {
-                        argument: format!("context:{key}"),
-                    })?;
-                out.insert(name.clone(), Value::String(value.clone()));
+                context_refs.insert(name.clone(), key.clone());
             }
         }
     }
+    let stripped = actor
+        .map(|o| {
+            o.keys()
+                .filter(|k| !matches!(cap.args.get(*k), Some(ArgSource::ActorInput)))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(EffectiveCall {
+        base_action: cap.base_action.clone(),
+        backing: descriptor.backing.clone(),
+        arguments: Value::Object(arguments),
+        context_refs,
+        stripped,
+    })
+}
+
+/// Resolve the effective params a scoped capability runs with: the
+/// [`effective_call`] lowering, with context refs resolved from `env`. A
+/// non-scoped action passes its params through.
+fn effective_params(
+    world: &CompiledWorld,
+    intent: &IntentIR,
+    descriptor: &harness_types::Descriptor,
+    env: &ExecEnv,
+) -> Result<EffectiveParams, SpecError> {
+    let action = intent.action();
+    let lowered = effective_call(world, intent).ok_or_else(|| SpecError::BadArgument {
+        detail: format!("no descriptor for {action}"),
+    })?;
+    let Some(cap) = world.scoped_capability(action) else {
+        return Ok(EffectiveParams {
+            value: lowered.arguments,
+            contract: ParamContract::for_descriptor(descriptor),
+        });
+    };
+    let mut value = lowered.arguments;
+    for (name, key) in &lowered.context_refs {
+        let resolved = env
+            .context
+            .get(key)
+            .ok_or_else(|| SpecError::MissingArgument {
+                argument: format!("context:{key}"),
+            })?;
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert(name.clone(), Value::String(resolved.clone()));
+        }
+    }
     Ok(EffectiveParams {
-        value: Value::Object(out),
+        value,
         contract: ParamContract::for_scoped_args(&cap.args),
     })
 }
@@ -452,5 +520,83 @@ base_actions:
         )
         .unwrap_err();
         assert!(matches!(err, BuildError::InvariantViolation { .. }));
+    }
+
+    // ---- D80: the lowered call a decision-only host must execute ----
+
+    #[test]
+    fn effective_call_strips_injects_and_reports() {
+        let (world, ir) = build_ir_with_world(
+            compile_default(),
+            "run_tests",
+            json!({ "command": "rm -rf /", "path": "x" }),
+        )
+        .unwrap();
+        let call = effective_call(&world, &ir).unwrap();
+        assert_eq!(call.base_action, ActionName::new("run_command"));
+        assert_eq!(call.arguments, json!({ "command": "pytest" }));
+        assert_eq!(
+            call.stripped,
+            vec!["command".to_string(), "path".to_string()]
+        );
+        assert!(call.context_refs.is_empty());
+    }
+
+    #[test]
+    fn effective_call_of_a_base_action_is_the_call_itself() {
+        let args = json!({ "path": "src/lib.rs" });
+        let (world, ir) =
+            build_ir_with_world(compile_default(), "read_workspace", args.clone()).unwrap();
+        let call = effective_call(&world, &ir).unwrap();
+        assert_eq!(call.base_action, ActionName::new("read_workspace"));
+        assert_eq!(call.arguments, args);
+        assert!(call.stripped.is_empty());
+    }
+
+    #[test]
+    fn effective_call_carries_the_mcp_backing_and_lists_context_refs() {
+        let world = compiler::compile(
+            &compiler::load_yaml(
+                r#"
+world_id: w
+capabilities:
+  - { trust: Trusted, actions: [Mcp] }
+base_actions:
+  - name: create_pull_request
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: codehost, tool: create_pull_request }
+    schema:
+      type: object
+      properties: { repo: { type: string }, base: { type: string }, title: { type: string } }
+scoped_capabilities:
+  - name: open_change_pr
+    base_action: create_pull_request
+    args: { repo: !Literal "acme/svc", base: !ContextRef change.base, title: ActorInput }
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let (world, ir) = build_ir_with_world(
+            world,
+            "open_change_pr",
+            json!({ "title": "t", "repo": "attacker/fork" }),
+        )
+        .unwrap();
+        let call = effective_call(&world, &ir).unwrap();
+        assert_eq!(
+            call.backing,
+            BackingIdentity::McpServer {
+                server: "codehost".to_string(),
+                tool: "create_pull_request".to_string()
+            }
+        );
+        assert_eq!(call.arguments, json!({ "repo": "acme/svc", "title": "t" }));
+        assert_eq!(
+            call.context_refs.get("base").map(String::as_str),
+            Some("change.base")
+        );
+        assert_eq!(call.stripped, vec!["repo".to_string()]);
     }
 }

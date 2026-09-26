@@ -2921,3 +2921,117 @@ outcome/provider-result seam and become direct input to the next model turn. The
 AI2-12 showcase replans with `observer: None`, and a regression model asserts call
 correlation plus the full verdict range. No kernel, Gate ABI, trace, policy, or
 executor semantics changed.
+
+## D78 — Signed logs are chained and head-anchored; a missing line is tampering, not history
+
+**Context.** Since finding #15 / D67 every line of the approval log (and, since D74,
+the staged-commit log) carries an HMAC, so a line cannot be forged or edited without
+the key. A per-line MAC says nothing about lines that are *not there*. Deleting the
+signed `Consumed` line from `approvals.jsonl` folded the authorization back to
+`Approved`, and the next `consume` succeeded — a single-use grant used twice, with no
+key and every remaining line verifying. The same holds for `AttemptStarted` /
+`AttemptFinished` in the commit log, which own an idempotency key. Found while
+checking an external write-up of the kernel; pinned by
+`deleting_the_consumed_line_does_not_revive_the_grant`, which failed on `41a4eda`.
+
+**Decision.** Both logs chain and anchor (`trace-store/src/chain.rs`):
+
+- line `n` carries `seq = n` and `prev` = the MAC of line `n-1` (`"genesis"` for 0);
+  its MAC covers `(seq, prev, event)` under a domain-separated prefix. Deleting,
+  reordering, or splicing a line breaks the chain (`out of chain`);
+- a chain cannot see its own tail being cut, so every append also rewrites
+  `<log>.head` — the last `(seq, mac)`, itself MACed — via temp file + rename (and a
+  best-effort directory sync). On load the log must *reach* the head and may run **at
+  most one line** past it — what a crash between append and head write leaves;
+  `open` re-anchors such a log under the lock, so the slack never accumulates;
+- every open store keeps a **high-water mark** — the furthest `(seq, mac)` it has
+  loaded or written — and refuses a later load that falls short of it;
+- a store with entries but no head is refused, not re-anchored: deleting the head is
+  the next step of cutting the tail. A fresh store writes a genesis head on open. A
+  log whose first line has no chain link is left to the line check, so a genuine
+  pre-D78 store is reported as old, not as tampered (the D73 distinction).
+
+**Alternatives.** A per-line counter without `prev` catches deletion but not splicing
+lines from another log under the same key. Chaining without a head misses tail
+truncation, which is exactly the `Consumed`-is-last case. Storing the head inside the
+key file couples two files with different lifecycles and permissions checks. Making
+`consume` idempotent-by-state elsewhere just moves the file.
+
+**Consequence.** Breaking for stores written before this change: an unchained line is
+refused with a message naming D78 ("delete the log, its key and its head file"), the
+same direction as D73's refusal of 0.4.1 records. The shipped CLI keeps its approval
+store in a per-run tempdir, so embedders holding a store across the upgrade are the
+ones affected. `open` now takes the store lock when it has to anchor (a fresh store
+or a crash-ahead log), so a stale `.lock` can make such an open fail after 5 s where
+it used to succeed. **Not covered**, and pinned by
+`known_limit_a_matching_old_snapshot_fools_a_new_process`: the log is append-only, so
+every older log is a prefix of the current one, and a copy of the *head alone*, saved
+between `Approved` and `Consumed`, lets someone cut the log back to it — against a
+process that has not already seen the longer chain. Rollback to a consistent earlier
+state needs a monotonic counter outside the attacker's reach; the store's placement
+outside the governed project (D57/D67) remains the primary defence. What D78 changes
+is the bar: from "delete a line" to "have saved the head at the right moment".
+
+## D79 — A base action can stay in the ontology without being projected
+
+**Context.** A scoped capability pins arguments (`open_change_pr` with a literal
+`repo`), but `compile` set `projected = ontology`, so the unscoped base action stayed
+callable: a clean proposal could call `create_pull_request` with any `repo` and get
+`ALLOW`. The pinning only held for callers who chose to use the verb. The kernel
+already had the right primitive — "known but not projected → `ABSENT`" (invariant 2)
+— and no manifest field to reach it.
+
+**Decision.** `BaseActionDef.projected: bool`, default `true`, skipped from
+serialization when `true` (every existing manifest keeps its hash). `false` keeps the
+action in the ontology — scoped capabilities still resolve through
+`scoped_capability()` and lower to its backing — while a direct call is `ABSENT`
+(`rule: absent`), `harness project` / `tools/list` / `tool_surface` never list it, and
+a `command_classes` target marked `false` makes that class of command `ABSENT`.
+
+**Alternatives.** Hiding every base action that a scoped capability references was
+rejected: some worlds legitimately offer both (`read_workspace` and
+`read_repo_file`). Making backing actions `approval_required` was rejected because
+scoped capabilities inherit the flag. A separate `internal_actions:` list was
+rejected as a second place to declare an action.
+
+**Consequence.** One line per manifest closes the bypass. `check-wasm-freshness.mjs`
+gains a `projected: false` case, so a committed WASM engine that predates this fails
+CI until rebuilt.
+
+## D80 — The gate returns the effective call; hosts execute that, not the proposal
+
+**Context.** The gate is decision-only (D24): on `ALLOW` the host runs its own tool.
+But the kernel decides on the *proposed* call, and a scoped capability runs with
+different arguments — locked and unknown actor arguments stripped, literals
+injected (invariant 12). That lowering existed only inside `build_execution_spec`,
+which out-of-process hosts never reach. `mcp-gateway` forwarded
+`up.call_tool(&name, &args)`: a scoped verb reached the upstream under a name it did
+not know, and a caller's `repo: attacker/fork` next to a literal `repo` was `ALLOW`ed
+and, in any host executing the proposal, sent.
+
+**Decision.** `world_kernel::effective_call(world, intent) -> EffectiveCall` —
+base action, backing, arguments after stripping and literal injection, `ContextRef`
+arguments listed (not resolved: runtime values are not the pure kernel's to hold),
+and the actor arguments that were stripped. `build_execution_spec` now lowers through
+it, so there is one implementation. `GateResponse.effective` carries it on `ALLOW` and
+`ASK` (a backward-compatible v1 field). `mcp-gateway` forwards the effective call —
+the base action's name, which by the gateway's existing convention is the upstream
+tool's name — refuses when the call needs a `ContextRef` it has no trusted source for,
+and audits non-empty `stripped` as its own record.
+
+**Alternatives.** Rejecting any locked argument outright (`schema_violation`) was
+considered and deferred, not rejected: it changes a verdict hosts rely on today, and
+the stripped list already makes the attempt visible. It is the better default for a
+strict mode. Re-implementing lowering in each adapter was rejected by D24's own
+reasoning. Forwarding `effective.base_action` unconditionally was rejected in review:
+for an unscoped call it is the `command_classes` result (D36), a policy name the
+upstream does not have — so the gateway forwards the base action only when it differs
+from the decided action (a scoped verb), and the client's tool name otherwise. A call
+the gateway refuses is not charged against the budget.
+
+**Consequence.** A host that honours `effective` gets the world's scoping without
+linking the kernel. Hosts that ignore it keep today's behaviour, so adoption is per
+adapter. Not yet done: `tools/list` in `mcp-gateway` does not synthesize scoped verbs
+(they are callable by name, not discoverable there); `cc-hook` / `agy-hook` do not
+rewrite native tool input from `effective`; path-scope still reads the adapter's
+`path`, which for a literal-path verb is the proposal's.

@@ -23,7 +23,8 @@ pub mod host;
 pub mod project;
 
 pub use gate::{
-    gate, GateApproval, GateContext, GateRequest, GateResponse, GateUsage, ABI_VERSION,
+    gate, GateApproval, GateBacking, GateContext, GateEffective, GateRequest, GateResponse,
+    GateUsage, ABI_VERSION,
 };
 pub use host::{host_outcome, BlockKind, HostOutcome};
 pub use project::{project, PROJECTION_VERSION};

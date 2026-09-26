@@ -23,6 +23,13 @@
 //!
 //! The MAC is not a substitute for putting the store somewhere the governed
 //! project cannot reach. It is what remains true when that assumption fails.
+//!
+//! ## Why the log is chained (D78)
+//!
+//! A MAC per line cannot see a line that is *missing*: deleting the signed
+//! `Consumed` line used to hand a single-use grant back. Lines now chain
+//! (`seq`, `prev`) and the log's end is anchored in a MACed `<log>.head`; see
+//! [`crate::chain`].
 
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
@@ -36,7 +43,7 @@ use harness_types::{
     ContentHash, DescriptorHash, EffectMode, ManifestHash, PrincipalId, Provenance, WorldId,
 };
 
-use crate::integrity::{constant_time_eq, hmac_hex};
+use crate::chain::{self, LineFault, Tail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -99,6 +106,12 @@ pub enum ConsumeOutcome {
 struct SignedEvent {
     event: ApprovalEvent,
     mac: String,
+    /// Position in the chain (D78). Absent on lines written before chaining.
+    #[serde(default)]
+    seq: Option<u64>,
+    /// MAC of the previous line, or `chain::GENESIS`.
+    #[serde(default)]
+    prev: Option<String>,
 }
 
 /// The bytes a line's MAC covers — the event's canonical JSON.
@@ -190,6 +203,9 @@ pub struct ApprovalStore {
     path: PathBuf,
     key: Vec<u8>,
     tokens: BTreeMap<ApprovalTokenId, ApprovalToken>,
+    /// The furthest point of the chain this instance has loaded or written; a
+    /// later load that falls short of it was rolled back underneath us (D78).
+    seen: Tail,
 }
 
 impl ApprovalStore {
@@ -197,8 +213,27 @@ impl ApprovalStore {
     pub fn open(path: impl Into<PathBuf>) -> io::Result<Self> {
         let path = path.into();
         let key = load_or_create_key(&key_path(&path))?;
-        let tokens = load(&path, &key)?;
-        Ok(Self { path, key, tokens })
+        // The common case needs no lock: an anchored log that reaches its head.
+        // A fresh store (no head yet), or a log a crash left one line past its
+        // head, is anchored under the lock so the slack never accumulates.
+        let loaded = match load(&path, &key) {
+            Ok(loaded) if !loaded.ahead => loaded,
+            _ => {
+                let _lock = StoreLock::acquire(&lock_path(&path))?;
+                chain::ensure_head(&path, &key, "approval log")?;
+                let loaded = load(&path, &key)?;
+                if loaded.ahead {
+                    chain::write_head(&path, &key, &loaded.tail)?;
+                }
+                loaded
+            }
+        };
+        Ok(Self {
+            path,
+            key,
+            tokens: loaded.tokens,
+            seen: loaded.tail,
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -225,7 +260,11 @@ impl ApprovalStore {
             ));
         }
         let _lock = StoreLock::acquire(&lock_path(&self.path))?;
-        let mut tokens = load(&self.path, &self.key)?;
+        let Loaded {
+            mut tokens,
+            mut tail,
+            ..
+        } = self.reload()?;
         if tokens.contains_key(&id) {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
@@ -233,7 +272,7 @@ impl ApprovalStore {
             ));
         }
         let event = ApprovalEvent::Minted(Box::new(token));
-        self.append(&event)?;
+        self.append(&event, &mut tail)?;
         apply_event(&mut tokens, event);
         self.tokens = tokens;
         Ok(id)
@@ -284,15 +323,22 @@ impl ApprovalStore {
         now_unix_ms: u64,
     ) -> io::Result<ConsumeOutcome> {
         let _lock = StoreLock::acquire(&lock_path(&self.path))?;
-        let mut tokens = load(&self.path, &self.key)?;
+        let Loaded {
+            mut tokens,
+            mut tail,
+            ..
+        } = self.reload()?;
         let token = tokens
             .get(id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown authorization"))?;
         if let Some(reason) = rejection_reason(token, binding, now_unix_ms) {
-            self.append(&ApprovalEvent::ConsumptionRejected {
-                id: id.clone(),
-                reason,
-            })?;
+            self.append(
+                &ApprovalEvent::ConsumptionRejected {
+                    id: id.clone(),
+                    reason,
+                },
+                &mut tail,
+            )?;
             self.tokens = tokens;
             return Ok(ConsumeOutcome::Rejected(reason));
         }
@@ -302,7 +348,7 @@ impl ApprovalStore {
             .consume()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
         let event = ApprovalEvent::Consumed(id.clone());
-        self.append(&event)?;
+        self.append(&event, &mut tail)?;
         apply_event(&mut tokens, event);
         self.tokens = tokens;
         Ok(ConsumeOutcome::Consumed(id.clone()))
@@ -315,30 +361,51 @@ impl ApprovalStore {
         event: ApprovalEvent,
     ) -> io::Result<()> {
         let _lock = StoreLock::acquire(&lock_path(&self.path))?;
-        let mut tokens = load(&self.path, &self.key)?;
+        let Loaded {
+            mut tokens,
+            mut tail,
+            ..
+        } = self.reload()?;
         let mut candidate = tokens
             .get(id)
             .cloned()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown authorization"))?;
         apply(&mut candidate)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
-        self.append(&event)?;
+        self.append(&event, &mut tail)?;
         apply_event(&mut tokens, event);
         self.tokens = tokens;
         Ok(())
     }
 
-    fn append(&self, event: &ApprovalEvent) -> io::Result<()> {
+    /// Load under the caller's lock, refusing a log shorter than this instance
+    /// has already seen (D78).
+    fn reload(&self) -> io::Result<Loaded> {
+        let loaded = load(&self.path, &self.key)?;
+        chain::check_high_water(&self.path, &loaded.macs, &self.seen, "approval log")?;
+        Ok(loaded)
+    }
+
+    /// Append one chained line, then move the head anchor to it. Callers hold the
+    /// store lock and pass the tail from the `load` they did under it.
+    fn append(&mut self, event: &ApprovalEvent, tail: &mut Tail) -> io::Result<()> {
         let payload = event_bytes(event)?;
+        let mac = chain::line_mac(&self.key, tail.next_seq, &tail.last_mac, &payload);
         let signed = SignedEvent {
             event: event.clone(),
-            mac: hmac_hex(&self.key, payload.as_bytes()),
+            mac: mac.clone(),
+            seq: Some(tail.next_seq),
+            prev: Some(tail.last_mac.clone()),
         };
         let line = serde_json::to_string(&signed).map_err(io::Error::other)?;
         let mut file = private_append(&self.path)?;
         writeln!(file, "{line}")?;
         file.flush()?;
-        file.sync_data()
+        file.sync_data()?;
+        tail.next_seq += 1;
+        tail.last_mac = mac;
+        self.seen = tail.clone();
+        chain::write_head(&self.path, &self.key, tail)
     }
 }
 
@@ -605,13 +672,32 @@ fn random_key() -> io::Result<Vec<u8>> {
     }
 }
 
-fn load(path: &Path, key: &[u8]) -> io::Result<BTreeMap<ApprovalTokenId, ApprovalToken>> {
+/// A verified log folded into state, with what the chain needs to append to it.
+struct Loaded {
+    tokens: BTreeMap<ApprovalTokenId, ApprovalToken>,
+    tail: Tail,
+    macs: Vec<String>,
+    /// The log runs one line past its head (a crash); `open` re-anchors it.
+    ahead: bool,
+}
+
+fn load(path: &Path, key: &[u8]) -> io::Result<Loaded> {
     let file = match File::open(path) {
         Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            chain::verify_head(path, key, &[], "approval log")?;
+            return Ok(Loaded {
+                tokens: BTreeMap::new(),
+                tail: Tail::genesis(),
+                macs: Vec::new(),
+                ahead: false,
+            });
+        }
         Err(e) => return Err(e),
     };
     let mut tokens = BTreeMap::new();
+    let mut tail = Tail::genesis();
+    let mut macs = Vec::new();
     for (n, line) in BufReader::new(file).lines().enumerate() {
         let line = line?;
         if line.trim().is_empty() {
@@ -631,8 +717,29 @@ fn load(path: &Path, key: &[u8]) -> io::Result<BTreeMap<ApprovalTokenId, Approva
                 ),
             )
         })?;
-        let expected = hmac_hex(key, event_bytes(&signed.event)?.as_bytes());
-        if !constant_time_eq(&expected, &signed.mac) {
+        let payload = event_bytes(&signed.event)?;
+        let fault = chain::verify_line(
+            key,
+            &mut tail,
+            signed.seq,
+            signed.prev.as_deref(),
+            &signed.mac,
+            &payload,
+        )
+        .err();
+        if fault == Some(LineFault::OutOfChain) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "approval log {} line {}: signed, but out of chain — a line before it \
+                     was removed, reordered, or copied in from another log (D78). \
+                     Refusing to load; pending approvals will simply be asked again",
+                    path.display(),
+                    n + 1
+                ),
+            ));
+        }
+        if let Some(fault) = fault {
             // The MAC covers a re-serialization of the parsed event, not the bytes
             // on disk, so a record written before D73 can never verify: it parses
             // (every field it lacks has a default) and then hashes to something its
@@ -644,6 +751,11 @@ fn load(path: &Path, key: &[u8]) -> io::Result<BTreeMap<ApprovalTokenId, Approva
                  an expiry and a use budget, so this version cannot authenticate it. \
                  Delete the log and its key; pending approvals will simply be asked \
                  again"
+            } else if fault == LineFault::Unchained {
+                "it was written before approval logs were chained (D78), so this \
+                 version cannot tell whether lines around it are missing. Delete the \
+                 log, its key and its head file; pending approvals will simply be \
+                 asked again"
             } else {
                 "the log has been modified by something without the key. Refusing to \
                  load it; pending approvals will simply be asked again"
@@ -657,9 +769,16 @@ fn load(path: &Path, key: &[u8]) -> io::Result<BTreeMap<ApprovalTokenId, Approva
                 ),
             ));
         }
+        macs.push(signed.mac);
         apply_event(&mut tokens, signed.event);
     }
-    Ok(tokens)
+    let ahead = chain::verify_head(path, key, &macs, "approval log")?;
+    Ok(Loaded {
+        tokens,
+        tail,
+        macs,
+        ahead,
+    })
 }
 
 /// A record from before D73: it parsed only because every field that version
@@ -871,6 +990,8 @@ mod tests {
             serde_json::to_string(&SignedEvent {
                 event,
                 mac: "00".repeat(32), // guessed
+                seq: Some(1),
+                prev: Some("00".repeat(32)),
             })
             .unwrap(),
         ] {
@@ -1125,5 +1246,212 @@ mod tests {
                 .unwrap(),
             ConsumeOutcome::Rejected(AuthorizationRejection::Exhausted)
         );
+    }
+
+    /// Every line carries its own valid MAC, so without a chain a log can lose a
+    /// line and still verify. Dropping the signed `Consumed` line must not hand the
+    /// single-use grant back.
+    #[test]
+    fn deleting_the_consumed_line_does_not_revive_the_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl");
+        let params = json!({"shell": "bash"});
+        {
+            let mut store = ApprovalStore::open(&path).unwrap();
+            let id = store.mint(token("t1", &params, "desc-1")).unwrap();
+            store.approve(&id).unwrap();
+            assert!(matches!(
+                store
+                    .consume(&id, &binding(&params, "desc-1"), NOW)
+                    .unwrap(),
+                ConsumeOutcome::Consumed(_)
+            ));
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        let kept: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.contains("\"Consumed\""))
+            .collect();
+        assert_eq!(kept.len(), text.lines().count() - 1);
+        std::fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
+
+        match ApprovalStore::open(&path) {
+            Err(e) => assert!(format!("{e}").contains("removed from the end"), "{e}"),
+            Ok(mut store) => assert_eq!(
+                store
+                    .consume(
+                        &ApprovalTokenId::new("t1"),
+                        &binding(&params, "desc-1"),
+                        NOW,
+                    )
+                    .unwrap(),
+                ConsumeOutcome::Rejected(AuthorizationRejection::Exhausted),
+                "a deleted Consumed line revived a single-use grant"
+            ),
+        }
+    }
+
+    fn consumed_log(dir: &Path) -> (PathBuf, Value) {
+        let path = dir.join("approvals.jsonl");
+        let params = json!({"shell": "bash"});
+        let mut store = ApprovalStore::open(&path).unwrap();
+        let id = store.mint(token("t1", &params, "desc-1")).unwrap();
+        store.approve(&id).unwrap();
+        assert!(matches!(
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap(),
+            ConsumeOutcome::Consumed(_)
+        ));
+        (path, params)
+    }
+
+    fn open_err(path: &Path) -> String {
+        match ApprovalStore::open(path) {
+            Ok(_) => panic!("a tampered log must not load"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// Removing a line from the middle leaves every remaining MAC valid; the chain
+    /// is what notices.
+    #[test]
+    fn deleting_a_middle_line_breaks_the_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, _) = consumed_log(dir.path());
+        let text = std::fs::read_to_string(&path).unwrap();
+        let kept: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.contains("\"Approved\""))
+            .collect();
+        std::fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
+        let err = open_err(&path);
+        assert!(err.contains("out of chain"), "{err}");
+    }
+
+    /// Deleting the head anchor is what someone cutting the tail would do next.
+    #[test]
+    fn a_missing_head_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, _) = consumed_log(dir.path());
+        std::fs::remove_file(chain::head_path(&path)).unwrap();
+        let err = open_err(&path);
+        assert!(err.contains("no head anchor"), "{err}");
+    }
+
+    /// A crash between writing a line and moving the head leaves the log one line
+    /// ahead. Those lines chain and verify, so the store loads — and still counts
+    /// the claim.
+    #[test]
+    fn a_log_ahead_of_its_head_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl");
+        let params = json!({"shell": "bash"});
+        let mut store = ApprovalStore::open(&path).unwrap();
+        let id = store.mint(token("t1", &params, "desc-1")).unwrap();
+        store.approve(&id).unwrap();
+        let old_head = std::fs::read(chain::head_path(&path)).unwrap();
+        assert!(matches!(
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap(),
+            ConsumeOutcome::Consumed(_)
+        ));
+        drop(store);
+        std::fs::write(chain::head_path(&path), &old_head).unwrap(); // "crash"
+
+        let mut store = ApprovalStore::open(&path).unwrap();
+        // `open` re-anchored, so the one line of slack does not accumulate.
+        assert_ne!(std::fs::read(chain::head_path(&path)).unwrap(), old_head);
+        assert_eq!(
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap(),
+            ConsumeOutcome::Rejected(AuthorizationRejection::Exhausted)
+        );
+    }
+
+    /// A head saved before the consumption, put back over a log cut to match it:
+    /// the running store has already seen the longer chain and refuses (D78).
+    #[test]
+    fn a_rolled_back_log_is_refused_by_the_store_that_saw_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl");
+        let params = json!({"shell": "bash"});
+        let mut store = ApprovalStore::open(&path).unwrap();
+        let id = store.mint(token("t1", &params, "desc-1")).unwrap();
+        store.approve(&id).unwrap();
+        let before = std::fs::read_to_string(&path).unwrap();
+        let head_before = std::fs::read(chain::head_path(&path)).unwrap();
+        assert!(matches!(
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap(),
+            ConsumeOutcome::Consumed(_)
+        ));
+
+        std::fs::write(&path, &before).unwrap();
+        std::fs::write(chain::head_path(&path), &head_before).unwrap();
+
+        let err = store
+            .consume(&id, &binding(&params, "desc-1"), NOW)
+            .unwrap_err();
+        assert!(format!("{err}").contains("rolled back"), "{err}");
+    }
+
+    /// The genesis head is on disk from `open` until the first append. Put back
+    /// over a two-line log, it anchors at most one line.
+    #[test]
+    fn a_saved_genesis_head_cannot_anchor_a_longer_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl");
+        let params = json!({"shell": "bash"});
+        let mut store = ApprovalStore::open(&path).unwrap();
+        let genesis = std::fs::read(chain::head_path(&path)).unwrap();
+        let id = store.mint(token("t1", &params, "desc-1")).unwrap();
+        store.approve(&id).unwrap();
+        drop(store);
+
+        std::fs::write(chain::head_path(&path), genesis).unwrap();
+        let err = open_err(&path);
+        assert!(err.contains("past its head"), "{err}");
+    }
+
+    /// KNOWN LIMIT (D78), pinned so it cannot be forgotten: a *new* process has no
+    /// memory of the longer chain. A head saved between `Approved` and `Consumed`
+    /// and put back over a log cut to match it is indistinguishable from the real
+    /// state at that moment, so the grant is spent twice. Closing this needs a
+    /// monotonic counter the attacker cannot write; keep the store out of reach.
+    #[test]
+    fn known_limit_a_matching_old_snapshot_fools_a_new_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl");
+        let params = json!({"shell": "bash"});
+        let before;
+        let head_before;
+        {
+            let mut store = ApprovalStore::open(&path).unwrap();
+            let id = store.mint(token("t1", &params, "desc-1")).unwrap();
+            store.approve(&id).unwrap();
+            before = std::fs::read_to_string(&path).unwrap();
+            head_before = std::fs::read(chain::head_path(&path)).unwrap();
+            store
+                .consume(&id, &binding(&params, "desc-1"), NOW)
+                .unwrap();
+        }
+        std::fs::write(&path, &before).unwrap();
+        std::fs::write(chain::head_path(&path), &head_before).unwrap();
+
+        let mut store = ApprovalStore::open(&path).unwrap();
+        assert!(matches!(
+            store
+                .consume(
+                    &ApprovalTokenId::new("t1"),
+                    &binding(&params, "desc-1"),
+                    NOW
+                )
+                .unwrap(),
+            ConsumeOutcome::Consumed(_)
+        ));
     }
 }

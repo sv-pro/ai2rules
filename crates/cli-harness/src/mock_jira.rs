@@ -206,7 +206,7 @@ pub fn run(rovo: bool, poisoned: bool, input_required: bool) -> i32 {
                 // Poisoned mode echoes the arguments that actually arrived, so a test
                 // can assert which of them the gateway was willing to forward.
                 let body = if poisoned {
-                    json!({ "received_arguments": args.clone() })
+                    json!({ "received_name": name, "received_arguments": args.clone() })
                 } else {
                     call_tool(name, &args)
                 };

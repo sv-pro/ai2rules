@@ -12,8 +12,11 @@
 //!   from the **world's** descriptor rather than the upstream's advertisement, so a
 //!   drifted or hostile server cannot bolt an extra argument onto an allowed tool
 //!   (finding #14).
-//! - `tools/call` → `gate()` decides; the call is forwarded **only on ALLOW**;
-//!   DENY / ABSENT / ASK come back as an MCP tool error.
+//! - `tools/call` → `gate()` decides; the call is forwarded **only on ALLOW**,
+//!   and what is forwarded is the kernel's **effective call** (D80): the base
+//!   action, with a scoped capability's locked arguments stripped and its literals
+//!   injected — not the caller's own name and arguments. DENY / ABSENT / ASK come
+//!   back as an MCP tool error.
 //! - an upstream result that *demands* input instead of answering (MCP `2026-07-28`
 //!   MRTR `input_required`) is **refused, not relayed** — the D49 interim deny.
 //! - every decision is appended to an optional JSONL audit log.
@@ -23,7 +26,8 @@
 
 use compiler::{compile, loader::load_yaml};
 use harness_preview::{
-    gate, host_outcome, GateContext, GateRequest, GateResponse, GateUsage, HostOutcome, ABI_VERSION,
+    gate, host_outcome, GateContext, GateEffective, GateRequest, GateResponse, GateUsage,
+    HostOutcome, ABI_VERSION,
 };
 use harness_types::{ActionName, CompiledWorld};
 use serde_json::{json, Value};
@@ -183,6 +187,48 @@ fn govern(
         },
     };
     gate(world, &req)
+}
+
+/// What to send upstream for an allowed call (D80): the kernel's effective call,
+/// never the caller's proposal. The two differ exactly when the world scoped the
+/// action — a `Literal` the caller tried to override, or a verb whose name the
+/// upstream has never heard of. Fail-closed: no effective call, or one that
+/// needs a context value this process has no trusted source for, is refused.
+///
+/// `requested` is the tool name the client called and `decided` the action the
+/// kernel decided on (after `command_classes`, D36). An unscoped call keeps the
+/// requested name — classification renames the *policy* action, not the upstream
+/// tool — and a scoped verb forwards under its base action's name.
+fn upstream_call(
+    requested: &str,
+    decided: &str,
+    effective: Option<&GateEffective>,
+) -> Result<(String, Value), String> {
+    let Some(effective) = effective else {
+        return Err("the kernel returned no effective call for an ALLOW".to_string());
+    };
+    if !effective.context_refs.is_empty() {
+        let keys: Vec<&str> = effective
+            .context_refs
+            .values()
+            .map(String::as_str)
+            .collect();
+        return Err(format!(
+            "the call needs runtime context ({}) and the gateway has no trusted source \
+             for it",
+            keys.join(", ")
+        ));
+    }
+    // The gateway's convention — the one `tools/list` already matches on — is that
+    // a world action's *name* is the upstream tool's name; `backing` is not read
+    // here (the demo worlds' `backing.tool` values are descriptive).
+    let scoped = effective.base_action != decided;
+    let tool = if scoped {
+        effective.base_action.clone()
+    } else {
+        requested.to_string()
+    };
+    Ok((tool, effective.arguments.clone()))
 }
 
 fn audit(path: Option<&Path>, entry: Value) {
@@ -411,7 +457,11 @@ pub fn run(
                     mode,
                     session_usage,
                 );
-                session_usage = verdict.context.usage;
+                // Charged only once the call is actually sent upstream.
+                let charged_usage = verdict.context.usage;
+                if !matches!(host_outcome(&verdict), HostOutcome::Proceed) {
+                    session_usage = charged_usage;
+                }
                 let action = verdict.action.clone();
                 let manifest_hash = verdict.manifest_hash.clone();
                 audit(
@@ -432,7 +482,29 @@ pub fn run(
                         if verdict.context.taint == "tainted" {
                             session_taint = true;
                         }
-                        match up.call_tool(&name, &args, params.get("_meta")) {
+                        if let Some(stripped) = verdict
+                            .effective
+                            .as_ref()
+                            .map(|e| &e.stripped)
+                            .filter(|s| !s.is_empty())
+                        {
+                            // The proposal tried to set what the world fixes. The
+                            // scoping already defeats it; the record is the signal.
+                            audit(
+                                audit_path,
+                                json!({"tool": name, "action": action, "stage": "stripped",
+                                       "stripped": stripped, "manifest_hash": manifest_hash}),
+                            );
+                        }
+                        let forwarded = upstream_call(&name, &action, verdict.effective.as_ref())
+                            .map_err(|why| format!("REFUSED (gateway): {why}"))
+                            .and_then(|(up_name, up_args)| {
+                                // A refused call never ran, so it costs nothing.
+                                session_usage = charged_usage;
+                                up.call_tool(&up_name, &up_args, params.get("_meta"))
+                                    .map_err(|e| format!("upstream error: {e}"))
+                            });
+                        match forwarded {
                             Ok(r) if demands_input(&r) => {
                                 // D49 interim deny (issue #40). The upstream answered
                                 // with a *demand* rather than a result. Note what this
@@ -461,7 +533,7 @@ pub fn run(
                             }
                             Ok(r) => r,
                             Err(e) => json!({"isError": true,
-                                "content": [{"type": "text", "text": format!("upstream error: {e}")}]}),
+                                "content": [{"type": "text", "text": e}]}),
                         }
                     }
                     HostOutcome::NeedsApproval { reason } => json!({"isError": true,

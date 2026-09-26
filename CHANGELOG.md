@@ -12,6 +12,36 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Security
+
+- **Approval and staged-commit logs are chained and head-anchored** (D78). Deleting a
+  signed line — the approval log's `Consumed`, or the commit log's `AttemptStarted` /
+  `AttemptFinished` — used to hand a single-use grant back or release an
+  idempotency key while every remaining line still verified. Lines now carry `seq`
+  and `prev`, a MACed `<log>.head` anchors the end (at most one line of crash
+  slack, re-anchored on open), and each open store refuses a log shorter than it has
+  already seen. **Breaking** for stores written by earlier versions: they are refused
+  as old (D73/D78 wording); delete the log and its key. Known limit, pinned by a test:
+  a head saved between approval and consumption can still roll back a store that a
+  fresh process opens.
+- **A scoped verb's base action can be hidden** (D79): `projected: false` on a base
+  action keeps it in the ontology for scoped capabilities while a direct call is
+  `ABSENT`. Previously the unscoped action stayed callable with any argument.
+
+### Added
+
+- **`GateResponse.effective`** (D80): on `ALLOW` / `ASK` the gate returns the call to
+  execute — base action, backing, arguments after a scoped capability's stripping
+  and literal injection, context refs, and the stripped argument names. Backward-
+  compatible v1 addition; `world_kernel::effective_call` is the single lowering that
+  `build_execution_spec` now also uses.
+
+### Changed
+
+- **`mcp-gateway` forwards the effective call** (D80), not the caller's name and
+  arguments, refuses a call that needs a `ContextRef`, and audits stripped
+  arguments. For unscoped actions the forwarded call is unchanged.
+
 ## [0.6.0] — 2026-09-19
 
 ### Added

@@ -134,6 +134,18 @@ still returns `ASK` for approval-required actions.
 }
 ```
 
+On `ALLOW` / `ASK` the response also carries the call to execute (D80):
+
+```json
+"effective": {
+  "base_action": "create_pull_request",
+  "backing": { "kind": "mcp", "server": "codehost", "tool": "create_pull_request" },
+  "arguments": { "repo": "acme/svc", "title": "Fix rounding" },
+  "context_refs": { "base": "change.base" },
+  "stripped": ["repo"]
+}
+```
+
 | Field | Meaning |
 |---|---|
 | `decision` | `ABSENT` \| `ALLOW` \| `DENY` \| `ASK` \| `REPLAN`. (`UnknownToOntology` is surfaced as `ABSENT` with `rule:"unknown_to_ontology"`, per `KernelOutcome::decision()`.) |
@@ -144,6 +156,7 @@ still returns `ASK` for approval-required actions.
 | `context.usage` | **Post-call** budget counters the adapter must persist for the next call. Charged only on an `ALLOW` that will actually run — a blocked call consumes nothing, so a refusal never pushes a session toward its limit. Tokens are carried through unchanged; only a caller that has seen a model response can count them. |
 | `approval` | On `ASK`: `{ "token": "<id>", "required": true }`. Else `null`. The token is a correlation id for the adapter's approval UI/store, not a grant credential. |
 | `manifest_hash` | First 12 hex of the compiled manifest hash — drift correlation + trace join. |
+| `effective` | On `ALLOW` / `ASK` only (D80): the lowered call. `base_action` and `backing` (`local` handler or `mcp` server/tool) say what runs; `arguments` are the proposal after a scoped capability stripped locked/unknown arguments and injected literals; `context_refs` (omitted when empty) names arguments the host must fill from its own trusted context; `stripped` (omitted when empty) lists what the proposal tried to set that the world fixes — record it. **Execute this, not the proposal**: the gate decided on the proposal, but for a scoped capability only this call carries the world's scoping. *Which tool name to call:* for a scoped capability (`base_action` ≠ `action`) call the base action; otherwise keep the tool the host proposed — `action` may be a `command_classes` rename, which is a policy name, not a tool. `backing` says where the action is served; a host whose world's `backing` names real upstream tools may call `backing.tool`, while the reference `mcp-gateway` relies on world action names matching upstream tool names. Backward-compatible v1 addition. |
 
 ## 5. Exit codes (process-level, **not** the verdict)
 
@@ -176,6 +189,8 @@ Every host adapter, regardless of language, does exactly this:
    to persist is a budget that silently stops counting (D59's rule, applied to
    budgets).
 7. Map `response.decision` → the host's decision shape; fail-open/closed on `≠0`.
+   On `ALLOW`, execute `response.effective` where the host can (D80); a host that
+   can only run the proposal as-is should not offer scoped capabilities.
 
 No governance logic lives in the adapter — only event-shape translation and
 session-state plumbing (taint and budget counters). **The taint *algebra*, the rules (incl. which inputs taint), and —

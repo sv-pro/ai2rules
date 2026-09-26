@@ -2,8 +2,8 @@
 //! (PLAN.md E1.3, E1.5, E1.6).
 
 use harness_types::{
-    BackingIdentity, ChannelDef, ChannelPolicy, CompiledWorld, CompiledWorldParts, Descriptor,
-    RootRule, RootsDef, SourceChannel, Taint, TaintRule, WorldManifest,
+    ActionName, BackingIdentity, ChannelDef, ChannelPolicy, CompiledWorld, CompiledWorldParts,
+    Descriptor, RootRule, RootsDef, SourceChannel, Taint, TaintRule, WorldManifest,
 };
 use serde_json::Value;
 
@@ -112,9 +112,23 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
             .insert(cap.name.clone(), cap.clone());
     }
 
-    // Default projection exposes the whole ontology. Dynamic narrowing by taint
+    // Default projection exposes the whole ontology, minus base actions the
+    // manifest declares `projected: false` (D79): they stay in the ontology so
+    // scoped capabilities built on them still resolve and lower, but a direct
+    // call is ABSENT and discovery never lists them. Dynamic narrowing by taint
     // and context is a runtime concern (E2 / Layer 2).
-    parts.projected = parts.ontology.clone();
+    let hidden: std::collections::BTreeSet<&ActionName> = manifest
+        .base_actions
+        .iter()
+        .filter(|a| !a.projected)
+        .map(|a| &a.name)
+        .collect();
+    parts.projected = parts
+        .ontology
+        .iter()
+        .filter(|name| !hidden.contains(name))
+        .cloned()
+        .collect();
 
     // Capability matrix.
     for grant in &manifest.capabilities {

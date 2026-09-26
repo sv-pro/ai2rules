@@ -60,6 +60,25 @@ pub struct BaseActionDef {
     pub backing: Option<BackingIdentity>,
     #[serde(default)]
     pub approval_required: bool,
+    /// Whether the action is projected (visible and callable by name). `false`
+    /// keeps it in the ontology — so scoped capabilities can still be built on it
+    /// and lower to its backing — while a direct call is `ABSENT` (invariant 2)
+    /// and discovery never lists it. Use it for the unscoped action behind a
+    /// scoped verb: pinning `repo` in `open_change_pr` means nothing if the model
+    /// can call `create_pull_request` with any `repo` (D79). Defaults to `true`;
+    /// omitted from serialization when `true`, so existing manifests keep their
+    /// hash.
+    #[serde(default = "projected_default", skip_serializing_if = "is_projected")]
+    pub projected: bool,
+}
+
+fn projected_default() -> bool {
+    true
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature
+fn is_projected(projected: &bool) -> bool {
+    *projected
 }
 
 /// Where a scoped-capability argument's value comes from.

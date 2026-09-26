@@ -75,6 +75,42 @@ mod tests {
     }
 
     #[test]
+    fn a_base_action_can_stay_in_the_ontology_without_being_projected() {
+        // D79: the unscoped action behind a scoped verb.
+        let yaml = r#"
+world_id: w
+base_actions:
+  - { name: create_pr, action_type: Mcp, side_effect: External, projected: false }
+scoped_capabilities:
+  - { name: open_change_pr, base_action: create_pr }
+"#;
+        let world = compile(&load_yaml(yaml).expect("parses")).expect("compiles");
+        let base = ActionName::new("create_pr");
+        let verb = ActionName::new("open_change_pr");
+        assert!(world.in_ontology(&base));
+        assert!(!world.is_projected(&base));
+        assert!(world.is_projected(&verb));
+        assert!(world.descriptor(&base).is_some());
+    }
+
+    #[test]
+    fn declaring_projected_true_does_not_change_the_manifest_hash() {
+        // The field is skipped when true, so every pre-D79 manifest keeps its hash.
+        let plain =
+            "world_id: w\nbase_actions:\n  - { name: a, action_type: Read, side_effect: Read }\n";
+        let explicit = "world_id: w\nbase_actions:\n  - { name: a, action_type: Read, side_effect: Read, projected: true }\n";
+        let hidden = "world_id: w\nbase_actions:\n  - { name: a, action_type: Read, side_effect: Read, projected: false }\n";
+        let h = |y: &str| {
+            compile(&load_yaml(y).unwrap())
+                .unwrap()
+                .manifest_hash()
+                .clone()
+        };
+        assert_eq!(h(plain), h(explicit));
+        assert_ne!(h(plain), h(hidden));
+    }
+
+    #[test]
     fn scoped_capability_inherits_base_type_and_side_effect() {
         let world = compile_default();
         assert_eq!(
