@@ -43,14 +43,14 @@ To get this flywheel spinning quickly, implement these three automation steps:
 1. Check `_tasks/1_discovery/` for new vulnerabilities found by Codex.
 2. Review the task and assign it to Claude Code for Development (`_tasks/2_development/`).
 3. Claude builds the defense, tests it, and moves it to `_tasks/3_advocacy/`.
-4. Antigravity monitors `3_advocacy/`, generates the `.tape` proof and writes the `DeepDive.md` blog; a correcting-review pass then audits the result for accuracy/SEO and fixes it in place before the task lands in `_tasks/4_done/`.
+4. Claude Code, as the Megaphone, monitors `3_advocacy/`, generates the `.tape` proof and writes the `DeepDive.md` blog (hero images still come from Antigravity, the only agent with image generation); a correcting-review pass then audits the result for accuracy/SEO and fixes it in place before the task lands in `_tasks/4_done/`.
 5. Review social feedback to seed tomorrow's `1_discovery/`.
 
 ---
 
 ## Multi-Agent Parallel Workflow (No-Conflict Architecture)
 
-It is entirely possible to have **Claude Code**, **Codex**, and **Antigravity** running simultaneously on your machine, each driving a phase of the Flywheel. To prevent git conflicts or file clobbering, they must adhere to a strict **Isolation and Handoff Protocol**.
+It is entirely possible to have several agent sessions running simultaneously on your machine, each driving a phase of the Flywheel: **Claude Code**, **Codex** and **Antigravity**, or two Claude Code sessions in different roles (the Engine and the Megaphone are both Claude Code now). Roles, not agents, own the domains below. To prevent git conflicts or file clobbering, they must adhere to a strict **Isolation and Handoff Protocol**.
 
 ### 1. Agent Roles & Directory Boundaries
 
@@ -64,9 +64,9 @@ Agents are restricted to specific directories. They are not allowed to modify fi
     *   **Domain:** `crates/`, `src/`, `tests/`, `_tasks/2_development/`
     *   **Task:** Polls `_tasks/2_development/`. When a new task appears, it writes failing tests, implements the Rust/Python defense, and ensures the suite goes green.
     *   **Write Access:** Modifies core code. Upon success, it appends a technical summary to the task file and uses `mv` to send it to `_tasks/3_advocacy/`.
-*   **Antigravity (The Megaphone - Advocacy)**
+*   **Claude Code (The Megaphone - Advocacy)** — fallbacks: Codex, then Antigravity
     *   **Domain:** `docs/`, `demos/`, `blog/`, `_tasks/3_advocacy/`
-    *   **Task:** Polls `_tasks/3_advocacy/`. When a task arrives, Antigravity generates `.tape` files, scaffolds the Astro MDX post, and formats architecture diagrams.
+    *   **Task:** Polls `_tasks/3_advocacy/`. When a task arrives, it generates `.tape` files, scaffolds the Astro MDX post, and formats architecture diagrams. Hero images are delegated to Antigravity (see `_tasks/3_advocacy/hero-illustrations.md`). Antigravity held this role until 2026-10; it is rarely used now.
     *   **Write Access:** Modifies documentation/blog. Uses `mv` to archive the completed task to `_tasks/4_done/`.
 *   **Claude Code (The Critic — Correcting Review)** — *cross-cutting role*
     *   **Domain:** reads everything; may correct in `crates/`, `src/`, `tests/`, `docs/`, `blog/`.
@@ -84,14 +84,14 @@ The structure:
 _tasks/
   ├── 1_discovery/           (Inbox for Codex)
   ├── 2_development/         (Inbox for Claude Code)
-  ├── 3_advocacy/            (Inbox for Antigravity)
+  ├── 3_advocacy/            (Inbox for the Megaphone: Claude Code)
   └── 4_done/                (Archive)
 ```
 
 1. **Codex** creates `prompt-injection-bypass.md` in `1_discovery/`. 
 2. When ready, the file is moved to `2_development/`.
 3. **Claude Code** takes ownership, writes the code, and runs `mv prompt-injection-bypass.md ../3_advocacy/`. 
-4. **Antigravity** takes ownership, writes the blog post, and runs `mv prompt-injection-bypass.md ../4_done/`.
+4. **Claude Code**, as the Megaphone, takes ownership, writes the blog post, and runs `mv prompt-injection-bypass.md ../4_done/`.
 
 **Why this works:** The `mv` command in Linux is an atomic operation. Moving a file instantly transfers "ownership" of the task to the next agent, ensuring zero concurrency conflicts while running totally in parallel.
 
