@@ -222,19 +222,23 @@ flows:
       # AGENTS.md treats GitHub and Linear as equals; Linear is primary here because ids lead with AI2-<n>.
       primary: linear-status
       mirrors: [{ carrier: gh-issue, sync: manual }, { carrier: gh-pr, sync: auto }, { carrier: plan-checkbox, sync: manual }]
+    # Linear statuses of team AI2 ("Ai2rules"), read by Codex through its Linear connector on
+    # 2026-10-02: Backlog, Todo (unstarted), In Progress, In Review (started), Done (completed),
+    # Canceled (canceled), Duplicate (duplicate). Linear did not return their order.
     states:
-      - { id: open, values: { gh-issue: open } }
-      - { id: in-progress, summary: "a branch exists, maybe a draft PR", values: { gh-issue: open, gh-pr: draft } }
-      - { id: in-review, values: { gh-issue: open, gh-pr: open } }
-      - { id: merged, values: { gh-pr: merged } }
-      # "done" seen live: AI2-25 is Done in Linear (statusType completed), read by Codex 2026-10-02. Other statuses unknown.
-      - { id: closed, terminal: true, values: { gh-issue: closed, gh-pr: merged, linear-status: done } }
+      - { id: open, values: { linear-status: [backlog, todo], gh-issue: open } }
+      - { id: in-progress, summary: "a branch exists, maybe a draft PR", values: { linear-status: in progress, gh-issue: open, gh-pr: draft } }
+      - { id: in-review, values: { linear-status: in review, gh-issue: open, gh-pr: open } }
+      - { id: merged, summary: "merged; trackers not yet updated", values: { gh-pr: merged } }
+      - { id: closed, terminal: true, values: { linear-status: done, gh-issue: closed, gh-pr: merged } }
+      - { id: canceled, terminal: true, summary: "abandoned, or a duplicate", values: { linear-status: [canceled, duplicate], gh-issue: closed } }
     transitions:
       - { from: open, to: in-progress, by: engine, effects: ["branch <agent>/<key>-<slug>"] }
       - { from: in-progress, to: in-review, by: engine, checks: [rust-checks, readme-sync, wasm-refresh, governance-bench, demos-check, decision-record], effects: ["PR titled [AI2-<n> / #<n>] …, marked ready for review"] }
       - { from: in-review, to: in-progress, by: maintainer, effects: [review comments] }
       - { from: in-review, to: merged, by: maintainer, checks: [rust-checks] }
       - { from: merged, to: closed, by: engine, checks: [trackers-sync], effects: [close in GitHub and Linear, tick PLAN checkbox] }
+      - { from: [open, in-progress, in-review], to: canceled, by: maintainer, effects: ["close in GitHub as not planned; Canceled or Duplicate in Linear"] }
 
   - id: release
     summary: Unreleased changes become a published version on npm and GitHub Releases
