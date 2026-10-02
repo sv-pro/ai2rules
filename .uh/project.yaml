@@ -1,0 +1,350 @@
+# ai2rules described in the workspace model of universal-harness
+# (https://github.com/sv-pro/universal-harness, docs/model.md). Hand-edited: this file
+# is the source; `uh provision` generates .uh/brief.md and the uh:begin blocks from it.
+# Entries come from this repo as of 2026-10-02; "unverified" marks what it does not say.
+
+project:
+  id: ai2rules
+  summary: >-
+    Deterministic governance kernel for CLI coding agents (Rust, published to npm as
+    `ai2rules-harness`), plus the ai2rules.dev blog (Astro, in `blog/`).
+  repo: { resource: code }
+
+# ---------------------------------------------------------------- §1 resources
+resources:
+  - id: code
+    kind: code-host
+    provider: github
+    locator: sv-pro/ai2rules
+    access:
+      - { via: cli, tool: gh }
+      - { via: cli, tool: git }
+  - id: gh-issues
+    kind: issue-tracker
+    provider: github
+    locator: sv-pro/ai2rules issues + PRs
+    access:
+      - { via: cli, tool: gh }
+  - id: linear
+    kind: issue-tracker
+    provider: linear
+    locator: team AI2 (ids AI2-<n>)
+    access:
+      - { via: mcp, tool: linear }
+      - { via: web, actor: human }
+  - id: ci
+    kind: ci
+    provider: github-actions
+    locator: .github/workflows (ci.yml, release.yml, deepseek-integration.yml, demo-platform-smoke.yml)
+    access:
+      - { via: cli, tool: gh, note: "gh run list / gh run view" }
+  - id: site
+    kind: hosting
+    provider: cloudflare-pages
+    locator: ai2rules.dev, root dir blog/, deploys the production branch
+    access:
+      - { via: ci, note: "deploys on push to the production branch (dev or main, see blog/DEPLOY.md)" }
+      - { via: web, actor: human, note: "dashboard: settings, domains" }
+  - id: registrar
+    kind: registrar
+    provider: namecheap
+    locator: ai2rules.dev
+    access: [{ via: web, actor: human }]
+  - id: search-console
+    kind: analytics
+    provider: google-search-console
+    locator: ai2rules.dev
+    access: [{ via: web, actor: human }]
+  - id: npm
+    kind: package-registry
+    provider: npm
+    locator: ai2rules-harness + 4 platform packages
+    access:
+      - { via: ci, note: "only release.yml publishes, on a v* tag; a version cannot be republished" }
+  - id: gh-releases
+    kind: artifact-release
+    provider: github-releases
+    locator: sv-pro/ai2rules releases (binaries per platform)
+    access: [{ via: ci }]
+  - id: gdocs
+    kind: document-store
+    provider: google-drive
+    locator: design documents (unverified which ones belong to ai2rules)
+    access: [{ via: mcp, tool: google-drive }]
+  - id: social
+    kind: channel
+    provider: hacker-news, reddit, x
+    locator: copy in blog/social/<slug>.md
+    access: [{ via: web, actor: human }]
+  - id: feeds
+    kind: feed
+    provider: hacker-news-api, arxiv-cs.CR, rss
+    locator: docs/FLYWHEEL.md §1 (the cron radar is planned, not built)
+    access: [{ via: web }]
+
+# ---------------------------------------------------------------- §2 knowledge
+knowledge:
+  - { ref: AGENTS.md, role: conventions for agents and humans, authority: normative, truth_for: [conventions, crate map, build and test] }
+  - { ref: PLAN.md, role: epic-level execution plan, authority: normative, truth_for: [scope, epics, acceptance invariants] }
+  - { ref: DECISIONS.md, role: decision log D1–D80 (append-only); consult before choosing alternatives, authority: normative, truth_for: [architecture decisions] }
+  - { ref: docs/GLOSSARY.md, role: vocabulary; use these terms, authority: normative }
+  - { ref: docs/FLYWHEEL.md, role: the process (flows and roles) in prose, authority: normative }
+  - { ref: docs/BLOG_PLAN.md, role: blog plan and seeding, authority: normative }
+  - { ref: docs/harness-architecture.md, role: canonical runtime design, authority: descriptive }
+  - { ref: docs/THESIS.md, role: positioning (five layers), authority: descriptive }
+  - { ref: README.md, role: "public overview, status, test counts", authority: descriptive }
+  - { ref: CHANGELOG.md, role: release notes; Unreleased section is the next release, authority: descriptive, lifetime: release }
+  - { ref: blog/DEPLOY.md, role: "deploy runbook (Cloudflare, Namecheap, Search Console)", authority: descriptive }
+  - { ref: HANDOFF.md, role: note from the last session, authority: ephemeral, lifetime: session }
+  - { ref: _tasks, role: one file per flywheel item, authority: ephemeral, lifetime: item }
+
+# ------------------------------------------------------- §5 procedures & checks
+procedures:
+  - id: rust-checks
+    kind: recipe
+    summary: Build, test, format and lint the workspace on the pinned toolchain
+    run:
+      - cargo build --workspace --offline
+      - cargo test --workspace --offline
+      - cargo fmt --all -- --check
+      - cargo clippy --workspace --all-targets --offline -- -D warnings
+    enforced_by: { ci: ci.yml }
+  - id: wasm-refresh
+    kind: obligation
+    summary: Rebuild the committed WASM engine and copy it into blog/public/vendor/harness-wasm/
+    when: { paths: [crates/harness-preview/**, crates/compiler/**] }
+    touches: ["blog/public/vendor/harness-wasm/**"]
+    run:
+      - (cd crates/harness-wasm && wasm-pack build --target web --release)
+      - cp crates/harness-wasm/pkg/harness_wasm{_bg.wasm,.js} blog/public/vendor/harness-wasm/
+      - node scripts/check-wasm-freshness.mjs
+    enforced_by: { ci: "ci.yml / wasm" }
+    defined_in: AGENTS.md, D60
+  - id: governance-bench
+    kind: obligation
+    summary: Regenerate the governance benchmark results (committed build output)
+    when: { event: "kernel, gate ABI, projection or approval store changed" }
+    run: [bash scripts/run-governance-bench.sh]
+    enforced_by: { ci: "ci.yml / governance-bench" }
+    defined_in: AGENTS.md, D76
+  - id: demos-check
+    kind: obligation
+    summary: Run every demo and assert the verdict lines it claims to show
+    when: { event: kernel changed }
+    run: [bash scripts/check-demos.sh]
+    enforced_by: { ci: "ci.yml / demos" }
+  - id: release-rehearsal
+    kind: recipe
+    summary: Rehearse the npm publish path short of publishing
+    run:
+      - cargo build --release --locked -p cli-harness
+      - bash scripts/assemble-npm-packages.sh
+      - node npm/verify-packages.js && node scripts/check-npm-pack.mjs
+    enforced_by: { ci: "ci.yml / release-dry-run" }
+    defined_in: AGENTS.md, D70
+  - id: blog-checks
+    kind: recipe
+    summary: Build the site and check drafts, heroes and spacing
+    run: ["cd blog && npm run build && npm run check:drafts && npm run check:heroes && npm run check:spacing"]
+    enforced_by: { ci: ci.yml }
+  - id: correcting-review
+    kind: recipe
+    summary: Audit a handed-off artifact and fix defects in place (technical accuracy, SEO), then note what changed
+    entry: { claude-code: /review-blog }
+    defined_in: "docs/FLYWHEEL.md §3, .claude/agents/correcting-reviewer.md (the role), .claude/commands/review-blog.md (the steps)"
+  - id: readme-sync
+    kind: obligation
+    summary: Update README status, layout, build and test counts, and PLAN checkboxes in the same commit
+    when:
+      event: every commit that changes status, capabilities, layout, build steps or test counts
+      paths: ["crates/*/tests/**"]   # adding or removing tests changes the counts
+    touches: [README.md, AGENTS.md]   # both state the total ("331 tests", "total 331")
+    defined_in: AGENTS.md
+  - id: trackers-sync
+    kind: obligation
+    summary: Reflect every task state change in both GitHub and Linear; done on one side is not done
+    defined_in: AGENTS.md
+  - id: decision-record
+    kind: obligation
+    summary: Append a D<n> entry (decision, alternatives, why) when a choice closes off a real alternative
+    defined_in: AGENTS.md
+  - id: no-reference-repos
+    kind: prohibition
+    summary: Never git add repos/ (reference checkouts); stage paths explicitly
+    defined_in: AGENTS.md
+  - id: no-hook-moves
+    kind: prohibition
+    summary: Never move or delete .claude/hooks/world-gate.py mid-session; a missing hook bricks every tool call
+    defined_in: AGENTS.md, D37
+
+# ------------------------------------------------------------ §3 carriers
+carriers:
+  - { id: tasks-folder, kind: folder, locator: "_tasks/<phase>/<slug>.md", key: slug }
+  - { id: linear-status, kind: status, locator: Linear issue status, resource: linear, key: linear }
+  - { id: gh-issue, kind: issue-state, locator: GitHub issue state, resource: gh-issues, key: github }
+  - { id: gh-pr, kind: pr-state, locator: GitHub PR state, resource: gh-issues, key: branch }
+  - { id: plan-checkbox, kind: checkbox, locator: PLAN.md epic checkboxes }
+  - { id: changelog, kind: section, locator: "CHANGELOG.md (Unreleased → version)" }
+  - { id: git-tag, kind: tag, locator: "git tag v*", resource: code }
+  - { id: npm-version, kind: version, locator: published npm version, resource: npm }
+  - id: post-file
+    kind: frontmatter
+    locator: "blog/src/content/blog/<slug>.md, field draft"
+    key: slug
+    paths: ["blog/src/content/blog/{slug}.md", "blog/src/content/blog/{slug}.mdx"]
+    field: draft
+
+# --------------------------------------------------------------- §3 flows
+flows:
+  - id: flywheel
+    summary: A threat found in the wild becomes a defense, then a post, then feedback
+    items: [finding]
+    defined_in: docs/FLYWHEEL.md
+    carriers:
+      primary: tasks-folder
+      mirrors: [{ carrier: linear-status, sync: manual }, { carrier: gh-issue, sync: manual }]
+    states:
+      - { id: discovery, values: { tasks-folder: _tasks/1_discovery } }
+      - { id: development, values: { tasks-folder: _tasks/2_development } }
+      - { id: advocacy, values: { tasks-folder: _tasks/3_advocacy } }
+      - { id: done, terminal: true, values: { tasks-folder: _tasks/4_done } }
+    transitions:
+      - { from: discovery, to: development, by: maintainer, effects: [triage, mv the file] }
+      - { from: development, to: advocacy, by: engine, checks: [rust-checks], effects: [append a technical summary to the item, mv the file] }
+      - { from: advocacy, to: done, by: critic, checks: [blog-checks, correcting-review], effects: [append a Review note, mv the file] }
+      - { from: advocacy, to: development, by: critic, effects: [re-queue only when the fix needs the owner's rework] }
+
+  - id: change
+    summary: A tracked issue becomes merged code
+    items: [issue]
+    defined_in: AGENTS.md (conventions), branch and commit naming
+    carriers:
+      # AGENTS.md treats GitHub and Linear as equals; Linear is primary here because ids lead with AI2-<n>.
+      primary: linear-status
+      mirrors: [{ carrier: gh-issue, sync: manual }, { carrier: gh-pr, sync: auto }, { carrier: plan-checkbox, sync: manual }]
+    states:
+      - { id: open, values: { gh-issue: open } }
+      - { id: in-progress, summary: "a branch exists, maybe a draft PR", values: { gh-issue: open, gh-pr: draft } }
+      - { id: in-review, values: { gh-issue: open, gh-pr: open } }
+      - { id: merged, values: { gh-pr: merged } }
+      # "done" seen live: AI2-25 is Done in Linear (statusType completed), read by Codex 2026-10-02. Other statuses unknown.
+      - { id: closed, terminal: true, values: { gh-issue: closed, gh-pr: merged, linear-status: done } }
+    transitions:
+      - { from: open, to: in-progress, by: engine, effects: ["branch <agent>/<key>-<slug>"] }
+      - { from: in-progress, to: in-review, by: engine, checks: [rust-checks, readme-sync, wasm-refresh, governance-bench, demos-check, decision-record], effects: ["PR titled [AI2-<n> / #<n>] …, marked ready for review"] }
+      - { from: in-review, to: in-progress, by: maintainer, effects: [review comments] }
+      - { from: in-review, to: merged, by: maintainer, checks: [rust-checks] }
+      - { from: merged, to: closed, by: engine, checks: [trackers-sync], effects: [close in GitHub and Linear, tick PLAN checkbox] }
+
+  - id: release
+    summary: Unreleased changes become a published version on npm and GitHub Releases
+    items: [release]
+    defined_in: .github/workflows/release.yml, CHANGELOG.md, D70
+    carriers:
+      primary: changelog
+      mirrors: [{ carrier: git-tag, sync: manual }, { carrier: npm-version, sync: auto }]
+    states:
+      - { id: unreleased, values: { changelog: Unreleased } }
+      - { id: bump-pr, summary: version bump PR open }
+      - { id: tagged, values: { git-tag: "v<version>" } }
+      - { id: published, terminal: true, values: { npm-version: "<version>" } }
+    transitions:
+      - { from: unreleased, to: bump-pr, by: engine, checks: [release-rehearsal], effects: [bump versions, date the changelog section] }
+      - { from: bump-pr, to: tagged, by: maintainer, effects: [merge, push tag v<version>] }
+      - { from: tagged, to: published, by: ci-pipeline, effects: [build binaries, publish npm, create GitHub Release] }
+
+  - id: post
+    summary: A blog post goes from draft to deployed and seeded
+    items: [post]
+    defined_in: docs/BLOG_PLAN.md, blog/DEPLOY.md, blog/social/README.md
+    carriers:
+      primary: post-file
+    states:
+      - { id: draft, values: { post-file: "true" } }
+      - { id: illustrated, summary: "hero image in blog/src/assets, 1376×768 JPG" }
+      - { id: reviewed }
+      - { id: published, summary: "draft: false, on the production branch", values: { post-file: "false" } }
+      - { id: seeded, terminal: true, summary: copy in blog/social/<slug>.md posted }
+    transitions:
+      - { from: draft, to: illustrated, by: illustrator, effects: [hero in house style] }
+      - { from: illustrated, to: reviewed, by: critic, checks: [correcting-review, blog-checks] }
+      - { from: reviewed, to: published, by: maintainer, effects: [merge to the production branch; Cloudflare deploys] }
+      - { from: published, to: seeded, by: maintainer, effects: [post HN / Reddit / X from blog/social/<slug>.md] }
+
+# --------------------------------------------------------------- §4 roles
+roles:
+  - id: maintainer
+    actor: human
+    summary: Triage, approvals, merges, tags, dashboards, social seeding
+    inbox: [flywheel.discovery, change.in-review, release.bump-pr, post.reviewed]
+  - id: radar
+    summary: Find new threats and write one discovery file per finding
+    writes: [_tasks/1_discovery/**, scripts/**]
+    uses: [feeds]
+    agents: [codex, claude-code]
+    defined_in: docs/FLYWHEEL.md
+  - id: engine
+    summary: Write the failing test, implement the defense, keep the suite green
+    inbox: [flywheel.development, change.open, release.unreleased]
+    writes: [crates/**, tests/**, _tasks/2_development/**]
+    uses: [code, gh-issues, linear, ci]
+    agents: [claude-code, codex, grok-bot]
+  - id: megaphone
+    summary: Turn a shipped defense into a demo (.tape) and a post
+    inbox: [flywheel.advocacy, post.draft]
+    writes: [docs/**, blog/**, _tasks/3_advocacy/**]
+    uses: [code]
+    # Rebound 2026-10-02 (maintainer): Antigravity is rarely used. docs/FLYWHEEL.md updated in PR #96.
+    agents: [claude-code, codex, antigravity]
+  - id: illustrator
+    summary: Generate hero images in the house style (see _tasks/3_advocacy/hero-illustrations.md)
+    writes: [blog/src/assets/**]
+    requires: [image-generation]
+    agents: [antigravity]
+  - id: critic
+    summary: Correcting review of a handed-off artifact; fixes in place, serialized, never concurrent with the owner
+    inbox: [flywheel.advocacy, post.illustrated]
+    writes: [crates/**, docs/**, blog/**]
+    uses: [code]
+    # Codex first (maintainer, 2026-10-02): Claude Code is now the Megaphone, so it would
+    # mostly review its own posts. Claude Code stays as the fallback.
+    agents: [codex, claude-code]
+  - id: ci-pipeline
+    actor: automation
+    summary: GitHub Actions; the only path to npm and GitHub Releases
+    uses: [ci, npm, gh-releases]
+
+# ----------------------------------------------------------- §8 continuity
+# --------------------------------------------------------------- §3 identity
+identity:
+  keys:
+    - { id: linear, pattern: "AI2-\\d+", note: "Linear issue; often a parent spanning several PRs (AI2-25 → #92–#95)" }
+    - { id: github, pattern: "#\\d+", note: "GitHub issue (a PR number is resolved to key pr)" }
+  mention: "[{linear} / {github}]"
+  branch: "{agent}/{slug}"
+  examples:
+    - "PR title: [AI2-25 / #87] Add deterministic doctor fixtures and read-only behavior proof"
+    - "branches: cursor/doctor-fixtures-87-15e5 (Grok Bot), claude/jira-demo-narrative-uo0wij, codex/ai2-10-authorization-instance, blog/harness-blocked-itself"
+
+# ----------------------------------------------------------- §8 continuity
+continuity:
+  records:
+    - level: session
+      location: HANDOFF.md on the working branch
+      path: HANDOFF.md
+      cadence: after every meaningful step, not only at the end of a session
+      reachable_by: [local]
+    - level: item
+      location: the item's _tasks file (appended summary)
+      path: "_tasks/*/{slug}.md"
+      cadence: on each flywheel transition
+      reachable_by: [local, cloud]
+    - level: item
+      location: PR description and comments
+      cadence: when the PR is opened, and on each push (Grok Bot)
+      reachable_by: [local, cloud]
+
+# --------------------------------------------------------------- §6 policy
+policy:
+  - { agent: claude-code, path: .claude/cc-world.yaml, note: "PreToolUse → harness cc-hook (D37)" }
+  - { agent: antigravity, path: .agents/agy-world.yaml, note: "PreToolUse → harness agy-hook (D48)" }
