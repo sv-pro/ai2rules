@@ -68,10 +68,10 @@ Agents are restricted to specific directories. They are not allowed to modify fi
     *   **Domain:** `docs/`, `demos/`, `blog/`, `_tasks/3_advocacy/`
     *   **Task:** Polls `_tasks/3_advocacy/`. When a task arrives, it generates `.tape` files, scaffolds the Astro MDX post, and formats architecture diagrams. Hero images are delegated to Antigravity (see `_tasks/3_advocacy/hero-illustrations.md`). Antigravity held this role until 2026-10; it is rarely used now.
     *   **Write Access:** Modifies documentation/blog. Uses `mv` to archive the completed task to `_tasks/4_done/`.
-*   **Claude Code (The Critic — Correcting Review)** — *cross-cutting role*
+*   **Codex (The Critic — Correcting Review)** — *cross-cutting role*; fallback: Claude Code
     *   **Domain:** reads everything; may correct in `crates/`, `src/`, `tests/`, `docs/`, `blog/`.
     *   **Task:** Audits a handed-off artifact before it reaches `_tasks/4_done/` — code for correctness and regressions, content for **technical accuracy** (does the prose match the *real* kernel, commands, and manifest schema?) and for Google Discover / SEO hygiene.
-    *   **Write Access:** Fixes defects **in place** — the "correcting reviewer" pattern — then appends a short *Review* note to the task file describing what changed. It runs as a *serialized pass* on an artifact whose owner is idle (never concurrently), so the no-conflict guarantee holds even though it crosses domains. It re-queues to `2_development/` or `3_advocacy/` only when a fix genuinely needs the owner's rework.
+    *   **Write Access:** Fixes defects **in place** — the "correcting reviewer" pattern — then appends a short *Review* note to the task file describing what changed. Codex reviews first because the Megaphone is Claude Code, so posts get a reviewer other than their author; the procedure is in `.claude/agents/correcting-reviewer.md` and `.claude/commands/review-blog.md` (Claude Code runs it as `/review-blog`). It runs as a *serialized pass* on an artifact whose owner is idle (never concurrently), so the no-conflict guarantee holds even though it crosses domains. It re-queues to `2_development/` or `3_advocacy/` only when a fix genuinely needs the owner's rework.
 
 ### 2. The Handoff Mechanism (Filesystem Kanban)
 
