@@ -205,8 +205,10 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   stdio/HTTP deferred). Part of Milestone 3. Since D78 a scoped capability can
   also rename an argument and limit it to a list of values or a prefix, a base
   action can be kept off the surface (`exposed: false`) while scoped capabilities
-  wrap it, and `mcp_surface` names the server a gateway will present — the
-  manifest and kernel half of E13.4; the MCP gateway does not serve these yet.
+  wrap it, and `mcp_surface` names the server a gateway will present. With a
+  surface declared, `harness mcp-gateway` offers scoped capabilities under their
+  own names and forwards the kernel's lowered call (renamed arguments mapped back,
+  literals injected) rather than the call as proposed — E13.4a/b.
 - **E9 — CLI / TUI:** `cargo run --bin harness` is now an
   interactive session — `clap` flags (`--world`/`--simulate`/`--background`), a
   human-driven `ModelClient` that proposes from the projected tool surface via
@@ -320,7 +322,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **367 tests** green.
+Builds clean offline with `clippy -D warnings`; **373 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

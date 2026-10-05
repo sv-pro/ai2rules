@@ -2985,3 +2985,32 @@ still lists tools by upstream name only, so scoped capabilities are not served o
 
 **Related:** D33, D45, D51, D68, D72; PLAN E13.4;
 `crates/world-kernel/tests/scoped_mcp_surface.rs`.
+
+### D78 amendment (2026-10-05) — phase 2: the gateway serves the surface (E13.4b)
+
+- **A declared `mcp_surface` switches the gateway to the backing as the source of truth.** An
+  action is served when its `McpServer` backing names the surface's upstream, under the
+  backing's tool name, so several scoped capabilities can wrap one upstream tool. The model is
+  offered each under its own name with `model_facing_schema`. A projected action backed by
+  another server is not served, even if the upstream advertises a tool of that name.
+- **Without a surface, nothing changes.** Every earlier world names upstream tools by action
+  name, and their backings were never read by the gateway — the mock demo worlds back
+  `jira_get_issue` with a tool called `get_issue`, which the upstream does not have. Making the
+  backing authoritative everywhere would have silently emptied those surfaces. The governance
+  benchmark regenerates with no diff.
+- **What is forwarded is the kernel's `ExecutionSpec`.** `harness_preview::gate_and_lower`
+  returns `gate`'s verdict unchanged plus, for an `ALLOW`, the lowered spec; the gateway sends
+  its `{tool, input}` upstream — renamed arguments mapped back, literals injected, extras
+  stripped. An allowed call that cannot be lowered, or is not served by this upstream, is
+  refused (`REFUSED (gateway)`, audited as `not_forwardable`). `gate`'s wire ABI is unchanged,
+  and `gate_and_lower` is native-only: the WASM build has nothing to execute.
+- **A refused forward ingests nothing and spends nothing.** The gate's post-call taint and
+  budget charge assume the call runs; when the gateway does not forward it, the session keeps
+  its pre-call taint and usage.
+- **Scoped capabilities may carry a `description`.** The gateway shows it instead of the
+  upstream's, which names the base action's arguments and is untrusted text (D51's residual).
+  Base actions still show the upstream's description.
+- **The gateway announces `mcp_surface.name`** as its `serverInfo.name`.
+- **Rejected:** *adding the lowered operation to `GateResponse`* — a wire ABI change for every
+  host when only this adapter executes; *re-running `decide` in the gateway to lower* — a second
+  verdict that could disagree with the first.

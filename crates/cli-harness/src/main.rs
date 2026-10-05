@@ -126,6 +126,12 @@ enum Command {
         /// gateway must refuse to relay that demand — see D49 and issue #40.
         #[arg(long)]
         input_required: bool,
+        /// Answer every `tools/call` with the tool name and arguments that actually
+        /// arrived, so a test can assert what the gateway forwarded — a scoped
+        /// tool's upstream name, renamed arguments and injected literals (D78).
+        /// Used by `tests/mcp_gateway_scoped.rs`.
+        #[arg(long)]
+        echo: bool,
     },
     /// Claude Code PreToolUse adapter, in Rust (D33 / E16.C): read a PreToolUse
     /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
@@ -354,9 +360,10 @@ fn main() {
         rovo,
         poisoned,
         input_required,
+        echo,
     }) = &cli.command
     {
-        std::process::exit(mock_jira::run(*rovo, *poisoned, *input_required));
+        std::process::exit(mock_jira::run(*rovo, *poisoned, *input_required, *echo));
     }
 
     if let Some(Command::CcHook {
