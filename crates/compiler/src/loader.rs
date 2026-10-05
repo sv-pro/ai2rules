@@ -2,7 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use harness_types::{SourceChannel, WorldManifest};
+use harness_types::{
+    ArgSource, BackingIdentity, ScopedCapabilityDef, SourceChannel, WorldManifest,
+};
 
 use crate::error::CompileError;
 
@@ -59,6 +61,27 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
                 capability: cap.name.to_string(),
                 base: cap.base_action.to_string(),
             });
+        }
+        validate_scoped_args(manifest, cap)?;
+    }
+
+    // An MCP surface (D78) must front a server some base action is backed by;
+    // otherwise the gateway would announce a name for nothing it can reach.
+    if let Some(surface) = &manifest.mcp_surface {
+        if surface.name.trim().is_empty() {
+            return Err(CompileError::Invalid(
+                "mcp_surface declares an empty name".to_string(),
+            ));
+        }
+        let fronted = manifest.base_actions.iter().any(|a| {
+            matches!(&a.backing, Some(BackingIdentity::McpServer { server, .. })
+                if *server == surface.upstream)
+        });
+        if !fronted {
+            return Err(CompileError::Invalid(format!(
+                "mcp_surface {} fronts upstream {}, but no base action is backed by that server",
+                surface.name, surface.upstream
+            )));
         }
     }
 
@@ -126,5 +149,69 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
         }
     }
 
+    Ok(())
+}
+
+/// Check one scoped capability's arguments (D78): every name the actor supplies
+/// is unique and non-empty, and every input rule can admit at least one value.
+fn validate_scoped_args(
+    manifest: &WorldManifest,
+    cap: &ScopedCapabilityDef,
+) -> Result<(), CompileError> {
+    let invalid =
+        |detail: String| CompileError::Invalid(format!("scoped capability {}: {detail}", cap.name));
+    let base_schema = manifest
+        .base_actions
+        .iter()
+        .find(|a| a.name == cap.base_action)
+        .map(|a| &a.schema);
+
+    let mut actor_names: BTreeSet<&str> = BTreeSet::new();
+    for (arg, source) in &cap.args {
+        if let Some(name) = source.actor_name(arg) {
+            if name.trim().is_empty() {
+                return Err(invalid(format!(
+                    "argument {arg} is exposed under an empty name"
+                )));
+            }
+            // Two arguments under one actor-facing name would make the call
+            // ambiguous: the kernel could not tell which base argument it fills.
+            if !actor_names.insert(name) {
+                return Err(invalid(format!(
+                    "two arguments are exposed under the same name {name}"
+                )));
+            }
+        }
+        let ArgSource::Input(rule) = source else {
+            continue;
+        };
+        if let Some(prefix) = &rule.prefix {
+            if prefix.is_empty() {
+                return Err(invalid(format!("argument {arg} declares an empty prefix")));
+            }
+            let declared_type = base_schema
+                .and_then(|s| s.get("properties"))
+                .and_then(|p| p.get(arg))
+                .and_then(|p| p.get("type"))
+                .and_then(|t| t.as_str());
+            if declared_type.is_some_and(|t| t != "string") {
+                return Err(invalid(format!(
+                    "argument {arg} has a prefix rule but the base schema types it as {}",
+                    declared_type.unwrap_or_default()
+                )));
+            }
+            // A listed value outside the prefix can never be supplied, since both
+            // limits apply. That is an authoring mistake, not a policy.
+            if let Some(unreachable) = rule
+                .one_of
+                .iter()
+                .find(|v| !v.as_str().is_some_and(|s| s.starts_with(prefix.as_str())))
+            {
+                return Err(invalid(format!(
+                    "argument {arg} lists {unreachable}, which does not start with prefix {prefix}"
+                )));
+            }
+        }
+    }
     Ok(())
 }

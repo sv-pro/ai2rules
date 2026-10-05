@@ -2921,3 +2921,67 @@ outcome/provider-result seam and become direct input to the next model turn. The
 AI2-12 showcase replans with `observer: None`, and a regression model asserts call
 correlation plus the full verdict range. No kernel, Gate ABI, trace, policy, or
 executor semantics changed.
+
+## D78 — A scoped capability can rename and limit an MCP tool's arguments; the world can hide the tool it wraps
+
+**Date:** 2026-10-05. Phase 1 of **E13.4** (the MCP projection shim): manifest and kernel
+only. The gateway does not serve these tools yet; that is phase 2.
+
+**Context.** The goal is a governed stand-in for an MCP server: the operator picks which
+upstream tools exist, renames them, and limits what the model may pass — "only issues
+starting `PLAT-`", "only these three projects". Scoped capabilities already narrowed a base
+action (locked literals, stripped extras, invariant 12), and an MCP-backed action already
+lowered to `{server, tool, input}`. Three things were missing. A scoped capability could not
+rename an argument or limit its values. The base action it wrapped stayed on the surface
+beside it, so narrowing `getJiraIssue` into `get_platform_issue` left `getJiraIssue` callable.
+And literals were strings only, so `maxResults: 20` could not be pinned.
+
+**Decision.**
+
+- **`ArgSource::Input { as, one_of, prefix }`** beside `ActorInput`. `as` is the name the actor
+  supplies; the kernel reads the value under that name and passes it on under the base
+  action's name, both when validating against the base schema and when lowering to the
+  `ExecutionSpec`. `one_of` and `prefix` are checked on the value the actor sent, before
+  mapping; a value either rule refuses is `schema_violation` (DENY). Both apply when both are
+  set. A prefix only ever matches a string.
+- **The base name is not a back door.** A value sent under the base name of a renamed argument
+  is never read: it is stripped like any undeclared extra, so a call carrying only that name
+  is missing its required argument and is refused, never run without its limit.
+- **`exposed: false` on a base action** keeps it in the ontology, so scoped capabilities can
+  name it, and out of the projection, so the model sees it as ABSENT.
+- **`ArgSource::Literal` holds any JSON value.** A string literal serializes exactly as before.
+- **`mcp_surface: { name, upstream }`** records the server name a gateway will announce and
+  the `McpServer` backing it fronts. Validation requires some base action to use that backing.
+- **`world_kernel::schema::model_facing_schema`** derives what the model is shown for a scoped
+  capability: actor-supplied arguments only, under their actor names, with `enum` for a list
+  and `pattern` (`^` plus the escaped prefix) for a prefix, closed with
+  `additionalProperties: false` because extras are stripped anyway. This is the advertisement;
+  the gate is the check. Per D51 the world owns this schema, not the upstream.
+- **L2 taint follows the rename.** An argument role is declared on the base name; the floor now
+  reads per-argument taint under the name the actor used.
+- **Every new field is skipped when it holds its default**, so no manifest written before this
+  changes its hash. The governance benchmark regenerates with no diff.
+
+**Alternatives.**
+
+- *A regex rule.* Rejected for now: it adds a dependency to the pure kernel and to the WASM
+  build, and a prefix covers the common case (issue keys, project keys). A list or prefix
+  cannot constrain free-text arguments such as JQL; templated arguments are a separate design.
+- *Put renames and limits in the gateway.* Rejected: policy in an adapter is the D34/D36/D48
+  drift, and other hosts would not get it. The gateway will forward the kernel's lowered
+  operation instead of the raw call.
+- *Derive the scoped descriptor's schema and validate against it.* Rejected: it would change
+  the descriptor hash of every existing scoped capability and replace strip-then-validate with
+  a closed check, changing behavior for the default world. Validation stays on base names.
+- *Hide a base action automatically when a scoped capability wraps it.* Rejected: an operator
+  may want both, and an implicit rule would surprise. The flag is explicit.
+- *Reuse `arg_constraints` for limits.* Rejected: those sit on the base action and apply to
+  every capability wrapping it; the limits here belong to one scoped capability.
+
+**Consequence.** A manifest can now express the stand-in fully, and the kernel enforces it.
+The committed WASM engine grows from 523 KB to 567 KB, measured against a rebuild of the
+previous commit with the same toolchain and `wasm-opt -Oz`. Until phase 2 the MCP gateway
+still lists tools by upstream name only, so scoped capabilities are not served over MCP yet.
+
+**Related:** D33, D45, D51, D68, D72; PLAN E13.4;
+`crates/world-kernel/tests/scoped_mcp_surface.rs`.

@@ -228,13 +228,16 @@ fn effective_params(
         match source {
             // Copy only what the actor is allowed to set; anything else they
             // sent is never read here, so it is stripped.
-            ArgSource::ActorInput => {
-                if let Some(value) = actor.and_then(|o| o.get(name)) {
+            // Read under the name the actor sees (D78); the spec carries the
+            // base action's name, which is what the backing understands.
+            ArgSource::ActorInput | ArgSource::Input(_) => {
+                let actor_name = source.actor_name(name).unwrap_or(name);
+                if let Some(value) = actor.and_then(|o| o.get(actor_name)) {
                     out.insert(name.clone(), value.clone());
                 }
             }
             ArgSource::Literal(value) => {
-                out.insert(name.clone(), Value::String(value.clone()));
+                out.insert(name.clone(), value.clone());
             }
             ArgSource::ContextRef(key) => {
                 let value = env
