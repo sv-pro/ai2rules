@@ -139,6 +139,12 @@ pub struct ScopedCapabilityDef {
     pub base_action: ActionName,
     #[serde(default)]
     pub args: BTreeMap<String, ArgSource>,
+    /// What the model is told the tool does (D78). A gateway shows this instead of
+    /// the upstream's description, which names the base action's arguments and is
+    /// untrusted text besides (D51). Skipped when absent so existing manifests keep
+    /// their hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// The MCP server a gateway presents in place of its upstream (DECISIONS D78):

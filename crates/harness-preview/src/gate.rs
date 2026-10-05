@@ -14,12 +14,15 @@
 
 use harness_types::{
     ActionName, ActionType, BackingIdentity, CallId, ChannelPolicy, CompiledWorld, ContentHash,
-    Decision, ExecutionMode, Provenance, Provider, RootAccess, SessionId, SideEffectClass, Taint,
-    TaintContext, ToolCall,
+    Decision, EffectMode, ExecutionMode, ExecutionSpec, Provenance, Provider, RootAccess,
+    SessionId, SideEffectClass, Taint, TaintContext, ToolCall, TraceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use world_kernel::{charge, decide, BudgetUsage, EvalContext, KernelOutcome};
+use world_kernel::{
+    build_execution_spec, charge, decide, BudgetUsage, EvalContext, ExecEnv, IntentIR,
+    KernelOutcome,
+};
 
 /// The current ABI version. Bumped only on a breaking wire change (§8).
 pub const ABI_VERSION: u32 = 1;
@@ -160,24 +163,73 @@ pub struct GateApproval {
 /// Govern one proposed call against a compiled world. Pure and deterministic in
 /// `(world, req)` — the runtime half of the kernel, exposed as a value function.
 pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
+    gate_inner(world, req).0
+}
+
+/// [`gate`], plus — for an `ALLOW` — the `ExecutionSpec` the kernel lowers the
+/// call to (D78). A scoped capability's renamed arguments, injected literals and
+/// stripped extras are applied there, so an adapter that executes forwards the
+/// spec rather than the call it was proposed as: only an `ExecutionSpec` crosses
+/// into execution. `None` for any other verdict; `Some(Err)` when an allowed call
+/// cannot be lowered, which the adapter must treat as a refusal.
+///
+/// Native-only. The verdict is exactly [`gate`]'s, so the WASM build, which has
+/// nothing to execute, needs no counterpart.
+pub fn gate_and_lower(
+    world: &CompiledWorld,
+    req: &GateRequest,
+) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
+    let (response, allowed) = gate_inner(world, req);
+    let spec = allowed.map(|(intent, effect_mode)| {
+        build_execution_spec(
+            world,
+            &intent,
+            effect_mode,
+            &ExecEnv::default(),
+            TraceId::new(&req.context.session_id),
+        )
+        .map_err(|e| e.to_string())
+    });
+    (response, spec)
+}
+
+/// The verdict, plus the sealed intent and its effect mode when the final
+/// decision is `ALLOW` (after path scope has had its chance to tighten it).
+fn gate_inner(
+    world: &CompiledWorld,
+    req: &GateRequest,
+) -> (GateResponse, Option<(IntentIR, EffectMode)>) {
     // The effective action: the world's own command classifiers run first
     // (D36), so classification is kernel data, identical for every host.
     let action = world.classify_command(&ActionName::new(&req.tool), &req.arguments);
     let carried = req.context.usage.unwrap_or_default();
     let inbound = match parse_taint(req.context.taint.as_deref()) {
         Ok(t) => t,
-        Err(rule) => return denied_response(world, &action, rule, Taint::Tainted, carried),
+        Err(rule) => {
+            return (
+                denied_response(world, &action, rule, Taint::Tainted, carried),
+                None,
+            )
+        }
     };
     let channel = match parse_channel(world, req.context.source_channel.as_deref()) {
         Ok(c) => c,
-        Err(rule) => return denied_response(world, &action, rule, inbound, carried),
+        Err(rule) => {
+            return (
+                denied_response(world, &action, rule, inbound, carried),
+                None,
+            )
+        }
     };
     // Budget counters are session state the pure kernel cannot hold, so the adapter
     // carries them (finding #16). A world that counts calls therefore requires them:
     // otherwise a thin adapter silently disables every limit by omission, which is
     // the same failure `missing_path` closes for roots.
     if world.budget().counts_calls() && req.context.usage.is_none() {
-        return denied_response(world, &action, "missing_usage", inbound, carried);
+        return (
+            denied_response(world, &action, "missing_usage", inbound, carried),
+            None,
+        );
     }
     let inbound = inbound.join(channel.taint);
     let session = SessionId::new(&req.context.session_id);
@@ -207,12 +259,21 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         approval_granted: false,
     };
 
+    let mut sealed = None;
     let (mut decision, mut rule) = match decide(world, &call, provenance, &ctx) {
         KernelOutcome::UnknownToOntology { .. } => {
             (Decision::Absent, "unknown_to_ontology".to_string())
         }
         KernelOutcome::NotRepresentable { decision, rule, .. } => (decision, rule),
-        KernelOutcome::Evaluated { disposition, .. } => (disposition.decision, disposition.rule),
+        KernelOutcome::Evaluated {
+            intent,
+            disposition,
+        } => {
+            if let Some(effect_mode) = disposition.effect_mode {
+                sealed = Some((intent, effect_mode));
+            }
+            (disposition.decision, disposition.rule)
+        }
     };
 
     // Spatial scope (roots): when the world declares roots, path-scoped file
@@ -300,7 +361,7 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         required: true,
     });
 
-    GateResponse {
+    let response = GateResponse {
         v: ABI_VERSION,
         decision: decision_str(decision).to_string(),
         action: action.as_str().to_string(),
@@ -313,7 +374,9 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         },
         approval,
         manifest_hash: short_hash(world),
-    }
+    };
+    let allowed = sealed.filter(|_| decision == Decision::Allow);
+    (response, allowed)
 }
 
 fn default_version() -> u32 {
@@ -1065,6 +1128,41 @@ budget:
         let res = gate(&counted, &r);
         assert_eq!(res.decision, "DENY");
         assert_eq!(res.rule.as_deref(), Some("missing_usage"));
+    }
+
+    #[test]
+    fn gate_and_lower_returns_gates_verdict_and_a_spec_only_for_allow() {
+        let world = compile_default();
+        for tool in [
+            "read_workspace",
+            "fetch_web",
+            "start_pty",
+            "send_email",
+            "run_tests",
+        ] {
+            for taint in ["clean", "tainted"] {
+                let r = req(tool, taint);
+                let (res, spec) = gate_and_lower(&world, &r);
+                assert_eq!(
+                    serde_json::to_value(&res).unwrap(),
+                    serde_json::to_value(gate(&world, &r)).unwrap(),
+                    "the verdict must be gate's for {tool}/{taint}"
+                );
+                assert_eq!(
+                    spec.is_some(),
+                    res.decision == "ALLOW",
+                    "a spec exactly when allowed, for {tool}/{taint}"
+                );
+            }
+        }
+        // The spec is the kernel's lowering: a scoped capability's literal is in it.
+        let (res, spec) = gate_and_lower(&world, &req("run_tests", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        let spec = spec.unwrap().expect("lowers");
+        assert_eq!(
+            spec.operation(),
+            &harness_types::Operation::Argv(vec!["pytest".to_string()])
+        );
     }
 
     #[test]
