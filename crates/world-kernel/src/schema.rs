@@ -16,8 +16,8 @@
 //! Anything outside that subset passes — full Draft validation is later
 //! hardening, not something the current ontology exercises.
 
-use harness_types::{ActionName, BuildError};
-use serde_json::Value;
+use harness_types::{ActionName, ArgSource, BuildError, CompiledWorld};
+use serde_json::{Map, Value};
 
 /// Validate `args` against an action's model-facing `schema` and
 /// `arg_constraints`. Returns `SchemaViolation` on the first failure.
@@ -180,6 +180,86 @@ pub(crate) fn declared_arg_names(
     }
     if let Some(constraints) = constraints.as_object() {
         out.extend(constraints.keys().cloned());
+    }
+    out
+}
+
+/// The argument schema the model is shown for `action` (D78), or `None` when the
+/// world does not describe it.
+///
+/// A base action shows its descriptor schema unchanged. A scoped capability shows
+/// only what the actor supplies: locked and context arguments are left out, each
+/// argument appears under the name the actor uses, and an input rule's limits are
+/// stated as `enum` (a list) and `pattern` (a prefix) so the model can see them
+/// before it calls. The kernel enforces the same rules at the gate; this is the
+/// advertisement, not the check.
+pub fn model_facing_schema(world: &CompiledWorld, action: &ActionName) -> Option<Value> {
+    let descriptor = world.descriptor(action)?;
+    let Some(cap) = world.scoped_capability(action) else {
+        return Some(descriptor.schema.clone());
+    };
+    let base_props = descriptor
+        .schema
+        .get("properties")
+        .and_then(Value::as_object);
+    let base_required: Vec<&str> = descriptor
+        .schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|r| r.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+
+    let mut properties = Map::new();
+    let mut required = Vec::new();
+    for (name, source) in &cap.args {
+        let Some(actor_name) = source.actor_name(name) else {
+            continue;
+        };
+        let mut spec = base_props
+            .and_then(|p| p.get(name))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if let ArgSource::Input(rule) = source {
+            if !rule.one_of.is_empty() {
+                spec.insert("enum".to_string(), Value::Array(rule.one_of.clone()));
+            }
+            if let Some(prefix) = &rule.prefix {
+                spec.insert("type".to_string(), Value::from("string"));
+                spec.insert(
+                    "pattern".to_string(),
+                    Value::from(format!("^{}", escape_regex(prefix))),
+                );
+            }
+        }
+        properties.insert(actor_name.to_string(), Value::Object(spec));
+        if base_required.contains(&name.as_str()) {
+            required.push(Value::from(actor_name));
+        }
+    }
+
+    let mut schema = Map::new();
+    schema.insert("type".to_string(), Value::from("object"));
+    schema.insert("properties".to_string(), Value::Object(properties));
+    if !required.is_empty() {
+        schema.insert("required".to_string(), Value::Array(required));
+    }
+    // Anything else the actor sends is stripped before execution (invariant 12),
+    // so the honest advertisement is a closed object.
+    schema.insert("additionalProperties".to_string(), Value::Bool(false));
+    Some(Value::Object(schema))
+}
+
+/// Escape `text` so it matches literally inside an ECMA/JSON-Schema regex. Only
+/// the syntax characters: `\-` and `\/` are invalid escapes in Unicode mode, which
+/// JSON Schema validators commonly use, and a Jira key like `PLAT-` has a `-`.
+fn escape_regex(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\^$.|?*+()[]{}".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
     }
     out
 }

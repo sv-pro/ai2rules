@@ -52,8 +52,13 @@ pub fn effective_floor_taint(
         if matches!(literal_args.get(arg), Some(ArgSource::Literal(_))) {
             continue; // design-time literal → clean by construction
         }
-        // Known per-argument taint refines; unknown fails closed to ambient.
-        let arg_taint = ctx.arg_taint(arg).unwrap_or_else(|| ctx.taint());
+        // Known per-argument taint refines; unknown fails closed to ambient. A
+        // renamed input (D78) carries its taint under the name the actor used.
+        let key = literal_args
+            .get(arg)
+            .and_then(|source| source.actor_name(arg))
+            .unwrap_or(arg);
+        let arg_taint = ctx.arg_taint(key).unwrap_or_else(|| ctx.taint());
         effective = effective.join(arg_taint);
     }
     effective
@@ -104,6 +109,7 @@ pub fn check_descriptor_drift(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harness_types::InputRule;
 
     fn roles(pairs: &[(&str, ArgRole)]) -> BTreeMap<String, ArgRole> {
         pairs.iter().map(|(k, r)| (k.to_string(), *r)).collect()
@@ -184,6 +190,28 @@ mod tests {
         let ctx = TaintContext::from_taint(Taint::Tainted);
         let eff = effective_floor_taint(&roles(&[("endpoint", ArgRole::Target)]), &literals, &ctx);
         assert_eq!(eff, Taint::Clean);
+    }
+
+    #[test]
+    fn renamed_input_is_judged_by_the_taint_of_the_name_the_actor_used() {
+        // D78: the actor supplies `issue`, the role is declared on the base name
+        // `key`. The floor must read the taint recorded under `issue`, or a tainted
+        // renamed argument would be judged by whatever `key` happens to carry.
+        let inputs: BTreeMap<String, ArgSource> = [(
+            "key".to_string(),
+            ArgSource::Input(InputRule {
+                exposed_as: Some("issue".to_string()),
+                ..InputRule::default()
+            }),
+        )]
+        .into_iter()
+        .collect();
+        let ctx = TaintContext::from_taint(Taint::Clean).with_arg_taint([
+            ("issue".to_string(), Taint::Tainted),
+            ("key".to_string(), Taint::Clean),
+        ]);
+        let eff = effective_floor_taint(&roles(&[("key", ArgRole::Target)]), &inputs, &ctx);
+        assert_eq!(eff, Taint::Tainted);
     }
 
     #[test]

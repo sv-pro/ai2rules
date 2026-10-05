@@ -9,7 +9,7 @@ use crate::decision::{Decision, EffectMode};
 use crate::descriptor::{Descriptor, SideEffectClass};
 use crate::ids::{ActionName, DescriptorHash, ManifestHash, WorldId};
 use crate::manifest::{
-    Budget, CommandClassDef, RootAccess, RootRule, RootsDef, ScopedCapabilityDef,
+    Budget, CommandClassDef, McpSurfaceDef, RootAccess, RootRule, RootsDef, ScopedCapabilityDef,
 };
 use crate::provenance::{SourceChannel, Taint, TrustLevel};
 
@@ -70,6 +70,10 @@ pub struct CompiledWorldParts {
     /// pre-roots compiled worlds keep a stable serialized form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roots: Option<RootsDef>,
+    /// The MCP server a gateway presents for this world (DECISIONS D78). Skipped
+    /// when absent so earlier compiled worlds keep a stable serialized form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_surface: Option<McpSurfaceDef>,
 }
 
 /// Immutable, hash-addressed runtime artifact. No setters; read-only after
@@ -156,6 +160,10 @@ impl CompiledWorld {
     /// The manifest-declared command classifiers (DECISIONS D36).
     pub fn command_classes(&self) -> &[CommandClassDef] {
         &self.parts.command_classes
+    }
+    /// The MCP server a gateway presents for this world, if declared (D78).
+    pub fn mcp_surface(&self) -> Option<&McpSurfaceDef> {
+        self.parts.mcp_surface.as_ref()
     }
 
     /// Whether this world enables path-scoped root policy.

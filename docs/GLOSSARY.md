@@ -126,7 +126,9 @@ defined below under *Action layer*.
   input before the model sees it. Channels carry a trust level and a taint flag.
 - **Scoped capability** *(Action/Capability)* — a base action narrowed by locking
   args to literals (e.g. `run_tests` always runs `pytest`; injected/unknown args
-  are stripped — invariant 12).
+  are stripped — invariant 12). An actor-supplied argument can also be renamed and
+  limited to a list of values or a prefix (`!Input { as, one_of, prefix }`, D78);
+  the wrapped base action can be kept off the surface with `exposed: false`.
 - **roots** *(Action)* — the manifest's path-scoped capabilities: which paths an
   action may read and which it may write (spatial confinement). **Not MCP `roots`.**
   MCP's `roots` / `roots/list` feature was *deprecated* in protocol version

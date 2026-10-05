@@ -60,17 +60,77 @@ pub struct BaseActionDef {
     pub backing: Option<BackingIdentity>,
     #[serde(default)]
     pub approval_required: bool,
+    /// Whether the action is on the model-facing surface (DECISIONS D78). `false`
+    /// keeps it in the ontology as the backing of scoped capabilities while the
+    /// model sees it as ABSENT. Skipped when `true` so existing manifests keep
+    /// their hash.
+    #[serde(default = "exposed_default", skip_serializing_if = "is_exposed")]
+    pub exposed: bool,
+}
+
+fn exposed_default() -> bool {
+    true
+}
+
+fn is_exposed(exposed: &bool) -> bool {
+    *exposed
 }
 
 /// Where a scoped-capability argument's value comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArgSource {
-    /// Fixed value baked in; invisible to the actor, injected at execution.
-    Literal(String),
-    /// Supplied by the actor at call time.
+    /// Fixed value baked in; invisible to the actor, injected at execution. Any
+    /// JSON value: `!Literal pytest`, `!Literal 50`, `!Literal true`.
+    Literal(Value),
+    /// Supplied by the actor at call time, under the argument's own name.
     ActorInput,
+    /// Supplied by the actor at call time, optionally renamed and limited to
+    /// allowed values (DECISIONS D78).
+    Input(InputRule),
     /// Resolved from a named runtime context key.
     ContextRef(String),
+}
+
+impl ArgSource {
+    /// The name the actor supplies this argument under, or `None` when the actor
+    /// does not supply it at all (a literal or a context ref). `arg` is the
+    /// argument's name in the base action.
+    pub fn actor_name<'a>(&'a self, arg: &'a str) -> Option<&'a str> {
+        match self {
+            ArgSource::ActorInput => Some(arg),
+            ArgSource::Input(rule) => Some(rule.exposed_as.as_deref().unwrap_or(arg)),
+            ArgSource::Literal(_) | ArgSource::ContextRef(_) => None,
+        }
+    }
+}
+
+/// How the actor may supply one scoped-capability argument (DECISIONS D78).
+/// Both limits apply when both are set.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputRule {
+    /// The name the actor sees and supplies; the kernel maps it back to the base
+    /// action's argument name. `None` keeps the base name.
+    #[serde(default, rename = "as", skip_serializing_if = "Option::is_none")]
+    pub exposed_as: Option<String>,
+    /// The only values the actor may supply. Empty means no list limit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub one_of: Vec<Value>,
+    /// A string the supplied value must start with. Only strings can match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+}
+
+impl InputRule {
+    /// Does `value` satisfy every limit this rule sets?
+    pub fn admits(&self, value: &Value) -> bool {
+        if !self.one_of.is_empty() && !self.one_of.contains(value) {
+            return false;
+        }
+        match &self.prefix {
+            Some(prefix) => value.as_str().is_some_and(|s| s.starts_with(prefix)),
+            None => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +139,16 @@ pub struct ScopedCapabilityDef {
     pub base_action: ActionName,
     #[serde(default)]
     pub args: BTreeMap<String, ArgSource>,
+}
+
+/// The MCP server a gateway presents in place of its upstream (DECISIONS D78):
+/// the name it announces, and which `McpServer` backing it fronts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpSurfaceDef {
+    /// The server name announced to hosts, e.g. `My_Jira`.
+    pub name: String,
+    /// The `server` of the `McpServer` backings this surface fronts.
+    pub upstream: String,
 }
 
 /// One class of a host-syntactic command classifier (DECISIONS D36): if any
@@ -229,6 +299,11 @@ pub struct WorldManifest {
     /// pre-roots manifests keep their hash and their behavior unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roots: Option<RootsDef>,
+    /// The MCP server a gateway presents for this world (DECISIONS D78). Absent ⇒
+    /// the gateway keeps its default name; skipped so existing manifests keep
+    /// their hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_surface: Option<McpSurfaceDef>,
     #[serde(default)]
     pub budget: Budget,
     #[serde(default)]
