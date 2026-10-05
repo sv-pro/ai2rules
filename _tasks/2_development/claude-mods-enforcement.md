@@ -17,3 +17,14 @@ See branch HANDOFF.md. No real model inference or production changes.
 Remaining: genuine managed-hook mod off/on comparison in an isolated test
 environment. NOT RUN; keep both issues open. Next decision follows that result;
 do not build a second policy engine or claim prompt-injection persistence.
+
+## 2026-10-05 — setup recipe, precise runtime blocker
+
+Prepared genuine Linux file-based managed-policy image and managed-only runner;
+see `docs/benchmarks/claude-mods/MANAGED.md`. Original project runner/evidence
+unchanged. Checked Python syntax, JSON, synthetic oracle gates and whitespace.
+No Docker/Podman is available; namespace creation returned Operation not
+permitted. Image build and both live rows remain NOT RUN. Need a disposable
+Linux amd64 Docker host with build-time registry access, not an Enterprise
+tenant or API credentials. Next: execute only the two managed cases with the
+documented commands and retain source/tier/decision/effect evidence. No guard.

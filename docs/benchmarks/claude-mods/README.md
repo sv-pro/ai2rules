@@ -3,6 +3,11 @@
 Tracking: [AI2-41](https://linear.app/ai2rules/issue/AI2-41/) /
 [#99](https://github.com/sv-pro/ai2rules/issues/99).
 
+Managed follow-up: [disposable container setup and two-case runner](MANAGED.md)
+prepared 2026-10-05. Build/live execution remains **NOT RUN**: this workspace
+has no Docker/Podman and cannot create the required namespace. The runbook names
+the exact external runtime prerequisite; no machine-managed policy was changed.
+
 ## Observed result — 2026-10-03
 
 **A user-tier mod overrode an ai2rules project PreToolUse denial and the real

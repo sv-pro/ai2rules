@@ -480,6 +480,12 @@ The historical surface description below predates mods. The kernel's DENY is
 not necessarily the host's final authority. Project cases are verified;
 genuine managed-hook comparison remains open. No epic completion is claimed.
 
+**2026-10-05 setup follow-up:** a [file-based managed-policy container recipe](docs/benchmarks/claude-mods/MANAGED.md)
+and managed-only runner are prepared. Image build and both live rows remain NOT
+RUN: Docker/Podman unavailable and namespace creation denied in this workspace.
+Next prerequisite is a working disposable Linux amd64 container host with
+build-time registry access. Project proof unchanged; no guard work started.
+
 **Design — Claude Code exposes two enforcement surfaces that mirror the kernel's two stages:**
 1. *What tools exist* — a subagent's `tools` allowlist + which MCP tools are connected = **projection / representability / ABSENT** (a tool not on the surface literally cannot be called).
 2. *What a call may do, in context* — a **`PreToolUse` hook** returning `permissionDecision: allow|deny|ask` = **`decide()` / disposition**; this is the *only* lever over **native** tools (`Bash`/`Edit`/`Write`/`Read`/`WebFetch`).
