@@ -1,0 +1,250 @@
+{
+  "recorded_at": "2026-10-03T19:23:15.734365+00:00",
+  "claude_version": "2.1.288 (Claude Code)",
+  "harness_version": "cli-harness 0.6.0",
+  "executable_sha256": {
+    "claude_argument_target": "0298068b686e7fdbaf9402a7a587bb7f49c0b0e084de09f69145a0719207640c",
+    "harness_argument_target": "eeb35130f89f3de6ca1335b84d8f11b97642798067a4b6359b48481736c44307"
+  },
+  "mode": "acceptEdits",
+  "hook_scope": "project",
+  "sec_default": "not observed loaded",
+  "model": "scripted Anthropic-compatible API on 127.0.0.1; no real model inference",
+  "note": "Any token/cost figures in raw CLI output are estimates from synthetic usage, not billed inference.",
+  "managed_cases": "NOT RUN: this runner does not modify machine-managed policy",
+  "cases": [
+    {
+      "case": "control",
+      "kernel": {
+        "v": 1,
+        "decision": "DENY",
+        "action": "Write",
+        "rule": "path_scope_denied",
+        "reason": "the target path is outside the allowed roots",
+        "context": {
+          "taint": "clean",
+          "usage": {
+            "commands_run": 0,
+            "network_calls": 0,
+            "file_writes": 0,
+            "tokens_used": 0
+          }
+        },
+        "manifest_hash": "7ab2051004f0"
+      },
+      "preflight_adapter": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "permissionDecision": "deny",
+          "permissionDecisionReason": "the target path is outside the allowed roots (path_scope_denied)"
+        }
+      },
+      "live_hooks": [],
+      "mod_evidence": [
+        "2026-10-03T19:23:13.124Z [DEBUG] hooks module cc-plugin-agents-md@builtin loaded (native, environment 1, tier builtin); events: session.start,prompt.context,agent.spawn,tool.call",
+        "2026-10-03T19:23:13.138Z [DEBUG] hooks module cc-plugin-agents-md@builtin session.start settled in 1.8ms (native link, next() included)",
+        "2026-10-03T19:23:13.165Z [DEBUG] hooks module cc-plugin-agents-md@builtin prompt.context settled in 14.2ms (native link, next() included)"
+      ],
+      "model_calls": [
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [],
+          "offered_tools": [
+            "Write"
+          ]
+        },
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [
+            {
+              "tool_use_id": "toolu_ai2rules_probe",
+              "type": "tool_result",
+              "content": "File created successfully at: <RUN_DIR>/control/project/denied-marker.txt (file state is current in your context \u2014 no need to Read it back)\n\n<system-reminder>\n<total_tokens>14999870 tokens left</total_tokens>\n</system-reminder>",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ],
+          "offered_tools": [
+            "Write"
+          ]
+        }
+      ],
+      "host_exit_code": 0,
+      "marker_exists": true,
+      "marker_content": "AI2RULES_MODS_PROBE\n",
+      "world_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc",
+      "oracle_errors": []
+    },
+    {
+      "case": "project-deny",
+      "kernel": {
+        "v": 1,
+        "decision": "DENY",
+        "action": "Write",
+        "rule": "path_scope_denied",
+        "reason": "the target path is outside the allowed roots",
+        "context": {
+          "taint": "clean",
+          "usage": {
+            "commands_run": 0,
+            "network_calls": 0,
+            "file_writes": 0,
+            "tokens_used": 0
+          }
+        },
+        "manifest_hash": "7ab2051004f0"
+      },
+      "preflight_adapter": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "permissionDecision": "deny",
+          "permissionDecisionReason": "the target path is outside the allowed roots (path_scope_denied)"
+        }
+      },
+      "live_hooks": [
+        {
+          "event": {
+            "session_id": "8a58b7cc-a9ad-4ea3-9d59-6ff280e9c77e",
+            "transcript_path": "<RUN_DIR>/project-deny/config/projects/-tmp-ai2rules-mods-vjo9gtv5-project-deny-project/8a58b7cc-a9ad-4ea3-9d59-6ff280e9c77e.jsonl",
+            "cwd": "<RUN_DIR>/project-deny/project",
+            "prompt_id": "49b511c5-2d96-4896-b840-4084369fcdc1",
+            "permission_mode": "acceptEdits",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "<RUN_DIR>/project-deny/project/denied-marker.txt",
+              "content": "AI2RULES_MODS_PROBE\n"
+            },
+            "tool_use_id": "toolu_ai2rules_probe"
+          },
+          "exit_code": 0,
+          "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the target path is outside the allowed roots (path_scope_denied)\"}}\n",
+          "stderr": ""
+        }
+      ],
+      "mod_evidence": [
+        "2026-10-03T19:23:13.920Z [DEBUG] hooks module cc-plugin-agents-md@builtin loaded (native, environment 1, tier builtin); events: session.start,prompt.context,agent.spawn,tool.call",
+        "2026-10-03T19:23:13.934Z [DEBUG] hooks module cc-plugin-agents-md@builtin session.start settled in 1.5ms (native link, next() included)",
+        "2026-10-03T19:23:13.962Z [DEBUG] hooks module cc-plugin-agents-md@builtin prompt.context settled in 14.6ms (native link, next() included)"
+      ],
+      "model_calls": [
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [],
+          "offered_tools": [
+            "Write"
+          ]
+        },
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [
+            {
+              "type": "tool_result",
+              "content": "PreToolUse:Write hook error: the target path is outside the allowed roots (path_scope_denied)\n\n<system-reminder>\n<total_tokens>14999870 tokens left</total_tokens>\n</system-reminder>",
+              "is_error": true,
+              "tool_use_id": "toolu_ai2rules_probe",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ],
+          "offered_tools": [
+            "Write"
+          ]
+        }
+      ],
+      "host_exit_code": 0,
+      "marker_exists": false,
+      "marker_content": null,
+      "world_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc",
+      "oracle_errors": []
+    },
+    {
+      "case": "project-override",
+      "kernel": {
+        "v": 1,
+        "decision": "DENY",
+        "action": "Write",
+        "rule": "path_scope_denied",
+        "reason": "the target path is outside the allowed roots",
+        "context": {
+          "taint": "clean",
+          "usage": {
+            "commands_run": 0,
+            "network_calls": 0,
+            "file_writes": 0,
+            "tokens_used": 0
+          }
+        },
+        "manifest_hash": "7ab2051004f0"
+      },
+      "preflight_adapter": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "permissionDecision": "deny",
+          "permissionDecisionReason": "the target path is outside the allowed roots (path_scope_denied)"
+        }
+      },
+      "live_hooks": [
+        {
+          "event": {
+            "session_id": "679dbbfd-7d77-4ff0-9bfb-4e6df946bff2",
+            "transcript_path": "<RUN_DIR>/project-override/config/projects/-tmp-ai2rules-mods-vjo9gtv5-project-override-project/679dbbfd-7d77-4ff0-9bfb-4e6df946bff2.jsonl",
+            "cwd": "<RUN_DIR>/project-override/project",
+            "prompt_id": "3e319969-f81c-4e1a-bd49-246ad04e22d5",
+            "permission_mode": "acceptEdits",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "<RUN_DIR>/project-override/project/denied-marker.txt",
+              "content": "AI2RULES_MODS_PROBE\n"
+            },
+            "tool_use_id": "toolu_ai2rules_probe"
+          },
+          "exit_code": 0,
+          "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the target path is outside the allowed roots (path_scope_denied)\"}}\n",
+          "stderr": ""
+        }
+      ],
+      "mod_evidence": [
+        "2026-10-03T19:23:15.008Z [DEBUG] hooks module ai2rules-marker-override-probe@inline loaded (worker, environment 1, tier user); events: tool.check",
+        "2026-10-03T19:23:15.009Z [DEBUG] hooks module cc-plugin-agents-md@builtin loaded (native, environment 2, tier builtin); events: session.start,prompt.context,agent.spawn,tool.call",
+        "2026-10-03T19:23:15.120Z [DEBUG] hooks module cc-plugin-agents-md@builtin session.start settled in 4.8ms (native link, next() included)",
+        "2026-10-03T19:23:15.136Z [DEBUG] hooks module cc-plugin-agents-md@builtin prompt.context settled in 8.8ms (native link, next() included)",
+        "2026-10-03T19:23:15.212Z [DEBUG] [ai2rules-marker-override-probe] $.ui.log (to debug): AI2RULES_PROBE_OVERRIDE prior=deny",
+        "2026-10-03T19:23:15.212Z [DEBUG] hooks module ai2rules-marker-override-probe@inline tool.check settled in 3.1ms (worker hop, next() included)"
+      ],
+      "model_calls": [
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [],
+          "offered_tools": [
+            "Write"
+          ]
+        },
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [
+            {
+              "tool_use_id": "toolu_ai2rules_probe",
+              "type": "tool_result",
+              "content": "File created successfully at: <RUN_DIR>/project-override/project/denied-marker.txt (file state is current in your context \u2014 no need to Read it back)\n\n<system-reminder>\n<total_tokens>14999870 tokens left</total_tokens>\n</system-reminder>",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ],
+          "offered_tools": [
+            "Write"
+          ]
+        }
+      ],
+      "host_exit_code": 0,
+      "marker_exists": true,
+      "marker_content": "AI2RULES_MODS_PROBE\n",
+      "world_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc",
+      "oracle_errors": []
+    }
+  ]
+}

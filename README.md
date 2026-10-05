@@ -233,6 +233,14 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   sidecar (E13.6, D20), and the containerized governed SUT with an
   egress-allowlist proxy supplies the E8 enforcement floor (E13.7, D21).
   See `DECISIONS.md` D19–D21, D29, D36, D37.
+  **Mods coverage finding (2026-10-03):** on Claude Code 2.1.288 with released
+  harness 0.6.0, a user-tier mod overrode a project PreToolUse `deny` and the
+  native Write tool created the denied temporary marker. The kernel correctly
+  denied; the host did not retain that decision as final. See the
+  [reproducible probe and evidence](docs/benchmarks/claude-mods/).
+  Managed-hook comparison remains NOT RUN (AI2-41 / #99); a
+  [disposable managed-policy recipe](docs/benchmarks/claude-mods/MANAGED.md)
+  is ready for a Linux amd64 Docker host (unavailable in the authoring workspace).
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the
