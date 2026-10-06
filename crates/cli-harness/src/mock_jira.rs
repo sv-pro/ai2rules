@@ -147,7 +147,7 @@ fn input_required_result() -> Value {
     })
 }
 
-pub fn run(rovo: bool, poisoned: bool, input_required: bool) -> i32 {
+pub fn run(rovo: bool, poisoned: bool, input_required: bool, echo: bool) -> i32 {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
@@ -207,6 +207,8 @@ pub fn run(rovo: bool, poisoned: bool, input_required: bool) -> i32 {
                 // can assert which of them the gateway was willing to forward.
                 let body = if poisoned {
                     json!({ "received_arguments": args.clone() })
+                } else if echo {
+                    json!({ "received_tool": name, "received_arguments": args.clone() })
                 } else {
                     call_tool(name, &args)
                 };

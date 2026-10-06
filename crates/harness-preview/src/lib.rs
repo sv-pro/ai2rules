@@ -23,7 +23,8 @@ pub mod host;
 pub mod project;
 
 pub use gate::{
-    gate, GateApproval, GateContext, GateRequest, GateResponse, GateUsage, ABI_VERSION,
+    gate, gate_and_lower, GateApproval, GateContext, GateRequest, GateResponse, GateUsage,
+    ABI_VERSION,
 };
 pub use host::{host_outcome, BlockKind, HostOutcome};
 pub use project::{project, PROJECTION_VERSION};
@@ -34,6 +35,7 @@ use harness_types::{
     SessionId, SourceChannel, Taint, TaintContext, ToolCall,
 };
 use serde_json::{json, Value};
+use world_kernel::schema::model_facing_schema;
 use world_kernel::{decide, BudgetUsage, EvalContext, KernelOutcome};
 
 /// Compile a draft manifest and report the projected surface + decision matrix.
@@ -65,6 +67,8 @@ pub fn preview(yaml: &str) -> Value {
             "args": scoped.map(|c| {
                 c.args.iter().map(|(k, v)| (k.clone(), describe_arg(v))).collect::<serde_json::Map<_, _>>()
             }),
+            // What the model is shown (D78): renamed, with locked args left out.
+            "input_schema": model_facing_schema(&world, action),
         }));
         decisions.push(json!({
             "action": action.as_str(),
@@ -86,8 +90,30 @@ pub fn preview(yaml: &str) -> Value {
 fn describe_arg(source: &ArgSource) -> Value {
     match source {
         ArgSource::ActorInput => json!("actor-input"),
-        ArgSource::Literal(v) => json!(format!("literal: {v}")),
+        ArgSource::Input(rule) => {
+            let mut text = "actor-input".to_string();
+            if let Some(name) = &rule.exposed_as {
+                text.push_str(&format!(" as {name}"));
+            }
+            if !rule.one_of.is_empty() {
+                let values: Vec<String> = rule.one_of.iter().map(plain).collect();
+                text.push_str(&format!(", one of [{}]", values.join(", ")));
+            }
+            if let Some(prefix) = &rule.prefix {
+                text.push_str(&format!(", starts with {prefix}"));
+            }
+            json!(text)
+        }
+        ArgSource::Literal(v) => json!(format!("literal: {}", plain(v))),
         ArgSource::ContextRef(k) => json!(format!("context: {k}")),
+    }
+}
+
+/// A JSON value as an author would write it: strings without their quotes.
+fn plain(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -130,8 +156,20 @@ fn sample_arguments(world: &CompiledWorld, action: &ActionName) -> Value {
         return Value::Object(
             cap.args
                 .iter()
-                .filter(|(_, source)| matches!(source, ArgSource::ActorInput))
-                .map(|(name, _)| (name.clone(), sample_value(name, None)))
+                .filter_map(|(name, source)| {
+                    let actor_name = source.actor_name(name)?;
+                    // A sample the input rule admits, so the matrix shows the
+                    // verdict for a well-formed call rather than a refusal.
+                    let value = match source {
+                        ArgSource::Input(rule) => match (rule.one_of.first(), &rule.prefix) {
+                            (Some(first), _) => first.clone(),
+                            (None, Some(prefix)) => json!(format!("{prefix}1")),
+                            (None, None) => sample_value(actor_name, None),
+                        },
+                        _ => sample_value(name, None),
+                    };
+                    Some((actor_name.to_string(), value))
+                })
                 .collect(),
         );
     }
@@ -223,6 +261,49 @@ mod tests {
             .find(|d| d["action"] == json!("start_pty"))
             .unwrap();
         assert_eq!(pty["clean"]["decision"], json!("Ask"));
+    }
+
+    #[test]
+    fn scoped_surface_previews_renamed_limited_inputs() {
+        let yaml = r#"
+world_id: my-jira
+capabilities:
+  - { trust: Trusted, actions: [Read] }
+base_actions:
+  - name: getJiraIssue
+    action_type: Read
+    side_effect: Read
+    exposed: false
+    backing: !McpServer { server: atlassian, tool: getJiraIssue }
+    schema:
+      type: object
+      required: [cloudId, issueIdOrKey]
+      properties:
+        cloudId: { type: string }
+        issueIdOrKey: { type: string }
+scoped_capabilities:
+  - name: get_issue
+    base_action: getJiraIssue
+    args:
+      cloudId: !Literal abc-123
+      issueIdOrKey: !Input { as: issue, prefix: "PLAT-" }
+"#;
+        let out = preview(yaml);
+        assert_eq!(out["ok"], json!(true), "{out}");
+        let surface = out["surface"].as_array().unwrap();
+        // The hidden backing is not on the surface; the scoped tool is.
+        assert_eq!(surface.len(), 1);
+        let tool = &surface[0];
+        assert_eq!(tool["name"], json!("get_issue"));
+        assert_eq!(tool["args"]["cloudId"], json!("literal: abc-123"));
+        assert_eq!(
+            tool["args"]["issueIdOrKey"],
+            json!("actor-input as issue, starts with PLAT-")
+        );
+        assert_eq!(tool["input_schema"]["required"], json!(["issue"]));
+        // The matrix samples a value the rule admits, so it shows the real verdict.
+        let decision = &out["decisions"][0];
+        assert_eq!(decision["clean"]["decision"], json!("Allow"));
     }
 
     #[test]

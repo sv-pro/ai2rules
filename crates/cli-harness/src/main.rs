@@ -20,6 +20,7 @@ mod doctor;
 mod doctor_collector;
 mod hostkit;
 mod init;
+mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
 mod project;
@@ -126,6 +127,12 @@ enum Command {
         /// gateway must refuse to relay that demand — see D49 and issue #40.
         #[arg(long)]
         input_required: bool,
+        /// Answer every `tools/call` with the tool name and arguments that actually
+        /// arrived, so a test can assert what the gateway forwarded — a scoped
+        /// tool's upstream name, renamed arguments and injected literals (D78).
+        /// Used by `tests/mcp_gateway_scoped.rs`.
+        #[arg(long)]
+        echo: bool,
     },
     /// Claude Code PreToolUse adapter, in Rust (D33 / E16.C): read a PreToolUse
     /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
@@ -244,6 +251,21 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
     },
+    /// Author a scoped MCP surface in the browser (D78 / E13.4c): connect to an
+    /// upstream MCP server, pick and rename its tools, fix or limit their
+    /// arguments, try calls through the real kernel, and save the world manifest
+    /// that `harness mcp-gateway --world` serves.
+    McpAuthor {
+        /// The world manifest to edit and save. Loaded if it exists.
+        #[arg(long)]
+        world: PathBuf,
+        /// Local port for the page (127.0.0.1 only). 0 picks a free one.
+        #[arg(long, default_value_t = 8788)]
+        port: u16,
+        /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira --rovo`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        upstream: Vec<String>,
+    },
 }
 
 struct InteractiveModel;
@@ -354,9 +376,10 @@ fn main() {
         rovo,
         poisoned,
         input_required,
+        echo,
     }) = &cli.command
     {
-        std::process::exit(mock_jira::run(*rovo, *poisoned, *input_required));
+        std::process::exit(mock_jira::run(*rovo, *poisoned, *input_required, *echo));
     }
 
     if let Some(Command::CcHook {
@@ -397,6 +420,15 @@ fn main() {
             *grant,
             *soft_ask,
         ));
+    }
+
+    if let Some(Command::McpAuthor {
+        world,
+        port,
+        upstream,
+    }) = &cli.command
+    {
+        std::process::exit(mcp_author::run(world, *port, upstream));
     }
 
     if let Some(Command::McpGateway {

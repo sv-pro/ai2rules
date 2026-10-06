@@ -1,0 +1,86 @@
+# A scoped MCP surface (DECISIONS D78) over the Rovo-named mock upstream
+# (`harness mock-jira --rovo`). Driven by tests/mcp_gateway_scoped.rs.
+#
+# The gateway presents itself as `My_Jira`. The model sees:
+#   get_platform_issue(issue)          - getJiraIssue, PLAT- issues only, cloudId fixed
+#   comment_on_platform_issue(issue, comment)
+#                                      - addCommentToJiraIssue, listed issues only
+#   searchJiraIssuesUsingJql           - a base action served as-is
+# getJiraIssue and addCommentToJiraIssue are kept off the surface; every other
+# upstream tool is undeclared. getConfluencePage is declared but backed by another
+# server, so this gateway does not serve it.
+world_id: my-jira
+
+actors:
+  - { name: developer, kind: User }
+  - { name: agent, kind: Model }
+
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+
+capabilities:
+  - trust: Trusted
+    actions: [Read, Mcp]
+
+mcp_surface: { name: My_Jira, upstream: atlassian }
+
+base_actions:
+  - name: getJiraIssue
+    action_type: Read
+    side_effect: Read
+    exposed: false
+    backing: !McpServer { server: atlassian, tool: getJiraIssue }
+    schema:
+      type: object
+      required: [cloudId, issueIdOrKey]
+      properties:
+        cloudId: { type: string }
+        issueIdOrKey: { type: string }
+  - name: addCommentToJiraIssue
+    action_type: Mcp
+    side_effect: External
+    exposed: false
+    backing: !McpServer { server: atlassian, tool: addCommentToJiraIssue }
+    schema:
+      type: object
+      required: [cloudId, issueIdOrKey, commentBody]
+      properties:
+        cloudId: { type: string }
+        issueIdOrKey: { type: string }
+        commentBody: { type: string }
+  - name: searchJiraIssuesUsingJql
+    action_type: Read
+    side_effect: Read
+    backing: !McpServer { server: atlassian, tool: searchJiraIssuesUsingJql }
+    schema:
+      type: object
+      required: [cloudId, jql]
+      properties:
+        cloudId: { type: string }
+        jql: { type: string }
+  - name: getConfluencePage
+    action_type: Read
+    side_effect: Read
+    backing: !McpServer { server: confluence, tool: getConfluencePage }
+    schema:
+      type: object
+      properties:
+        cloudId: { type: string }
+        pageId: { type: string }
+
+scoped_capabilities:
+  - name: get_platform_issue
+    base_action: getJiraIssue
+    description: Read one PLAT issue by its key.
+    args:
+      cloudId: !Literal abc-123
+      issueIdOrKey: !Input { as: issue, prefix: "PLAT-" }
+  - name: comment_on_platform_issue
+    base_action: addCommentToJiraIssue
+    args:
+      cloudId: !Literal abc-123
+      issueIdOrKey: !Input { as: issue, one_of: [PLAT-1, PLAT-2] }
+      commentBody: !Input { as: comment }
+
+transition_policies:
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }

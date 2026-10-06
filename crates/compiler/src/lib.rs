@@ -294,4 +294,108 @@ base_actions:
             Err(CompileError::DuplicateAction(_))
         ));
     }
+
+    // --- Scoped MCP surfaces (D78) ---
+
+    const SURFACE: &str = r#"
+world_id: w
+mcp_surface: { name: My_Jira, upstream: atlassian }
+base_actions:
+  - name: getJiraIssue
+    action_type: Read
+    side_effect: Read
+    exposed: false
+    backing: !McpServer { server: atlassian, tool: getJiraIssue }
+    schema:
+      type: object
+      properties:
+        issueIdOrKey: { type: string }
+        maxResults: { type: integer }
+scoped_capabilities:
+  - name: get_issue
+    base_action: getJiraIssue
+    args:
+      issueIdOrKey: !Input { as: issue, one_of: [PLAT-1], prefix: "PLAT-" }
+      maxResults: !Literal 20
+"#;
+
+    fn invalid(yaml: &str) -> String {
+        match compile(&load_yaml(yaml).expect("parses")) {
+            Err(CompileError::Invalid(detail)) => detail,
+            other => panic!("expected an Invalid error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scoped_surface_compiles_and_hides_its_backing() {
+        let world = compile(&load_yaml(SURFACE).expect("parses")).expect("compiles");
+        assert!(!world.is_projected(&ActionName::new("getJiraIssue")));
+        assert!(world.is_projected(&ActionName::new("get_issue")));
+        assert_eq!(
+            world.mcp_surface().map(|s| s.name.as_str()),
+            Some("My_Jira")
+        );
+    }
+
+    #[test]
+    fn new_fields_leave_existing_manifests_hash_stable() {
+        // Defaults are skipped when serializing, and a string literal serializes
+        // exactly as it did when literals were strings only, so no manifest that
+        // predates D78 changes its hash.
+        let canonical = serde_json::to_string(&default_cli_world()).unwrap();
+        assert!(!canonical.contains("\"exposed\""));
+        assert!(!canonical.contains("\"mcp_surface\""));
+        assert!(canonical.contains(r#"{"Literal":"pytest"}"#));
+    }
+
+    #[test]
+    fn validate_rejects_two_args_under_one_actor_name() {
+        let yaml = SURFACE.replace(
+            "maxResults: !Literal 20",
+            "maxResults: !Input { as: issue }",
+        );
+        assert!(invalid(&yaml).contains("same name issue"));
+    }
+
+    #[test]
+    fn validate_rejects_a_rename_onto_another_args_own_name() {
+        let yaml = SURFACE
+            .replace(
+                "maxResults: !Literal 20",
+                "maxResults: !Input { as: issueIdOrKey }",
+            )
+            .replace("as: issue,", "");
+        assert!(invalid(&yaml).contains("same name issueIdOrKey"));
+    }
+
+    #[test]
+    fn validate_rejects_a_listed_value_the_prefix_excludes() {
+        let yaml = SURFACE.replace("one_of: [PLAT-1]", "one_of: [PLAT-1, SEC-1]");
+        assert!(invalid(&yaml).contains("SEC-1"));
+    }
+
+    #[test]
+    fn validate_rejects_a_prefix_on_a_non_string_argument() {
+        let yaml = SURFACE.replace(
+            "maxResults: !Literal 20",
+            r#"maxResults: !Input { prefix: "1" }"#,
+        );
+        assert!(invalid(&yaml).contains("types it as integer"));
+    }
+
+    #[test]
+    fn validate_rejects_an_empty_prefix_or_name() {
+        let yaml = SURFACE
+            .replace(r#"prefix: "PLAT-""#, r#"prefix: """#)
+            .replace("one_of: [PLAT-1], ", "");
+        assert!(invalid(&yaml).contains("empty prefix"));
+        let yaml = SURFACE.replace("as: issue", r#"as: " ""#);
+        assert!(invalid(&yaml).contains("empty name"));
+    }
+
+    #[test]
+    fn validate_rejects_a_surface_for_an_unknown_upstream() {
+        let yaml = SURFACE.replace("upstream: atlassian", "upstream: github");
+        assert!(invalid(&yaml).contains("no base action is backed by that server"));
+    }
 }

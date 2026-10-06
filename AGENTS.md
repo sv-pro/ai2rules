@@ -29,7 +29,7 @@ ai2rules/
 │   ├── safe-mcp-proxy/
 │   └── mcp-tool-projection/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
-├── DECISIONS.md              # ADR-lite decision log (D1–D69+)
+├── DECISIONS.md              # ADR-lite decision log (D1–D78+)
 ├── README.md                 # Project overview, milestone status, build instructions
 ├── rustfmt.toml              # max_width 100, edition 2021
 └── rust-toolchain.toml       # the pinned compiler — same one locally and in CI
@@ -72,13 +72,13 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
-| **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
+| **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author` |
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all passing, native):**
-harness-types 5 · world-kernel 46 · compiler 20 · executor 28 · trace-store 43 ·
-provider-adapters 5 · agent-core 18 · harness-preview 56 · cli-harness 101 ·
-harness-wasm 0 · govbench 9 · **total 331** (plus the harness-wasm Node smoke
+harness-types 5 · world-kernel 57 · compiler 28 · executor 28 · trace-store 45 ·
+provider-adapters 5 · agent-core 18 · harness-preview 58 · cli-harness 125 ·
+harness-wasm 0 · govbench 9 · **total 378** (plus the harness-wasm Node smoke
 tests, run via wasm-pack)
 
 ---
@@ -138,7 +138,7 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
   harness paths explicitly.
 - **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
   a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
-  can be revisited later. Currently D1–D69.
+  can be revisited later. Currently D1–D78.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
@@ -236,7 +236,7 @@ marker in the same commit as the kernel change.
 | `README.md` | Project overview, milestone table, build/run instructions |
 | `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D69+; consult before choosing alternatives |
+| `DECISIONS.md` | ADR-lite log D1–D78+; consult before choosing alternatives |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |

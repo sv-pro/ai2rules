@@ -2921,3 +2921,130 @@ outcome/provider-result seam and become direct input to the next model turn. The
 AI2-12 showcase replans with `observer: None`, and a regression model asserts call
 correlation plus the full verdict range. No kernel, Gate ABI, trace, policy, or
 executor semantics changed.
+
+## D78 — A scoped capability can rename and limit an MCP tool's arguments; the world can hide the tool it wraps
+
+**Date:** 2026-10-05. Phase 1 of **E13.4** (the MCP projection shim): manifest and kernel
+only. The gateway does not serve these tools yet; that is phase 2.
+
+**Context.** The goal is a governed stand-in for an MCP server: the operator picks which
+upstream tools exist, renames them, and limits what the model may pass — "only issues
+starting `PLAT-`", "only these three projects". Scoped capabilities already narrowed a base
+action (locked literals, stripped extras, invariant 12), and an MCP-backed action already
+lowered to `{server, tool, input}`. Three things were missing. A scoped capability could not
+rename an argument or limit its values. The base action it wrapped stayed on the surface
+beside it, so narrowing `getJiraIssue` into `get_platform_issue` left `getJiraIssue` callable.
+And literals were strings only, so `maxResults: 20` could not be pinned.
+
+**Decision.**
+
+- **`ArgSource::Input { as, one_of, prefix }`** beside `ActorInput`. `as` is the name the actor
+  supplies; the kernel reads the value under that name and passes it on under the base
+  action's name, both when validating against the base schema and when lowering to the
+  `ExecutionSpec`. `one_of` and `prefix` are checked on the value the actor sent, before
+  mapping; a value either rule refuses is `schema_violation` (DENY). Both apply when both are
+  set. A prefix only ever matches a string.
+- **The base name is not a back door.** A value sent under the base name of a renamed argument
+  is never read: it is stripped like any undeclared extra, so a call carrying only that name
+  is missing its required argument and is refused, never run without its limit.
+- **`exposed: false` on a base action** keeps it in the ontology, so scoped capabilities can
+  name it, and out of the projection, so the model sees it as ABSENT.
+- **`ArgSource::Literal` holds any JSON value.** A string literal serializes exactly as before.
+- **`mcp_surface: { name, upstream }`** records the server name a gateway will announce and
+  the `McpServer` backing it fronts. Validation requires some base action to use that backing.
+- **`world_kernel::schema::model_facing_schema`** derives what the model is shown for a scoped
+  capability: actor-supplied arguments only, under their actor names, with `enum` for a list
+  and `pattern` (`^` plus the escaped prefix) for a prefix, closed with
+  `additionalProperties: false` because extras are stripped anyway. This is the advertisement;
+  the gate is the check. Per D51 the world owns this schema, not the upstream.
+- **L2 taint follows the rename.** An argument role is declared on the base name; the floor now
+  reads per-argument taint under the name the actor used.
+- **Every new field is skipped when it holds its default**, so no manifest written before this
+  changes its hash. The governance benchmark regenerates with no diff.
+
+**Alternatives.**
+
+- *A regex rule.* Rejected for now: it adds a dependency to the pure kernel and to the WASM
+  build, and a prefix covers the common case (issue keys, project keys). A list or prefix
+  cannot constrain free-text arguments such as JQL; templated arguments are a separate design.
+- *Put renames and limits in the gateway.* Rejected: policy in an adapter is the D34/D36/D48
+  drift, and other hosts would not get it. The gateway will forward the kernel's lowered
+  operation instead of the raw call.
+- *Derive the scoped descriptor's schema and validate against it.* Rejected: it would change
+  the descriptor hash of every existing scoped capability and replace strip-then-validate with
+  a closed check, changing behavior for the default world. Validation stays on base names.
+- *Hide a base action automatically when a scoped capability wraps it.* Rejected: an operator
+  may want both, and an implicit rule would surprise. The flag is explicit.
+- *Reuse `arg_constraints` for limits.* Rejected: those sit on the base action and apply to
+  every capability wrapping it; the limits here belong to one scoped capability.
+
+**Consequence.** A manifest can now express the stand-in fully, and the kernel enforces it.
+The committed WASM engine grows from 523 KB to 567 KB, measured against a rebuild of the
+previous commit with the same toolchain and `wasm-opt -Oz`. Until phase 2 the MCP gateway
+still lists tools by upstream name only, so scoped capabilities are not served over MCP yet.
+
+**Related:** D33, D45, D51, D68, D72; PLAN E13.4;
+`crates/world-kernel/tests/scoped_mcp_surface.rs`.
+
+### D78 amendment (2026-10-05) — phase 2: the gateway serves the surface (E13.4b)
+
+- **A declared `mcp_surface` switches the gateway to the backing as the source of truth.** An
+  action is served when its `McpServer` backing names the surface's upstream, under the
+  backing's tool name, so several scoped capabilities can wrap one upstream tool. The model is
+  offered each under its own name with `model_facing_schema`. A projected action backed by
+  another server is not served, even if the upstream advertises a tool of that name.
+- **Without a surface, nothing changes.** Every earlier world names upstream tools by action
+  name, and their backings were never read by the gateway — the mock demo worlds back
+  `jira_get_issue` with a tool called `get_issue`, which the upstream does not have. Making the
+  backing authoritative everywhere would have silently emptied those surfaces. The governance
+  benchmark regenerates with no diff.
+- **What is forwarded is the kernel's `ExecutionSpec`.** `harness_preview::gate_and_lower`
+  returns `gate`'s verdict unchanged plus, for an `ALLOW`, the lowered spec; the gateway sends
+  its `{tool, input}` upstream — renamed arguments mapped back, literals injected, extras
+  stripped. An allowed call that cannot be lowered, or is not served by this upstream, is
+  refused (`REFUSED (gateway)`, audited as `not_forwardable`). `gate`'s wire ABI is unchanged,
+  and `gate_and_lower` is native-only: the WASM build has nothing to execute.
+- **A refused forward ingests nothing and spends nothing.** The gate's post-call taint and
+  budget charge assume the call runs; when the gateway does not forward it, the session keeps
+  its pre-call taint and usage.
+- **Scoped capabilities may carry a `description`.** The gateway shows it instead of the
+  upstream's, which names the base action's arguments and is untrusted text (D51's residual).
+  Base actions still show the upstream's description.
+- **The gateway announces `mcp_surface.name`** as its `serverInfo.name`.
+- **Rejected:** *adding the lowered operation to `GateResponse`* — a wire ABI change for every
+  host when only this adapter executes; *re-running `decide` in the gateway to lower* — a second
+  verdict that could disagree with the first.
+
+### D78 amendment (2026-10-06) — phase 3: the authoring page (E13.4c)
+
+- **`harness mcp-author --world W -- <upstream>`** spawns the upstream once and serves a local
+  page: name the surface, tick the tools that exist, rename them, fix or limit each argument,
+  try calls, save `W`. `harness mcp-gateway --world W -- <upstream>` then serves it.
+- **The page builds the manifest as JSON; the server owns YAML.** It parses the JSON into the
+  real `WorldManifest`, renders it with `serde_yaml`, reloads the rendering and refuses to
+  continue unless it equals what was sent, then compiles it. Save refuses anything that does
+  not compile. There is no YAML writer and no governance logic in the page (D18).
+- **"Try it" is the gateway's own path** (`govern` → `forward_target`), so it shows the
+  verdict and the exact `{tool, arguments}` the gateway would send. It calls the upstream only
+  when asked to *send*, and the page confirms first: a send runs with the operator's upstream
+  credentials.
+- **The server is stricter than `harness serve`**, because this page can call a credentialed
+  upstream and write a file. It binds to 127.0.0.1, refuses a `Host` other than its own (DNS
+  rebinding), refuses a foreign `Origin`, and requires a per-run token in a custom header on
+  every POST; the token lives only in the served page. It writes only the `--world` path from
+  the command line. The upstream command is never written into the file: it can carry
+  credentials, and the file is meant to be committed. Everything the upstream sends is placed
+  in the page as text, never as HTML — tested with a hostile upstream.
+- **A loaded world keeps its own schemas.** When the upstream now describes a tool's arguments
+  differently, the saved schema stays and the page says so (D51). Parts of a world the page
+  cannot edit — another server's actions, a second scoped capability over one tool, context
+  references — are kept as written and named in a banner, never dropped.
+- **Shape of what the page writes.** A tool left as-is is a base action. A renamed, described
+  or limited tool becomes a hidden base action named `<tool>__upstream` plus one scoped
+  capability; the gateway finds the tool through the backing, so the base action's name is
+  free. A new world starts with one trusted channel, `Read`/`Mcp` capabilities, and the taint
+  floor on external and network effects.
+- **Rejected:** *generating YAML in the page* — a second serializer that could disagree with the
+  loader; *letting the page choose the save path* — a request could then write anywhere the
+  user can; *sending on every Try* — a write tool would run while the operator was still
+  designing it.
