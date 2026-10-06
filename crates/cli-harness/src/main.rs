@@ -20,6 +20,7 @@ mod doctor;
 mod doctor_collector;
 mod hostkit;
 mod init;
+mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
 mod project;
@@ -250,6 +251,21 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
     },
+    /// Author a scoped MCP surface in the browser (D78 / E13.4c): connect to an
+    /// upstream MCP server, pick and rename its tools, fix or limit their
+    /// arguments, try calls through the real kernel, and save the world manifest
+    /// that `harness mcp-gateway --world` serves.
+    McpAuthor {
+        /// The world manifest to edit and save. Loaded if it exists.
+        #[arg(long)]
+        world: PathBuf,
+        /// Local port for the page (127.0.0.1 only). 0 picks a free one.
+        #[arg(long, default_value_t = 8788)]
+        port: u16,
+        /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira --rovo`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        upstream: Vec<String>,
+    },
 }
 
 struct InteractiveModel;
@@ -404,6 +420,15 @@ fn main() {
             *grant,
             *soft_ask,
         ));
+    }
+
+    if let Some(Command::McpAuthor {
+        world,
+        port,
+        upstream,
+    }) = &cli.command
+    {
+        std::process::exit(mcp_author::run(world, *port, upstream));
     }
 
     if let Some(Command::McpGateway {

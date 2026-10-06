@@ -43,15 +43,17 @@ use world_kernel::schema::model_facing_schema;
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// A minimal MCP stdio **client** to the spawned upstream child process.
-struct Upstream {
+pub(crate) struct Upstream {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     next_id: i64,
+    /// The upstream's `serverInfo` from its `initialize` answer.
+    pub(crate) server_info: Value,
 }
 
 impl Upstream {
-    fn spawn(cmd: &[String]) -> std::io::Result<Self> {
+    pub(crate) fn spawn(cmd: &[String]) -> std::io::Result<Self> {
         let mut child = Command::new(&cmd[0])
             .args(&cmd[1..])
             .stdin(Stdio::piped())
@@ -65,6 +67,7 @@ impl Upstream {
             stdin,
             stdout,
             next_id: 1,
+            server_info: Value::Null,
         };
         up.initialize()?;
         Ok(up)
@@ -98,11 +101,12 @@ impl Upstream {
     }
 
     fn initialize(&mut self) -> std::io::Result<()> {
-        self.rpc(
+        let resp = self.rpc(
             "initialize",
             json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
                    "clientInfo": {"name": "harness-mcp-gateway", "version": "0.1.0"}}),
         )?;
+        self.server_info = resp["result"]["serverInfo"].clone();
         writeln!(
             self.stdin,
             "{}",
@@ -118,7 +122,7 @@ impl Upstream {
     /// not model (`_meta`, and since protocol version 2026-07-28 the required
     /// `ttlMs` / `cacheScope`). Shaping the surface is policy; discarding
     /// protocol fields is data loss.
-    fn list_result(&mut self) -> std::io::Result<Value> {
+    pub(crate) fn list_result(&mut self) -> std::io::Result<Value> {
         let resp = self.rpc("tools/list", json!({}))?;
         Ok(resp.get("result").cloned().unwrap_or_else(|| json!({})))
     }
@@ -133,7 +137,7 @@ impl Upstream {
     /// trace propagation. Forwarding it widens nothing: `_meta` is set by the
     /// *host*, not proposed by the model — the kernel still governs only the tool
     /// name and its arguments.
-    fn call_tool(
+    pub(crate) fn call_tool(
         &mut self,
         name: &str,
         arguments: &Value,
@@ -164,7 +168,7 @@ impl Drop for Upstream {
 /// `source` is the proposer's channel (its *trust*); `tainted` is the carried,
 /// monotonic session taint (the inbound floor). They're independent dimensions.
 /// `mode` is threaded into every request so ASK fails closed in background.
-fn govern(
+pub(crate) fn govern(
     world: &CompiledWorld,
     tool: &str,
     args: &Value,
@@ -220,7 +224,7 @@ fn audit(path: Option<&Path>, entry: Value) {
 /// names of their own. Without one, the world names upstream tools directly by
 /// action name, as every world did before D78; their backings were never read
 /// here, and some name tools the upstream does not have.
-fn served_tool(world: &CompiledWorld, action: &ActionName) -> Option<String> {
+pub(crate) fn served_tool(world: &CompiledWorld, action: &ActionName) -> Option<String> {
     let Some(surface) = world.mcp_surface() else {
         return Some(action.as_str().to_string());
     };
@@ -315,7 +319,7 @@ fn project_tool(
 /// allowed but could not lower is refused. Without a surface the call is
 /// forwarded as proposed, as before D78: the world names upstream tools directly
 /// and declares no scoping the gateway would have to apply.
-fn forward_target(
+pub(crate) fn forward_target(
     world: &CompiledWorld,
     action: &ActionName,
     args: &Value,

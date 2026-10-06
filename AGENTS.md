@@ -72,13 +72,13 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
-| **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway` |
+| **cli-harness** | `harness init`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author` |
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 57 · compiler 28 · executor 28 · trace-store 45 ·
-provider-adapters 5 · agent-core 18 · harness-preview 58 · cli-harness 120 ·
-harness-wasm 0 · govbench 9 · **total 373** (plus the harness-wasm Node smoke
+provider-adapters 5 · agent-core 18 · harness-preview 58 · cli-harness 125 ·
+harness-wasm 0 · govbench 9 · **total 378** (plus the harness-wasm Node smoke
 tests, run via wasm-pack)
 
 ---

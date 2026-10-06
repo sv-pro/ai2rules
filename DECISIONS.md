@@ -3014,3 +3014,37 @@ still lists tools by upstream name only, so scoped capabilities are not served o
 - **Rejected:** *adding the lowered operation to `GateResponse`* — a wire ABI change for every
   host when only this adapter executes; *re-running `decide` in the gateway to lower* — a second
   verdict that could disagree with the first.
+
+### D78 amendment (2026-10-06) — phase 3: the authoring page (E13.4c)
+
+- **`harness mcp-author --world W -- <upstream>`** spawns the upstream once and serves a local
+  page: name the surface, tick the tools that exist, rename them, fix or limit each argument,
+  try calls, save `W`. `harness mcp-gateway --world W -- <upstream>` then serves it.
+- **The page builds the manifest as JSON; the server owns YAML.** It parses the JSON into the
+  real `WorldManifest`, renders it with `serde_yaml`, reloads the rendering and refuses to
+  continue unless it equals what was sent, then compiles it. Save refuses anything that does
+  not compile. There is no YAML writer and no governance logic in the page (D18).
+- **"Try it" is the gateway's own path** (`govern` → `forward_target`), so it shows the
+  verdict and the exact `{tool, arguments}` the gateway would send. It calls the upstream only
+  when asked to *send*, and the page confirms first: a send runs with the operator's upstream
+  credentials.
+- **The server is stricter than `harness serve`**, because this page can call a credentialed
+  upstream and write a file. It binds to 127.0.0.1, refuses a `Host` other than its own (DNS
+  rebinding), refuses a foreign `Origin`, and requires a per-run token in a custom header on
+  every POST; the token lives only in the served page. It writes only the `--world` path from
+  the command line. The upstream command is never written into the file: it can carry
+  credentials, and the file is meant to be committed. Everything the upstream sends is placed
+  in the page as text, never as HTML — tested with a hostile upstream.
+- **A loaded world keeps its own schemas.** When the upstream now describes a tool's arguments
+  differently, the saved schema stays and the page says so (D51). Parts of a world the page
+  cannot edit — another server's actions, a second scoped capability over one tool, context
+  references — are kept as written and named in a banner, never dropped.
+- **Shape of what the page writes.** A tool left as-is is a base action. A renamed, described
+  or limited tool becomes a hidden base action named `<tool>__upstream` plus one scoped
+  capability; the gateway finds the tool through the backing, so the base action's name is
+  free. A new world starts with one trusted channel, `Read`/`Mcp` capabilities, and the taint
+  floor on external and network effects.
+- **Rejected:** *generating YAML in the page* — a second serializer that could disagree with the
+  loader; *letting the page choose the save path* — a request could then write anywhere the
+  user can; *sending on every Try* — a write tool would run while the operator was still
+  designing it.
