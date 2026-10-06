@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="harness-author-token" content="__HARNESS_AUTHOR_TOKEN__">
+<title>MCP surface authoring</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #5f5f5a; --line: #dcdcd6;
+    --accent: #2f5fd0; --accent-ink: #ffffff; --ok: #1f7a3a; --warn: #9a6200; --bad: #b42318;
+    --code: #f1f1ec; --chip: #ececE6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #1f1f1d; --ink: #ecece8; --muted: #a3a39c; --line: #3a3a36;
+      --accent: #7aa2ff; --accent-ink: #10131a; --ok: #5cc27a; --warn: #e0a640; --bad: #ff7a6e;
+      --code: #282826; --chip: #2d2d2a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--panel);
+           border-bottom: 1px solid var(--line); padding: 12px 20px;
+           display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: end; }
+  header h1 { font-size: 16px; margin: 0 16px 6px 0; }
+  label.field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+  input[type=text], textarea, select {
+    font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; }
+  textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  button { font: inherit; border-radius: 6px; padding: 6px 14px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .spacer { flex: 1; }
+  #status { font-size: 12.5px; color: var(--muted); max-width: 420px; }
+  #status.bad { color: var(--bad); } #status.ok { color: var(--ok); }
+  main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; padding: 20px; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  h2 { font-size: 14px; margin: 0 0 10px; }
+  .note { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
+  .banner { border: 1px solid var(--warn); color: var(--warn); border-radius: 8px;
+            padding: 8px 12px; margin-bottom: 12px; font-size: 12.5px; }
+  .banner.bad { border-color: var(--bad); color: var(--bad); }
+  .tool { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 12px 14px; margin-bottom: 10px; }
+  .tool.off { opacity: .62; }
+  .tool-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .tool-head .upname { font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+  .tool-head .desc { color: var(--muted); font-size: 12.5px; flex-basis: 100%; margin-left: 26px; }
+  .tool-body { margin: 10px 0 0 26px; display: grid; gap: 10px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  .row > label.field { flex: 1 1 180px; }
+  table.args { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.args th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 6px;
+                  border-bottom: 1px solid var(--line); }
+  table.args td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.args td input[type=text], table.args td select { width: 100%; }
+  table.args td select { min-width: 132px; }
+  .argname { font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
+  .req { color: var(--muted); font-size: 11px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tabs button { border-radius: 6px 6px 0 0; }
+  .tabs button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: var(--code);
+        border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+  .surface-item { border-bottom: 1px solid var(--line); padding: 8px 0; }
+  .surface-item:last-child { border-bottom: 0; }
+  .chip { display: inline-block; font-size: 11.5px; border-radius: 999px; padding: 1px 8px;
+          background: var(--chip); margin-left: 6px; }
+  .v-Allow, .v-ALLOW { color: var(--ok); } .v-Ask, .v-ASK { color: var(--warn); }
+  .v-Deny, .v-DENY, .v-Absent, .v-ABSENT, .v-Replan, .v-REPLAN { color: var(--bad); }
+  .absent-list { color: var(--muted); font-size: 12.5px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MCP surface authoring</h1>
+  <label class="field">Surface name (what hosts see)
+    <input type="text" id="surface-name" placeholder="My_Jira"></label>
+  <label class="field">Upstream id (backing server label)
+    <input type="text" id="upstream-id"></label>
+  <label class="field">World id
+    <input type="text" id="world-id"></label>
+  <div class="spacer"></div>
+  <div id="status">Loading…</div>
+  <button class="primary" id="save" disabled>Save</button>
+</header>
+
+<main>
+  <section>
+    <h2>Upstream tools</h2>
+    <p class="note" id="upstream-note"></p>
+    <div id="banners"></div>
+    <div id="tools"></div>
+  </section>
+
+  <section>
+    <div class="tabs">
+      <button data-tab="surface" class="on">What the model sees</button>
+      <button data-tab="try">Try it</button>
+      <button data-tab="yaml">Manifest</button>
+    </div>
+    <div class="panel" id="tab-surface"></div>
+    <div class="panel hidden" id="tab-try">
+      <p class="note">Runs the real gate, lowering and forwarding path the gateway uses.
+        <b>Check</b> shows what would be sent upstream; <b>Send</b> actually calls the upstream.</p>
+      <div class="row">
+        <label class="field">Tool <select id="try-tool"></select></label>
+        <label class="field">Session
+          <select id="try-taint"><option value="clean">clean</option>
+            <option value="tainted">tainted (after reading upstream data)</option></select></label>
+      </div>
+      <label class="field" style="margin-top:10px">Arguments (JSON)
+        <textarea id="try-args" rows="6">{}</textarea></label>
+      <div class="row" style="margin-top:10px">
+        <button id="try-check">Check</button>
+        <button id="try-send">Send to upstream</button>
+      </div>
+      <div id="try-out" style="margin-top:12px"></div>
+    </div>
+    <div class="panel hidden" id="tab-yaml">
+      <p class="note" id="yaml-path"></p>
+      <pre id="yaml"></pre>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+// Everything an upstream sends — names, descriptions, schemas, results — is
+// untrusted text. It is only ever placed with textContent / value, never as HTML.
+const TOKEN = document.querySelector('meta[name="harness-author-token"]').content;
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") node.className = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (k === "checked" || k === "disabled" || k === "value") node[k] = v;
+    else node.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return node;
+}
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Harness-Author": TOKEN },
+    body: JSON.stringify(body),
+  };
+  const res = await fetch(path, opts);
+  return res.json();
+}
+
+function setStatus(text, kind) {
+  const s = $("status");
+  s.textContent = text;
+  s.className = kind || "";
+}
+
+// --- State ---------------------------------------------------------------
+
+const state = {
+  upstreamTools: [],     // as the upstream advertised them
+  cfg: {},               // upstream tool name -> choices
+  skeleton: null,        // the manifest minus what this page generates
+  preserved: { base: [], scoped: [] },
+  rendered: null,        // last /api/render answer
+  dirty: false,          // changed since loaded or saved
+  loaded: false,         // a saved world was loaded at start
+};
+
+function defaultSkeleton(worldId) {
+  return {
+    world_id: worldId,
+    actors: [{ name: "developer", kind: "User" }, { name: "agent", kind: "Model" }],
+    channels: [{ name: "user_cli", trust: "Trusted", taint: false }],
+    data_classes: [],
+    capabilities: [{ trust: "Trusted", actions: ["Read", "Mcp"] }],
+    base_actions: [],
+    scoped_capabilities: [],
+    // Untrusted context (anything read from the upstream) cannot drive a write.
+    transition_policies: [
+      { from_taint: "Tainted", side_effect: "External", decision: "Deny", rule: "no_tainted_external" },
+      { from_taint: "Tainted", side_effect: "Network", decision: "Deny", rule: "no_tainted_network" },
+    ],
+    budget: {},
+    observability: {},
+  };
+}
+
+// The schema a tool's arguments are described by: the saved world's when it has
+// one (the world owns it, D51), else what the upstream advertises now.
+function schemaOf(tool) {
+  const cfg = state.cfg[tool.name];
+  return (cfg && cfg.schema) || tool.inputSchema || { type: "object", properties: {} };
+}
+
+function props(tool) {
+  const p = schemaOf(tool).properties;
+  return p && typeof p === "object" ? p : {};
+}
+
+function required(tool) {
+  const r = schemaOf(tool).required;
+  return Array.isArray(r) ? r : [];
+}
+
+function guessKind(tool) {
+  const a = tool.annotations || {};
+  if (a.readOnlyHint === true) return "read";
+  if (a.readOnlyHint === false || a.destructiveHint === true) return "write";
+  return /^(get|list|search|read|fetch|find|lookup|query|describe|view)/i.test(tool.name) ? "read" : "write";
+}
+
+function freshCfg(tool, schema) {
+  const args = {};
+  const p = (schema || tool.inputSchema || {}).properties || {};
+  for (const name of Object.keys(p)) {
+    args[name] = { mode: "model", as: "", oneOf: "", prefix: "", value: "" };
+  }
+  return { include: false, name: tool.name, description: "", kind: guessKind(tool), approval: false, args, schema: schema || null };
+}
+
+const hiddenName = (toolName) => `${toolName}__upstream`;
+
+function show(v) { return typeof v === "string" ? v : JSON.stringify(v); }
+
+/// Rebuild the page's choices from a saved manifest. Anything it cannot edit is
+/// kept as it was and named in a banner, never dropped silently.
+function loadWorld(world, upstreamId) {
+  const warnings = [];
+  const ours = new Map(); // base action name -> upstream tool name
+  const known = new Set(state.upstreamTools.map((t) => t.name));
+  const skeleton = { ...world, base_actions: [], scoped_capabilities: [] };
+  delete skeleton.mcp_surface;
+
+  for (const base of world.base_actions || []) {
+    const mcp = base.backing && base.backing.McpServer;
+    if (!mcp || mcp.server !== upstreamId || !known.has(mcp.tool) || ours.has(base.name) ||
+        [...ours.values()].includes(mcp.tool)) {
+      state.preserved.base.push(base);
+      if (mcp && mcp.server === upstreamId && !known.has(mcp.tool)) {
+        warnings.push(`Kept ${base.name} as written: the upstream no longer advertises ${mcp.tool}.`);
+      }
+      continue;
+    }
+    ours.set(base.name, mcp.tool);
+    const tool = state.upstreamTools.find((t) => t.name === mcp.tool);
+    const cfg = freshCfg(tool, base.schema);
+    if (JSON.stringify(base.schema) !== JSON.stringify(tool.inputSchema)) {
+      warnings.push(`${mcp.tool}: the upstream now describes its arguments differently from the saved world. The saved schema is kept; the gateway logs the difference.`);
+    }
+    cfg.kind = base.action_type === "Read" ? "read" : "write";
+    cfg.approval = !!base.approval_required;
+    cfg.include = base.exposed !== false;
+    cfg.name = base.name;
+    state.cfg[mcp.tool] = cfg;
+  }
+
+  for (const cap of world.scoped_capabilities || []) {
+    const tool = ours.get(cap.base_action);
+    const cfg = tool && state.cfg[tool];
+    if (!cfg || cfg._scoped) {
+      state.preserved.scoped.push(cap);
+      if (cfg) warnings.push(`Kept ${cap.name} as written: this page edits one tool per upstream tool.`);
+      continue;
+    }
+    cfg._scoped = true;
+    cfg.include = true;
+    cfg.name = cap.name;
+    cfg.description = cap.description || "";
+    for (const [arg, source] of Object.entries(cap.args || {})) {
+      const a = cfg.args[arg] || (cfg.args[arg] = { mode: "model", as: "", oneOf: "", prefix: "", value: "" });
+      if (source === "ActorInput") continue;
+      if (source.Literal !== undefined) { a.mode = "fixed"; a.value = show(source.Literal); }
+      else if (source.Input) {
+        a.as = source.Input.as || "";
+        a.oneOf = (source.Input.one_of || []).map(show).join(", ");
+        a.prefix = source.Input.prefix || "";
+      } else if (source.ContextRef !== undefined) {
+        warnings.push(`${cap.name}.${arg} reads a runtime context key, which this page cannot edit; it is shown as model-supplied.`);
+      }
+    }
+  }
+  for (const cfg of Object.values(state.cfg)) delete cfg._scoped;
+  return { skeleton, warnings };
+}
+
+// --- Manifest ------------------------------------------------------------
+
+function typed(text, type) {
+  const t = text.trim();
+  if (type === "integer" || type === "number") {
+    const n = Number(t);
+    if (t === "" || Number.isNaN(n)) throw new Error(`"${t}" is not a number`);
+    return n;
+  }
+  if (type === "boolean") {
+    if (t !== "true" && t !== "false") throw new Error(`"${t}" is not true or false`);
+    return t === "true";
+  }
+  if (type === "string") return text;
+  try { return JSON.parse(t); } catch { return text; }
+}
+
+function buildManifest() {
+  const upstreamId = $("upstream-id").value.trim();
+  const m = structuredClone(state.skeleton);
+  m.world_id = $("world-id").value.trim();
+  m.mcp_surface = { name: $("surface-name").value.trim(), upstream: upstreamId };
+  const bases = [...state.preserved.base];
+  const scoped = [...state.preserved.scoped];
+
+  for (const tool of state.upstreamTools) {
+    const cfg = state.cfg[tool.name];
+    if (!cfg.include) continue;
+    const read = cfg.kind === "read";
+    const base = {
+      name: tool.name,
+      action_type: read ? "Read" : "Mcp",
+      side_effect: read ? "Read" : "External",
+      schema: schemaOf(tool),
+      backing: { McpServer: { server: upstreamId, tool: tool.name } },
+      approval_required: cfg.approval,
+    };
+    const types = props(tool);
+    const plain = cfg.name === tool.name && !cfg.description.trim() &&
+      Object.values(cfg.args).every((a) => a.mode === "model" && !a.as.trim() && !a.oneOf.trim() && !a.prefix);
+    if (plain) { bases.push(base); continue; }
+
+    // Scoped: the upstream tool stays in the world as a hidden backing, and the
+    // model sees only the scoped capability that wraps it.
+    base.name = hiddenName(tool.name);
+    base.exposed = false;
+    bases.push(base);
+    const args = {};
+    for (const [arg, a] of Object.entries(cfg.args)) {
+      const type = types[arg] && types[arg].type;
+      if (a.mode === "fixed") {
+        args[arg] = { Literal: typed(a.value, type) };
+        continue;
+      }
+      const rule = {};
+      if (a.as.trim()) rule.as = a.as.trim();
+      if (a.oneOf.trim()) rule.one_of = a.oneOf.split(",").map((v) => v.trim()).filter(Boolean).map((v) => typed(v, type));
+      if (a.prefix) rule.prefix = a.prefix;
+      args[arg] = Object.keys(rule).length ? { Input: rule } : "ActorInput";
+    }
+    const cap = { name: cfg.name.trim(), base_action: base.name, args };
+    if (cfg.description.trim()) cap.description = cfg.description.trim();
+    scoped.push(cap);
+  }
+  m.base_actions = bases;
+  m.scoped_capabilities = scoped;
+  return m;
+}
+
+// --- Rendering the editor ---------------------------------------------------
+
+function toolCard(tool) {
+  const cfg = state.cfg[tool.name];
+  const card = el("div", { class: "tool" + (cfg.include ? "" : " off") });
+  const head = el("div", { class: "tool-head" },
+    el("input", { type: "checkbox", checked: cfg.include, "aria-label": `Include ${tool.name}`,
+      onchange: (e) => { cfg.include = e.target.checked; redrawTools(); changed(); } }),
+    el("span", { class: "upname" }, tool.name),
+    cfg.include ? null : el("span", { class: "chip" }, "ABSENT"),
+    tool.description ? el("span", { class: "desc" }, tool.description) : null);
+  card.append(head);
+  if (!cfg.include) return card;
+
+  const bind = (key) => (e) => { cfg[key] = e.target.value; changed(); };
+  const body = el("div", { class: "tool-body" },
+    el("div", { class: "row" },
+      el("label", { class: "field" }, "Name the model sees",
+        el("input", { type: "text", value: cfg.name, oninput: bind("name") })),
+      el("label", { class: "field" }, "What it does",
+        el("select", { onchange: (e) => { cfg.kind = e.target.value; changed(); } },
+          el("option", { value: "read", ...(cfg.kind === "read" ? { selected: "" } : {}) }, "Reads data"),
+          el("option", { value: "write", ...(cfg.kind === "write" ? { selected: "" } : {}) }, "Changes something (external write)"))),
+      el("label", { class: "field", style: "flex:0 0 auto" }, "Needs approval",
+        el("input", { type: "checkbox", checked: cfg.approval,
+          onchange: (e) => { cfg.approval = e.target.checked; changed(); } }))),
+    el("label", { class: "field" }, "Description for the model (optional; replaces the upstream's)",
+      el("textarea", { rows: "2", value: cfg.description, oninput: bind("description") })));
+
+  const names = Object.keys(cfg.args);
+  if (names.length) {
+    const req = required(tool);
+    const table = el("table", { class: "args" },
+      el("tr", {}, el("th", {}, "Argument"), el("th", {}, "Value comes from"),
+        el("th", {}, "Model calls it"), el("th", {}, "Allowed values (comma-separated)"),
+        el("th", {}, "Must start with")));
+    for (const name of names) {
+      const a = cfg.args[name];
+      const set = (key) => (e) => { a[key] = e.target.value; changed(); };
+      const fixed = a.mode === "fixed";
+      table.append(el("tr", {},
+        el("td", { class: "argname" }, name, req.includes(name) ? el("div", { class: "req" }, "required") : null),
+        el("td", {}, el("select", { onchange: (e) => { a.mode = e.target.value; redrawTools(); changed(); } },
+          el("option", { value: "model", ...(fixed ? {} : { selected: "" }) }, "the model"),
+          el("option", { value: "fixed", ...(fixed ? { selected: "" } : {}) }, "a fixed value"))),
+        fixed
+          ? el("td", { colspan: "3" }, el("input", { type: "text", value: a.value, placeholder: "fixed value (hidden from the model)", oninput: set("value") }))
+          : [el("td", {}, el("input", { type: "text", value: a.as, placeholder: name, oninput: set("as") })),
+             el("td", {}, el("input", { type: "text", value: a.oneOf, placeholder: "any", oninput: set("oneOf") })),
+             el("td", {}, el("input", { type: "text", value: a.prefix, placeholder: "anything", oninput: set("prefix") }))]));
+    }
+    body.append(table);
+  }
+  card.append(body);
+  return card;
+}
+
+function redrawTools() {
+  const box = $("tools");
+  box.replaceChildren(...state.upstreamTools.map(toolCard));
+}
+
+function verdictText(d) {
+  return d ? el("span", { class: `v-${d.decision}` }, d.decision, d.rule && d.rule !== "default_allow" ? ` (${d.rule})` : "") : "—";
+}
+
+function redrawSurface() {
+  const r = state.rendered;
+  const panel = $("tab-surface");
+  const select = $("try-tool");
+  const previous = select.value;
+  if (!r || !r.ok || !r.preview || !r.preview.ok) {
+    panel.replaceChildren(el("p", { class: "note" }, "Fix the error above to see the surface."));
+    return;
+  }
+  const decisions = new Map(r.preview.decisions.map((d) => [d.action, d]));
+  const items = r.preview.surface.map((s) => el("div", { class: "surface-item" },
+    el("div", {}, el("b", {}, s.name), el("span", { class: "chip" }, s.kind === "scoped" ? "scoped" : "as-is"),
+      " clean: ", verdictText(decisions.get(s.name) && decisions.get(s.name).clean),
+      " · tainted: ", verdictText(decisions.get(s.name) && decisions.get(s.name).tainted)),
+    el("pre", {}, JSON.stringify(s.input_schema, null, 2))));
+  const absent = state.upstreamTools.filter((t) => !state.cfg[t.name].include).map((t) => t.name);
+  panel.replaceChildren(
+    el("p", { class: "note" }, `${r.preview.surface.length} tool(s) offered. The verdicts assume a trusted caller and sample arguments the limits allow.`),
+    ...items,
+    absent.length ? el("p", { class: "absent-list" }, "ABSENT: ", absent.join(", ")) : null);
+
+  select.replaceChildren(...r.preview.surface.map((s) => el("option", { value: s.name }, s.name)));
+  if ([...select.options].some((o) => o.value === previous)) select.value = previous;
+}
+
+// --- Render / save / try ----------------------------------------------------
+
+let timer = null;
+function changed() {
+  state.dirty = true;
+  clearTimeout(timer);
+  timer = setTimeout(renderNow, 200);
+}
+
+async function renderNow() {
+  if (!state.upstreamTools.some((t) => state.cfg[t.name].include)) {
+    setStatus("Tick the tools the model may use.", "");
+    $("save").disabled = true;
+    state.rendered = null;
+    redrawSurface();
+    return;
+  }
+  if (!$("surface-name").value.trim()) {
+    setStatus("Name the surface — it is what hosts see.", "");
+    $("save").disabled = true;
+    return;
+  }
+  let manifest;
+  try { manifest = buildManifest(); }
+  catch (e) { setStatus(e.message, "bad"); $("save").disabled = true; return; }
+  const r = await api("/api/render", { manifest });
+  state.rendered = r;
+  $("yaml").textContent = r.yaml || "";
+  $("save").disabled = !r.ok;
+  if (r.ok) setStatus(state.dirty || !state.loaded ? "Compiles. Not saved yet." : "Loaded from the world file.", "");
+  else setStatus(r.error, "bad");
+  redrawSurface();
+}
+
+$("save").addEventListener("click", async () => {
+  const r = await api("/api/save", { manifest: buildManifest() });
+  if (r.ok) { state.dirty = false; state.loaded = true; setStatus(`Saved to ${r.path}`, "ok"); }
+  else setStatus(r.error, "bad");
+});
+
+async function tryCall(send) {
+  const out = $("try-out");
+  let args;
+  try { args = JSON.parse($("try-args").value || "{}"); }
+  catch (e) { out.replaceChildren(el("p", { class: "v-DENY" }, `Arguments are not JSON: ${e.message}`)); return; }
+  const tool = $("try-tool").value;
+  if (send && !confirm(`Send ${tool} to the real upstream? It runs with your upstream credentials.`)) return;
+  const r = await api("/api/try", { manifest: buildManifest(), tool, arguments: args, taint: $("try-taint").value, send });
+  if (!r.ok) { out.replaceChildren(el("p", { class: "v-DENY" }, r.error)); return; }
+  const v = r.verdict;
+  const parts = [el("p", {}, "Verdict: ", el("b", { class: `v-${v.decision}` }, v.decision),
+    v.rule ? ` — ${v.rule}` : "", el("br", {}), el("span", { class: "note" }, v.reason))];
+  if (r.refused) parts.push(el("p", { class: "v-DENY" }, `The gateway would refuse to forward it: ${r.refused}`));
+  if (r.forwarded) {
+    parts.push(el("p", {}, r.sent ? "Sent upstream:" : "Would be sent upstream:"),
+      el("pre", {}, JSON.stringify(r.forwarded, null, 2)));
+  }
+  if (r.sent) parts.push(el("p", {}, "Upstream answered:"), el("pre", {}, JSON.stringify(r.result, null, 2)));
+  out.replaceChildren(...parts);
+}
+$("try-check").addEventListener("click", () => tryCall(false));
+$("try-send").addEventListener("click", () => tryCall(true));
+$("try-tool").addEventListener("change", fillSample);
+
+function fillSample() {
+  const r = state.rendered;
+  const item = r && r.preview && r.preview.ok && r.preview.surface.find((s) => s.name === $("try-tool").value);
+  const sample = {};
+  for (const [name, spec] of Object.entries((item && item.input_schema && item.input_schema.properties) || {})) {
+    sample[name] = spec.enum ? spec.enum[0]
+      : spec.pattern && spec.pattern.startsWith("^") ? spec.pattern.slice(1).replace(/\\(.)/g, "$1") + "1"
+      : spec.type === "integer" || spec.type === "number" ? 1
+      : spec.type === "boolean" ? true : "";
+  }
+  $("try-args").value = JSON.stringify(sample, null, 2);
+}
+
+for (const b of document.querySelectorAll(".tabs button")) {
+  b.addEventListener("click", () => {
+    for (const o of document.querySelectorAll(".tabs button")) o.classList.toggle("on", o === b);
+    for (const id of ["surface", "try", "yaml"]) $(`tab-${id}`).classList.toggle("hidden", id !== b.dataset.tab);
+    if (b.dataset.tab === "try" && $("try-args").value.trim() === "{}") fillSample();
+  });
+}
+for (const id of ["surface-name", "upstream-id", "world-id"]) $(id).addEventListener("input", changed);
+
+// --- Start ------------------------------------------------------------------
+
+(async function start() {
+  const s = await api("/api/session");
+  state.upstreamTools = Array.isArray(s.upstream.tools) ? s.upstream.tools.filter((t) => t && typeof t.name === "string") : [];
+  for (const t of state.upstreamTools) state.cfg[t.name] = freshCfg(t);
+  const info = s.upstream.server_info || {};
+  const upstreamLabel = String(info.name || "upstream").replace(/[^A-Za-z0-9_-]+/g, "-");
+  $("upstream-note").textContent =
+    `${info.name || "The upstream"} advertises ${state.upstreamTools.length} tool(s). ` +
+    "Tick the ones the model may use; everything unticked is ABSENT.";
+  $("yaml-path").textContent = `Saves to ${s.world_path}`;
+
+  const banners = [];
+  if (s.load_error) {
+    banners.push(el("div", { class: "banner bad" }, `${s.load_error} Saving will replace it.`));
+  }
+  if (s.world) {
+    const surface = s.world.mcp_surface || {};
+    const upstreamId = surface.upstream || upstreamLabel;
+    const { skeleton, warnings } = loadWorld(s.world, upstreamId);
+    state.skeleton = skeleton;
+    state.loaded = true;
+    $("surface-name").value = surface.name || "";
+    $("upstream-id").value = upstreamId;
+    $("world-id").value = s.world.world_id;
+    for (const w of warnings) banners.push(el("div", { class: "banner" }, w));
+  } else {
+    state.skeleton = defaultSkeleton(s.world_stem);
+    $("surface-name").value = "";
+    $("upstream-id").value = upstreamLabel;
+    $("world-id").value = s.world_stem;
+  }
+  $("banners").replaceChildren(...banners);
+  redrawTools();
+  renderNow();
+})().catch((e) => setStatus(`Cannot start: ${e.message}`, "bad"));
+</script>
+</body>
+</html>
