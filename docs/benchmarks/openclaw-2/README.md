@@ -1,6 +1,6 @@
 # OpenClaw 2.0 benchmark target profile
 
-> **Status: Planned — no benchmark result exists yet.**
+> **Status: Planned — historical v2026.8.1 baseline; no benchmark result exists yet.**
 >
 > GitHub [#77](https://github.com/sv-pro/ai2rules/issues/77) / Linear
 > [AI2-21](https://linear.app/ai2rules/issue/AI2-21/benchmark-evaluate-openclaw-20-default-vs-hardened-execution).
@@ -30,10 +30,14 @@ This keeps two claims separate:
 
 ## Pinned source and profiles
 
-The implementation task must pin the exact source commit and published package corresponding
-to OpenClaw [`v2026.8.1`](https://github.com/openclaw/openclaw/releases/tag/v2026.8.1),
-then record a digest of each effective configuration. A later OpenClaw release is a new
-target revision, not an in-place substitution.
+Use OpenClaw [`v2026.8.1`](https://github.com/openclaw/openclaw/releases/tag/v2026.8.1)
+at source commit `ea806575e6450e4d1efdfc72c19f04be982a1b9b` and published package
+`openclaw@2026.8.1`. Upstream records the root tarball integrity as
+`sha512-bSaFeaDFnQH/bU1vgKMac6eHkHHPHG0C/uwduXGI3eIS3lyiYSwmDU5ehhBUUhlPeV85tL5/KVwmoH48nX1tWw==`.
+The implementation must verify those artifact identities and record each effective
+configuration digest, runtime and any plugin/backend versions; this documentation review
+does not claim a downloaded or executed package verification. A later OpenClaw release
+is a new target revision, not an in-place substitution.
 
 | Target ID | Intended configuration | Claim boundary |
 |---|---|---|
@@ -43,6 +47,50 @@ target revision, not an in-place substitution.
 The two profiles must run the same OpenClaw build and identical scenarios. Configuration is
 the independent variable. Shared-session roles are collaboration controls; they must not be
 reported as hostile-tenant isolation.
+
+## Version decision — 2026-10-07
+
+**KEEP 2.0: `v2026.8.1` is an intentional historical launch baseline, not the
+current OpenClaw security posture.** Issue #77 asks how that released build differs
+between personal and hardened configurations. Preserve that question and the two target
+IDs; evaluate a newer release only as an explicitly named target revision.
+
+Upstream's Latest stable is [`v2026.9.8`](https://github.com/openclaw/openclaw/releases/tag/v2026.9.8)
+(published 2026-10-03; source `fc23bc864e4553c2d215e479eeec47b67a0bf943`).
+[`v2026.10.1-beta.1`](https://github.com/openclaw/openclaw/releases/tag/v2026.10.1-beta.1)
+is a prerelease and is excluded. Do not resolve this target through `latest`, update it
+automatically, or apply current rolling documentation to the historical configuration.
+
+### Governance-only comparison with stable
+
+This is a review of versioned upstream documentation and release changes from
+`v2026.8.1` through `v2026.9.8`, **not executed probe results**. Later fixes do not
+establish that the old version fails or the new version passes any complete scenario.
+
+| #77 surface | `v2026.8.1` baseline | Relevant changes included by `v2026.9.8` |
+|---|---|---|
+| Capability shaping | Read-only filesystem/tool policies do not make retained `exec` read-only ([baseline security guide][security-81]). | 9.4 preserves read-only permissions in standalone MCP Apps; 9.6 adds automatic per-model Code Mode activation. Inspect the actual exposed tool surface rather than assuming parity ([9.4][changes-94], [9.6][changes-96]). |
+| Execution placement / boundaries | Optional tool sandbox; elevated execution can reach Gateway or node ([baseline security guide][security-81]). | 9.5 verifies Docker-hosted bind sources; 9.6 distinguishes trusted Node Code Mode from isolated QuickJS; 9.7 enforces required sandboxing for new compatibility-API sessions. Node `vm` is explicitly not an OS security boundary ([9.5][changes-95], [9.6][changes-96], [9.7][changes-97], [stable policy][security-98]). |
+| Approval integrity | Exact-context approvals and best-effort direct file-operand binding; not arbitrary interpreter semantics ([baseline security guide][security-81]). | 9.6 invalidates standing automation grants after substantive edits, including edit-and-revert; old grants need fresh approval. 9.7 preserves authority across storage waits and hook rebuilds. Retain every mutation and replay probe ([9.6][changes-96], [9.7][changes-97]). |
+| Protected-secret egress | Host-bound substitution and agent-facing secrecy remain configuration-dependent ([8.1 release][release-81]). | 9.6 keeps Gateway background-command proxy credentials/destinations alive until the command stops; changing bindings alone does not immediately revoke that command. Sandbox, node and provider-native shells are outside that proxy. 9.7 repairs forwarding failures ([9.6][changes-96], [9.7][changes-97]). |
+| Shared-session authority | Named roles/scope ceilings are collaboration controls, not hostile-tenant isolation ([8.1 release][release-81]). | 9.2 broadens default session visibility/cross-agent access; 9.7 cancels Guest work after original access revocation. The one-Gateway trust-domain non-boundary remains ([9.2][changes-92], [9.7][changes-97], [stable policy][security-98]). |
+| Policy drift / failure direction | Explicit sandbox execution without a runtime fails closed; sandbox-off automatic placement can use the host ([baseline security guide][security-81]). | 9.5 refuses unverifiable Docker sources; 9.6 fails an unavailable selected Code Mode executor without falling back to Node. Keep deliberate component-break probes and distinguish `ERROR_CLOSED` from `ERROR_OPEN` ([9.5][changes-95], [stable policy][security-98]). |
+| Evidence integrity | Exact build/config, checked binding, placement and runner-owned effect counts are required by this contract. | 9.7 preserves authenticated chat identity in execution audits. Upstream audit improvements still do not replace an external effect counter ([9.7][changes-97]). |
+
+The changes are material enough that an in-place version swap would change the meaning of
+this launch-baseline target. Both historical profiles keep the **identical minimum probe
+matrix below**, oracle, evidence requirements and build; only effective configuration differs.
+Any future stable revision must run that same probe set for both of its profiles and report
+separately. Neither revision may inherit PASS/FAIL results from the other.
+
+[release-81]: https://github.com/openclaw/openclaw/releases/tag/v2026.8.1
+[security-81]: https://github.com/openclaw/openclaw/blob/ea806575e6450e4d1efdfc72c19f04be982a1b9b/docs/gateway/security/index.md
+[security-98]: https://github.com/openclaw/openclaw/blob/fc23bc864e4553c2d215e479eeec47b67a0bf943/SECURITY.md
+[changes-92]: https://github.com/openclaw/openclaw/blob/fc23bc864e4553c2d215e479eeec47b67a0bf943/CHANGELOG/2026.9.2.md
+[changes-94]: https://github.com/openclaw/openclaw/blob/fc23bc864e4553c2d215e479eeec47b67a0bf943/CHANGELOG/2026.9.4.md
+[changes-95]: https://github.com/openclaw/openclaw/blob/fc23bc864e4553c2d215e479eeec47b67a0bf943/CHANGELOG/2026.9.5.md
+[changes-96]: https://github.com/openclaw/openclaw/blob/fc23bc864e4553c2d215e479eeec47b67a0bf943/CHANGELOG/2026.9.6.md
+[changes-97]: https://github.com/openclaw/openclaw/blob/fc23bc864e4553c2d215e479eeec47b67a0bf943/CHANGELOG/2026.9.7.md
 
 ## Minimum probe matrix
 
