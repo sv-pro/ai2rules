@@ -12,6 +12,28 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+Planned as **0.7.0**: D78 breaks persisted approval and staged-commit logs (see
+below), which is more than a patch release should carry.
+
+### Upgrading
+
+- Stores written by 0.6.x or earlier are refused as written by an older version.
+  Delete the approval log, the commit log, their keys and any `.head` files; pending
+  approvals are simply asked again.
+
+### Security
+
+- **Approval and staged-commit logs are chained and head-anchored** (D78). Deleting a
+  signed line — the approval log's `Consumed`, or the commit log's `AttemptStarted` /
+  `AttemptFinished` — used to hand a single-use grant back or release an
+  idempotency key while every remaining line still verified. Lines now carry `seq`
+  and `prev`, a MACed `<log>.head` anchors the end (at most one line of crash
+  slack, re-anchored on open), and each open store refuses a log shorter than it has
+  already seen. **Breaking** for stores written by earlier versions: they are refused
+  as old (D73/D78 wording); delete the log and its key. Known limit, pinned by a test:
+  a head saved between approval and consumption can still roll back a store that a
+  fresh process opens.
+
 ## [0.6.0] — 2026-09-19
 
 ### Added
