@@ -78,6 +78,13 @@ below), which is more than a patch release should carry.
   how often the hook would have stayed silent, asked or denied, by rule with
   examples, which sessions became tainted and by what, and which tools the world
   does not know. `--json` gives every call. Nothing is executed.
+- **`harness demo --story law-firm`**: the first proof as a story for
+  non-engineers. An AI legal assistant reads a client email with a hidden
+  instruction; sending, uploading, deleting overnight and touching the trust
+  account are refused or absent, while its work goes on. The world is embedded,
+  so it runs from any folder with no `harness init`. Each verdict is the real
+  kernel's, the session's taint is carried exactly as an adapter carries it, and the
+  10 decisions are traced and replayed. Runbook: `docs/demos/law-firm/`.
 
 ## [0.6.0] — 2026-09-19
 

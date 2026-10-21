@@ -77,8 +77,8 @@ harness-types (foundation — language-neutral contracts, pure data)
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 61 · compiler 28 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 64 · cli-harness 139 ·
-harness-wasm 0 · govbench 9 · **total 420** (plus the harness-wasm Node smoke
+provider-adapters 5 · agent-core 18 · harness-preview 64 · cli-harness 140 ·
+harness-wasm 0 · govbench 9 · **total 421** (plus the harness-wasm Node smoke
 tests, run via wasm-pack)
 
 ---
@@ -248,6 +248,7 @@ marker in the same commit as the kernel change.
 | `.agents/agy-world.yaml` | Live `WorldManifest` governing Antigravity CLI (`agy`) (dogfood; D48) |
 | `.agents/hooks.json` + `.agents/hooks/world-gate.sh` | Antigravity PreToolUse wiring → `harness agy-hook` (D48) |
 | `docs/demos/antigravity/` | Antigravity host runbook + the verified hook contract |
+| `docs/demos/law-firm/` | `harness demo --story law-firm`: the embedded law-firm world, the runbook and talking points for a non-engineering audience |
 | `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
 | `docs/benchmarks/mcp-governance/` | Public MCP Governance Benchmark seed (issue #64 / AI2-5, E18): three scenarios, an intentionally weak reference gateway, ai2rules over both transports, and the generated per-scenario report. Runner: `crates/govbench` |
 | `scripts/run-governance-bench.sh` | The one command for the benchmark. Builds, runs both targets over both transports, regenerates `docs/benchmarks/mcp-governance/results/`, and fails if either half of the contrast stops holding (CI job `governance-bench`) |
