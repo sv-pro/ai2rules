@@ -2921,3 +2921,53 @@ outcome/provider-result seam and become direct input to the next model turn. The
 AI2-12 showcase replans with `observer: None`, and a regression model asserts call
 correlation plus the full verdict range. No kernel, Gate ABI, trace, policy, or
 executor semantics changed.
+
+## D78 — Signed logs are chained and head-anchored; a missing line is tampering, not history
+
+**Context.** Since finding #15 / D67 every line of the approval log (and, since D74,
+the staged-commit log) carries an HMAC, so a line cannot be forged or edited without
+the key. A per-line MAC says nothing about lines that are *not there*. Deleting the
+signed `Consumed` line from `approvals.jsonl` folded the authorization back to
+`Approved`, and the next `consume` succeeded — a single-use grant used twice, with no
+key and every remaining line verifying. The same holds for `AttemptStarted` /
+`AttemptFinished` in the commit log, which own an idempotency key. Found while
+checking an external write-up of the kernel; pinned by
+`deleting_the_consumed_line_does_not_revive_the_grant`, which failed on `41a4eda`.
+
+**Decision.** Both logs chain and anchor (`trace-store/src/chain.rs`):
+
+- line `n` carries `seq = n` and `prev` = the MAC of line `n-1` (`"genesis"` for 0);
+  its MAC covers `(seq, prev, event)` under a domain-separated prefix. Deleting,
+  reordering, or splicing a line breaks the chain (`out of chain`);
+- a chain cannot see its own tail being cut, so every append also rewrites
+  `<log>.head` — the last `(seq, mac)`, itself MACed — via temp file + rename (and a
+  best-effort directory sync). On load the log must *reach* the head and may run **at
+  most one line** past it — what a crash between append and head write leaves;
+  `open` re-anchors such a log under the lock, so the slack never accumulates;
+- every open store keeps a **high-water mark** — the furthest `(seq, mac)` it has
+  loaded or written — and refuses a later load that falls short of it;
+- a store with entries but no head is refused, not re-anchored: deleting the head is
+  the next step of cutting the tail. A fresh store writes a genesis head on open. A
+  log whose first line has no chain link is left to the line check, so a genuine
+  pre-D78 store is reported as old, not as tampered (the D73 distinction).
+
+**Alternatives.** A per-line counter without `prev` catches deletion but not splicing
+lines from another log under the same key. Chaining without a head misses tail
+truncation, which is exactly the `Consumed`-is-last case. Storing the head inside the
+key file couples two files with different lifecycles and permissions checks. Making
+`consume` idempotent-by-state elsewhere just moves the file.
+
+**Consequence.** Breaking for stores written before this change: an unchained line is
+refused with a message naming D78 ("delete the log, its key and its head file"), the
+same direction as D73's refusal of 0.4.1 records. The shipped CLI keeps its approval
+store in a per-run tempdir, so embedders holding a store across the upgrade are the
+ones affected. `open` now takes the store lock when it has to anchor (a fresh store
+or a crash-ahead log), so a stale `.lock` can make such an open fail after 5 s where
+it used to succeed. **Not covered**, and pinned by
+`known_limit_a_matching_old_snapshot_fools_a_new_process`: the log is append-only, so
+every older log is a prefix of the current one, and a copy of the *head alone*, saved
+between `Approved` and `Consumed`, lets someone cut the log back to it — against a
+process that has not already seen the longer chain. Rollback to a consistent earlier
+state needs a monotonic counter outside the attacker's reach; the store's placement
+outside the governed project (D57/D67) remains the primary defence. What D78 changes
+is the bar: from "delete a line" to "have saved the head at the right moment".
