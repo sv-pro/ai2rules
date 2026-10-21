@@ -12,8 +12,10 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
-Planned as **0.7.0**: D78 breaks persisted approval and staged-commit logs (see
-below), which is more than a patch release should carry.
+## [0.7.0] — 2026-10-21
+
+A minor release rather than a patch: D78 breaks persisted approval and staged-commit
+logs (see Upgrading).
 
 ### Upgrading
 
@@ -39,6 +41,17 @@ below), which is more than a patch release should carry.
   the caller added was sent. It now goes to the tool named after its base action,
   with the kernel's lowered input, and is refused when it cannot be lowered.
 
+### Fixed
+
+- **A write into a folder that does not exist yet is no longer denied as
+  `missing_path`.** With roots enabled, the hooks resolved only a new file's
+  immediate parent, so `docs/new-dir/README.md` before `new-dir/` existed was
+  refused. A new path is now classified by its nearest existing ancestor,
+  canonicalized as before (so a symlink there still resolves to its real
+  destination), plus the components below it. A `..` among those components is
+  refused, since the filesystem cannot resolve it there. Found by replaying real
+  sessions through the hook.
+
 ### Added
 
 - **Scoped MCP surfaces** (D79, E13.4). A scoped capability can rename an argument
@@ -50,6 +63,30 @@ below), which is more than a patch release should carry.
 - **`harness mcp-author --world W -- <upstream>`**: a local page that connects to an
   MCP server, lets you pick, rename and limit its tools, try calls through the real
   gate, and save the manifest.
+- **`GateResponse.effective`** (D80). On `ALLOW` / `ASK` the gate returns the call to
+  execute: base action, backing, arguments after a scoped capability's stripping,
+  renaming and literal injection, unresolved context refs, and the names it
+  stripped. A backward-compatible v1 field. A wire host
+  that executes this instead of the proposal gets the world's scoping without
+  linking the kernel. `world_kernel::effective_call` is the single lowering that
+  `build_execution_spec` now also uses.
+- **`mcp-gateway` audits stripped arguments** (D80): an allowed call whose
+  proposal tried to set what the world fixes gets its own `stripped` record.
+- **`harness replay-transcripts [PATH…]`**: evidence before enforcement. It
+  replays every tool call in past Claude Code transcripts (default
+  `~/.claude/projects`) through the kernel exactly as `cc-hook` would have decided
+  it: the same request and answer mapping, now shared with the hook, with taint and
+  budget carried per session across a session's subagent transcripts. It reports
+  how often the hook would have stayed silent, asked or denied, by rule with
+  examples, which sessions became tainted and by what, and which tools the world
+  does not know. `--json` gives every call. Nothing is executed.
+- **`harness demo --story law-firm`**: the first proof as a story for
+  non-engineers. An AI legal assistant reads a client email with a hidden
+  instruction; sending, uploading, deleting overnight and touching the trust
+  account are refused or absent, while its work goes on. The world is embedded,
+  so it runs from any folder with no `harness init`. Each verdict is the real
+  kernel's, the session's taint is carried exactly as an adapter carries it, and the
+  10 decisions are traced and replayed. Runbook: `docs/demos/law-firm/`.
 
 ## [0.6.0] — 2026-09-19
 
@@ -816,7 +853,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sv-pro/ai2rules/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sv-pro/ai2rules/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...v0.4.1

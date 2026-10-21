@@ -123,7 +123,7 @@ pub fn run(world_override: Option<&Path>) -> i32 {
         },
     ];
 
-    let trace_path = match prepare_trace_path() {
+    let trace_path = match prepare_trace_path("ai2rules-demo") {
         Ok(path) => path,
         Err(e) => {
             eprintln!("demo: cannot create trace: {e}");
@@ -218,15 +218,16 @@ fn outside_target(cwd: &Path) -> Option<String> {
     hostkit::canonicalize_action_path(&candidate).map(hostkit::path_to_string)
 }
 
-fn prepare_trace_path() -> std::io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join(format!("ai2rules-demo-{}", std::process::id()));
+/// A fresh, empty `trace.jsonl` in a per-process temp directory named `prefix-<pid>`.
+pub(crate) fn prepare_trace_path(prefix: &str) -> std::io::Result<PathBuf> {
+    let dir = std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
     fs::create_dir_all(&dir)?;
     let path = dir.join("trace.jsonl");
     fs::write(&path, b"")?;
     Ok(path)
 }
 
-fn append_trace(
+pub(crate) fn append_trace(
     path: &Path,
     seq: usize,
     scenario: &str,
@@ -266,7 +267,7 @@ fn print_result(index: usize, name: &str, response: &GateResponse, trace: &Path)
     println!("   trace: {}", trace.display());
 }
 
-fn equivalent(a: &GateResponse, b: &GateResponse) -> bool {
+pub(crate) fn equivalent(a: &GateResponse, b: &GateResponse) -> bool {
     a.decision == b.decision
         && a.action == b.action
         && a.rule == b.rule

@@ -23,7 +23,9 @@
 //!   action, lowered the same way.
 //! - an upstream result that *demands* input instead of answering (MCP `2026-07-28`
 //!   MRTR `input_required`) is **refused, not relayed** — the D49 interim deny.
-//! - every decision is appended to an optional JSONL audit log.
+//! - every decision is appended to an optional JSONL audit log, and an allowed
+//!   call whose arguments the scoping stripped gets its own `stripped` record
+//!   (D80): the proposal tried to set what the world fixes.
 //!
 //! It is pure plumbing around the kernel — no policy logic lives here. MCP over
 //! stdio is hand-rolled (newline-delimited JSON-RPC), so no async runtime / SDK.
@@ -552,6 +554,20 @@ pub fn run(
                 // MCP's only structural channel is the isError text.
                 match host_outcome(&verdict) {
                     HostOutcome::Proceed => {
+                        if let Some(stripped) = verdict
+                            .effective
+                            .as_ref()
+                            .map(|e| &e.stripped)
+                            .filter(|s| !s.is_empty())
+                        {
+                            // The proposal tried to set what the world fixes (D80).
+                            // The lowering already defeats it; the record is the signal.
+                            audit(
+                                audit_path,
+                                json!({"tool": name, "action": action, "stage": "stripped",
+                                       "stripped": stripped, "manifest_hash": manifest_hash}),
+                            );
+                        }
                         let target = forward_target(
                             &world,
                             &name,
