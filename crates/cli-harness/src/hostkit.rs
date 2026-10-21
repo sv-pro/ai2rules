@@ -193,6 +193,13 @@ pub fn canonicalize_action_path(path: &Path) -> Option<PathBuf> {
 /// Canonicalize manifest roots at the same adapter boundary as action paths.
 /// Missing roots stay lexical, preserving portable manifests for paths that may
 /// not exist yet while still resolving real symlinked roots such as `.` and `~/.ssh`.
+///
+/// Except a missing **drive-letter** path (Windows): kept lexical it is
+/// `C:\project/.claude/settings.json` — the expanded base in native form plus the
+/// rule's tail — while the action path it should match arrives canonical
+/// (`//?/C:/project/.claude/settings.json`), so the rule never matched and a
+/// read-only rule on a not-yet-created file silently fell to the default. It is
+/// resolved the way the action path is, from its nearest existing ancestor.
 pub fn canonicalize_root_paths(roots: &RootsDef) -> RootsDef {
     let mut out = roots.clone();
     for rule in &mut out.rules {
@@ -201,6 +208,10 @@ pub fn canonicalize_root_paths(roots: &RootsDef) -> RootsDef {
             .unwrap_or_else(|_| {
                 if rule.path.starts_with('/') {
                     normalize_dots(&rule.path)
+                } else if Path::new(&rule.path).is_absolute() {
+                    canonicalize_action_path(Path::new(&rule.path))
+                        .map(path_to_string)
+                        .unwrap_or_else(|| normalize_kernel_path_string(&rule.path))
                 } else {
                     rule.path.clone()
                 }

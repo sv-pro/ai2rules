@@ -37,6 +37,8 @@ npm install -g ai2rules-harness   # or: cargo install --git https://github.com/s
 harness init                      # additive: adds deny/ask on top of the host's permissions
 harness init --grant              # replace: the manifest becomes the allowlist
 harness init --dry-run            # print the plan, write nothing
+harness init --user               # every session this account opens, in any folder
+harness init --managed            # every session on the machine; admin-installed, the user cannot turn it off
 harness demo                      # decision-only proof: 5 cases through the real kernel, no execution
 harness demo --story law-firm     # the same kind of proof as a story, for non-engineers; no init needed
 ```
@@ -124,6 +126,17 @@ The manifest is compiled by the real compiler *before* anything is written, so w
 lands in your project is known to build. `init` supersedes the per-project half of
 [`scripts/install-governance.sh`](scripts/install-governance.sh), which is still
 there for the per-machine half (putting a binary on `PATH` from a checkout).
+
+**Every folder, not one.** `harness init --user` puts the same hook into
+`~/.claude/settings.json`, so every session you open is governed, wherever it
+starts; its world and taint state live under `~/.claude/ai2rules/user/`. It is a
+personal seatbelt: a project can still switch user hooks off with
+`disableAllHooks`. For an organisation, `harness init --managed` (elevated)
+installs into Claude Code's **managed settings**, which nothing below an
+administrator can disable, with no user-side kill-switch and the kernel copied
+into the admin-owned directory. Both take `--remove`. The difference, an example
+policy, and what neither scope stops yet are in
+[`docs/machine-wide-governance.md`](docs/machine-wide-governance.md).
 
 ---
 
@@ -360,7 +373,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **423 tests** green.
+Builds clean offline with `clippy -D warnings`; **440 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

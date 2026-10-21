@@ -20,6 +20,7 @@ mod doctor;
 mod doctor_collector;
 mod hostkit;
 mod init;
+mod init_machine;
 mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
@@ -75,6 +76,27 @@ enum Command {
         /// Print the plan and write nothing.
         #[arg(long)]
         dry_run: bool,
+        /// Govern every Claude Code session this account opens, in any folder:
+        /// the hook goes into `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR`),
+        /// the world and an absolute state dir into `~/.claude/ai2rules/user/`.
+        /// A project can still switch user hooks off (`disableAllHooks`); for a
+        /// hook only an administrator can remove, use `--managed`.
+        #[arg(long, conflicts_with = "managed")]
+        user: bool,
+        /// Govern every session on this machine, for every account, through
+        /// Claude Code's managed settings (the system policy directory). Needs an
+        /// elevated shell. The shim has no user-side kill-switch, and the kernel
+        /// is copied into the admin-owned directory.
+        #[arg(long)]
+        managed: bool,
+        /// With `--managed`: write into this directory instead of the OS policy
+        /// directory (for staging a bundle, or testing).
+        #[arg(long, value_name = "DIR", requires = "managed")]
+        policy_dir: Option<PathBuf>,
+        /// With `--user` or `--managed`: unregister the hook and delete the shim,
+        /// keeping every other setting. The manifest and state are kept.
+        #[arg(long)]
+        remove: bool,
     },
     /// Run the safe first-proof scenarios over the real compiled project world.
     Demo {
@@ -381,9 +403,32 @@ fn main() {
         grant,
         force,
         dry_run,
+        user,
+        managed,
+        policy_dir,
+        remove,
     }) = &cli.command
     {
-        std::process::exit(init::run(target, *grant, *force, *dry_run));
+        let scope = match (*user, *managed) {
+            (true, _) => Some(init_machine::Scope::User),
+            (_, true) => Some(init_machine::Scope::Managed),
+            _ => None,
+        };
+        std::process::exit(match scope {
+            Some(scope) => init_machine::run(&init_machine::Options {
+                scope,
+                policy_dir: policy_dir.as_deref(),
+                grant: *grant,
+                force: *force,
+                dry_run: *dry_run,
+                remove: *remove,
+            }),
+            None if *remove => {
+                eprintln!("harness init: --remove needs --user or --managed");
+                2
+            }
+            None => init::run(target, *grant, *force, *dry_run),
+        });
     }
 
     if let Some(Command::Demo { story, html }) = &cli.command {
