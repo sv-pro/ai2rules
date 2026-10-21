@@ -117,9 +117,17 @@ fn law_firm_story_needs_no_init_and_earns_its_refusals() {
         .collect();
     assert_eq!(records.len(), 10);
     let taint_in = |i: usize| records[i]["request"]["context"]["taint"].as_str().unwrap();
-    assert_eq!(taint_in(2), "clean", "the email is read from a clean session");
+    assert_eq!(
+        taint_in(2),
+        "clean",
+        "the email is read from a clean session"
+    );
     assert_eq!(records[2]["response"]["context"]["taint"], "tainted");
-    assert_eq!(taint_in(3), "tainted", "the refusal inherits the kernel's taint");
+    assert_eq!(
+        taint_in(3),
+        "tainted",
+        "the refusal inherits the kernel's taint"
+    );
     assert_eq!(records[3]["response"]["decision"], "DENY");
     assert_eq!(taint_in(9), "clean", "the control session starts clean");
     assert_eq!(records[9]["response"]["decision"], "ALLOW");
