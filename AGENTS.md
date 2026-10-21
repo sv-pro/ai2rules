@@ -227,6 +227,12 @@ hardening change silently hollowed out a demo — a demo that stops teaching doe
 not fail, it just gets shorter. If a marker legitimately changes, update the
 marker in the same commit as the kernel change.
 
+The same script checks that the published story page,
+`blog/public/demo/law-firm.html` (ai2rules.dev/demo/law-firm.html), is what the
+current binary writes. It embeds the version, so **a release bump or a story change
+needs it regenerated**: `cargo run -q -p cli-harness -- demo --story law-firm --html
+blog/public/demo/law-firm.html`.
+
 ---
 
 ## Key reference files

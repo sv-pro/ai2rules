@@ -33,7 +33,8 @@ The output is plain text, coloured on a terminal that supports it (set `NO_COLOR
 for none), so it reads the same in PowerShell, Windows Terminal, WSL or an SSH
 session. Make the terminal wide (about 90 columns) and the font big.
 
-**To present from a browser** instead, write the run as a page and open it:
+**To present from a browser**, open the published copy,
+<https://ai2rules.dev/demo/law-firm.html>, or write your own and open it:
 
 ```bash
 harness demo --story law-firm --html law-firm.html
