@@ -39,6 +39,17 @@ below), which is more than a patch release should carry.
   the caller added was sent. It now goes to the tool named after its base action,
   with the kernel's lowered input, and is refused when it cannot be lowered.
 
+### Fixed
+
+- **A write into a folder that does not exist yet is no longer denied as
+  `missing_path`.** With roots enabled, the hooks resolved only a new file's
+  immediate parent, so `docs/new-dir/README.md` before `new-dir/` existed was
+  refused. A new path is now classified by its nearest existing ancestor,
+  canonicalized as before (so a symlink there still resolves to its real
+  destination), plus the components below it. A `..` among those components is
+  refused, since the filesystem cannot resolve it there. Found by replaying real
+  sessions through the hook.
+
 ### Added
 
 - **Scoped MCP surfaces** (D79, E13.4). A scoped capability can rename an argument

@@ -310,3 +310,53 @@ fn grant_mode_allows_new_file_under_real_project_parent() {
     );
     assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
 }
+
+/// A write into folders the agent has not created yet is an in-project write,
+/// not `missing_path`. Found by replaying real sessions: the hook used to resolve
+/// only the immediate parent, so every such write was denied.
+#[cfg(unix)]
+#[test]
+fn grant_mode_allows_new_file_in_new_project_folders() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let project = dir.path().join("project");
+    let state = dir.path().join("state");
+    let world = dir.path().join("world.yaml");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    write_roots_world(&world);
+
+    let out = run_hook_with_world_env(
+        &world,
+        &state,
+        &json!({"tool_name":"Write","tool_input":{"file_path":"docs/demos/new/README.md"},"session_id":"new-dirs"}),
+        &["--grant"],
+        &[("CLAUDE_PROJECT_DIR", &project), ("HOME", &home)],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
+}
+
+/// New folders do not open a way around a symlink: the existing part still
+/// resolves to its real destination, here a denied root.
+#[cfg(unix)]
+#[test]
+fn new_folders_under_a_symlink_to_a_denied_root_are_still_denied() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let project = dir.path().join("project");
+    let state = dir.path().join("state");
+    let world = dir.path().join("world.yaml");
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    symlink(home.join(".ssh"), project.join("link")).unwrap();
+    write_roots_world(&world);
+
+    let out = run_hook_with_world_env(
+        &world,
+        &state,
+        &json!({"tool_name":"Write","tool_input":{"file_path":"link/new/dir/key"},"session_id":"symlink-new"}),
+        &["--grant"],
+        &[("CLAUDE_PROJECT_DIR", &project), ("HOME", &home)],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
+}
