@@ -50,6 +50,14 @@ below), which is more than a patch release should carry.
 - **`harness mcp-author --world W -- <upstream>`**: a local page that connects to an
   MCP server, lets you pick, rename and limit its tools, try calls through the real
   gate, and save the manifest.
+- **`harness replay-transcripts [PATH…]`**: evidence before enforcement. It
+  replays every tool call in past Claude Code transcripts (default
+  `~/.claude/projects`) through the kernel exactly as `cc-hook` would have decided
+  it: the same request and answer mapping, now shared with the hook, with taint and
+  budget carried per session across a session's subagent transcripts. It reports
+  how often the hook would have stayed silent, asked or denied, by rule with
+  examples, which sessions became tainted and by what, and which tools the world
+  does not know. `--json` gives every call. Nothing is executed.
 
 ## [0.6.0] — 2026-09-19
 

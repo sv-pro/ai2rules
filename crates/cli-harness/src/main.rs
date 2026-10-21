@@ -24,6 +24,7 @@ mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
 mod project;
+mod replay_transcripts;
 mod serve;
 
 /// ai2rules
@@ -80,6 +81,33 @@ enum Command {
     /// projected actions in the current project (AI2-25 / #84 skeleton).
     Doctor {
         /// Emit JSON report on stdout instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replay the tool calls in past Claude Code transcripts through the kernel,
+    /// exactly as `harness cc-hook` would have decided them, and report how often
+    /// it would have asked or denied, and why. Nothing is executed. Uses the
+    /// starter manifest unless `--world` is given.
+    ReplayTranscripts {
+        /// Transcript files or folders (searched for `.jsonl`). Default:
+        /// `~/.claude/projects`, every session on this machine.
+        paths: Vec<PathBuf>,
+        /// Execution mode, as for `cc-hook`.
+        #[arg(long, default_value = "interactive", value_parser = ["interactive", "background"])]
+        mode: String,
+        /// The manifest channel calls are attributed to, as for `cc-hook`.
+        #[arg(long, default_value = "user_prompt")]
+        source_channel: String,
+        /// Count ABSENT as a denial, as `cc-hook --enforce-absent` would.
+        #[arg(long)]
+        enforce_absent: bool,
+        /// Replace mode, as `cc-hook --grant`: ALLOW becomes an explicit grant.
+        #[arg(long)]
+        grant: bool,
+        /// Examples shown per rule in the report.
+        #[arg(long, default_value_t = 5)]
+        examples: usize,
+        /// Every call with its verdict and reason, as JSON.
         #[arg(long)]
         json: bool,
     },
@@ -350,6 +378,28 @@ fn main() {
 
     if matches!(&cli.command, Some(Command::Demo)) {
         std::process::exit(demo::run(cli.world.as_deref()));
+    }
+
+    if let Some(Command::ReplayTranscripts {
+        paths,
+        mode,
+        source_channel,
+        enforce_absent,
+        grant,
+        examples,
+        json,
+    }) = &cli.command
+    {
+        std::process::exit(replay_transcripts::run(&replay_transcripts::Options {
+            paths,
+            world: cli.world.as_deref(),
+            mode,
+            source_channel,
+            enforce_absent: *enforce_absent,
+            grant: *grant,
+            examples: *examples,
+            json: *json,
+        }));
     }
 
     if let Some(Command::Doctor { json }) = &cli.command {

@@ -73,6 +73,20 @@ harness demo
 # Footer: "Next: harness doctor" (planned, not yet shipped; see issue AI2-25).
 ```
 
+**Before you turn it on, see what it would have done in your own sessions.** This
+replays every tool call in your past Claude Code transcripts through the kernel,
+exactly as the hook would have decided them, and reports how often it would have
+asked or denied, and why. Nothing is executed:
+
+```bash
+harness replay-transcripts                       # every session under ~/.claude/projects
+harness replay-transcripts path/to/session.jsonl --world .claude/cc-world.yaml --json
+```
+
+Run it on the OS the sessions ran on: path rules resolve paths against today's
+filesystem, so Windows paths replayed on Linux, and folders deleted since, show
+up as `missing_path`.
+
 Or ask the kernel directly about one proposed call:
 
 ```bash
@@ -336,7 +350,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **398 tests** green.
+Builds clean offline with `clippy -D warnings`; **403 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

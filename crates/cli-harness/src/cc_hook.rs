@@ -30,11 +30,115 @@ use crate::hostkit::{
 };
 use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
-    gate, host_outcome, BlockKind, GateContext, GateRequest, HostOutcome, ABI_VERSION,
+    gate, host_outcome, BlockKind, GateContext, GateRequest, GateResponse, GateUsage, HostOutcome,
+    ABI_VERSION,
 };
+use harness_types::CompiledWorld;
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::Path;
+
+/// Compile a world as the hook does: roots resolved against the project `base`
+/// and `home` at the I/O boundary, then the pure compile. `None` on any failure.
+/// Shared with `harness replay-transcripts`, so a replay compiles the same world.
+pub(crate) fn compile_hook_world(
+    content: &str,
+    base: Option<&str>,
+    home: Option<&str>,
+) -> Option<CompiledWorld> {
+    let mut m = load_yaml(content).ok()?;
+    if let Some(r) = &m.roots {
+        let roots = resolve_root_paths(r, home, base);
+        m.roots = Some(canonicalize_root_paths(&roots));
+    }
+    compile(&m).ok()
+}
+
+/// One PreToolUse event, as the hook sees it.
+pub(crate) struct HookEvent<'a> {
+    pub tool: &'a str,
+    pub tool_input: Value,
+    pub session_id: String,
+}
+
+/// The session state the hook carries between calls.
+pub(crate) struct HookSession {
+    pub tainted: bool,
+    pub usage: Option<GateUsage>,
+}
+
+/// The `GateRequest` the hook sends for `event`. Shared with
+/// `harness replay-transcripts`, so a replay asks the kernel exactly what the live
+/// hook would have.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn hook_request(
+    world: &CompiledWorld,
+    event: HookEvent<'_>,
+    session: &HookSession,
+    base: Option<&str>,
+    home: Option<&str>,
+    mode: &str,
+    source_channel: &str,
+) -> GateRequest {
+    let ti = if event.tool_input.is_object() {
+        event.tool_input
+    } else {
+        json!({})
+    };
+    // The action's absolute target path for path-scope (roots), if this tool carries
+    // one. Bash's `command` is not a path key, so Bash is path-scope-exempt.
+    let action_path = base.and_then(|b| resolve_action_path(&ti, b, home));
+    GateRequest {
+        v: ABI_VERSION,
+        tool: normalize_tool(world, event.tool),
+        arguments: ti,
+        path: action_path,
+        context: GateContext {
+            session_id: event.session_id,
+            mode: Some(mode.to_string()),
+            taint: Some(if session.tainted { "tainted" } else { "clean" }.to_string()),
+            // Declared by the operator, not inferred from the event (finding #22):
+            // a PreToolUse payload says what is about to run, never who asked for
+            // it. See the `--source-channel` flag's documentation.
+            source_channel: Some(source_channel.to_string()),
+            approval_token: None,
+            usage: session.usage,
+        },
+    }
+}
+
+/// What the hook answers for a verdict: `Some((decision, reason))` to emit, or
+/// `None` to stay silent and defer to the host's own permission flow.
+pub(crate) fn hook_answer(
+    res: &GateResponse,
+    enforce_absent: bool,
+    grant: bool,
+) -> Option<(&'static str, String)> {
+    match host_outcome(res) {
+        // ALLOW. Additive default: stay silent and defer to the host's normal
+        // permission flow. With `--grant` (replace mode) emit an explicit `allow`,
+        // which *grants* — the host skips its Allow/Deny prompt — so the manifest
+        // is the authoritative allowlist, not an overlay. An explicit `allow` still
+        // cannot override a native deny/ask rule, so replace mode wants an emptied
+        // settings.json baseline (docs/demos/replace-permissions).
+        HostOutcome::Proceed => grant.then(|| ("allow", format!("manifest ALLOW: {}", res.action))),
+        HostOutcome::NeedsApproval { reason } => Some(("ask", reason)),
+        HostOutcome::Block {
+            kind: BlockKind::Deny,
+            reason,
+        } => Some(("deny", reason)),
+        // Additive dogfooding default: fall through to the host's flow.
+        HostOutcome::Block {
+            kind: BlockKind::Absent,
+            reason,
+        } => enforce_absent.then(|| ("deny", format!("ABSENT: {reason}"))),
+        // No host channel for "smaller step" — fall through.
+        HostOutcome::Block {
+            kind: BlockKind::Replan,
+            reason: _,
+        } => None,
+    }
+}
 
 /// Emit a PreToolUse decision (`deny`/`ask`, or `allow` in `--grant` mode) and exit 0.
 fn emit(decision: &str, reason: &str) -> ! {
@@ -96,41 +200,28 @@ pub fn run(
     // absolute here (env-dependent) before the pure compile.
     let world = match std::fs::read_to_string(world_path)
         .ok()
-        .and_then(|c| load_yaml(&c).ok())
-        .and_then(|mut m| {
-            if let Some(r) = &m.roots {
-                let roots = resolve_root_paths(r, home.as_deref(), base.as_deref());
-                m.roots = Some(canonicalize_root_paths(&roots));
-            }
-            compile(&m).ok()
-        }) {
+        .and_then(|c| compile_hook_world(&c, base.as_deref(), home.as_deref()))
+    {
         Some(w) => w,
         None => return 0, // fail-open
     };
 
-    // The action's absolute target path for path-scope (roots), if this tool carries
-    // one. Bash's `command` is not a path key, so Bash is path-scope-exempt.
-    let action_path = base
-        .as_deref()
-        .and_then(|b| resolve_action_path(&ti, b, home.as_deref()));
-
-    let req = GateRequest {
-        v: ABI_VERSION,
-        tool: normalize_tool(&world, tool),
-        arguments: ti,
-        path: action_path,
-        context: GateContext {
+    let req = hook_request(
+        &world,
+        HookEvent {
+            tool,
+            tool_input: ti,
             session_id: sid,
-            mode: Some(mode.to_string()),
-            taint: Some(if tainted { "tainted" } else { "clean" }.to_string()),
-            // Declared by the operator, not inferred from the event (finding #22):
-            // a PreToolUse payload says what is about to run, never who asked for
-            // it. See the `--source-channel` flag's documentation.
-            source_channel: Some(source_channel.to_string()),
-            approval_token: None,
+        },
+        &HookSession {
+            tainted,
             usage: carried_usage,
         },
-    };
+        base.as_deref(),
+        home.as_deref(),
+        mode,
+        source_channel,
+    );
     let res = gate(&world, &req);
 
     // Persist the kernel-computed monotonic taint for the next call. The note
@@ -173,36 +264,8 @@ pub fn run(
         }
     }
 
-    match host_outcome(&res) {
-        // ALLOW. Additive default: stay silent (exit 0) and defer to the host's
-        // normal permission flow. With `--grant` (replace mode) emit an explicit
-        // `allow`, which *grants* — the host skips its Allow/Deny prompt — so the
-        // manifest is the authoritative allowlist, not an overlay. An explicit
-        // `allow` still cannot override a native deny/ask rule, so replace mode
-        // wants an emptied settings.json baseline (docs/demos/replace-permissions).
-        HostOutcome::Proceed => {
-            if grant {
-                emit("allow", &format!("manifest ALLOW: {}", res.action));
-            }
-            0 // additive default: defer to the host's permission flow
-        }
-        HostOutcome::NeedsApproval { reason } => emit("ask", &reason),
-        HostOutcome::Block {
-            kind: BlockKind::Deny,
-            reason,
-        } => emit("deny", &reason),
-        HostOutcome::Block {
-            kind: BlockKind::Absent,
-            reason,
-        } => {
-            if enforce_absent {
-                emit("deny", &format!("ABSENT: {reason}"));
-            }
-            0 // additive dogfooding default: fall through to the host's flow
-        }
-        HostOutcome::Block {
-            kind: BlockKind::Replan,
-            reason: _,
-        } => 0, // no host channel for "smaller step" — fall through
+    match hook_answer(&res, enforce_absent, grant) {
+        Some((decision, reason)) => emit(decision, &reason),
+        None => 0, // defer to the host's permission flow
     }
 }
