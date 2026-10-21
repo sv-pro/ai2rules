@@ -25,8 +25,8 @@ harness demo --story law-firm
   cargo run -q -p cli-harness -- demo --story law-firm
   ```
 
-- **From npm**: `npx ai2rules-harness demo --story law-firm` works once a release
-  includes this flag. Releases up to 0.6.0 do not have it.
+- **From npm** (0.7.0 and later): `npx ai2rules-harness demo --story law-firm`, on
+  any machine with Node. Releases up to 0.6.0 do not have the flag.
 
 The output is plain ASCII, so it reads the same in PowerShell, Windows Terminal,
 WSL or an SSH session. Make the terminal wide (about 90 columns) and the font big.

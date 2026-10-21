@@ -12,8 +12,10 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
-Planned as **0.7.0**: D78 breaks persisted approval and staged-commit logs (see
-below), which is more than a patch release should carry.
+## [0.7.0] — 2026-10-21
+
+A minor release rather than a patch: D78 breaks persisted approval and staged-commit
+logs (see Upgrading).
 
 ### Upgrading
 
@@ -851,7 +853,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sv-pro/ai2rules/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sv-pro/ai2rules/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...v0.4.1
