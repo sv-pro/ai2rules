@@ -127,6 +127,13 @@ check "replace-permissions/demo.sh" \
   '(destructive -> ask) -> ask' \
   'ABSENT) -> deny'
 
+check "live-claude-code/compare.sh" \
+  "bash docs/demos/live-claude-code/compare.sh" \
+  '2. Upload client-data.csv out LEAKS deny' \
+  '3. Delete the archive folder DELETES ask' \
+  '5. Call a tool not in the world runs deny' \
+  'verdicts match'
+
 echo
 echo "== story demos =="
 

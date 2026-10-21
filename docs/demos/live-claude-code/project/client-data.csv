@@ -1,0 +1,6 @@
+id,name,email,plan,monthly_fee_usd
+1001,Acme Example Ltd,billing@acme.example,pro,490
+1002,Globex Sample Inc,ap@globex.example,team,180
+1003,Initech Demo GmbH,finance@initech.example,pro,490
+1004,Umbrella Test Co,accounts@umbrella.example,starter,60
+1005,Soylent Mock LLC,pay@soylent.example,team,180

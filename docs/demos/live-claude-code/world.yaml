@@ -1,0 +1,59 @@
+# Live demo world: Claude Code with and without ai2rules, side by side
+# (docs/demos/live-claude-code). Deliberately small, so the four beats of the demo
+# are the only verdicts anyone sees. It is not a starting point for real use: a
+# real world asks before an unclassified command (see scripts/starter-world.yaml,
+# which `harness init` installs); this one lets them run so the demo stays quiet.
+world_id: live-demo-claude-code
+
+actors:
+  - { name: developer, kind: User }
+  - { name: claude, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  - { name: Read, action_type: Read, side_effect: Read }
+  - { name: Glob, action_type: Read, side_effect: Read }
+  - { name: Grep, action_type: Read, side_effect: Read }
+  - { name: LS, action_type: Read, side_effect: Read }
+  - { name: Edit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
+  # Reading anything from the network taints the session (post-call taint).
+  - { name: WebFetch, action_type: Web, side_effect: Network }
+  - { name: WebSearch, action_type: Web, side_effect: Network }
+  - { name: Bash, action_type: Command, side_effect: Process }
+  - { name: Bash_network, action_type: Command, side_effect: Network }
+  - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+
+command_classes:
+  - action: Bash
+    arg: command
+    default_to: Bash
+    classes:
+      - to: Bash_network
+        patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
+      - to: Bash_destructive
+        patterns: ["rm -rf", "rm -fr", "rm -r ", "sudo "]
+
+# The taint floor (invariant 7): once the session has read from outside, nothing
+# leaves it. The kernel enforces this even without these lines; they name the rule.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000

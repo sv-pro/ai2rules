@@ -1,0 +1,2 @@
+Placeholder for last year's invoices. The demo asks the assistant to delete the
+archive/ folder; with ai2rules that deletion asks a human first.
