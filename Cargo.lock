@@ -144,6 +144,8 @@ name = "cli-harness"
 version = "0.7.0"
 dependencies = [
  "agent-core",
+ "anstream",
+ "anstyle",
  "clap",
  "compiler",
  "executor",

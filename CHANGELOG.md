@@ -12,6 +12,20 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Added
+
+- `harness demo --story law-firm --html <PATH>` also writes the run as a
+  self-contained page to step through in a browser (arrow keys, a session badge
+  that turns when the email is read, the hidden text shown as hidden, the kernel's
+  own request and reason under each step, and the audit summary). The page only
+  renders this run's verdicts; it decides nothing. It needs no network and is the
+  same bytes for the same binary. A copy is published at
+  <https://ai2rules.dev/demo/law-firm.html>; `scripts/check-demos.sh` fails if it
+  is no longer what the current binary writes.
+- The story's terminal output is coloured: green `ALLOW`, red `DENY`, yellow `ASK`
+  and taint, dimmed `ABSENT`, the hidden email text in magenta. Piped output and
+  `NO_COLOR` stay plain text, so logs and the demo checks are unchanged.
+
 ## [0.7.0] — 2026-10-21
 
 A minor release rather than a patch: D78 breaks persisted approval and staged-commit

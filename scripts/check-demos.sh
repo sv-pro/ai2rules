@@ -139,6 +139,21 @@ check "harness demo --story law-firm" \
   'ABSENT (unknown_to_ontology)' \
   'Replay: 10/10 decisions reproduced from the log'
 
+# The published page (ai2rules.dev/demo/law-firm.html) is a build output kept in
+# git, like the WASM engine: regenerate it and fail if the committed copy differs.
+# It embeds the version, so a release bump needs a regenerated page too.
+PUBLISHED=blog/public/demo/law-firm.html
+page="$(mktemp)"
+if cargo run -q -p cli-harness -- demo --story law-firm --html "$page" >/dev/null 2>&1 \
+  && cmp -s "$page" "$PUBLISHED"; then
+  printf 'ok    %s\n' "$PUBLISHED is current"
+else
+  printf 'FAIL  %s — stale; regenerate with:\n' "$PUBLISHED"
+  printf '        cargo run -q -p cli-harness -- demo --story law-firm --html %s\n' "$PUBLISHED"
+  fails=$((fails + 1))
+fi
+rm -f "$page"
+
 echo
 if [ "$fails" -gt 0 ]; then
   echo "$fails demo(s) no longer say what they claim."

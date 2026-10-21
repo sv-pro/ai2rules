@@ -25,11 +25,30 @@ harness demo --story law-firm
   cargo run -q -p cli-harness -- demo --story law-firm
   ```
 
-- **From npm** (0.7.0 and later): `npx ai2rules-harness demo --story law-firm`, on
-  any machine with Node. Releases up to 0.6.0 do not have the flag.
+- **From npm** (0.7.0 and later): `npx ai2rules-harness@latest demo --story law-firm`,
+  on any machine with Node. Releases up to 0.6.0 do not have the flag; `--html`
+  arrives in the release after 0.7.0.
 
-The output is plain ASCII, so it reads the same in PowerShell, Windows Terminal,
-WSL or an SSH session. Make the terminal wide (about 90 columns) and the font big.
+The output is plain text, coloured on a terminal that supports it (set `NO_COLOR=1`
+for none), so it reads the same in PowerShell, Windows Terminal, WSL or an SSH
+session. Make the terminal wide (about 90 columns) and the font big.
+
+**To present from a browser**, open the published copy,
+<https://ai2rules.dev/demo/law-firm.html>, or write your own and open it:
+
+```bash
+harness demo --story law-firm --html law-firm.html
+```
+
+The page steps through the same ten decisions with the arrow keys or Space, `A`
+lists all steps, and "What the kernel saw" under each step shows the request and
+the kernel's reason. It is one file with no network access, so it works offline
+and can be sent to someone or recorded for a voiceover. The verdicts in it are the
+ones the kernel returned when the page was written.
+
+In Windows PowerShell, if `npx` is blocked because running scripts is disabled,
+call `npx.cmd` instead. If an older `ai2rules-harness` is installed globally, `npx`
+runs that one: ask for `ai2rules-harness@latest`.
 
 ## What to say
 
