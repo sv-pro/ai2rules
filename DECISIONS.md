@@ -2997,8 +2997,13 @@ And literals were strings only, so `maxResults: 20` could not be pinned.
 - **The base name is not a back door.** A value sent under the base name of a renamed argument
   is never read: it is stripped like any undeclared extra, so a call carrying only that name
   is missing its required argument and is refused, never run without its limit.
-- **`exposed: false` on a base action** keeps it in the ontology, so scoped capabilities can
-  name it, and out of the projection, so the model sees it as ABSENT.
+- **`projected: false` on a base action** keeps it in the ontology, so scoped capabilities can
+  name it, and out of the projection, so the model sees it as ABSENT. The name is the
+  compiled world's own (`CompiledWorld::is_projected`, invariant 2: known but not projected
+  is ABSENT). An earlier draft of this branch called it `exposed`; it was renamed before
+  release, so no manifest carries the old spelling. The same flag closes the bypass an
+  external review of the kernel found on its own: a scoped verb that pins `repo` was
+  pointless while its unscoped base action stayed callable with any `repo`.
 - **`ArgSource::Literal` holds any JSON value.** A string literal serializes exactly as before.
 - **`mcp_surface: { name, upstream }`** records the server name a gateway will announce and
   the `McpServer` backing it fronts. Validation requires some base action to use that backing.

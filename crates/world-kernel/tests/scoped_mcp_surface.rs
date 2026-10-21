@@ -22,7 +22,7 @@ base_actions:
   - name: getJiraIssue
     action_type: Read
     side_effect: Read
-    exposed: false
+    projected: false
     backing: !McpServer { server: atlassian, tool: getJiraIssue }
     schema:
       type: object
@@ -33,7 +33,7 @@ base_actions:
   - name: searchJiraIssuesUsingJql
     action_type: Read
     side_effect: Read
-    exposed: false
+    projected: false
     backing: !McpServer { server: atlassian, tool: searchJiraIssuesUsingJql }
     schema:
       type: object

@@ -264,7 +264,7 @@ function loadWorld(world, upstreamId) {
     }
     cfg.kind = base.action_type === "Read" ? "read" : "write";
     cfg.approval = !!base.approval_required;
-    cfg.include = base.exposed !== false;
+    cfg.include = base.projected !== false;
     cfg.name = base.name;
     state.cfg[mcp.tool] = cfg;
   }
@@ -343,7 +343,7 @@ function buildManifest() {
     // Scoped: the upstream tool stays in the world as a hidden backing, and the
     // model sees only the scoped capability that wraps it.
     base.name = hiddenName(tool.name);
-    base.exposed = false;
+    base.projected = false;
     bases.push(base);
     const args = {};
     for (const [arg, a] of Object.entries(cfg.args)) {

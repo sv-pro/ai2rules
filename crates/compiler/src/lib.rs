@@ -304,7 +304,7 @@ base_actions:
   - name: getJiraIssue
     action_type: Read
     side_effect: Read
-    exposed: false
+    projected: false
     backing: !McpServer { server: atlassian, tool: getJiraIssue }
     schema:
       type: object
@@ -343,7 +343,7 @@ scoped_capabilities:
         // exactly as it did when literals were strings only, so no manifest that
         // predates D79 changes its hash.
         let canonical = serde_json::to_string(&default_cli_world()).unwrap();
-        assert!(!canonical.contains("\"exposed\""));
+        assert!(!canonical.contains("\"projected\""));
         assert!(!canonical.contains("\"mcp_surface\""));
         assert!(canonical.contains(r#"{"Literal":"pytest"}"#));
     }

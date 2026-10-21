@@ -60,20 +60,20 @@ pub struct BaseActionDef {
     pub backing: Option<BackingIdentity>,
     #[serde(default)]
     pub approval_required: bool,
-    /// Whether the action is on the model-facing surface (DECISIONS D79). `false`
+    /// Whether the action is projected onto the model-facing surface (DECISIONS D79). `false`
     /// keeps it in the ontology as the backing of scoped capabilities while the
     /// model sees it as ABSENT. Skipped when `true` so existing manifests keep
     /// their hash.
-    #[serde(default = "exposed_default", skip_serializing_if = "is_exposed")]
-    pub exposed: bool,
+    #[serde(default = "projected_default", skip_serializing_if = "is_projected")]
+    pub projected: bool,
 }
 
-fn exposed_default() -> bool {
+fn projected_default() -> bool {
     true
 }
 
-fn is_exposed(exposed: &bool) -> bool {
-    *exposed
+fn is_projected(projected: &bool) -> bool {
+    *projected
 }
 
 /// Where a scoped-capability argument's value comes from.

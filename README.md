@@ -204,7 +204,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   channel (invariant 7). MCP/web use deterministic **mock** transports (real
   stdio/HTTP deferred). Part of Milestone 3. Since D79 a scoped capability can
   also rename an argument and limit it to a list of values or a prefix, a base
-  action can be kept off the surface (`exposed: false`) while scoped capabilities
+  action can be kept off the surface (`projected: false`) while scoped capabilities
   wrap it, and `mcp_surface` names the server a gateway will present. With a
   surface declared, `harness mcp-gateway` offers scoped capabilities under their
   own names and forwards the kernel's lowered call (renamed arguments mapped back,

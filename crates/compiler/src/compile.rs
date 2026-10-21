@@ -117,7 +117,7 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
     // capabilities can name them, but the model sees them as ABSENT. Dynamic
     // narrowing by taint and context is a runtime concern (E2 / Layer 2).
     parts.projected = parts.ontology.clone();
-    for action in manifest.base_actions.iter().filter(|a| !a.exposed) {
+    for action in manifest.base_actions.iter().filter(|a| !a.projected) {
         parts.projected.remove(&action.name);
     }
 
