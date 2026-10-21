@@ -3103,3 +3103,26 @@ still lists tools by upstream name only, so scoped capabilities are not served o
   loader; *letting the page choose the save path* — a request could then write anywhere the
   user can; *sending on every Try* — a write tool would run while the operator was still
   designing it.
+
+### D79 amendment (2026-10-21) — worlds without a surface forward the lowering too
+
+- **The gap.** Phase 2 forwarded the kernel's lowering only when the world declared an
+  `mcp_surface`. Without one, the gateway sent `(action, arguments)` exactly as proposed. For
+  a scoped capability that meant its own name, which the upstream has never heard of, and the
+  caller's arguments: no literal was injected, and a locked argument the caller added
+  (`issue_key: SEC-9` beside a pinned `PLAT-1`) went through. An external review of the
+  kernel found the same shape independently. The same path also forwarded an unscoped call
+  under the action the kernel decided on, after `command_classes` (D36), not under the tool
+  name the client called.
+- **Decision.** Without a surface, an unscoped call is forwarded under the requested name
+  with its arguments, as before D79. A scoped capability goes to the upstream tool named
+  after its **base action**, which is how a surface-less world names upstream tools, with
+  the input of the kernel's `ExecutionSpec`. A call that cannot be lowered (a `ContextRef`
+  the gateway has no trusted source for) or does not lower to an MCP call is refused, and
+  audited as `not_forwardable`, like any other refused forward.
+- **Listing is unchanged.** Scoped capabilities in a surface-less world stay callable by name
+  and are not listed; listing them would change `tools/list` for existing worlds. Declare a
+  surface to have them offered.
+- **Rejected:** *refusing every scoped capability without a surface* — fail-closed as well,
+  but it makes scoped capabilities useless in exactly the worlds that already route by
+  action name, when the lowering that serves them already exists.

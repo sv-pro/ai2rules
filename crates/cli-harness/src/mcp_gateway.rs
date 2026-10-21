@@ -18,7 +18,9 @@
 //!   scoped capability is offered under its own name with the schema the model
 //!   supplies, the kernel's lowered `ExecutionSpec` is what goes upstream (renamed
 //!   arguments mapped back, literals injected, extras stripped), and the gateway
-//!   announces the surface's name. A world without one is served as before.
+//!   announces the surface's name. A world without one is listed as before, and a
+//!   scoped capability in it is forwarded to the upstream tool named after its base
+//!   action, lowered the same way.
 //! - an upstream result that *demands* input instead of answering (MCP `2026-07-28`
 //!   MRTR `input_required`) is **refused, not relayed** — the D49 interim deny.
 //! - every decision is appended to an optional JSONL audit log.
@@ -312,32 +314,59 @@ fn project_tool(
 }
 
 /// What to send upstream for an allowed call: the tool name and its arguments.
+/// `requested` is the tool name the client called and `action` the action the
+/// kernel decided on (after `command_classes`, D36).
 ///
 /// With an `mcp_surface` (D79) this is the kernel's `ExecutionSpec` — the
 /// backing tool, with renamed arguments mapped back, literals injected and
 /// extras stripped — never the call as the model proposed it. A call the kernel
-/// allowed but could not lower is refused. Without a surface the call is
-/// forwarded as proposed, as before D79: the world names upstream tools directly
-/// and declares no scoping the gateway would have to apply.
+/// allowed but could not lower is refused.
+///
+/// Without a surface the world names upstream tools by action name. An unscoped
+/// call is forwarded as proposed, under the name the client called:
+/// classification renames the *policy* action, not the upstream tool. A scoped
+/// capability is not an upstream tool, so it goes to the tool named after its
+/// base action, with the kernel's lowered input. Forwarding the proposal there
+/// would drop every literal the world pins and pass on any locked argument the
+/// caller added.
 pub(crate) fn forward_target(
     world: &CompiledWorld,
+    requested: &str,
     action: &ActionName,
     args: &Value,
     lowered: Option<Result<ExecutionSpec, String>>,
 ) -> Result<(String, Value), String> {
+    if world.mcp_surface().is_none() {
+        let Some(cap) = world.scoped_capability(action) else {
+            return Ok((requested.to_string(), args.clone()));
+        };
+        let input = lowered_input(lowered, None)?;
+        return Ok((cap.base_action.as_str().to_string(), input));
+    }
     let tool = served_tool(world, action)
         .ok_or_else(|| format!("`{action}` is not served by this gateway's upstream"))?;
-    if world.mcp_surface().is_none() {
-        return Ok((tool, args.clone()));
-    }
+    let input = lowered_input(lowered, Some(&tool))?;
+    Ok((tool, input))
+}
+
+/// The upstream input of the kernel's lowering, which must be an MCP call (to
+/// `tool`, when given). Fail-closed: no spec, a spec that could not be built, or
+/// one that is not an MCP call is a refusal.
+fn lowered_input(
+    lowered: Option<Result<ExecutionSpec, String>>,
+    tool: Option<&str>,
+) -> Result<Value, String> {
     let spec = match lowered {
         Some(Ok(spec)) => spec,
         Some(Err(e)) => return Err(format!("the kernel could not lower the call: {e}")),
         None => return Err("the kernel produced no execution spec".to_string()),
     };
     match spec.operation() {
-        Operation::Structured(op) if op.get("tool").and_then(Value::as_str) == Some(&tool) => {
-            Ok((tool, op.get("input").cloned().unwrap_or_else(|| json!({}))))
+        Operation::Structured(op)
+            if op.get("server").is_some()
+                && tool.is_none_or(|t| op.get("tool").and_then(Value::as_str) == Some(t)) =>
+        {
+            Ok(op.get("input").cloned().unwrap_or_else(|| json!({})))
         }
         _ => Err("the execution spec is not a call to this gateway's upstream".to_string()),
     }
@@ -523,8 +552,13 @@ pub fn run(
                 // MCP's only structural channel is the isError text.
                 match host_outcome(&verdict) {
                     HostOutcome::Proceed => {
-                        let target =
-                            forward_target(&world, &ActionName::new(&action), &args, lowered);
+                        let target = forward_target(
+                            &world,
+                            &name,
+                            &ActionName::new(&action),
+                            &args,
+                            lowered,
+                        );
                         match target {
                             Err(why) => {
                                 // Nothing runs, so nothing is ingested or spent: the

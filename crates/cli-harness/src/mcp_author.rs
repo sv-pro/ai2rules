@@ -343,6 +343,7 @@ fn try_call(session: &mut Session, body: &Value) -> Value {
     }
     let (upstream_tool, input) = match forward_target(
         &world,
+        tool,
         &ActionName::new(&verdict.action),
         &arguments,
         lowered,

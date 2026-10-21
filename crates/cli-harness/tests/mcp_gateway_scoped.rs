@@ -19,13 +19,23 @@ fn manifest() -> PathBuf {
 
 /// Drive one gateway session through `requests`; return responses by id.
 fn scenario(requests: &[Value], audit: Option<&Path>) -> HashMap<i64, Value> {
+    scenario_with(&manifest(), &["--rovo", "--echo"], requests, audit)
+}
+
+/// [`scenario`] against any world, with `mock_flags` passed to `mock-jira`.
+fn scenario_with(
+    world: &Path,
+    mock_flags: &[&str],
+    requests: &[Value],
+    audit: Option<&Path>,
+) -> HashMap<i64, Value> {
     let bin = env!("CARGO_BIN_EXE_harness");
-    let world = manifest();
     let mut args = vec!["mcp-gateway", "--world", world.to_str().unwrap()];
     if let Some(audit) = audit {
         args.extend(["--audit", audit.to_str().unwrap()]);
     }
-    args.extend(["--", bin, "mock-jira", "--rovo", "--echo"]);
+    args.extend(["--", bin, "mock-jira"]);
+    args.extend(mock_flags);
     let mut child = Command::new(bin)
         .args(&args)
         .stdin(Stdio::piped())
@@ -262,4 +272,115 @@ fn a_call_this_gateway_does_not_serve_is_refused_without_tainting() {
         .expect("the refusal is audited");
     assert_eq!(refusal["tool"], json!("getConfluencePage"));
     assert_eq!(refusal["rule"], json!("not_forwardable"));
+}
+
+// ---- Worlds without an `mcp_surface` (D79 amendment, phase 4) ----
+
+/// A world that names upstream tools by action name and declares no surface, as
+/// every gateway world did before D79, plus two scoped capabilities over one of
+/// them. Its backings name tools the upstream does not have, like the demo
+/// worlds': without a surface they are never read.
+const PLAIN_WORLD: &str = r#"
+world_id: plain-jira
+actors:
+  - { name: developer, kind: User }
+  - { name: agent, kind: Model }
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+capabilities:
+  - trust: Trusted
+    actions: [Read, Mcp]
+base_actions:
+  - name: jira_get_issue
+    action_type: Read
+    side_effect: Read
+    backing: !McpServer { server: jira, tool: get_issue }
+    schema:
+      type: object
+      required: [issue_key]
+      properties: { issue_key: { type: string } }
+  - name: jira_add_comment
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: jira, tool: add_comment }
+    schema:
+      type: object
+      required: [body]
+      properties: { issue_key: { type: string }, body: { type: string } }
+scoped_capabilities:
+  - name: comment_on_plat_1
+    base_action: jira_add_comment
+    args: { issue_key: !Literal PLAT-1, body: ActorInput }
+  - name: comment_on_current_ticket
+    base_action: jira_add_comment
+    args: { issue_key: !ContextRef ticket.key, body: ActorInput }
+"#;
+
+/// Write `yaml` to a fresh temp file and return its path.
+fn temp_world(yaml: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "mcp-gateway-plain-{}-{}.world.yaml",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, yaml).unwrap();
+    path
+}
+
+#[test]
+fn without_a_surface_a_scoped_verb_forwards_its_lowering_to_the_base_tool() {
+    let world = temp_world(PLAIN_WORLD);
+    let out = scenario_with(
+        &world,
+        &["--echo"],
+        &[
+            // The caller tries to set the issue the world pins.
+            call(
+                1,
+                "comment_on_plat_1",
+                json!({"body": "hi", "issue_key": "SEC-9"}),
+            ),
+            // An unscoped call is forwarded as proposed, under its own name.
+            call(2, "jira_get_issue", json!({"issue_key": "DEMO-1"})),
+        ],
+        None,
+    );
+    let _ = std::fs::remove_file(&world);
+    assert_eq!(
+        received(&out[&1]).expect("forwarded"),
+        json!({"received_tool": "jira_add_comment",
+               "received_arguments": {"body": "hi", "issue_key": "PLAT-1"}})
+    );
+    assert_eq!(
+        received(&out[&2]).expect("forwarded"),
+        json!({"received_tool": "jira_get_issue",
+               "received_arguments": {"issue_key": "DEMO-1"}})
+    );
+}
+
+#[test]
+fn without_a_surface_a_verb_needing_runtime_context_is_refused() {
+    // The gateway has no trusted source for `ticket.key`, so the call cannot be
+    // lowered; it is refused rather than sent without the argument.
+    let world = temp_world(PLAIN_WORLD);
+    let out = scenario_with(
+        &world,
+        &["--echo"],
+        &[call(
+            1,
+            "comment_on_current_ticket",
+            json!({"body": "hi", "issue_key": "SEC-9"}),
+        )],
+        None,
+    );
+    let _ = std::fs::remove_file(&world);
+    assert!(received(&out[&1]).is_none());
+    assert!(
+        text(&out[&1]).starts_with("REFUSED (gateway)"),
+        "{}",
+        text(&out[&1])
+    );
 }
