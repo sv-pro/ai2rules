@@ -107,7 +107,8 @@ fn law_firm_steps() -> Vec<Step> {
             mode: "interactive",
             expected: "ALLOW",
             meaning: "The assistant may read mail. But this text came from outside the firm, \
-                      so from here on nothing may leave the session.",
+                      so from here on nothing may leave the session. Any outside email does \
+                      this, harmless or not: the kernel does not judge what an email says.",
         },
         Step {
             scene: Some("Scene 3: the assistant follows the hidden instruction"),
@@ -218,7 +219,8 @@ pub fn run(story: Story, html: Option<&Path>) -> i32 {
         Story::LawFirm => (
             LAW_FIRM_WORLD,
             "Cohen & Levi: an AI legal assistant, governed by ai2rules",
-            "One poisoned email closed every way out of the firm; the assistant's work went on.",
+            "Reading one email from outside closed every way out of the firm, whatever it said; \
+             the assistant's work went on.",
             law_firm_steps(),
         ),
     };

@@ -12,6 +12,14 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Changed
+
+- The law-firm story no longer suggests the kernel recognises a poisoned email.
+  The closing line now says reading one email from outside closed the exits,
+  whatever it said, and step 3 says any outside email does this, harmless or not.
+  The runbook answers the follow-ups: no detection, no way to clear a marked
+  session, a new session starts clean, and session-wide marking is today's limit.
+
 ### Added
 
 - `harness demo --story law-firm --html <PATH>` also writes the run as a

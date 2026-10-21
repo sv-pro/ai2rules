@@ -70,6 +70,22 @@ runs that one: ask for `ai2rules-harness@latest`.
 - **"So it detects prompt injection?"** No, and it does not need to. It does not
   try to recognize the attack. It makes the attack's goal impossible: whatever the
   email said, the session can no longer send anything out.
+- **"So it spots the poisoned email?"** No. Any email from outside the firm does
+  the same, harmless or not: the kernel never judges what an email says, only
+  where it came from. The hidden instruction is there to show what the closed
+  exits are for.
+- **"Then how does the assistant ever send anything again?"** Not from that
+  session. A session that has read outside text stays marked until it ends; there
+  is deliberately no way for the assistant, or for text it read, to clear it. A
+  new session starts clean (that is the control at step 10), and a person can
+  still send the email themselves. Even a partner typing "send this to the
+  client" into the marked session is refused, because the kernel cannot tell
+  whether the request came from the partner or from the email.
+- **"Isn't that too strict?"** For a session that only reads mail and drafts,
+  no. For mixed work it can be, and that is the honest limit today: the marking
+  covers the whole session. Marking only the data that came from outside (so a
+  status update to a known client could still go out) exists in the kernel and is
+  the next step for the hooks.
 - **"Does a model make these decisions?"** No. The decisions are deterministic.
   The same request gives the same answer every time, and the replay proves it.
 - **"Which AI tools does it work with?"** Today: Claude Code, OpenCode,
