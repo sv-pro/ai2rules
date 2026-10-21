@@ -50,6 +50,15 @@ below), which is more than a patch release should carry.
 - **`harness mcp-author --world W -- <upstream>`**: a local page that connects to an
   MCP server, lets you pick, rename and limit its tools, try calls through the real
   gate, and save the manifest.
+- **`GateResponse.effective`** (D80). On `ALLOW` / `ASK` the gate returns the call to
+  execute: base action, backing, arguments after a scoped capability's stripping,
+  renaming and literal injection, unresolved context refs, and the names it
+  stripped. A backward-compatible v1 field. A wire host
+  that executes this instead of the proposal gets the world's scoping without
+  linking the kernel. `world_kernel::effective_call` is the single lowering that
+  `build_execution_spec` now also uses.
+- **`mcp-gateway` audits stripped arguments** (D80): an allowed call whose
+  proposal tried to set what the world fixes gets its own `stripped` record.
 
 ## [0.6.0] — 2026-09-19
 

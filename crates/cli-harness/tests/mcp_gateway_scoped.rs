@@ -384,3 +384,46 @@ fn without_a_surface_a_verb_needing_runtime_context_is_refused() {
         text(&out[&1])
     );
 }
+
+// ---- D80: what the scoping stripped is audited ----
+
+#[test]
+fn arguments_the_scoping_strips_are_audited() {
+    let audit = std::env::temp_dir().join(format!(
+        "mcp-gateway-stripped-{}-{}.jsonl",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let out = scenario(
+        &[
+            // Clean: nothing to record.
+            call(1, "get_platform_issue", json!({"issue": "PLAT-1"})),
+            // The base name of the renamed argument and a fixed argument.
+            call(
+                2,
+                "get_platform_issue",
+                json!({"issue": "PLAT-2", "issueIdOrKey": "SEC-9", "cloudId": "evil"}),
+            ),
+        ],
+        Some(&audit),
+    );
+    assert!(received(&out[&1]).is_some());
+    assert_eq!(
+        received(&out[&2]).expect("forwarded")["received_arguments"],
+        json!({"cloudId": "abc-123", "issueIdOrKey": "PLAT-2"})
+    );
+
+    let log = std::fs::read_to_string(&audit).expect("audit log");
+    let _ = std::fs::remove_file(&audit);
+    let stripped: Vec<Value> = log
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|e| e["stage"] == json!("stripped"))
+        .collect();
+    assert_eq!(stripped.len(), 1, "only the second call strips anything");
+    assert_eq!(stripped[0]["tool"], json!("get_platform_issue"));
+    assert_eq!(stripped[0]["stripped"], json!(["cloudId", "issueIdOrKey"]));
+}

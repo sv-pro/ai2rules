@@ -3126,3 +3126,63 @@ still lists tools by upstream name only, so scoped capabilities are not served o
 - **Rejected:** *refusing every scoped capability without a surface* — fail-closed as well,
   but it makes scoped capabilities useless in exactly the worlds that already route by
   action name, when the lowering that serves them already exists.
+
+## D80 — The gate returns the effective call; hosts execute that, not the proposal
+
+**Context.** The gate is decision-only (D24): on `ALLOW` the host runs its own tool. But the
+kernel decides on the *proposed* call, and a scoped capability runs with different
+arguments: locked and unknown actor arguments are stripped, renamed ones are mapped back to
+the base action's names (D79), and literals are injected (invariant 12). D79's phase 2 gave
+the in-process `mcp-gateway` that lowering through `gate_and_lower`, which returns the
+`ExecutionSpec`. A host that calls `harness gate` over the wire still got none of it: the
+gate would `ALLOW` `open_change_pr` with `repo: attacker/fork` beside a literal `repo`, and a
+host executing the proposal would send the attacker's value. An external review of the
+kernel found this independently (its G2). D79's phase 2 considered adding the lowered
+operation to `GateResponse` and rejected it as "a wire ABI change for every host when only
+this adapter executes". That premise does not hold for the port D24 exists to be: every
+out-of-process host executes, and only the wire can tell it what to run.
+
+**Decision.**
+
+- **`world_kernel::effective_call(world, intent) -> EffectiveCall`** is the single
+  lowering. It returns:
+  - the base action and its backing;
+  - the arguments after stripping, renaming and literal injection, under the base
+    action's names;
+  - `ContextRef` arguments, listed by key and not resolved, since runtime values are not
+    the pure kernel's to hold;
+  - the actor-supplied names the scoping dropped, including a renamed argument sent under
+    its base name.
+
+  `build_execution_spec` lowers through it and only resolves the context refs, so
+  `gate_and_lower`'s spec and the wire field cannot disagree.
+- **`GateResponse.effective`** carries it on `ALLOW` and `ASK`, so an approval prompt can
+  show what will actually run. It is a backward-compatible v1 field, skipped when absent.
+  (The WASM engine compiles the same `gate` but exports only `preview`, so the field is not
+  observable there yet.) It is not the `ExecutionSpec`: the spec also holds
+  runtime policy (cwd, roots, env, timeout) that belongs to whoever executes, and a
+  decision-only gate would have to fill it with placeholder values.
+- **`mcp-gateway` keeps forwarding `gate_and_lower`'s spec**, so in-process only an
+  `ExecutionSpec` still crosses into execution. It adds a `stripped` audit record when the
+  proposal tried to set what the world fixes. The lowering already defeats the attempt;
+  the record is the signal.
+
+**Alternatives.**
+
+- *Reject locked arguments outright* (`schema_violation`): deferred, not rejected. It
+  changes a verdict hosts rely on today, and `stripped` already makes the attempt visible.
+  It is the better default for a strict mode.
+- *Re-implement lowering in each adapter*: rejected by D24's own reasoning.
+- *Keep the lowering native-only*, as D79's phase 2 did: rejected for the reason above. A
+  wire host that has no lowering either drops the scoping or has to refuse scoped verbs.
+- *Serialize the whole `ExecutionSpec`*: rejected because of the placeholder runtime
+  policy described above.
+
+**Consequence.** A host that honours `effective` gets the world's scoping without linking
+the kernel. Hosts that ignore it keep today's behaviour, so adoption is per adapter.
+
+Not done yet:
+- `cc-hook` and `agy-hook` do not rewrite native tool input from `effective`.
+- Roots path scope still reads the adapter's `path`, which for a literal-path verb is the
+  proposal's.
+- `tools/list` in a world without a surface still does not list scoped verbs (D79).
