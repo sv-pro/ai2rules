@@ -33,6 +33,23 @@ below), which is more than a patch release should carry.
   as old (D73/D78 wording); delete the log and its key. Known limit, pinned by a test:
   a head saved between approval and consumption can still roll back a store that a
   fresh process opens.
+- **`mcp-gateway` no longer forwards a scoped capability as proposed** (D79). In a
+  world without an `mcp_surface`, a scoped verb went upstream under its own name with
+  the caller's arguments, so its literals were never applied and a locked argument
+  the caller added was sent. It now goes to the tool named after its base action,
+  with the kernel's lowered input, and is refused when it cannot be lowered.
+
+### Added
+
+- **Scoped MCP surfaces** (D79, E13.4). A scoped capability can rename an argument
+  and limit it to a list of values or a prefix (`!Input { as, one_of, prefix }`);
+  literals take any JSON value; `projected: false` keeps a base action in the
+  ontology but off the surface; `mcp_surface: { name, upstream }` makes
+  `harness mcp-gateway` offer scoped capabilities under their own names, with a
+  world-derived schema, and forward the kernel's lowered call.
+- **`harness mcp-author --world W -- <upstream>`**: a local page that connects to an
+  MCP server, lets you pick, rename and limit its tools, try calls through the real
+  gate, and save the manifest.
 
 ## [0.6.0] — 2026-09-19
 

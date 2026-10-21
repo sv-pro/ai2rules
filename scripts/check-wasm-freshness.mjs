@@ -51,9 +51,19 @@ function fail(what, hint) {
 
 // The manifests the two engines must agree on. Beyond the bundled default world,
 // these pin the features whose absence made the drift invisible last time: a
-// world with `roots` (#27) and one with `command_classes` (D36). An engine that
-// predates either silently returns a different surface for them.
+// world with `roots` (#27), one with `command_classes` (D36), and one that hides
+// a scoped verb's base action (`projected: false`, D79). An engine that predates
+// any of them silently returns a different surface for it.
 const CASES = {
+  hidden_base: `
+world_id: freshness-hidden-base
+capabilities:
+  - { trust: Trusted, actions: [Mcp] }
+base_actions:
+  - { name: create_pr, action_type: Mcp, side_effect: External, projected: false }
+scoped_capabilities:
+  - { name: open_change_pr, base_action: create_pr }
+`,
   roots: `
 world_id: freshness-roots
 capabilities:
