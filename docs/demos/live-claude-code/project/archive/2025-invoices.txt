@@ -1,2 +1,5 @@
-Placeholder for last year's invoices. The demo asks the assistant to delete the
-archive/ folder; with ai2rules that deletion asks a human first.
+INV-2025-0412  Acme Example Ltd      490.00  paid 2025-04-30
+INV-2025-0413  Globex Sample Inc     180.00  paid 2025-05-02
+INV-2025-0519  Initech Demo GmbH     490.00  paid 2025-06-01
+INV-2025-0611  Umbrella Test Co       60.00  paid 2025-06-28
+INV-2025-0702  Soylent Mock LLC      180.00  paid 2025-07-15

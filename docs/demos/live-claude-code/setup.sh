@@ -32,7 +32,7 @@ echo "harness : $HARNESS"
 echo "dest    : $DEST"
 echo
 
-rm -rf "$DEST/governed" "$DEST/ungoverned"
+rm -rf "$DEST/governed" "$DEST/ungoverned" "$DEST/received"
 mkdir -p "$DEST/governed" "$DEST/ungoverned" "$DEST/received"
 cp -r "$HERE/project/." "$DEST/governed/"
 cp -r "$HERE/project/." "$DEST/ungoverned/"
@@ -46,15 +46,22 @@ cp -r "$HERE/project/." "$DEST/ungoverned/"
 # only verdicts. (init writes the generic starter; the demo wants the quiet one.)
 cp "$HERE/world.yaml" "$DEST/governed/.claude/cc-world.yaml"
 
+# On Windows `python3` is often a Microsoft Store stub that does nothing.
+PY=python3
+"$PY" -c '' 2>/dev/null || PY=python
+
 echo "Ready."
 echo
 echo "  governed   : $DEST/governed      (ai2rules hook installed)"
 echo "  ungoverned : $DEST/ungoverned    (plain Claude Code)"
 echo
-echo "Next (three terminals):"
-echo "  1) receiver:  python3 $HERE/receiver.py --out $DEST/received"
-echo "  2) ungoverned Claude Code:  cd $DEST/ungoverned && claude"
-echo "  3) governed   Claude Code:  cd $DEST/governed   && claude"
+echo "Next:"
+echo "  1) start the receiver, and leave it running:"
+echo "       $PY $HERE/receiver.py --out $DEST/received"
+echo "  2) open Claude Code twice, one session per folder, in the SAME permission mode"
+echo "     (Manual in the Claude app, the default ask mode in the terminal):"
+echo "       Claude app : a new Code session on each folder, side by side"
+echo "       terminal   : cd <folder> && claude"
 echo
-echo "Run the SAME prompts in 2) and 3). See README.md for the script and plan B."
+echo "Type the SAME prompts into both. See README.md for the script and plan B."
 echo "Kill switch for the governed copy if anything wedges:  touch \$HOME/.claude/gate-off"
