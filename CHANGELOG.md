@@ -59,6 +59,14 @@ below), which is more than a patch release should carry.
   `build_execution_spec` now also uses.
 - **`mcp-gateway` audits stripped arguments** (D80): an allowed call whose
   proposal tried to set what the world fixes gets its own `stripped` record.
+- **`harness replay-transcripts [PATH…]`**: evidence before enforcement. It
+  replays every tool call in past Claude Code transcripts (default
+  `~/.claude/projects`) through the kernel exactly as `cc-hook` would have decided
+  it: the same request and answer mapping, now shared with the hook, with taint and
+  budget carried per session across a session's subagent transcripts. It reports
+  how often the hook would have stayed silent, asked or denied, by rule with
+  examples, which sessions became tainted and by what, and which tools the world
+  does not know. `--json` gives every call. Nothing is executed.
 
 ## [0.6.0] — 2026-09-19
 
