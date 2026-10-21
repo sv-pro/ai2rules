@@ -82,6 +82,10 @@ enum Command {
         /// needed. `law-firm`: an AI legal assistant reads a poisoned client email.
         #[arg(long, value_enum)]
         story: Option<story::Story>,
+        /// With `--story`: also write the run as a self-contained page to step
+        /// through in a browser, for presenting. The page shows this run's verdicts.
+        #[arg(long, value_name = "PATH", requires = "story")]
+        html: Option<PathBuf>,
     },
     /// Inspect effective coverage: report on installation, hook, manifest, and
     /// projected actions in the current project (AI2-25 / #84 skeleton).
@@ -382,9 +386,9 @@ fn main() {
         std::process::exit(init::run(target, *grant, *force, *dry_run));
     }
 
-    if let Some(Command::Demo { story }) = &cli.command {
+    if let Some(Command::Demo { story, html }) = &cli.command {
         std::process::exit(match story {
-            Some(story) => story::run(*story),
+            Some(story) => story::run(*story, html.as_deref()),
             None => demo::run(cli.world.as_deref()),
         });
     }

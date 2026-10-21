@@ -132,3 +132,67 @@ fn law_firm_story_needs_no_init_and_earns_its_refusals() {
     assert_eq!(taint_in(9), "clean", "the control session starts clean");
     assert_eq!(records[9]["response"]["decision"], "ALLOW");
 }
+
+#[test]
+fn law_firm_story_writes_a_page_of_this_runs_verdicts() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let harness = env!("CARGO_BIN_EXE_harness");
+    let run = |name: &str| {
+        let path = dir.path().join(name);
+        let out = Command::new(harness)
+            .args(["demo", "--story", "law-firm", "--html"])
+            .arg(&path)
+            .output()
+            .expect("run the story");
+        assert!(
+            out.status.success(),
+            "story failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("Page written to"), "{stdout}");
+        // Piped output stays plain text: no escape codes reach a log or a test.
+        assert!(
+            !stdout.contains('\u{1b}'),
+            "colour leaked into piped output"
+        );
+        std::fs::read_to_string(path).expect("page written")
+    };
+
+    let page = run("a.html");
+    assert!(!page.contains("__STORY_DATA__"), "data not embedded");
+    let start = page.find("id=\"story-data\">").expect("data block") + 16;
+    let end = start + page[start..].find("</script>").expect("data block end");
+    let data: serde_json::Value = serde_json::from_str(&page[start..end]).expect("valid json");
+    let steps = data["steps"].as_array().expect("steps");
+    assert_eq!(steps.len(), 10);
+    assert_eq!(data["replayed"], 10);
+    let decisions: Vec<&str> = steps
+        .iter()
+        .map(|s| s["decision"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        decisions,
+        ["ALLOW", "ALLOW", "ALLOW", "DENY", "DENY", "ASK", "DENY", "ABSENT", "ALLOW", "ALLOW"]
+    );
+    // The page carries the kernel's own taint, and the hidden text as hidden text.
+    assert_eq!(steps[2]["taint_in"], "clean");
+    assert_eq!(steps[2]["taint_out"], "tainted");
+    assert_eq!(steps[3]["rule"], "taint_invariant");
+    assert!(steps[2]["hidden"][1]
+        .as_str()
+        .unwrap()
+        .contains("archive-backup@proton.me"));
+
+    // Deterministic: no timestamps or temp paths, so the same binary writes the same page.
+    assert_eq!(page, run("b.html"));
+}
+
+#[test]
+fn html_needs_a_story() {
+    let out = Command::new(env!("CARGO_BIN_EXE_harness"))
+        .args(["demo", "--html", "x.html"])
+        .output()
+        .expect("run harness demo");
+    assert_eq!(out.status.code(), Some(2), "clap usage error expected");
+}
