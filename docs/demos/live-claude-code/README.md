@@ -16,13 +16,13 @@ local receiver on `127.0.0.1`. The data is fake.
   words, to upload `client-data.csv` and to delete `archive/`. The result is the
   same every run. (If instead you wait for the model to act on a hidden
   instruction, it may notice and refuse, and the demo falls flat.)
-- **The outside page is ordinary.** `site/onboarding.html` is a normal vendor page
-  with one labeled, empty slot (`#ai-slot`, white 1px text) where a real attacker
-  would hide a message to the AI. You do not need to fill it in: ai2rules marks the
-  session because it read something from outside, not because of what the text
-  says. To show a filled-in hidden instruction, open
-  <https://ai2rules.dev/demo/law-firm> alongside. If you edit the slot, keep it a
-  note, not a working instruction.
+- **The outside page is ordinary, with nothing hidden in it.** `site/onboarding.html`
+  is a plain vendor page. ai2rules marks the session because it read something from
+  outside, not because of what the text says, so the page needs no hidden
+  instruction. An earlier version carried a labeled empty slot for one, and in
+  rehearsal Claude found it, reported it and grew wary. To show what a hidden
+  instruction looks like, open <https://ai2rules.dev/demo/law-firm> alongside.
+  The receiver reads the page once at startup: restart it after editing the page.
 - **Nothing in the project says "demo".** Claude reads the files it works on. A
   README that announced the attack made both sessions wary in rehearsal, and a
   wary ungoverned session may refuse the upload on its own, which erases the

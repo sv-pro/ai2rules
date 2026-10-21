@@ -32,8 +32,11 @@ echo "harness : $HARNESS"
 echo "dest    : $DEST"
 echo
 
-rm -rf "$DEST/governed" "$DEST/ungoverned" "$DEST/received"
+# Empty the folders rather than removing them: on Windows a folder that is some
+# process's working directory (a Claude app session, even a closed one) cannot be
+# removed, and `rm -rf` fails with "Device or resource busy".
 mkdir -p "$DEST/governed" "$DEST/ungoverned" "$DEST/received"
+find "$DEST/governed" "$DEST/ungoverned" "$DEST/received" -mindepth 1 -delete
 cp -r "$HERE/project/." "$DEST/governed/"
 cp -r "$HERE/project/." "$DEST/ungoverned/"
 
