@@ -129,7 +129,7 @@ enum Command {
         input_required: bool,
         /// Answer every `tools/call` with the tool name and arguments that actually
         /// arrived, so a test can assert what the gateway forwarded — a scoped
-        /// tool's upstream name, renamed arguments and injected literals (D78).
+        /// tool's upstream name, renamed arguments and injected literals (D79).
         /// Used by `tests/mcp_gateway_scoped.rs`.
         #[arg(long)]
         echo: bool,
@@ -251,7 +251,7 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
     },
-    /// Author a scoped MCP surface in the browser (D78 / E13.4c): connect to an
+    /// Author a scoped MCP surface in the browser (D79 / E13.4c): connect to an
     /// upstream MCP server, pick and rename its tools, fix or limit their
     /// arguments, try calls through the real kernel, and save the world manifest
     /// that `harness mcp-gateway --world` serves.

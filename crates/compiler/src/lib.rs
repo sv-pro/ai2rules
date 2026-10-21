@@ -295,7 +295,7 @@ base_actions:
         ));
     }
 
-    // --- Scoped MCP surfaces (D78) ---
+    // --- Scoped MCP surfaces (D79) ---
 
     const SURFACE: &str = r#"
 world_id: w
@@ -341,7 +341,7 @@ scoped_capabilities:
     fn new_fields_leave_existing_manifests_hash_stable() {
         // Defaults are skipped when serializing, and a string literal serializes
         // exactly as it did when literals were strings only, so no manifest that
-        // predates D78 changes its hash.
+        // predates D79 changes its hash.
         let canonical = serde_json::to_string(&default_cli_world()).unwrap();
         assert!(!canonical.contains("\"exposed\""));
         assert!(!canonical.contains("\"mcp_surface\""));

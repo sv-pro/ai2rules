@@ -1,4 +1,4 @@
-//! End-to-end test for `harness mcp-author` (DECISIONS D78, PLAN E13.4c): the
+//! End-to-end test for `harness mcp-author` (DECISIONS D79, PLAN E13.4c): the
 //! authoring page's server, driven over real HTTP against `harness mock-jira
 //! --rovo --echo`, and the file it saves served by the real `mcp-gateway`.
 

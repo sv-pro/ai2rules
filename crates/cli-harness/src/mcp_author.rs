@@ -1,5 +1,5 @@
 //! `harness mcp-author` — the authoring page for a scoped MCP surface (PLAN
-//! E13.4c with E11.4, DECISIONS D78).
+//! E13.4c with E11.4, DECISIONS D79).
 //!
 //! It spawns the upstream MCP server once, lists its tools, and serves a local page
 //! where an operator names the surface, picks the tools that exist, renames them,
@@ -380,7 +380,7 @@ fn save(session: &Session, manifest: &Value) -> Value {
     // The upstream command line is deliberately not recorded: it can carry
     // credentials, and the file is meant to be committed.
     let text = format!(
-        "# World manifest written by `harness mcp-author` (DECISIONS D78).\n\
+        "# World manifest written by `harness mcp-author` (DECISIONS D79).\n\
          # Serve it with: harness mcp-gateway --world <this file> -- <upstream command>\n{yaml}"
     );
     match write_atomically(&session.world_path, &text) {

@@ -118,7 +118,7 @@ impl<'w> IRBuilder<'w> {
         }
 
         // 4. Schema — validate arguments against the frozen descriptor. A scoped
-        //    capability's input rules (D78) are checked first, on the values the
+        //    capability's input rules (D79) are checked first, on the values the
         //    actor actually supplied, before they are mapped to base names.
         if let Some(cap) = self.world.scoped_capability(&action) {
             check_input_rules(&action, cap, &call.arguments)?;
@@ -211,7 +211,7 @@ fn schema_args_for(world: &CompiledWorld, action: &ActionName, actor_args: &Valu
     Value::Object(out)
 }
 
-/// Refuse an actor-supplied value an input rule does not admit (D78). An absent
+/// Refuse an actor-supplied value an input rule does not admit (D79). An absent
 /// argument is left to the base schema's `required` list.
 fn check_input_rules(
     action: &ActionName,

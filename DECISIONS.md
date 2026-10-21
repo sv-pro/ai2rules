@@ -2972,7 +2972,7 @@ state needs a monotonic counter outside the attacker's reach; the store's placem
 outside the governed project (D57/D67) remains the primary defence. What D78 changes
 is the bar: from "delete a line" to "have saved the head at the right moment".
 
-## D78 — A scoped capability can rename and limit an MCP tool's arguments; the world can hide the tool it wraps
+## D79 — A scoped capability can rename and limit an MCP tool's arguments; the world can hide the tool it wraps
 
 **Date:** 2026-10-05. Phase 1 of **E13.4** (the MCP projection shim): manifest and kernel
 only. The gateway does not serve these tools yet; that is phase 2.
@@ -3036,7 +3036,7 @@ still lists tools by upstream name only, so scoped capabilities are not served o
 **Related:** D33, D45, D51, D68, D72; PLAN E13.4;
 `crates/world-kernel/tests/scoped_mcp_surface.rs`.
 
-### D78 amendment (2026-10-05) — phase 2: the gateway serves the surface (E13.4b)
+### D79 amendment (2026-10-05) — phase 2: the gateway serves the surface (E13.4b)
 
 - **A declared `mcp_surface` switches the gateway to the backing as the source of truth.** An
   action is served when its `McpServer` backing names the surface's upstream, under the
@@ -3065,7 +3065,7 @@ still lists tools by upstream name only, so scoped capabilities are not served o
   host when only this adapter executes; *re-running `decide` in the gateway to lower* — a second
   verdict that could disagree with the first.
 
-### D78 amendment (2026-10-06) — phase 3: the authoring page (E13.4c)
+### D79 amendment (2026-10-06) — phase 3: the authoring page (E13.4c)
 
 - **`harness mcp-author --world W -- <upstream>`** spawns the upstream once and serves a local
   page: name the surface, tick the tools that exist, rename them, fix or limit each argument,

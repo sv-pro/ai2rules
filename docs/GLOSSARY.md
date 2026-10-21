@@ -127,7 +127,7 @@ defined below under *Action layer*.
 - **Scoped capability** *(Action/Capability)* — a base action narrowed by locking
   args to literals (e.g. `run_tests` always runs `pytest`; injected/unknown args
   are stripped — invariant 12). An actor-supplied argument can also be renamed and
-  limited to a list of values or a prefix (`!Input { as, one_of, prefix }`, D78);
+  limited to a list of values or a prefix (`!Input { as, one_of, prefix }`, D79);
   the wrapped base action can be kept off the surface with `exposed: false`.
 - **roots** *(Action)* — the manifest's path-scoped capabilities: which paths an
   action may read and which it may write (spatial confinement). **Not MCP `roots`.**

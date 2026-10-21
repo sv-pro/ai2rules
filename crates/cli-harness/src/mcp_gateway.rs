@@ -14,7 +14,7 @@
 //!   (finding #14).
 //! - `tools/call` → `gate()` decides; the call is forwarded **only on ALLOW**;
 //!   DENY / ABSENT / ASK come back as an MCP tool error.
-//! - a world that declares an `mcp_surface` (D78) is served by its backings: each
+//! - a world that declares an `mcp_surface` (D79) is served by its backings: each
 //!   scoped capability is offered under its own name with the schema the model
 //!   supplies, the kernel's lowered `ExecutionSpec` is what goes upstream (renamed
 //!   arguments mapped back, literals injected, extras stripped), and the gateway
@@ -218,11 +218,11 @@ fn audit(path: Option<&Path>, entry: Value) {
 /// The upstream tool that serves a world action, or `None` when this gateway does
 /// not serve it.
 ///
-/// With an `mcp_surface` (D78) the backing is authoritative: an action is served
+/// With an `mcp_surface` (D79) the backing is authoritative: an action is served
 /// when its `McpServer` backing names the surface's upstream, under the backing's
 /// tool name — so several scoped capabilities can wrap one upstream tool under
 /// names of their own. Without one, the world names upstream tools directly by
-/// action name, as every world did before D78; their backings were never read
+/// action name, as every world did before D79; their backings were never read
 /// here, and some name tools the upstream does not have.
 pub(crate) fn served_tool(world: &CompiledWorld, action: &ActionName) -> Option<String> {
     let Some(surface) = world.mcp_surface() else {
@@ -276,7 +276,7 @@ fn surface_tools(world: &CompiledWorld, upstream: &[Value]) -> (Vec<Value>, usiz
 /// extra argument onto an allowed tool cannot get that argument in front of the
 /// model. Returns the projected tool and whether the upstream's schema differed.
 ///
-/// A scoped capability (D78) is offered under its own name, with the schema the
+/// A scoped capability (D79) is offered under its own name, with the schema the
 /// model supplies — renamed arguments, locked ones left out, limits stated — and,
 /// when the world gives one, its own description.
 ///
@@ -313,11 +313,11 @@ fn project_tool(
 
 /// What to send upstream for an allowed call: the tool name and its arguments.
 ///
-/// With an `mcp_surface` (D78) this is the kernel's `ExecutionSpec` — the
+/// With an `mcp_surface` (D79) this is the kernel's `ExecutionSpec` — the
 /// backing tool, with renamed arguments mapped back, literals injected and
 /// extras stripped — never the call as the model proposed it. A call the kernel
 /// allowed but could not lower is refused. Without a surface the call is
-/// forwarded as proposed, as before D78: the world names upstream tools directly
+/// forwarded as proposed, as before D79: the world names upstream tools directly
 /// and declares no scoping the gateway would have to apply.
 pub(crate) fn forward_target(
     world: &CompiledWorld,

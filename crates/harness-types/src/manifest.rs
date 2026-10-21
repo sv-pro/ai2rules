@@ -60,7 +60,7 @@ pub struct BaseActionDef {
     pub backing: Option<BackingIdentity>,
     #[serde(default)]
     pub approval_required: bool,
-    /// Whether the action is on the model-facing surface (DECISIONS D78). `false`
+    /// Whether the action is on the model-facing surface (DECISIONS D79). `false`
     /// keeps it in the ontology as the backing of scoped capabilities while the
     /// model sees it as ABSENT. Skipped when `true` so existing manifests keep
     /// their hash.
@@ -85,7 +85,7 @@ pub enum ArgSource {
     /// Supplied by the actor at call time, under the argument's own name.
     ActorInput,
     /// Supplied by the actor at call time, optionally renamed and limited to
-    /// allowed values (DECISIONS D78).
+    /// allowed values (DECISIONS D79).
     Input(InputRule),
     /// Resolved from a named runtime context key.
     ContextRef(String),
@@ -104,7 +104,7 @@ impl ArgSource {
     }
 }
 
-/// How the actor may supply one scoped-capability argument (DECISIONS D78).
+/// How the actor may supply one scoped-capability argument (DECISIONS D79).
 /// Both limits apply when both are set.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputRule {
@@ -139,7 +139,7 @@ pub struct ScopedCapabilityDef {
     pub base_action: ActionName,
     #[serde(default)]
     pub args: BTreeMap<String, ArgSource>,
-    /// What the model is told the tool does (D78). A gateway shows this instead of
+    /// What the model is told the tool does (D79). A gateway shows this instead of
     /// the upstream's description, which names the base action's arguments and is
     /// untrusted text besides (D51). Skipped when absent so existing manifests keep
     /// their hash.
@@ -147,7 +147,7 @@ pub struct ScopedCapabilityDef {
     pub description: Option<String>,
 }
 
-/// The MCP server a gateway presents in place of its upstream (DECISIONS D78):
+/// The MCP server a gateway presents in place of its upstream (DECISIONS D79):
 /// the name it announces, and which `McpServer` backing it fronts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpSurfaceDef {
@@ -305,7 +305,7 @@ pub struct WorldManifest {
     /// pre-roots manifests keep their hash and their behavior unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roots: Option<RootsDef>,
-    /// The MCP server a gateway presents for this world (DECISIONS D78). Absent ⇒
+    /// The MCP server a gateway presents for this world (DECISIONS D79). Absent ⇒
     /// the gateway keeps its default name; skipped so existing manifests keep
     /// their hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,5 +1,5 @@
 //! End-to-end test for `harness mcp-gateway` serving a **scoped MCP surface**
-//! (DECISIONS D78, PLAN E13.4b): the world presents itself as `My_Jira`, offers
+//! (DECISIONS D79, PLAN E13.4b): the world presents itself as `My_Jira`, offers
 //! upstream tools under names of its own with renamed and limited arguments, and
 //! forwards the kernel's lowered call — never the call as the model proposed it.
 //!

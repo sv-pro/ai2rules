@@ -113,7 +113,7 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
     }
 
     // Default projection exposes the whole ontology, minus base actions the
-    // manifest keeps off the surface (D78): they stay in the ontology so scoped
+    // manifest keeps off the surface (D79): they stay in the ontology so scoped
     // capabilities can name them, but the model sees them as ABSENT. Dynamic
     // narrowing by taint and context is a runtime concern (E2 / Layer 2).
     parts.projected = parts.ontology.clone();

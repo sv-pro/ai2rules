@@ -70,7 +70,7 @@ pub struct CompiledWorldParts {
     /// pre-roots compiled worlds keep a stable serialized form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roots: Option<RootsDef>,
-    /// The MCP server a gateway presents for this world (DECISIONS D78). Skipped
+    /// The MCP server a gateway presents for this world (DECISIONS D79). Skipped
     /// when absent so earlier compiled worlds keep a stable serialized form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_surface: Option<McpSurfaceDef>,
@@ -161,7 +161,7 @@ impl CompiledWorld {
     pub fn command_classes(&self) -> &[CommandClassDef] {
         &self.parts.command_classes
     }
-    /// The MCP server a gateway presents for this world, if declared (D78).
+    /// The MCP server a gateway presents for this world, if declared (D79).
     pub fn mcp_surface(&self) -> Option<&McpSurfaceDef> {
         self.parts.mcp_surface.as_ref()
     }

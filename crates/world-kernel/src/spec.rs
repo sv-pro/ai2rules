@@ -228,7 +228,7 @@ fn effective_params(
         match source {
             // Copy only what the actor is allowed to set; anything else they
             // sent is never read here, so it is stripped.
-            // Read under the name the actor sees (D78); the spec carries the
+            // Read under the name the actor sees (D79); the spec carries the
             // base action's name, which is what the backing understands.
             ArgSource::ActorInput | ArgSource::Input(_) => {
                 let actor_name = source.actor_name(name).unwrap_or(name);

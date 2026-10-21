@@ -53,7 +53,7 @@ pub fn effective_floor_taint(
             continue; // design-time literal → clean by construction
         }
         // Known per-argument taint refines; unknown fails closed to ambient. A
-        // renamed input (D78) carries its taint under the name the actor used.
+        // renamed input (D79) carries its taint under the name the actor used.
         let key = literal_args
             .get(arg)
             .and_then(|source| source.actor_name(arg))
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn renamed_input_is_judged_by_the_taint_of_the_name_the_actor_used() {
-        // D78: the actor supplies `issue`, the role is declared on the base name
+        // D79: the actor supplies `issue`, the role is declared on the base name
         // `key`. The floor must read the taint recorded under `issue`, or a tainted
         // renamed argument would be judged by whatever `key` happens to carry.
         let inputs: BTreeMap<String, ArgSource> = [(

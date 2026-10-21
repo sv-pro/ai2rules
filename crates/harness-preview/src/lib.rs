@@ -67,7 +67,7 @@ pub fn preview(yaml: &str) -> Value {
             "args": scoped.map(|c| {
                 c.args.iter().map(|(k, v)| (k.clone(), describe_arg(v))).collect::<serde_json::Map<_, _>>()
             }),
-            // What the model is shown (D78): renamed, with locked args left out.
+            // What the model is shown (D79): renamed, with locked args left out.
             "input_schema": model_facing_schema(&world, action),
         }));
         decisions.push(json!({

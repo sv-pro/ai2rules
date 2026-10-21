@@ -202,7 +202,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   invariant 12); MCP calls dispatch via a pluggable `McpTransport` through the
   same descriptor/drift path (invariant 11); web fetch is an always-tainted
   channel (invariant 7). MCP/web use deterministic **mock** transports (real
-  stdio/HTTP deferred). Part of Milestone 3. Since D78 a scoped capability can
+  stdio/HTTP deferred). Part of Milestone 3. Since D79 a scoped capability can
   also rename an argument and limit it to a list of values or a prefix, a base
   action can be kept off the surface (`exposed: false`) while scoped capabilities
   wrap it, and `mcp_surface` names the server a gateway will present. With a
@@ -278,7 +278,7 @@ via an `mcp-remote` OAuth bridge with no kernel change — and its shaping is pr
 offline (no creds) by `harness mock-jira --rovo`, which advertises the genuine Rovo
 tool names (see [`docs/demos/jira-copilot/REAL-ATLASSIAN.md`](docs/demos/jira-copilot/REAL-ATLASSIAN.md)).
 
-**Author your own MCP surface (D78, E13.4):** `harness mcp-author` connects to an MCP
+**Author your own MCP surface (D79, E13.4):** `harness mcp-author` connects to an MCP
 server and opens a local page where you name the surface the gateway will present
 (say `My_Jira`), tick the tools that exist (everything else is ABSENT), rename them,
 fix arguments to hidden values, and limit the rest to a list of values or a prefix.
@@ -355,7 +355,7 @@ crates/               the harness implementation
   trace-store/        append-only audit, redaction, replay (E4)
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
-  cli-harness/        terminal entrypoint + `serve`/`gate`/`project`/`mcp-gateway`/`mcp-author`/host adapters (binary `harness`) (E9, E11, E13.4, E16, D48, D72, D78)
+  cli-harness/        terminal entrypoint + `serve`/`gate`/`project`/`mcp-gateway`/`mcp-author`/host adapters (binary `harness`) (E9, E11, E13.4, E16, D48, D72, D79)
   harness-preview/    pure preview + runtime gate() ABI + discovery projection, shared by serve, wasm, `harness gate` and `harness project` (E11/E14, D24, D75)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
   govbench/           MCP governance benchmark runner: 3 scenarios, weak baseline vs ai2rules (E18)

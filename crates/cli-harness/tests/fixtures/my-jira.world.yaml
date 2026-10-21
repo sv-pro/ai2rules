@@ -1,4 +1,4 @@
-# A scoped MCP surface (DECISIONS D78) over the Rovo-named mock upstream
+# A scoped MCP surface (DECISIONS D79) over the Rovo-named mock upstream
 # (`harness mock-jira --rovo`). Driven by tests/mcp_gateway_scoped.rs.
 #
 # The gateway presents itself as `My_Jira`. The model sees:

@@ -184,7 +184,7 @@ pub(crate) fn declared_arg_names(
     out
 }
 
-/// The argument schema the model is shown for `action` (D78), or `None` when the
+/// The argument schema the model is shown for `action` (D79), or `None` when the
 /// world does not describe it.
 ///
 /// A base action shows its descriptor schema unchanged. A scoped capability shows

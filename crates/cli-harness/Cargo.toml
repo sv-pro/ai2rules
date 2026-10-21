@@ -21,7 +21,7 @@ provider-adapters = { workspace = true }
 trace-store = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# Renders authored manifests as YAML (harness mcp-author, D78).
+# Renders authored manifests as YAML (harness mcp-author, D79).
 serde_yaml = "0.9"
 tempfile = { workspace = true }
 clap = { version = "4.6.1", features = ["derive"] }

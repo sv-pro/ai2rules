@@ -167,7 +167,7 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
 }
 
 /// [`gate`], plus — for an `ALLOW` — the `ExecutionSpec` the kernel lowers the
-/// call to (D78). A scoped capability's renamed arguments, injected literals and
+/// call to (D79). A scoped capability's renamed arguments, injected literals and
 /// stripped extras are applied there, so an adapter that executes forwards the
 /// spec rather than the call it was proposed as: only an `ExecutionSpec` crosses
 /// into execution. `None` for any other verdict; `Some(Err)` when an allowed call

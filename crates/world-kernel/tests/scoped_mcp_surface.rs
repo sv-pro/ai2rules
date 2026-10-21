@@ -1,4 +1,4 @@
-//! Scoped MCP surfaces (DECISIONS D78): a world that hides its upstream tools,
+//! Scoped MCP surfaces (DECISIONS D79): a world that hides its upstream tools,
 //! re-exposes them under new names with renamed arguments, and limits what the
 //! actor may supply. Driven through the real compiler and kernel.
 

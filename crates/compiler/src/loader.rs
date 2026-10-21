@@ -65,7 +65,7 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
         validate_scoped_args(manifest, cap)?;
     }
 
-    // An MCP surface (D78) must front a server some base action is backed by;
+    // An MCP surface (D79) must front a server some base action is backed by;
     // otherwise the gateway would announce a name for nothing it can reach.
     if let Some(surface) = &manifest.mcp_surface {
         if surface.name.trim().is_empty() {
@@ -152,7 +152,7 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
     Ok(())
 }
 
-/// Check one scoped capability's arguments (D78): every name the actor supplies
+/// Check one scoped capability's arguments (D79): every name the actor supplies
 /// is unique and non-empty, and every input rule can admit at least one value.
 fn validate_scoped_args(
     manifest: &WorldManifest,
