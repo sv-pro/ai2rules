@@ -58,6 +58,12 @@ check() {
 echo "== building (once) =="
 cargo build --workspace --examples --quiet || { echo "build failed"; exit 1; }
 
+# Shell demos take `$HARNESS`, else whatever `harness` is on PATH. Pin them to the
+# binary just built: an installed release (in WSL, even a Windows npm shim via the
+# inherited PATH) would otherwise be what got checked, and a stale or foreign one
+# fails open — every beat printed `<silent: defer to host>`.
+export HARNESS="$PWD/target/debug/harness"
+
 echo
 echo "== crate examples =="
 
@@ -120,6 +126,18 @@ check "replace-permissions/demo.sh" \
   '(taint floor) -> deny' \
   '(destructive -> ask) -> ask' \
   'ABSENT) -> deny'
+
+echo
+echo "== story demos =="
+
+check "harness demo --story law-firm" \
+  "cargo run -q -p cli-harness -- demo --story law-firm" \
+  'ALLOW | session now TAINTED' \
+  'DENY (taint_invariant)' \
+  'ASK (approval_required)' \
+  'DENY (background_denies_ask)' \
+  'ABSENT (unknown_to_ontology)' \
+  'Replay: 10/10 decisions reproduced from the log'
 
 echo
 if [ "$fails" -gt 0 ]; then

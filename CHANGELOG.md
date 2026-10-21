@@ -50,6 +50,13 @@ below), which is more than a patch release should carry.
 - **`harness mcp-author --world W -- <upstream>`**: a local page that connects to an
   MCP server, lets you pick, rename and limit its tools, try calls through the real
   gate, and save the manifest.
+- **`harness demo --story law-firm`**: the first proof as a story for
+  non-engineers. An AI legal assistant reads a client email with a hidden
+  instruction; sending, uploading, deleting overnight and touching the trust
+  account are refused or absent, while its work goes on. The world is embedded,
+  so it runs from any folder with no `harness init`. Each verdict is the real
+  kernel's, the session's taint is carried exactly as an adapter carries it, and the
+  10 decisions are traced and replayed. Runbook: `docs/demos/law-firm/`.
 
 ## [0.6.0] — 2026-09-19
 

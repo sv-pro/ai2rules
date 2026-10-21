@@ -37,7 +37,8 @@ npm install -g ai2rules-harness   # or: cargo install --git https://github.com/s
 harness init                      # additive: adds deny/ask on top of the host's permissions
 harness init --grant              # replace: the manifest becomes the allowlist
 harness init --dry-run            # print the plan, write nothing
-harness demo                      # decision-only proof: 8 cases through the real kernel, no execution
+harness demo                      # decision-only proof: 5 cases through the real kernel, no execution
+harness demo --story law-firm     # the same kind of proof as a story, for non-engineers; no init needed
 ```
 
 Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
@@ -67,10 +68,19 @@ you just ran. It writes four things and is safe to run twice:
 
 ```bash
 harness demo
-# Runs 8 cases (Read, Write, Shell, JIRA_CREATE_ISSUE, scoped actions, path roots,
-# poisoned knowledge, classification) through the real kernel, records each verdict,
-# and replays them to prove determinism. Decision-only, no tool execution.
-# Footer: "Next: harness doctor" (planned, not yet shipped; see issue AI2-25).
+# Runs 5 cases through the real kernel over this project's world: a local write
+# (ALLOW), an out-of-root write in background (DENY), a network call from a tainted
+# session (DENY), and `rm -rf` interactive (ASK) and in background (DENY). It records
+# each verdict and replays them to prove determinism. Decision-only, no tool execution.
+```
+
+For someone who does not write code, tell it as a story instead. An AI legal
+assistant reads a client email with a hidden instruction, and every way out of the
+firm closes. It runs from any folder, over its own embedded world; the runbook and
+talking points are in [`docs/demos/law-firm/`](docs/demos/law-firm/):
+
+```bash
+harness demo --story law-firm
 ```
 
 Or ask the kernel directly about one proposed call:
@@ -336,7 +346,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **398 tests** green.
+Builds clean offline with `clippy -D warnings`; **399 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

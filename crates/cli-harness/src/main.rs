@@ -25,6 +25,7 @@ mod mcp_gateway;
 mod mock_jira;
 mod project;
 mod serve;
+mod story;
 
 /// ai2rules
 #[derive(Parser, Debug)]
@@ -75,7 +76,12 @@ enum Command {
         dry_run: bool,
     },
     /// Run the safe first-proof scenarios over the real compiled project world.
-    Demo,
+    Demo {
+        /// Tell a story instead, over its own embedded world: no `harness init`
+        /// needed. `law-firm`: an AI legal assistant reads a poisoned client email.
+        #[arg(long, value_enum)]
+        story: Option<story::Story>,
+    },
     /// Inspect effective coverage: report on installation, hook, manifest, and
     /// projected actions in the current project (AI2-25 / #84 skeleton).
     Doctor {
@@ -348,8 +354,11 @@ fn main() {
         std::process::exit(init::run(target, *grant, *force, *dry_run));
     }
 
-    if matches!(&cli.command, Some(Command::Demo)) {
-        std::process::exit(demo::run(cli.world.as_deref()));
+    if let Some(Command::Demo { story }) = &cli.command {
+        std::process::exit(match story {
+            Some(story) => story::run(*story),
+            None => demo::run(cli.world.as_deref()),
+        });
     }
 
     if let Some(Command::Doctor { json }) = &cli.command {
