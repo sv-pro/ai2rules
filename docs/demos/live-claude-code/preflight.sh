@@ -2,7 +2,7 @@
 # preflight.sh - check the stand right before the demo, after setup.sh and with the
 # receiver running. Read-only: it changes nothing, and talks only to 127.0.0.1.
 #
-#   bash preflight.sh [DEST]      DEST defaults to ~/ai2rules-live-demo
+#   bash preflight.sh [DEST]      DEST defaults to ~/northwind
 #
 # Checks: the harness binary, the two project copies, that both demo names resolve
 # to this machine and reach the receiver, that the page served is the plain one,
@@ -10,7 +10,9 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DEST="${1:-$HOME/ai2rules-live-demo}"
+DEST="${1:-$HOME/northwind}"
+PLAIN="$DEST/vendor-desk-1"
+GUARDED="$DEST/vendor-desk-2"
 PORT="${PORT:-8787}"
 NAMES=(portal.northwind.test files.northwind.test)
 fails=0
@@ -25,15 +27,15 @@ else
   fail "no 'harness' on PATH: npm install -g ai2rules-harness@latest"
 fi
 
-if [ -f "$DEST/governed/.claude/settings.json" ] && [ -f "$DEST/governed/client-data.csv" ]; then
-  ok "governed copy: $DEST/governed (hook installed)"
+if [ -f "$PLAIN/client-data.csv" ] && [ ! -e "$PLAIN/.claude" ]; then
+  ok "left window:  $PLAIN (plain, no hook)"
 else
-  fail "governed copy missing or incomplete: run setup.sh"
+  fail "left copy missing or has a .claude folder: run setup.sh"
 fi
-if [ -f "$DEST/ungoverned/client-data.csv" ] && [ ! -e "$DEST/ungoverned/.claude" ]; then
-  ok "ungoverned copy: $DEST/ungoverned (no hook)"
+if [ -f "$GUARDED/.claude/settings.json" ] && [ -f "$GUARDED/client-data.csv" ]; then
+  ok "right window: $GUARDED (ai2rules hook installed)"
 else
-  fail "ungoverned copy missing or has a .claude folder: run setup.sh"
+  fail "right copy missing or incomplete: run setup.sh"
 fi
 
 hosts_hint=0

@@ -6,7 +6,7 @@ file either leaving or being stopped, without anything touching the internet. It
 binds to 127.0.0.1, writes what it receives under --out, and never forwards
 anything anywhere: it is the destination, not a proxy.
 
-    python3 receiver.py --port 8787 --out ~/ai2rules-live-demo/received
+    python3 receiver.py --port 8787 --out ~/northwind-inbox
 
 The demo addresses it by name, so the audience sees ordinary-looking sites rather
 than 127.0.0.1. Both names live under `.test`, which is reserved (RFC 6761) and
@@ -114,7 +114,7 @@ def main():
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument(
         "--out",
-        default=str(pathlib.Path.home() / "ai2rules-live-demo" / "received"),
+        default=str(pathlib.Path.home() / "northwind-inbox"),
         help="where received uploads are written",
     )
     ap.add_argument(
