@@ -121,13 +121,32 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
 
 ## Conventions
 
-- **Task tracking spans GitHub *and* Linear.** The maintainer
-  (sergeyvlasov.pro@gmail.com) manages this project's work in **both** GitHub
-  (issues/PRs) and Linear — the two are kept in sync by hand, not mirrored
-  automatically. When picking up, closing out, or cross-referencing a task,
-  check and update **both** systems; an item done on one side is not done until
-  the other reflects it. `PLAN.md` remains the epic-level source of truth for
-  scope; GitHub + Linear track the live task state.
+- **Linear plans the work; GitHub holds the code.** The maintainer
+  (sergeyvlasov.pro@gmail.com) splits task tracking by audience rather than
+  copying every item into both systems (changed 2026-10-22; before that, every
+  task was duplicated by hand and the two drifted):
+  - **Linear (team `AI2`) is where work is planned and its live state is kept.**
+    Initiatives are business or product goals; Projects are epics, one per
+    `PLAN.md` epic worth tracking; Issues are the work itself, code included.
+    New work starts as a Linear issue.
+  - **Private work lives only in Linear.** This repository and its issues are
+    public. Partners, prospects, deals, outreach and anything naming a person
+    outside the project never go into GitHub issues, PRs, commits or files.
+  - **A GitHub issue exists only when people outside the project should see the
+    work**: a bug or question from a user, a public roadmap item, a research
+    note meant for the community. Link it to its Linear issue both ways (the
+    Linear issue carries the GitHub URL as a link; the GitHub issue title starts
+    with `[AI2-<n>]`).
+  - **PRs link to Linear by key.** Put `AI2-<n>` in the branch name and the PR
+    title (`[AI2-<n> / #<n>]` when a GitHub issue exists too). Linear's GitHub
+    integration then attaches the PR and moves the issue as the PR opens and
+    merges, so nobody updates statuses by hand.
+  - `PLAN.md` stays the source of truth for epic *scope* (design, acceptance
+    invariants); Linear holds the *state*. Keep the epic checkboxes in step when
+    an epic's items land.
+
+  Items created before the split (for example AI2-44…51 / #116…#123) stay
+  linked on both sides; close both when they are done.
 - **Keep `README.md` current on every commit.** If a change affects project
   status, capabilities, crate layout, build/run instructions, or test counts,
   update the README's Status / layout / Build & test sections in the *same*
