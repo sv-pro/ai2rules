@@ -15,11 +15,13 @@ use world_kernel::ExecEnv;
 
 mod agy_hook;
 mod cc_hook;
+mod console;
 mod demo;
 mod doctor;
 mod doctor_collector;
 mod hostkit;
 mod init;
+mod local_page;
 mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
@@ -217,6 +219,12 @@ enum Command {
         /// even on a hook `allow`). Default off: ALLOW stays a silent passthrough.
         #[arg(long)]
         grant: bool,
+        /// Append one JSON line per decision to this file: what the agent tried,
+        /// the verdict, the rule and the session's taint after the call. It is
+        /// what `harness console` shows as its live feed. Observability only: a
+        /// log that cannot be written never changes the verdict. Off by default.
+        #[arg(long)]
+        log: Option<PathBuf>,
     },
     /// Antigravity CLI (`agy`) PreToolUse adapter, in Rust (D48): read an
     /// Antigravity `PreToolUse` payload on stdin, govern it with the kernel
@@ -288,6 +296,26 @@ enum Command {
         /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
+    },
+    /// The policy console (D81 / E15.7): a local page whose profiles and
+    /// Allow / Ask / Off switches rewrite a project's world file, which
+    /// `harness cc-hook` reads on every call, so a live Claude Code session
+    /// changes behaviour on its next tool call. The hook's `--log` is the page's
+    /// live feed. The kernel still decides every call.
+    Console {
+        /// The project governed by `harness cc-hook` (it has `.claude/cc-world.yaml`).
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        /// The world file to edit. Default: `<project>/.claude/cc-world.yaml`.
+        #[arg(long)]
+        world: Option<PathBuf>,
+        /// The hook's decision log to show. Default:
+        /// `<project>/.claude/state/decisions.jsonl`.
+        #[arg(long)]
+        log: Option<PathBuf>,
+        /// Local port for the page (127.0.0.1 only). 0 picks a free one.
+        #[arg(long, default_value_t = 8790)]
+        port: u16,
     },
     /// Author a scoped MCP surface in the browser (D79 / E13.4c): connect to an
     /// upstream MCP server, pick and rename its tools, fix or limit their
@@ -452,6 +480,7 @@ fn main() {
         source_channel,
         enforce_absent,
         grant,
+        log,
     }) = &cli.command
     {
         std::process::exit(cc_hook::run(
@@ -461,6 +490,7 @@ fn main() {
             source_channel,
             *enforce_absent,
             *grant,
+            log.as_deref(),
         ));
     }
 
@@ -482,6 +512,21 @@ fn main() {
             *enforce_absent,
             *grant,
             *soft_ask,
+        ));
+    }
+
+    if let Some(Command::Console {
+        project,
+        world,
+        log,
+        port,
+    }) = &cli.command
+    {
+        std::process::exit(console::run(
+            project,
+            world.as_deref(),
+            log.as_deref(),
+            *port,
         ));
     }
 
