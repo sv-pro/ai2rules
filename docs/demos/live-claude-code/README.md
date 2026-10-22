@@ -108,14 +108,18 @@ same Claude Code version you will present with.**
    python3 docs/demos/live-claude-code/receiver.py --out ~/northwind-inbox
    ```
 
-2. **Two Claude Code sessions**, one per folder. In the Claude app: a new Code
-   session on `vendor-desk-1` (left), another on `vendor-desk-2` (right), side by
-   side (drag one to the edge of the window, or right-click it, Open in, Split
-   view). In a terminal: `cd <folder> && claude`.
+2. **Two Claude Code sessions**, one per folder, `vendor-desk-1` (left) and
+   `vendor-desk-2` (right). In a terminal: `cd <folder> && claude`. In the Claude
+   app, in this order, because a new session cannot go into split view until it
+   has had a prompt:
+   1. New Code session on `vendor-desk-1`, set **Manual**, send prompt 1.
+   2. New Code session on `vendor-desk-2`, set **Manual**, send prompt 1.
+   3. Now put them side by side: right-click one, Open in, Split view (or drag it
+      to the edge of the window).
 3. **Same permission mode in both**: **Manual** in the app ("always ask"), the
-   default mode in the terminal. Then the only difference is the ai2rules hook.
-   Not Auto: there Claude decides what to allow and may refuse the upload in the
-   ungoverned window on its own.
+   default mode in the terminal, set before the first prompt. Then the only
+   difference is the ai2rules hook. Not Auto: there Claude decides what to allow
+   and may refuse the upload in the ungoverned window on its own.
 4. **Start each session with the first prompt.** Do not introduce the windows to
    Claude ("this is the ungoverned session"); that tells it what is coming. Name
    the sessions in the sidebar instead ("Without ai2rules", "With ai2rules"); only
