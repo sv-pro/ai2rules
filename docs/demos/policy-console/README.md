@@ -27,8 +27,8 @@ which ask first (DECISIONS D81).
 
 | Switch | Actions in the world | Off means |
 |---|---|---|
-| Read the web | `WebFetch`, `WebSearch`, `curl`/`wget` fetches | the agent has no way to read the web |
-| Send data out | `curl -F` / `-T` / `--data`, `scp`, `rsync`, … | no way to send |
+| Read the web | `WebFetch`, `WebSearch`, any `curl` / `wget` | the agent has no way to read the web |
+| Send data out | `scp`, `rsync`, `sftp`, `nc`, … | no way to send that way |
 | Delete files | `rm`, `rmdir`, `Remove-Item`, … | no way to delete |
 | Edit project files | `Edit`, `Write`, `MultiEdit`, `NotebookEdit` | the edit tools are gone |
 | Run scripts | `python`, `node`, `bash`, … | no interpreters |
@@ -155,9 +155,13 @@ console starts the feed over by itself when the log is reset.
 ## Honest limits
 
 - **Command classes are text patterns.** They are the world's judgement, not a shell
-  parser. A command they cannot place, or one that looks like two things at once
-  (`curl http://x -F f=@y`), is treated as unrecognised: it asks first, and after the
-  session has read from outside it is refused. With **Edit project files** Off, a
+  parser. Any `curl` or `wget` counts as reading the web, whatever its flags: an
+  earlier world listed flag combinations, and the first rehearsal's `curl -sS -i`
+  fell through to "unrecognised". A command they cannot place, or one that looks
+  like two things at once (a `curl` carrying `-F`, `-T` or `--data`), is treated as
+  unrecognised: it asks first, and after the session has read from outside it is
+  refused. So a curl upload asks even with **Send data out** Off; the switch governs
+  `scp`, `rsync` and the like. With **Edit project files** Off, a
   shell append (`printf … >> report.md`) is such a command, so it asks rather than
   being absent.
 - **PowerShell fetches and uploads share a verb** (`Invoke-WebRequest`), so a

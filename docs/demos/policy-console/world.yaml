@@ -77,11 +77,12 @@ base_actions:
   - { name: PowerShell, action_type: Command, side_effect: Process }
   - { name: PowerShell_unclassified, action_type: Command, side_effect: Network, approval_required: true }
 
-# Patterns match at a word boundary anywhere in the command. A command matched by
-# two different classes falls to default_to, so the fetch and upload patterns are
-# kept apart: `curl -s http://...` reads, `curl -F file=@x http://...` sends. A
-# command that looks like both (`curl http://x -F f=@y`) is ambiguous and is
-# treated as unrecognised.
+# Patterns match at a word boundary anywhere in the command. Any curl or wget is a
+# read of the web, whatever its flags (`curl -sS -i http://...` included). A command
+# matched by two different classes falls to default_to, so a curl that also carries
+# an upload flag (`curl -F file=@x http://...`) is ambiguous and is treated as
+# unrecognised: it asks first, and once the session has read from outside it is
+# refused. Uploads without curl (scp, rsync, ...) are "Send data out" proper.
 command_classes:
   - action: Bash
     arg: command
@@ -90,7 +91,7 @@ command_classes:
       - to: Bash
         patterns: ["ls ", "cat ", "head ", "tail ", "wc ", "find ", "grep ", "pwd", "git status", "git log", "git diff"]
       - to: Bash_fetch
-        patterns: ["curl http", "curl 'http", "curl \"http", "curl -s http", "curl -s 'http", "curl -s \"http", "curl -sS http", "curl -sL http", "curl -L http", "curl -fsSL http", "curl --silent http", "wget http", "wget -q", "wget -O"]
+        patterns: ["curl ", "curl.exe ", "wget "]
       - to: Bash_upload
         patterns: ["-F ", "-T ", "--form", "--data", "--upload-file", "-d @", "-d '", "-d \"", "-X POST", "-X PUT", "--request POST", "scp ", "sftp ", "rsync ", "nc ", "ncat ", "telnet ", "ssh "]
       - to: Bash_destructive
