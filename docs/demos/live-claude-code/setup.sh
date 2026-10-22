@@ -61,6 +61,8 @@ echo
 echo "Next:"
 echo "  1) start the receiver, and leave it running:"
 echo "       $PY $HERE/receiver.py --out $DEST/received"
+echo "     then check the stand (needs the hosts.txt lines once per machine):"
+echo "       bash $HERE/preflight.sh"
 echo "  2) open Claude Code twice, one session per folder, in the SAME permission mode"
 echo "     (Manual in the Claude app, the default ask mode in the terminal):"
 echo "       Claude app : a new Code session on each folder, side by side"
