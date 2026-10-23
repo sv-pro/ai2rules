@@ -3236,3 +3236,84 @@ header block, which the console keeps. Switches only exist for action names the 
 declares, so the console is generic over any world that uses the demo's names, and silent
 about the rest. Command classes stay text patterns: a command that matches two switches'
 classes is unrecognised and asks, whatever either switch says.
+
+## D82 — Machine-wide governance: a user scope for convenience, a managed scope for control
+
+**Date:** 2026-10-21. Adds `harness init --user` and `harness init --managed`
+(`crates/cli-harness/src/init_machine.rs`, `docs/machine-wide-governance.md`).
+
+**Context.** `harness init` governs one folder. A session opened anywhere else, even
+next door to a governed project, is ungoverned. The question came up while preparing
+the live demo ("can it govern all of Claude Code, whatever the folder?"), and again
+from the enterprise side ("it should install like a corporate endpoint agent: on
+the work machine, and the employee cannot turn it off"). Claude Code reads hooks
+from two scopes that apply to every folder. Checked against its docs on 2026-10-21:
+
+- user settings `~/.claude/settings.json`;
+- managed settings, a `managed-settings.json` in an admin-only system directory, or
+  HKLM / MDM / the claude.ai console.
+
+Hooks from all scopes merge, and the strictest PreToolUse answer wins
+(deny > defer > ask > allow). The two scopes differ in one property that decides
+everything: `disableAllHooks` in any non-managed file, a project's committed
+`.claude/settings.json` included, turns off user hooks, but **nothing below the
+managed tier can turn off a managed hook**.
+
+**Decision.** Two install scopes, sharing the starter manifest, the settings merge
+and the symlink refusal with project `init`:
+
+- **`--user`** writes the world, shim and state under `~/.claude/ai2rules/user/` and
+  merges the hook into `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR`).
+  - Additive by default. A user-scope `--grant` would skip Claude Code's prompts in
+    every folder.
+  - State is absolute: cc-hook's default `.claude/state` is cwd-relative and would
+    scatter sidecars into every project.
+  - `--remove` unregisters the hook and drops the containers it created, so
+    install-then-remove gives back the original document.
+- **`--managed`** writes into the system policy directory. It copies the kernel in
+  (admin-owned, so it cannot be swapped). Its shim has **no kill-switch and no
+  `HARNESS_BIN` override**: both live where the governed user can write, and either
+  would make the policy optional. State is per-user, resolved from `$HOME` at run
+  time.
+- **The machine-scope world protects what can switch it off.** The starter makes a
+  project's whole `.claude/` read-only. At machine scope that would block ordinary
+  work in every repository. So the rule is narrowed to:
+  - the project's `settings.json` and `settings.local.json`, where `disableAllHooks`
+    would go;
+  - `~/.claude/ai2rules`: the world, shim, state and every kill-switch;
+  - `~/.claude/settings.json`.
+- **A project with its own ai2rules hook runs both.** Each keeps its own state;
+  Claude Code takes the stricter verdict. The user hook never steps aside when it
+  sees a project hook. Stepping aside would let any repository plant a weak hook to
+  switch the user one off.
+
+Found while smoke-testing on Windows, and fixed in `hostkit::canonicalize_root_paths`:
+a root on a not-yet-existing drive-letter path stayed lexical (`C:\p/.claude/x`),
+while the action path is canonical (`//?/C:/p/.claude/x`). The rule never matched,
+so a read-only rule on a file that did not exist yet fell to the roots default. Such
+roots now resolve from their nearest existing ancestor, the way action paths already
+did. Roots starting with `/` are untouched, so Linux and macOS behave as before.
+
+**Alternatives.**
+
+- *Only the user scope.* Rejected as the organisation answer, because a single line
+  in a cloned repository's settings switches it off. Kept as the personal one.
+- *Have `init --managed` set `allowManagedHooksOnly`.* Rejected as a default. It
+  disables every developer and project hook in the organisation, which is a policy
+  choice, not an install step, and ai2rules does not need it: a managed `deny`
+  already beats any other hook's `allow`. Documented as optional hardening.
+- *Fail closed when the managed kernel is missing.* Rejected for now. Only an
+  administrator can remove it, so fail-open hands the user no switch, while
+  fail-closed turns a bad deployment into an outage for everyone.
+- *Write the policy to the HKLM registry.* Not done. The file is the documented
+  lowest-common-denominator across Windows, macOS and Linux, and fleet tools
+  deliver either form.
+
+**Consequence.** One command now covers every session for an account, and one
+elevated command covers a whole machine in a way its user cannot undo. The honest
+limit, which is also where an endpoint product would go next: the taint state is
+per-user and writable by that user, because the hook runs as that user. The agent's
+file tools are kept off it, but a person, or an approved Bash command, can delete a
+marker. Closing that needs the kernel's state behind a boundary the user cannot
+cross, such as a system service the hook asks. Also unverified: whether `claude
+--bare` skips managed hooks. The docs do not say.

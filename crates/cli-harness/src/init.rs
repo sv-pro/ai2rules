@@ -43,7 +43,7 @@ pub const STARTER_WORLD: &str = include_str!("../../../scripts/starter-world.yam
 /// Substring identifying *our* hook entry in someone's `settings.json`, whatever
 /// form it currently takes. Matching on this rather than on an exact string means
 /// a re-run upgrades an older entry in place instead of appending a second one.
-const HOOK_MARKER: &str = "world-gate.sh";
+pub(crate) const HOOK_MARKER: &str = "world-gate.sh";
 const HOOK_TIMEOUT: u64 = 10;
 
 /// The `command` the host runs.
@@ -90,7 +90,7 @@ pub struct Plan {
 
 /// Single-quote a path for embedding in the shim. The project directory is
 /// untrusted input (D37) and so is whatever path the binary was installed to.
-fn sh_quote(s: &str) -> String {
+pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
@@ -107,7 +107,7 @@ fn sh_quote(s: &str) -> String {
 /// dangling symlink leaves); this is the third place it has come up, which is why
 /// the check refuses rather than resolving. Resolving a symlink silently obeys
 /// whoever planted it.
-fn refuse_symlinks(root: &Path, path: &Path) -> Result<(), String> {
+pub(crate) fn refuse_symlinks(root: &Path, path: &Path) -> Result<(), String> {
     let rel = path.strip_prefix(root).unwrap_or(path);
     let mut cur = root.to_path_buf();
     for part in rel.components() {
@@ -434,8 +434,43 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
     Ok(Plan { steps, writes })
 }
 
+/// Write every file in the plan, each one write-then-rename. Shared with
+/// `init --user`, which writes into the user's own config directory.
+pub(crate) fn apply(writes: &[(PathBuf, String)]) -> Result<(), String> {
+    for (path, body) in writes {
+        if let Some(parent) = path.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                return Err(format!("cannot create {}: {e}", parent.display()));
+            }
+        }
+        // Write-then-rename. `settings.json` is the user's own config and a
+        // truncating write that dies midway corrupts it; the shell installer this
+        // replaces used `> tmp && mv` for the same reason, so a direct write was a
+        // regression rather than a new risk.
+        let tmp = path.with_extension(format!(
+            "{}.harness-tmp",
+            path.extension().and_then(|e| e.to_str()).unwrap_or("")
+        ));
+        if let Err(e) = fs::write(&tmp, body) {
+            return Err(format!("cannot write {}: {e}", tmp.display()));
+        }
+        if path.extension().and_then(|e| e.to_str()) == Some("sh") {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755));
+            }
+        }
+        if let Err(e) = fs::rename(&tmp, path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("cannot write {}: {e}", path.display()));
+        }
+    }
+    Ok(())
+}
+
 /// Resolve the absolute path of the running binary, for baking into the shim.
-fn current_harness() -> Result<String, String> {
+pub(crate) fn current_harness() -> Result<String, String> {
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve current executable: {e}"))?;
     let exe = exe.canonicalize().unwrap_or(exe);
@@ -503,37 +538,9 @@ pub fn run(target: &Path, grant: bool, force: bool, dry_run: bool) -> i32 {
         return 0;
     }
 
-    for (path, body) in &plan.writes {
-        if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("harness init: cannot create {}: {e}", parent.display());
-                return 1;
-            }
-        }
-        // Write-then-rename. `settings.json` is the user's own config and a
-        // truncating write that dies midway corrupts it; the shell installer this
-        // replaces used `> tmp && mv` for the same reason, so a direct write was a
-        // regression rather than a new risk.
-        let tmp = path.with_extension(format!(
-            "{}.harness-tmp",
-            path.extension().and_then(|e| e.to_str()).unwrap_or("")
-        ));
-        if let Err(e) = fs::write(&tmp, body) {
-            eprintln!("harness init: cannot write {}: {e}", tmp.display());
-            return 1;
-        }
-        if path.extension().and_then(|e| e.to_str()) == Some("sh") {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755));
-            }
-        }
-        if let Err(e) = fs::rename(&tmp, path) {
-            let _ = fs::remove_file(&tmp);
-            eprintln!("harness init: cannot write {}: {e}", path.display());
-            return 1;
-        }
+    if let Err(e) = apply(&plan.writes) {
+        eprintln!("harness init: {e}");
+        return 1;
     }
 
     let mode = if grant {
