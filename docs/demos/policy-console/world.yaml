@@ -1,0 +1,132 @@
+# Northwind vendor desk: the world Claude Code runs under in this folder.
+#
+# Each group of actions below can be allowed, made to ask first, or switched off
+# (not projected: the agent does not have it at all). Whatever the switches say,
+# once the session has read from outside, nothing it does may reach the network.
+world_id: northwind-vendor-desk
+
+actors:
+  - { name: developer, kind: User }
+  - { name: claude, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  # Looking around: always on.
+  - { name: Read, action_type: Read, side_effect: Read }
+  - { name: Glob, action_type: Read, side_effect: Read }
+  - { name: Grep, action_type: Read, side_effect: Read }
+  - { name: LS, action_type: Read, side_effect: Read }
+  - { name: Bash, action_type: Command, side_effect: Process }
+  # Claude Code's own bookkeeping tools. Named so that switching an action off can
+  # mean "absent" without also taking away the agent's to-do list.
+  - { name: TodoWrite, action_type: Read, side_effect: Read }
+  - { name: Task, action_type: Read, side_effect: Read }
+  - { name: Agent, action_type: Read, side_effect: Read }
+  - { name: TaskCreate, action_type: Read, side_effect: Read }
+  - { name: TaskUpdate, action_type: Read, side_effect: Read }
+  - { name: TaskList, action_type: Read, side_effect: Read }
+  - { name: TaskGet, action_type: Read, side_effect: Read }
+  - { name: TaskOutput, action_type: Read, side_effect: Read }
+  - { name: TaskStop, action_type: Read, side_effect: Read }
+  - { name: BashOutput, action_type: Read, side_effect: Read }
+  - { name: KillShell, action_type: Read, side_effect: Read }
+  - { name: KillBash, action_type: Read, side_effect: Read }
+  - { name: ExitPlanMode, action_type: Read, side_effect: Read }
+  - { name: EnterPlanMode, action_type: Read, side_effect: Read }
+  - { name: AskUserQuestion, action_type: Read, side_effect: Read }
+  - { name: ToolSearch, action_type: Read, side_effect: Read }
+  - { name: Skill, action_type: Read, side_effect: Read }
+  - { name: SlashCommand, action_type: Read, side_effect: Read }
+  - { name: NotebookRead, action_type: Read, side_effect: Read }
+  # The Claude app's own tools for its task list and end-of-turn box.
+  - { name: mcp__ccd_turn__update_plan, action_type: Read, side_effect: Read }
+  - { name: mcp__ccd_turn__wrap_up, action_type: Read, side_effect: Read }
+
+  # Read the web. Reading anything from the network marks the session.
+  - { name: WebFetch, action_type: Web, side_effect: Network }
+  - { name: WebSearch, action_type: Web, side_effect: Network }
+  - { name: Bash_fetch, action_type: Command, side_effect: Network }
+  - { name: PowerShell_fetch, action_type: Command, side_effect: Network }
+
+  # Send data out.
+  - { name: Bash_upload, action_type: Command, side_effect: External, approval_required: true }
+  - { name: PowerShell_upload, action_type: Command, side_effect: External, approval_required: true }
+
+  # Delete files.
+  - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: PowerShell_destructive, action_type: Command, side_effect: Process, approval_required: true }
+
+  # Edit project files.
+  - { name: Edit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: NotebookEdit, action_type: Patch, side_effect: FilesystemWrite }
+
+  # Run scripts. An interpreter can do anything, including reach the network.
+  - { name: Bash_script, action_type: Command, side_effect: Network }
+
+  # A command this world cannot place: it asks first, and after the session has
+  # read from outside it is refused.
+  - { name: Bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+  - { name: PowerShell, action_type: Command, side_effect: Process }
+  - { name: PowerShell_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+
+# Patterns match at a word boundary anywhere in the command. Any curl or wget is a
+# read of the web, whatever its flags (`curl -sS -i http://...` included). A command
+# matched by two different classes falls to default_to, so a curl that also carries
+# an upload flag (`curl -F file=@x http://...`) is ambiguous and is treated as
+# unrecognised: it asks first, and once the session has read from outside it is
+# refused. Uploads without curl (scp, rsync, ...) are "Send data out" proper.
+command_classes:
+  - action: Bash
+    arg: command
+    default_to: Bash_unclassified
+    classes:
+      - to: Bash
+        patterns: ["ls ", "cat ", "head ", "tail ", "wc ", "find ", "grep ", "pwd", "git status", "git log", "git diff"]
+      - to: Bash_fetch
+        patterns: ["curl ", "curl.exe ", "wget "]
+      - to: Bash_upload
+        patterns: ["-F ", "-T ", "--form", "--data", "--upload-file", "-d @", "-d '", "-d \"", "-X POST", "-X PUT", "--request POST", "scp ", "sftp ", "rsync ", "nc ", "ncat ", "telnet ", "ssh "]
+      - to: Bash_destructive
+        patterns: ["rm ", "rmdir", "unlink ", "shred ", "Remove-Item"]
+      - to: Bash_script
+        patterns: ["python", "node ", "perl ", "ruby ", "php ", "bash ", "sh ", "deno ", "npx ", "pwsh", "powershell"]
+  - action: PowerShell
+    arg: command
+    default_to: PowerShell_unclassified
+    classes:
+      - to: PowerShell
+        patterns: ["Get-ChildItem", "Get-Content", "Get-Location", "dir ", "ls ", "cat "]
+      # Claude Code on Windows often reaches for `curl.exe` from its PowerShell tool.
+      - to: PowerShell_fetch
+        patterns: ["Invoke-WebRequest", "Invoke-RestMethod", "iwr ", "irm ", "curl ", "curl.exe ", "wget "]
+      # The curl upload flags too, so a curl.exe upload is ambiguous here exactly as
+      # in Bash, never a plain fetch.
+      - to: PowerShell_upload
+        patterns: ["-InFile", "-Method Post", "-Method Put", "-Form ", "Start-BitsTransfer", "WebClient", "-F ", "-T ", "--form", "--data", "--upload-file", "-d @", "-X POST", "-X PUT"]
+      - to: PowerShell_destructive
+        patterns: ["Remove-Item", "DeleteDirectory", "DeleteFile", "rm ", "rmdir", "del ", "rd ", "Clear-Content"]
+
+# Once the session has read from outside, nothing leaves it. The kernel enforces
+# this even without these lines; they name the rule.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000

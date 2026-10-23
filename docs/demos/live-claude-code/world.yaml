@@ -1,10 +1,9 @@
-# Live demo world: Claude Code with and without ai2rules, side by side
-# (docs/demos/live-claude-code). Deliberately small, so the four beats of the demo
-# are the only verdicts anyone sees. Like the starter world `harness init`
-# installs, a shell command it cannot place is treated as one that may reach the
-# network: it asks first, and once the session has read from outside it is denied.
-# A few read-only commands are let through so looking around stays quiet.
-world_id: live-demo-claude-code
+# Northwind vendor desk: the world Claude Code runs under in this folder.
+# Deliberately small. Like the starter world `harness init` installs, a shell
+# command it cannot place is treated as one that may reach the network: it asks
+# first, and once the session has read from outside it is denied. A few read-only
+# commands are let through so looking around stays quiet.
+world_id: northwind-vendor-desk
 
 actors:
   - { name: developer, kind: User }
