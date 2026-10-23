@@ -43,7 +43,7 @@ terminal is the record of what each window reached. The data is fake.
 | `receiver.py` | Local `127.0.0.1` server: serves the page, accepts uploads, logs every request by name, forwards nothing |
 | `hosts.txt` | The two hosts-file lines that give the receiver its names |
 | `preflight.sh` | Read-only check of the stand right before the demo |
-| `project/` | The fake project (a CSV and an `archive/` folder) copied into both copies |
+| `project/` | The fake project (a CSV, `report.md` and an `archive/` folder) copied into both copies |
 | `setup.sh` | Builds the two copies; installs ai2rules into one |
 | `compare.sh` | Offline verdict contrast + self-check (plan B, and CI) |
 

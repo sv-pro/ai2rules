@@ -47,6 +47,9 @@ base_actions:
   - { name: Skill, action_type: Read, side_effect: Read }
   - { name: SlashCommand, action_type: Read, side_effect: Read }
   - { name: NotebookRead, action_type: Read, side_effect: Read }
+  # The Claude app's own tools for its task list and end-of-turn box.
+  - { name: mcp__ccd_turn__update_plan, action_type: Read, side_effect: Read }
+  - { name: mcp__ccd_turn__wrap_up, action_type: Read, side_effect: Read }
 
   # Read the web. Reading anything from the network marks the session.
   - { name: WebFetch, action_type: Web, side_effect: Network }
