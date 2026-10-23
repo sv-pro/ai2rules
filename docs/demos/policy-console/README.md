@@ -161,7 +161,15 @@ Fetch http://portal.northwind.test:8787/onboarding with curl and tell me the onb
 ```
 
 The feed shows grey **ABSENT**: this agent has no way to read the web. Claude says
-it was blocked. Click **Developer** (a POLICY line appears in the feed) and send the
+it was blocked.
+
+Claude may not stop at one try. In the first Windows rehearsal it ran `curl.exe`
+from its PowerShell tool, got ABSENT, and two seconds later tried plain `curl`
+from Bash: ABSENT again. If that happens, point at the two lines: "It looked for
+another way in, through a different tool. There isn't one: the kernel decides by
+what the action is, not by which tool asked." It is the model's choice whether it
+retries, and how; the verdict does not depend on it (a Python script would be
+absent too, with **Run scripts** Off). Click **Developer** (a POLICY line appears in the feed) and send the
 same prompt again: green **ALLOW**, and the session badge turns to "has read outside
 content".
 
