@@ -548,11 +548,25 @@ mod shim {
 
         // …while ordinary work in the project, including the rest of `.claude/`,
         // is untouched.
-        for target in [project.join("main.rs"), project.join(".claude/skills/x.md")] {
+        for target in [project.join("main.rs"), project.join(".claude/notes.md")] {
             let v = event(&shim, &home, &project, write("w", &target), &[]);
             assert!(
                 v.trim().is_empty(),
                 "Write {} was blocked: {v:?}",
+                target.display()
+            );
+        }
+
+        // An instruction file is not ordinary work at machine scope (D83): a clean
+        // session is asked before it changes what every later session loads.
+        for target in [
+            project.join(".claude/skills/x.md"),
+            project.join("CLAUDE.md"),
+        ] {
+            let v = event(&shim, &home, &project, write("w", &target), &[]);
+            assert!(
+                v.contains("\"ask\""),
+                "Write {} did not ask: {v:?}",
                 target.display()
             );
         }

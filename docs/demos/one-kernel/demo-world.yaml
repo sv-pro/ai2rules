@@ -96,12 +96,18 @@ command_classes:
 
 # Instruction and memory files (D83): the shared pattern list, byte-identical
 # with .claude/cc-world.yaml and .agents/agy-world.yaml (tests/one_kernel.rs).
+# This world is host-neutral, so each action is read under both spellings the
+# hosts send: Claude Code's `file_path` / `notebook_path`, and the `path`
+# Antigravity's adapter aliases its PascalCase keys into.
 path_classes:
   - to: write_instructions
     from:
       - { action: write, arg: file_path }
+      - { action: write, arg: path }
       - { action: edit, arg: file_path }
+      - { action: edit, arg: path }
       - { action: notebookedit, arg: notebook_path }
+      - { action: notebookedit, arg: path }
     patterns:
       - "**/CLAUDE.md"
       - "**/CLAUDE.local.md"

@@ -156,6 +156,11 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
     // a path classifier has two answers to one question.
     let mut path_classified: BTreeSet<&str> = BTreeSet::new();
     for class in &manifest.path_classes {
+        // Within one class an action may be read under several keys (a
+        // host-neutral world names each host's spelling); across classes it may
+        // not appear twice.
+        let mut in_class: BTreeSet<&str> = BTreeSet::new();
+        let mut keys: BTreeSet<(&str, &str)> = BTreeSet::new();
         if !base_names.contains(class.to.as_str()) {
             return Err(CompileError::Invalid(format!(
                 "path classifier maps to unknown action {}",
@@ -188,12 +193,21 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
                     class.to
                 )));
             }
-            if classified.contains(name) || !path_classified.insert(name) {
+            if !keys.insert((name, source.arg.as_str())) {
+                return Err(CompileError::Invalid(format!(
+                    "path classifier for {} reads {name}.{} twice",
+                    class.to, source.arg
+                )));
+            }
+            if in_class.insert(name)
+                && (classified.contains(name) || path_classified.contains(name))
+            {
                 return Err(CompileError::Invalid(format!(
                     "action {name} has more than one classifier — only one would run"
                 )));
             }
         }
+        path_classified.extend(in_class);
     }
 
     Ok(())

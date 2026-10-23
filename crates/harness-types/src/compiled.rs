@@ -293,13 +293,16 @@ impl CompiledWorld {
             return classified;
         }
         for class in &self.parts.path_classes {
-            let Some(source) = class.from.iter().find(|s| &s.action == action) else {
+            let mut sources = class.from.iter().filter(|s| &s.action == action).peekable();
+            if sources.peek().is_none() {
                 continue;
-            };
-            let raw = arguments.get(&source.arg).and_then(|v| v.as_str());
-            let hit = [path, raw]
+            }
+            // One action may be read under several keys: a host-neutral world
+            // names each spelling the hosts send (`file_path`, `path`).
+            let raws = sources.filter_map(|s| arguments.get(&s.arg).and_then(|v| v.as_str()));
+            let hit = path
                 .into_iter()
-                .flatten()
+                .chain(raws)
                 .any(|p| class.patterns.iter().any(|pat| path_glob_match(p, pat)));
             if hit {
                 return class.to.clone();

@@ -3369,8 +3369,12 @@ separately, in `GateRequest.path`.
   the line.
 - **One pattern list for every host**, pinned byte-identical by
   `tests/one_kernel.rs`. A file one host writes is context another host loads.
-- **One classifier per action, of either kind.** The loader refuses an action listed
-  twice or under both a command and a path classifier (findings #17 / #20).
+- **One classifier per action, of either kind.** The loader refuses an action in two
+  path classes, or under both a command and a path classifier (findings #17 / #20).
+  Within one class an action may be read under several keys: the host-neutral
+  conformance world names both `file_path` and the `path` that Antigravity's adapter
+  aliases into, because a `..` below a missing folder leaves no resolved path to
+  fall back on.
 
 **Alternatives.**
 

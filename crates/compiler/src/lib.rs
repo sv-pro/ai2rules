@@ -268,6 +268,14 @@ base_actions:
             compile(&manifest).is_ok(),
             "the well-formed classifier compiles"
         );
+        // One action read under two keys, in one class, is how a host-neutral
+        // world names both spellings.
+        let two_keys = "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path }, { action: write, arg: path } ], patterns: [\"**/CLAUDE.md\"] }\n";
+        let manifest = load_yaml(&format!("{base}{two_keys}")).expect("parses");
+        assert!(
+            compile(&manifest).is_ok(),
+            "two keys for one action compile"
+        );
         for (fragment, what) in [
             (
                 "path_classes:\n  - { to: ghost, from: [ { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n",
@@ -290,8 +298,12 @@ base_actions:
                 "unnamed path argument",
             ),
             (
-                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path }, { action: write, arg: path } ], patterns: [\"**/CLAUDE.md\"] }\n",
-                "one action listed twice",
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path }, { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "one key listed twice",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n  - { to: write_instructions, from: [ { action: write, arg: path } ], patterns: [\"**/AGENTS.md\"] }\n",
+                "one action in two classes",
             ),
             (
                 "command_classes:\n  - { action: bash, default_to: bash_unclassified, classes: [] }\npath_classes:\n  - { to: write_instructions, from: [ { action: bash, arg: command } ], patterns: [\"**/CLAUDE.md\"] }\n",
