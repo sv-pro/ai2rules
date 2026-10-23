@@ -27,7 +27,10 @@ base_actions:
   - { name: LS, action_type: Read, side_effect: Read }
   - { name: Bash, action_type: Command, side_effect: Process }
   # Claude Code's own bookkeeping tools. Named so that switching an action off can
-  # mean "absent" without also taking away the agent's to-do list.
+  # mean "absent" without also taking away the agent's to-do list. Under
+  # --enforce-absent a tool this file does not name is absent, harmless or not, so
+  # every built-in tool is named here: these as reads, the ones with real effects
+  # further down as not projected. A host update that adds a tool needs a line.
   - { name: TodoWrite, action_type: Read, side_effect: Read }
   - { name: Task, action_type: Read, side_effect: Read }
   - { name: Agent, action_type: Read, side_effect: Read }
@@ -47,9 +50,72 @@ base_actions:
   - { name: Skill, action_type: Read, side_effect: Read }
   - { name: SlashCommand, action_type: Read, side_effect: Read }
   - { name: NotebookRead, action_type: Read, side_effect: Read }
-  # The Claude app's own tools for its task list and end-of-turn box.
+  - { name: ListAgents, action_type: Read, side_effect: Read }
+  - { name: ReportFindings, action_type: Read, side_effect: Read }
+  - { name: ReadNotifications, action_type: Read, side_effect: Read }
+  - { name: ListSkills, action_type: Read, side_effect: Read }
+  - { name: SearchSkills, action_type: Read, side_effect: Read }
+  - { name: SuggestSkills, action_type: Read, side_effect: Read }
+  - { name: ListPlugins, action_type: Read, side_effect: Read }
+  - { name: SearchPlugins, action_type: Read, side_effect: Read }
+  - { name: SuggestPluginInstall, action_type: Read, side_effect: Read }
+  # The Claude app's own tools: its task list, end-of-turn box, chapters, and the
+  # inline visuals it draws in the conversation. Nothing leaves the app.
   - { name: mcp__ccd_turn__update_plan, action_type: Read, side_effect: Read }
   - { name: mcp__ccd_turn__wrap_up, action_type: Read, side_effect: Read }
+  - { name: mcp__ccd_session__mark_chapter, action_type: Read, side_effect: Read }
+  - { name: mcp__ccd_session__dismiss_task, action_type: Read, side_effect: Read }
+  - { name: mcp__visualize__read_me, action_type: Read, side_effect: Read }
+  - { name: mcp__visualize__show_widget, action_type: Read, side_effect: Read }
+
+  # Built-in tools this desk does not give the agent. Named, with what they would
+  # do, and not projected: absent by decision, not because nobody knew they exist.
+  # No switch turns them on; edit this file for that. Tools from an account's own
+  # connectors (Gmail, Drive, Linear, ...) have per-account names and cannot be
+  # listed here: under --enforce-absent they are absent as unknown.
+  #   Commands that would bypass the shell classifier below.
+  - { name: Monitor, action_type: Command, side_effect: Process, projected: false }
+  - { name: mcp__terminal__run_in_terminal, action_type: Command, side_effect: Process, projected: false }
+  - { name: mcp__terminal__read_terminal, action_type: Read, side_effect: Read, projected: false }
+  #   Work that outlives the session, or starts another agent.
+  - { name: ScheduleWakeup, action_type: Command, side_effect: PersistentWrite, projected: false }
+  - { name: CronCreate, action_type: Command, side_effect: PersistentWrite, projected: false }
+  - { name: CronDelete, action_type: Command, side_effect: PersistentWrite, projected: false }
+  - { name: CronList, action_type: Read, side_effect: Read, projected: false }
+  - { name: RemoteTrigger, action_type: Command, side_effect: External, projected: false }
+  - { name: EnterWorktree, action_type: Write, side_effect: FilesystemWrite, projected: false }
+  - { name: ExitWorktree, action_type: Write, side_effect: FilesystemWrite, projected: false }
+  - { name: mcp__ccd_session__start_session, action_type: Command, side_effect: Process, projected: false }
+  - { name: mcp__ccd_session__hand_off_to_session, action_type: Command, side_effect: Process, projected: false }
+  #   Messages and pages that leave this session.
+  - { name: SendMessage, action_type: Mcp, side_effect: External, projected: false }
+  - { name: FetchInboxMessage, action_type: Mcp, side_effect: Network, projected: false }
+  - { name: SendUserFile, action_type: Mcp, side_effect: External, projected: false }
+  - { name: PushNotification, action_type: Mcp, side_effect: External, projected: false }
+  - { name: Artifact, action_type: Mcp, side_effect: External, projected: false }
+  - { name: ArtifactComments, action_type: Mcp, side_effect: External, projected: false }
+  - { name: ArtifactData, action_type: Mcp, side_effect: External, projected: false }
+  - { name: DesignSync, action_type: Mcp, side_effect: External, projected: false }
+  #   The app's browser pane: reading and acting on the web outside "Read the web".
+  - { name: mcp__Claude_Browser__navigate, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__preview_start, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__browser_batch, action_type: Web, side_effect: External, projected: false }
+  - { name: mcp__Claude_Browser__computer, action_type: Web, side_effect: External, projected: false }
+  - { name: mcp__Claude_Browser__form_input, action_type: Web, side_effect: External, projected: false }
+  - { name: mcp__Claude_Browser__javascript_tool, action_type: Web, side_effect: External, projected: false }
+  - { name: mcp__Claude_Browser__get_page_text, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__read_page, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__find, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__read_network_requests, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__read_console_messages, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__tabs_context, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__tabs_create, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__tabs_select, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__tabs_close, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__resize_window, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__preview_list, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__preview_logs, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__preview_stop, action_type: Read, side_effect: Read, projected: false }
 
   # Read the web. Reading anything from the network marks the session.
   - { name: WebFetch, action_type: Web, side_effect: Network }
