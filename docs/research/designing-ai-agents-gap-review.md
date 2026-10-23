@@ -35,6 +35,7 @@ in two places:
   runtime-issued commit identity, unknown outcomes never blindly retried. These are, nearly
   field for field, D72/D75 (projection), D79/D80 (scoped capabilities, effective call),
   D73 (exact single-use authorization) and D74 (staged effect, receipts, `ambiguous`).
+  D74 is a tested prototype that the default agent loop does not use yet.
 - **Chapter 9, Approval Gate.** The book's "durable intent" across an approval pause
   (digest-bound, expiring, revalidated on resume, consumed once) is D73 plus D67/D78.
 
@@ -44,11 +45,13 @@ autonomy** (approval-fatigue and override metrics), on **narrower authority for
 delegated workers**, on **damage limits over time**, and on treating **model-written
 memory** as unauthoritative. Where ai2rules is ahead: information-flow control (taint),
 a compiled closed world with `ABSENT` as its own verdict, deterministic replay of
-*decisions* against a changed world, fail-closed host context, and signed, chained
-approval logs. The book has no counterpart to taint at all.
+*decisions* against a changed world, fail-closed gate context, and signed, chained
+approval logs. On hosts, two of those come with conditions: Claude Code enforces `ABSENT`
+only with `--enforce-absent`, and its hook still fails open on a broken world (AI2-56). The book has no counterpart to taint at all.
 
-Eight gaps are worth closing (ranked below). The first two are small enough to finish
-before the October demo.
+Eight gaps are worth closing (ranked below). G7 is small enough to finish before the
+October demo. G1 is too, if matching on canonical paths turns out to be world data
+rather than a change to the gate.
 
 ---
 
@@ -75,7 +78,7 @@ difference, with the reason).
 | # | The book recommends | ai2rules has | Gap |
 |---|---|---|---|
 | 9 | Perception (what enters context) and governance (what leaves as action) are separate boundaries. The harness owns both (ch. 3 §3.1, p. 54; ch. 9, p. 397). | Every input becomes a typed `Perception` with channel, trust and taint (architecture §5), but the harness does not choose what enters context. | **different.** ai2rules records *where* context came from and lets that decide actions. Curating context is the host's job. |
-| 10 | Progressive disclosure of tools is not progressive authority: loading a tool's description grants nothing (ch. 6 §6.3.2, p. 203). | Stronger: a non-projected action is `ABSENT` and cannot be loaded or called (invariant 2, D72, D75). | **none** |
+| 10 | Progressive disclosure of tools is not progressive authority: loading a tool's description grants nothing (ch. 6 §6.3.2, p. 203). | Stronger: a non-projected action is `ABSENT` and cannot be loaded or called (invariant 2, D72, D75). On Claude Code the call is refused only when the hook runs with `--enforce-absent` (row 19). | **none** |
 
 ### Chapter 4: memory
 
@@ -99,17 +102,17 @@ difference, with the reason).
 | 16 | An action contract: intended effect, execution boundary, state basis, execution rule, commit identity, acceptance evidence (ch. 6 §6.1.2, pp. 190–191). | `ExecutionSpec` (boundary, rule, descriptor hash) and `StagedEffect` (commit identity, epochs, consequence class, D74). State basis covers world and schema epochs, but not the version of the business object. Acceptance evidence is not modelled. | **partial.** Business-object freshness belongs to the domain layer (`action-layers.md` Q3). Acceptance → row 27. |
 | 17 | Risk follows the effect, not the step count or the tool name. Inspect arguments: `run_command` with `rm -rf` is a delete (ch. 6 §6.1.3, p. 192; ch. 9 §9.2.6, p. 358). | `side_effect` classes; `command_classes` reclassify by argument with a fail-closed default (D36, D44, D62, D63); `arg_roles`. | **none.** Pattern classification can be evaded, and D36 says so. |
 | 18 | Prompt chaining with named artifacts and gates between stages (ch. 6 §6.2, pp. 193–200). | Out of scope: that is orchestration. | **different** |
-| 19 | Compute the eligible tool set *before* the model selects. The registry returns summaries, never callables (ch. 6 §6.3.1, pp. 200–207). | Projection: `harness project` (D72, D75), D79's hidden wrapped tool. Raw handlers are unreachable from the model loop (architecture §4). | **none.** On Claude Code a hook cannot remove built-in tools from the model's view; they are refused per call as `ABSENT`. |
+| 19 | Compute the eligible tool set *before* the model selects. The registry returns summaries, never callables (ch. 6 §6.3.1, pp. 200–207). | Projection: `harness project` (D72, D75), D79's hidden wrapped tool. Raw handlers are unreachable from the model loop (architecture §4). | **none** in agent-core and over MCP. **partial** on Claude Code: a hook cannot remove built-in tools from the model's view, and an `ABSENT` call is refused only when the hook runs with `--enforce-absent`. Without the flag, which `harness init` does not add, the hook stays silent and Claude Code's own permission flow decides (`cc_hook.rs` `hook_answer`). |
 | 20 | Admission rechecks the exact call: authority, where each argument came from, state freshness (ch. 6 §6.3.3, pp. 207–211). | Per-call gate; explicit fail-closed context (D42); descriptor drift; `arg_roles`. Provenance is per session (one taint bit) with per-argument refinement by role, not per-value labels. | **partial** (known: "labels on data", `action-layers.md` Q1; `data_classes`) |
 | 21 | Arguments the model must not choose are bound from protected runtime state (ch. 6 §6.3.3, pp. 205–206). | `!Literal`, `!ContextRef`, `!Input { one_of, prefix }` (D79). The host executes the lowered call, not the proposal (D80). | **none** |
-| 22 | The runtime issues the commit identity. Reuse with different arguments is rejected; a repeat returns "unknown, verify" (ch. 6 §6.3.3, pp. 206, 211–214). | D73 and D74: idempotency key reserved before effect, duplicate receipt, `ambiguous` never auto-retried, with tests (PLAN E6 exit). | **none** in agent-core. On hosts, the host executes and there is no commit identity, by design of the gate ABI (D24). |
-| 23 | Admission must be the *only* execution path, or it is advisory. A Claude Code hook that times out or prints malformed output falls back to the normal permission flow, so a hard rule needs a fail-closed gateway (ch. 6, p. 211; ch. 9 §9.2.3, p. 352). | Invariants 4, 5, 16 in agent-core. On hosts: a bootstrap shim fails open (D37); an engaged adapter fails closed (D71); an unrecordable taint escalation fails closed (D59); managed scope stops users removing the hook (D82). Hook timeout is 10 s (`init.rs`). | **partial**, known and documented. The physical backstop is E8. |
+| 22 | The runtime issues the commit identity. Reuse with different arguments is rejected; a repeat returns "unknown, verify" (ch. 6 §6.3.3, pp. 206, 211–214). | D73: an exact, single-use authorization, used by the default loop. D74: an idempotency key reserved before the effect, a duplicate receipt, `ambiguous` never retried automatically, with tests (PLAN E6 exit). D74 is a separate staged-commit API. The default loop does not call it: `orchestrator.rs` `run_allowed` calls `executor.run(&spec)` directly, as D74 records. A single-use approval is not a durable effect reservation. | **partial.** Covered by the D74 prototype, not by the default loop (known: D74, AI2-7). On hosts, the host executes and there is no commit identity, by design of the gate ABI (D24). |
+| 23 | Admission must be the *only* execution path, or it is advisory. A Claude Code hook that times out or prints malformed output falls back to the normal permission flow, so a hard rule needs a fail-closed gateway (ch. 6, p. 211; ch. 9 §9.2.3, p. 352). | Invariants 4, 5, 16 in agent-core. On hosts: a bootstrap shim fails open (D37). Once engaged, the DeepSeek Harness adapter fails closed (D71). The Claude Code and Antigravity hooks do not: `cc-hook` returns 0 with no decision when the world cannot be read or compiled (`cc_hook.rs`; known: AI2-56), and an `ABSENT` call falls through without `--enforce-absent` (row 19). An unrecordable taint escalation fails closed (D59); managed scope stops users removing the hook (D82). Hook timeout is 10 s (`init.rs`). | **partial**, known and documented. The physical backstop is E8. |
 | 24 | No silent fallback: an agent whose API call fails must not move to a shell or browser with wider reach (ch. 6 §6.3.4, p. 214). | Shell egress is reclassified (D36) and caught by the taint floor; an unclassified command asks (D44). Whether domain worlds should drop the shell entirely is open (`action-layers.md` Q6). | **partial** (known open question) |
 | 25 | Imported content must not be able to add a capability (ch. 6 §6.3.4, p. 214). | The world is compiled at design time; MCP descriptors are hashed and drift blocks (architecture §5); the world owns the surface (D51); MRTR results cannot widen it (D49). | **none** |
 | 26 | Plan-and-Execute: a durable plan; only pending work may be replanned (ch. 6 §6.4, pp. 214–228). | Orchestration is out of scope. Durable effects are D74. | **different** |
 | 27 | Guardrail Sandwich: a trusted pre-check, a controlled runner, and a trusted post-check against authoritative evidence. The agent may not edit the policy, remove hooks or certify its own result (ch. 6 §6.5, pp. 228–239). | Pre-check: the gate. Runner: E8 open, D47/D65. Policy and hooks: D57, D82. Post-check: none. D74's receipt records *finality* (did the effect happen), not *acceptance* (was it right). Hosts record no outcome at all (no `PostToolUse` handler). | **partial.** Verifying correctness is deliberately not the kernel's job; recording the outcome is → G2. |
 | 28 | Containment is not verification; redacting output is not a postcondition (ch. 6 §6.5.5, p. 239). | ai2rules claims neither. Redaction (D66) is for the audit log only. | **none** |
-| 29 | Test the action boundary by injecting failures: object version changes after selection, a commit id reused with other arguments, a crash after the remote commit, an approval bound to an old version (ch. 6 §6.7, pp. 241–242). | D73/D74 tests cover each of these (PLAN E6 exit list). Also `check-demos.sh`, the `one_kernel.rs` conformance set, and govbench (D76). | **none** |
+| 29 | Test the action boundary by injecting failures: object version changes after selection, a commit id reused with other arguments, a crash after the remote commit, an approval bound to an old version (ch. 6 §6.7, pp. 241–242). | D73/D74 tests cover reusing a commit id, a crash after commit (`ambiguous`), and an approval that crosses a world or schema epoch change (PLAN E6 exit list). Those tests exercise the staged-commit prototype, not the default loop (row 22). Also `check-demos.sh`, the `one_kernel.rs` conformance set, and govbench (D76). | **partial.** World and schema epoch drift is tested. A change in the *business object's* version after selection is not modelled, so it cannot be injected (row 16). |
 
 ### Chapter 7: reflection and evaluation
 
@@ -117,7 +120,7 @@ difference, with the reason).
 |---|---|---|---|
 | 30 | Reusable skills pass through candidate, trial and active states, with an applicability contract, a version and a withdrawal path. A skill's tool calls still go through governance (ch. 7 §7.4, pp. 267–279). | Skill *calls* are governed like any tool call. Skill *files* are instruction files the agent can write → G1. Admitting skills is not the harness's job. | **partial** → G1 |
 | 31 | Evaluation: hard gates visible beside any aggregate score; evaluation cases have provenance; an empty evidence set blocks the release (ch. 7 §7.7, pp. 294–296). | govbench: no aggregate score anywhere, PASS needs observed evidence, and CI fails if the weak baseline stops failing (D76). | **none** (stronger on the baseline) |
-| 32 | Measure usefulness beside safety: a system that blocks every call scores perfectly on safety (ch. 6 §6.7, p. 241; ch. 9 §9.5.3, p. 379). | E10.4 (task utility, AgentDojo-style) is unchecked. govbench counts effects in attack scenarios; nothing measures false denials on benign work. | **missing** → G5 |
+| 32 | Measure usefulness beside safety: a system that blocks every call scores perfectly on safety (ch. 6 §6.7, p. 241; ch. 9 §9.5.3, p. 379). | E10.4 (task utility, AgentDojo-style) is unchecked. govbench's seeded scenarios already include the legitimate path. Scenario 02 requires the approved call to run exactly once (`the_approved_call_runs`, `one_yes_is_one_effect`), and scenario 03 requires the owner to still spend the grant, so a deny-all target fails them. What is missing is a suite of benign tasks that counts false denials on ordinary work. | **partial** → G5 |
 
 ### Chapter 8: collaboration
 
@@ -160,7 +163,7 @@ difference, with the reason).
 
 | Rank | Gap | Size | Epic | Rows |
 |---|---|---|---|---|
-| **G1** | Instruction and memory files count as durable memory: tainted writes to them are refused | S | E13 (world data), E2 invariant 7 | 12, 13, 30 |
+| **G1** | Instruction and memory files count as durable memory: tainted writes to them are refused | S–M | E13, E2 invariant 7 | 12, 13, 30 |
 | **G7** | A "Stop" position in the policy console: every effectful action off at the next call | XS | E13 / D81 | 4, 42 |
 | **G2** | Host decision log joins each decision to its outcome (tool-call id, agent id, ASK answer, result); optional OTel GenAI export | M | E4 + E13 | 27, 34, 37, 47, 49, 57 |
 | **G3** | `harness report`: verdict mix, approval and override rates per rule, candidate world changes | M | E11 (design-time loop), E10.5 | 6, 38, 39, 45, 50 |
@@ -169,7 +172,8 @@ difference, with the reason).
 | **G6** | Damage limits over time: windowed rates, cumulative value caps, `Defer` as a cancellation window | M | E2 + E6 (after AI2-55) | 41, 54 |
 | **G5** | Measure usefulness: false denials on benign tasks beside attack results | L | E10.4 / E18 | 32 |
 
-G1 and G7 can land before the 2026-10-25/27 demo. G1 closes a laundering path: outside content → instruction file → the next session's trusted context. G7 gives the console a "pull the plug" moment that a security audience will ask for. G2 is what G3 needs. G6 waits for AI2-55, because a threshold that passes silently is worse than none.
+G7 can land before the 2026-10-25/27 demo. G1 can too if canonical-path matching turns
+out to be world data; if it needs a gate change, it is the first item after. G1 closes a laundering path: outside content → instruction file → the next session's trusted context. G7 gives the console a "pull the plug" moment that a security audience will ask for. G2 is what G3 needs. G6 waits for AI2-55, because a threshold that passes silently is worse than none.
 
 Not worth closing: rows 7, 18, 26 and 55 (orchestration and hosted control plane, out of scope by plan), row 9 (context curation is the host's job), row 45 (runtime trust scores contradict "no stochastic component in the trust path").
 
@@ -181,7 +185,9 @@ Drafts only: nothing has been filed. Team AI2.
 
 ### G1 — Instruction and memory files count as durable memory
 
-**Epic:** E13 (Claude Code integration); hardens invariant 7. **Size:** S.
+**Epic:** E13 (Claude Code integration); hardens invariant 7. **Size:** S if the
+classifier can match canonical paths as world data; M if the gate has to change (see
+Proposal).
 
 **Problem.** Claude Code loads some files as instructions into every later session:
 `CLAUDE.md` / `AGENTS.md` at any level, `~/.claude/CLAUDE.md`, auto-memory under
@@ -195,12 +201,21 @@ launders taint across the session boundary. The `harness init` world protects `.
 (D57) but not root-level `CLAUDE.md` / `AGENTS.md` or the user-level memory directory.
 
 **Proposal.**
-- Add a classifier on `Write`, `Edit`, `MultiEdit` and `NotebookEdit` (`arg: file_path`)
-  that sends instruction and memory paths to a new action with `side_effect: Memory`
-  (e.g. `Write_instructions`). The existing `no_tainted_memory_write` then denies it under
-  taint. `command_classes` already takes any action and argument (`CommandClassDef`), so
-  this may be world data only. Confirm that matching works on adapter-resolved absolute
-  paths, including Windows paths (AI2-57).
+- Send instruction and memory paths written by `Write`, `Edit`, `MultiEdit` and
+  `NotebookEdit` to a new action with `side_effect: Memory` (e.g. `Write_instructions`).
+  The existing `no_tainted_memory_write` then denies it under taint. The argument key
+  differs by tool: `file_path` for the first three, `notebook_path` for `NotebookEdit`.
+  Antigravity's keys need checking.
+- **It is not established that this is world data only.** `command_classes` can name any
+  action and argument (`CommandClassDef`), but `classify_command` matches the raw
+  `arguments[def.arg]` string. The resolved absolute path travels separately, in
+  `GateRequest.path`, filled by `hostkit::resolve_action_path`. A pattern over the raw
+  string misses `./CLAUDE.md`, `docs/../CLAUDE.md`, an absolute path, `claude.md` on a
+  case-insensitive filesystem, and backslash separators. Requirement: classify on the
+  canonical path, with the host-specific argument keys made explicit. If that means the
+  classifier reads `GateRequest.path` rather than an argument, this is a kernel and
+  gate-ABI change. Then G1 is size M, and the WASM engine must be rebuilt (D60). Windows
+  paths depend on AI2-57.
 - Apply it to `.claude/cc-world.yaml`, the `harness init` template, the `--user` /
   `--managed` worlds (D82), and `agy-world.yaml` for Antigravity's equivalents.
 - Clean sessions: decide whether these writes ASK (recommended for the machine-wide
@@ -211,6 +226,9 @@ launders taint across the session boundary. The `harness init` world protects `.
 **Acceptance.**
 - A conformance case per host: tainted `Write` to `CLAUDE.md`, `AGENTS.md`,
   `.claude/skills/x/SKILL.md` and a memory file → `DENY no_tainted_memory_write`.
+- The same verdict for each spelling of one target: relative, absolute, with `./` and
+  `..`, with different letter case where the filesystem ignores it, and with either
+  separator on Windows. Also a `NotebookEdit` case keyed by `notebook_path`.
 - Clean writes behave as decided above.
 - Tainted writes to ordinary source files are unchanged.
 - `check-demos.sh` markers still hold.
@@ -384,11 +402,15 @@ the kernel stays a pure function of `(call, context, world)`. Carrying it like `
 
 **Epic:** E10.4 / E18. **Size:** L.
 
-**Problem.** A world that refuses everything scores perfectly on govbench (ch. 6 p. 241;
-ch. 9 p. 379). E10.4 (utility) is unchecked, so a tighter world looks strictly better.
+**Problem.** The book warns that a system blocking every call scores perfectly on safety
+(ch. 6 p. 241; ch. 9 p. 379). govbench is not that naive: scenarios 02 and 03 require
+the legitimate call to run exactly once, so a deny-all target fails them. But those are
+single legitimate steps inside attack scenarios. Nothing measures false denials across
+ordinary work, and E10.4 (utility) is unchecked. A world that is tighter than it needs to
+be on benign tasks goes unnoticed.
 
 **Proposal.** Add benign scenarios to the benchmark pack: the same tasks without the
-attack. Report the false-denial count beside the attack results, per scenario, with no
+attack, and a few ordinary tasks with no attack counterpart. Report the false-denial count beside the attack results, per scenario, with no
 combined score (D76). Start with the three seeded scenarios' benign twins.
 
 **Acceptance.**
@@ -410,7 +432,9 @@ combined score (D76). Start with the three seeded scenarios' benign twins.
 - **Absence as a verdict.** The book filters an "eligible set" at runtime by role and
   stage, then rejects at admission. ai2rules compiles a closed world in which a hidden
   action is `ABSENT`, a different verdict with a different audit meaning from `DENY`, and
-  a model cannot argue with it.
+  a model cannot argue with it. In agent-core and over MCP this holds as stated. A Claude
+  Code hook refuses an `ABSENT` call only with `--enforce-absent`; otherwise it logs the
+  verdict and leaves the call to Claude Code's permission flow.
 - **Determinism and replay of decisions.** The book replays *trajectories* to understand
   a run. ai2rules replays *decisions*: the same inputs give the same verdict, and a drift
   report shows how an old session would fare under a new world. The book allows
@@ -424,8 +448,11 @@ combined score (D76). Start with the three seeded scenarios' benign twins.
   signs and chains them (D67, D78), binds approvals to the policy that granted them, and
   makes the control plane read-only to the agent (D57). The book says the agent must not
   edit its policy (p. 239) but gives no mechanism.
-- **Fail-closed context.** Missing taint, channel or path is refused, not defaulted (D42,
-  D59). The book notes that hooks fail open (p. 352); ai2rules has worked through which
-  failures may fail open and which may not (D37, D59, D71).
+- **Fail-closed context.** At the gate, missing taint, channel or path is refused, not
+  defaulted (D42, D59). The book notes that hooks fail open (p. 352). ai2rules has worked
+  out which failures may fail open and which may not (D37, D59, D71), but only partly
+  applied it. The DeepSeek Harness adapter fails closed once engaged (D71). The Claude
+  Code and Antigravity hooks still fail open on an unreadable or uncompilable world
+  (AI2-56).
 - **MCP protocol hazards.** Descriptor drift, results that make demands (MRTR, D49), and
   remote reads tainting by backing (D50) are not in the book.
