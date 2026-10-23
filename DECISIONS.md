@@ -3317,3 +3317,54 @@ file tools are kept off it, but a person, or an approved Bash command, can delet
 marker. Closing that needs the kernel's state behind a boundary the user cannot
 cross, such as a system service the hook asks. Also unverified: whether `claude
 --bare` skips managed hooks. The docs do not say.
+
+## D85 — Stop is a console position, and it says "stopped" only on the hook's evidence
+
+**Context.** The policy console (D81) changes what an agent may do at its next call, but
+had no single "stop this agent" control. A security reviewer asks for one first: a halt
+outside the agent's process (gap G7 of the *Designing AI Agents* review; AI2-63 / #136).
+The mechanism was already there. What was missing was the position, and an honest way to
+show that it holds.
+
+**Decision.**
+
+- **Stop is a profile (`stop`) behind its own button.** It sets all five switches Off and
+  writes the world atomically like any other change, so it binds at the agent's next call.
+  A call already running finishes; killing one mid-call is E8.4.
+- **Stop also turns off the commands no switch covers.** Each `command_classes` entry's
+  `default_to` (`Bash_unclassified`, `PowerShell_unclassified`) asks under every other
+  profile. Left at Ask, Stop would leave `touch`, `mv` or `git push` one approval away from
+  running. Every profile now carries a position for that hidden group: Ask, or Off for
+  Stop.
+- **Reads stay.** They are not a switch today, and the plain-shell read classes (`ls`,
+  `cat`, `git status`) stay too. The page says "Reads still allowed".
+- **Restore puts back exactly what Stop replaced.** The Stop marker in the decision log
+  keeps every grouped action's position (`stop.before`), so a switch that was mixed comes
+  back mixed. Restore is offered only while the last policy change is that Stop. Any later
+  change ends it.
+- **"Stopped" needs evidence from the hook, never just the click.** Off is ABSENT, which
+  binds only under `cc-hook --enforce-absent`. The hook already logs what it told the host
+  (D81): `deny` for an ABSENT it enforced, `null` for one it let through to the host's
+  prompt. The page shows **Stopped** once a call after the Stop was refused that way, and
+  **Not stopped** as soon as the hook's latest ABSENT went through. Before any call, the
+  project's hook script is read as a hint: if the line that runs `cc-hook` lacks the flag,
+  the page warns before the button is pressed.
+
+**Alternatives.**
+
+- *Check the flag statically, as `doctor` inspects the hook.* Rejected as the answer. Hooks
+  can be wired from user, project, local or managed settings, and the shim can be edited.
+  A static check can be wrong in both directions. The log records what the hook did. The
+  static check stays only as an early warning.
+- *A sixth switch for reads, so Stop turns them off too.* Not done. An agent that cannot
+  even read cannot explain why it stopped, and reads are not effects. If wanted, it is a
+  separate switch with its own position in every profile.
+- *Restore to a fixed profile, or keep the previous state in the console's memory.*
+  Rejected. A fixed profile loses a custom mix of switches. Memory is lost when the console
+  restarts. The log marker survives both, and it is the record a reviewer reads anyway.
+- *Stop by killing the agent process, or by the shim's `gate-off` file.* Out of scope.
+  `gate-off` turns governance off, the opposite of a stop. Killing a running call is E8.4.
+
+**Consequence.** Stop is as strong as `--enforce-absent`, and the page says which it is.
+Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
+feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.

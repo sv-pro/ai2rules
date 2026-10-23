@@ -49,6 +49,23 @@
   .profile span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
   .profile.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--panel); }
 
+  /* Stop (D85): one control, apart from the profiles, with only what the log proves. */
+  .stopbox { display: flex; align-items: center; gap: 14px; margin: 0 0 16px; padding: 12px 14px;
+             border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+  .stopbox.in { border-color: var(--deny); background: var(--deny-bg); }
+  .stopbox.warn { border-color: var(--ask); background: var(--ask-bg); }
+  @media (max-width: 520px) { .stopbox { flex-direction: column; align-items: stretch; } }
+  .stopbtn { font: inherit; font-weight: 600; font-size: 14px; flex-shrink: 0; cursor: pointer;
+             padding: 9px 16px; border-radius: 8px; border: 1px solid var(--deny);
+             background: var(--deny); color: #fff; }
+  .stopbtn.restore { background: var(--panel); color: var(--ink); border-color: var(--line); }
+  .stopbtn.busy { opacity: .55; pointer-events: none; }
+  .stoptext b { display: block; font-size: 14px; }
+  .stoptext b:empty { display: none; }
+  .stoptext span { display: block; color: var(--muted); font-size: 12.5px; }
+  .stopbox.in .stoptext b { color: var(--deny); }
+  .stopbox.warn .stoptext b, .stoptext .warnline { color: var(--ask); }
+
   .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px;
             padding: 12px 0; border-top: 1px solid var(--line); }
   .switch .name { font-weight: 500; }
@@ -109,7 +126,8 @@
   .chip.ASK { background: var(--ask-bg); color: var(--ask); }
   .chip.DENY { background: var(--deny-bg); color: var(--deny); }
   .chip.ABSENT, .chip.REPLAN { background: var(--absent-bg); color: var(--absent); }
-  .chip.POLICY { background: var(--policy-bg); color: var(--policy); }
+  .chip.POLICY, .chip.RESTORE { background: var(--policy-bg); color: var(--policy); }
+  .chip.STOP { background: var(--deny); color: #fff; }
   .chip.SESSION { background: var(--soft); color: var(--muted); }
   .call { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-word; }
   .why { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
@@ -151,6 +169,10 @@
   <section class="card" aria-labelledby="policyTitle">
     <h2 id="policyTitle">Policy</h2>
     <p class="sub">What this agent may do. A change applies to its very next action.</p>
+    <div class="stopbox" id="stopbox" aria-live="polite">
+      <button class="stopbtn" id="stopBtn" hidden></button>
+      <div class="stoptext"><b id="stopHead"></b><span id="stopSub"></span></div>
+    </div>
     <div class="profiles" id="profiles"></div>
     <div id="switches"></div>
     <p class="belowpolicy">The kernel's invariants, above, hold whatever these switches say.</p>
@@ -206,7 +228,8 @@ function renderState(s) {
   if (!s.ok) { $("policyError").textContent = s.error; return; }
   $("where").textContent = s.world_id;
   $("where").title = s.world_path;
-  $("profiles").replaceChildren(...s.profiles.map((p) => {
+  renderStop(s.stop);
+  $("profiles").replaceChildren(...s.profiles.filter((p) => p.id !== "stop").map((p) => {
     const b = document.createElement("button");
     b.className = "profile" + (p.active ? " on" : "");
     b.setAttribute("aria-pressed", p.active);
@@ -239,6 +262,50 @@ function renderState(s) {
     row.append(label, seg);
     return row;
   }));
+}
+
+// Stop says only what the server read in the decision log: "stopped" once the hook
+// has refused a call since the Stop, never on the button press alone.
+const STOP_SCOPE = "A call already running finishes. Reads still allowed.";
+const NOT_ENFORCED = "This hook runs without --enforce-absent, so an action switched Off " +
+  "goes to Claude Code's own prompt instead of being refused.";
+
+function renderStop(st) {
+  const box = $("stopbox"), btn = $("stopBtn");
+  let head = "", sub = "", cls = "";
+  btn.hidden = false;
+  btn.classList.remove("restore");
+  if (st.status === "off") {
+    btn.textContent = "■ Stop the agent";
+    btn.onclick = () => send({ profile: "stop" }, btn);
+    sub = "Every effectful action off at the agent's next call. " + STOP_SCOPE;
+    if (st.enforced === false) { cls = "warn"; head = "Stop would not bind here"; sub = NOT_ENFORCED; }
+  } else {
+    if (st.restore_to) {
+      btn.textContent = "▶ Restore " + st.restore_to;
+      btn.classList.add("restore");
+      btn.onclick = () => send({ restore: true }, btn);
+    } else {
+      btn.hidden = true;
+    }
+    const resume = st.restore_to ? "" : " Pick a profile below to resume.";
+    if (st.status === "not_binding") {
+      cls = "warn";
+      head = "⚠ Not stopped";
+      sub = NOT_ENFORCED + resume;
+    } else if (st.status === "stopped") {
+      cls = "in";
+      head = "■ Stopped";
+      sub = "The agent's call at " + hhmmss(st.refused_ms) + " was refused. " + STOP_SCOPE + resume;
+    } else {
+      cls = "in";
+      head = "Stop set: takes effect at the agent's next call";
+      sub = "Not confirmed until the hook refuses a call. " + STOP_SCOPE + resume;
+    }
+  }
+  box.className = "stopbox" + (cls ? " " + cls : "");
+  $("stopHead").textContent = head;
+  $("stopSub").textContent = sub;
 }
 
 async function send(body, busyEl) {
@@ -374,7 +441,8 @@ function addEvent(ev) {
   $("empty").hidden = true;
   if (ev.kind === "policy") {
     const lines = ev.changes || [];
-    feed.prepend(row("POLICY", "POLICY", ev.headline || lines[0] || "Policy changed",
+    const chip = ev.stop ? "STOP" : ev.restore ? "RESTORE" : "POLICY";
+    feed.prepend(row(chip, chip, ev.headline || lines[0] || "Policy changed",
       [document.createTextNode((ev.headline ? lines : lines.slice(1)).join(" · "))], ev.ts_ms, false));
     refreshState();
     return;
@@ -396,6 +464,7 @@ function addEvent(ev) {
   $("nStop").textContent = counts.stop;
 
   const by = invariantOf(ev, v);
+  if (v === "ABSENT") refreshState(); // may confirm a Stop, or show it does not bind
   const w = why(ev);
   const code = document.createElement("code");
   code.textContent = w.code;

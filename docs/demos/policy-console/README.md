@@ -207,6 +207,13 @@ Add a line to report.md saying onboarding is done.
 Green **ALLOW**, no question. Point at the counters: the person was asked once in
 the whole session.
 
+**5. Pull the plug.** Click **■ Stop the agent** and send any prompt from above: every
+edit, delete, script, upload, web read and unplaced command is **ABSENT** from the
+agent's next call on. Reads still work, and a call already running finishes (D85). The
+box turns to **Stopped** only after the hook refuses a call; without `--enforce-absent`
+it says **Not stopped** instead. **▶ Restore** puts back the previous profile. Both
+moments land in the feed as **STOP** and **RESTORE**.
+
 To start over: `/exit` in Claude Code, `setup.sh` again, start `claude` again. The
 console starts the feed over by itself when the log is reset.
 

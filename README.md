@@ -335,7 +335,9 @@ files, run scripts) rewrite the project's world file atomically, and the hook re
 that file on every call, so the agent's very next action gets the new answer, with no
 restart. `cc-hook --log` feeds the page a live list of what the agent tried and what
 the kernel decided. Off takes the action out of the agent's world (ABSENT, with
-`--enforce-absent`); the taint floor has no switch. Runbook and scenario:
+`--enforce-absent`); the taint floor has no switch. A **Stop** button (D85) takes every
+effectful action away at the agent's next call and Restore puts the previous profile
+back; the page says "Stopped" only after the hook has refused a call. Runbook and scenario:
 [`docs/demos/policy-console/`](docs/demos/policy-console/README.md).
 
 ```bash
@@ -388,7 +390,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **453 tests** green.
+Builds clean offline with `clippy -D warnings`; **457 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
