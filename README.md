@@ -447,7 +447,8 @@ echo '{"tool":"fetch_web","context":{"taint":"tainted"}}' \
 ```
 
 CI runs all four checks on every push and PR
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), plus a `demos` job that
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), clippy and the tests
+again on Windows, plus a `demos` job that
 runs `scripts/check-demos.sh` — every example and demo script, asserting the
 verdict lines each one claims to show. The unit tests cover the kernel; that
 script covers what a reader actually sees.

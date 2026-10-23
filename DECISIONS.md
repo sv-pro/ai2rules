@@ -3317,3 +3317,50 @@ file tools are kept off it, but a person, or an approved Bash command, can delet
 marker. Closing that needs the kernel's state behind a boundary the user cannot
 cross, such as a system service the hook asks. Also unverified: whether `claude
 --bare` skips managed hooks. The docs do not say.
+
+## D83 — Windows is a tested platform: the OS CSPRNG everywhere, the same `..` refusal, a Windows CI job
+
+**Date:** 2026-10-23. AI2-57.
+
+**Context.** The harness ships a Windows binary, and the live policy-console demo
+runs on Windows, but CI tested Linux only. The first native Windows run of the
+workspace had 44 test failures and two clippy errors, none visible in CI:
+
+- `trace-store::approval::random_key()` read `/dev/urandom` and returned
+  `Unsupported` on every other platform, so `ApprovalStore::open` failed on
+  Windows. It failed closed, but REPL approvals, staged effects and the benchmark's
+  ai2rules target did not work at all there.
+- `hostkit` promises that a `..` after a component that does not exist is refused.
+  Unix does that by itself. Windows resolves `..` lexically, and `PathBuf::join`
+  onto a verbatim `\?\` base (what `canonicalize` returns there) does so before any
+  check runs, so `new/../../../etc/passwd` resolved to a real folder above the
+  project. That is not a bypass, because the resolved path is where Windows would
+  write and `roots` judged it. But the stated refusal did not hold.
+
+**Decision.**
+
+1. The approval key comes from the `getrandom` crate on every platform:
+   `getrandom(2)` on Linux, `ProcessPrng` on Windows. A failure is an error, never a
+   weaker key.
+2. The agent's relative path is joined onto the project base one component at a
+   time, refusing a `..` after a missing component. Absolute paths get the same
+   check before the nearest-ancestor fallback. Unix verdicts are unchanged.
+3. A `check-windows` CI job runs clippy `-D warnings` and `cargo test --workspace`
+   on `windows-latest`. Tests that need Unix (symlinks, process groups, shell
+   shims) stay `cfg(unix)`. Format stays in the Linux job, since it does not depend
+   on the platform.
+
+**Alternatives.**
+
+- *Direct FFI to `BCryptGenRandom`/`ProcessPrng`.* No new dependency, but it needs
+  `unsafe` in a crate that has none, and per-platform code to maintain. `getrandom`
+  was already in the lockfile through `tempfile`, so the offline crate set covers it.
+- *Keep `/dev/urandom` and declare approvals Unix-only.* That is honest, but it
+  makes the Windows binary a second-class product while the demo runs on Windows.
+- *Accept lexical `..` on Windows as the OS's own semantics.* The kernel's path
+  answers should not depend on the host OS; one rule on every host is the point of
+  the conformance suite.
+
+**Not done.** On Windows a timed-out command still kills only its direct child: the
+executor creates no Job Object. That was already stated in
+`executor/src/handlers/command.rs`, and its test stays `cfg(unix)`.

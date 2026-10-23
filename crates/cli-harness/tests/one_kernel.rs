@@ -780,6 +780,8 @@ fn compile_roots_world(world_path: &Path) -> harness_types::CompiledWorld {
 }
 
 /// Run one `GateRequest` through the `harness gate` CLI against an explicit world.
+/// Only the Unix-only roots tests use it.
+#[cfg(unix)]
 fn gate_cli_with_world(world: &Path, stdin_payload: &str) -> (i32, String) {
     let bin = env!("CARGO_BIN_EXE_harness");
     let mut child = Command::new(bin)
@@ -803,7 +805,9 @@ fn gate_cli_with_world(world: &Path, stdin_payload: &str) -> (i32, String) {
 }
 
 /// Run a host adapter subprocess against an explicit world, with `HOME` pinned
-/// so `~` expansion cannot reach the developer's real home directory.
+/// so `~` expansion cannot reach the developer's real home directory. Only the
+/// Unix-only roots tests use it.
+#[cfg(unix)]
 fn hook_with_world(
     subcommand: &str,
     world: &Path,
