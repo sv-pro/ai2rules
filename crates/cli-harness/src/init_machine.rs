@@ -55,6 +55,16 @@ pub enum Scope {
 /// silently installing a world without its self-protection.
 const PROJECT_CONTROL_PLANE: &str = "- { path: \"./.claude\", access: Read }";
 
+/// The starter's instruction-file action (D83). In a project world a clean
+/// session may write `CLAUDE.md` and its kin; a machine-scope world governs every
+/// project and the user's own `~/.claude`, so there a clean write asks. Same
+/// loud-failure rule as [`PROJECT_CONTROL_PLANE`].
+const INSTRUCTION_WRITE: &str =
+    "- { name: Write_instructions, action_type: Write, side_effect: Memory }";
+const INSTRUCTION_WRITE_ASK: &str =
+    "  - { name: Write_instructions, action_type: Write, side_effect: Memory, approval_required: true }
+";
+
 /// The home directory: `$HOME`, else `%USERPROFILE%`. Git Bash sets `HOME`, a
 /// plain Windows shell often does not.
 fn home_dir() -> Option<PathBuf> {
@@ -216,6 +226,11 @@ pub fn render_world(layout: &Layout) -> Result<String, String> {
             "embedded starter manifest has no `./.claude` control-plane rule to replace".into(),
         );
     }
+    if !STARTER_WORLD.lines().any(|l| l.trim() == INSTRUCTION_WRITE) {
+        return Err(
+            "embedded starter manifest has no `Write_instructions` action to make ask".into(),
+        );
+    }
     let world_id = match layout.scope {
         Scope::User => "claude-code-user",
         Scope::Managed => "claude-code-managed",
@@ -236,6 +251,8 @@ pub fn render_world(layout: &Layout) -> Result<String, String> {
     for line in STARTER_WORLD.lines() {
         if line.trim() == PROJECT_CONTROL_PLANE {
             world.push_str(&control_plane_rules(layout));
+        } else if line.trim() == INSTRUCTION_WRITE {
+            world.push_str(INSTRUCTION_WRITE_ASK);
         } else if line.trim() == "world_id: claude-code-starter" {
             world.push_str(&format!("world_id: {world_id}\n"));
         } else {

@@ -250,6 +250,62 @@ command_classes:
         );
     }
 
+    /// D83: path classifiers get the same checks as command classifiers, and an
+    /// action may sit under only one classifier of either kind.
+    #[test]
+    fn validate_rejects_malformed_or_overlapping_path_classifiers() {
+        let base = r#"
+world_id: w
+base_actions:
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: write_instructions, action_type: Write, side_effect: Memory }
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+"#;
+        let ok = "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n";
+        let manifest = load_yaml(&format!("{base}{ok}")).expect("parses");
+        assert!(
+            compile(&manifest).is_ok(),
+            "the well-formed classifier compiles"
+        );
+        for (fragment, what) in [
+            (
+                "path_classes:\n  - { to: ghost, from: [ { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "unknown `to` action",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: ghost, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "unknown `from` action",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path } ], patterns: [\"\"] }\n",
+                "empty pattern",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path } ], patterns: [] }\n",
+                "no patterns",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: \"\" } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "unnamed path argument",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path }, { action: write, arg: path } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "one action listed twice",
+            ),
+            (
+                "command_classes:\n  - { action: bash, default_to: bash_unclassified, classes: [] }\npath_classes:\n  - { to: write_instructions, from: [ { action: bash, arg: command } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "an action under both kinds of classifier",
+            ),
+        ] {
+            let manifest = load_yaml(&format!("{base}{fragment}")).expect("parses");
+            assert!(
+                matches!(compile(&manifest), Err(CompileError::Invalid(_))),
+                "{what} must be rejected"
+            );
+        }
+    }
+
     #[test]
     fn validate_rejects_unknown_or_duplicate_channel_names() {
         for (yaml, what) in [

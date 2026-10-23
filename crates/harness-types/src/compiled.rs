@@ -9,7 +9,8 @@ use crate::decision::{Decision, EffectMode};
 use crate::descriptor::{Descriptor, SideEffectClass};
 use crate::ids::{ActionName, DescriptorHash, ManifestHash, WorldId};
 use crate::manifest::{
-    Budget, CommandClassDef, McpSurfaceDef, RootAccess, RootRule, RootsDef, ScopedCapabilityDef,
+    Budget, CommandClassDef, McpSurfaceDef, PathClassDef, RootAccess, RootRule, RootsDef,
+    ScopedCapabilityDef,
 };
 use crate::provenance::{SourceChannel, Taint, TrustLevel};
 
@@ -65,6 +66,10 @@ pub struct CompiledWorldParts {
     /// pre-D36 compiled worlds keep a stable serialized form.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub command_classes: Vec<CommandClassDef>,
+    /// Path classifiers for instruction and memory files (DECISIONS D83). Skipped
+    /// when empty so earlier compiled worlds keep a stable serialized form.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_classes: Vec<PathClassDef>,
     /// Path-scoped capabilities (spatial confinement), with rule paths resolved to
     /// absolute at compile time. `None` ⇒ no path scope. Skipped when absent so
     /// pre-roots compiled worlds keep a stable serialized form.
@@ -160,6 +165,10 @@ impl CompiledWorld {
     /// The manifest-declared command classifiers (DECISIONS D36).
     pub fn command_classes(&self) -> &[CommandClassDef] {
         &self.parts.command_classes
+    }
+    /// The manifest-declared path classifiers (DECISIONS D83).
+    pub fn path_classes(&self) -> &[PathClassDef] {
+        &self.parts.path_classes
     }
     /// The MCP server a gateway presents for this world, if declared (D79).
     pub fn mcp_surface(&self) -> Option<&McpSurfaceDef> {
@@ -257,6 +266,113 @@ impl CompiledWorld {
         }
         matched.cloned().unwrap_or_else(fallback)
     }
+
+    /// Resolve the **effective action** for a proposed call: the command
+    /// classifiers (D36) and then the path classifiers (D83). An action carries at
+    /// most one of the two (the loader refuses both), so the order is not a policy
+    /// choice.
+    ///
+    /// `path` is the adapter-resolved canonical target (`GateRequest.path`), when
+    /// the caller has one. A path class matches when **either** that path or the
+    /// lexically normalized `arguments[arg]` matches one of its patterns. Taking
+    /// both fails closed in each direction a symlink can point: `notes.md` linked
+    /// to `CLAUDE.md` is caught by the resolved path, and a `CLAUDE.md` that is
+    /// itself a link elsewhere is caught by the name the agent wrote. Both are
+    /// writes to what the next session loads.
+    ///
+    /// Pure: the caller did the I/O of resolving the path; this only compares
+    /// strings.
+    pub fn classify_call(
+        &self,
+        action: &ActionName,
+        arguments: &serde_json::Value,
+        path: Option<&str>,
+    ) -> ActionName {
+        let classified = self.classify_command(action, arguments);
+        if &classified != action {
+            return classified;
+        }
+        for class in &self.parts.path_classes {
+            let Some(source) = class.from.iter().find(|s| &s.action == action) else {
+                continue;
+            };
+            let raw = arguments.get(&source.arg).and_then(|v| v.as_str());
+            let hit = [path, raw]
+                .into_iter()
+                .flatten()
+                .any(|p| class.patterns.iter().any(|pat| path_glob_match(p, pat)));
+            if hit {
+                return class.to.clone();
+            }
+        }
+        action.clone()
+    }
+}
+
+/// Split a path into the segments a path class compares: either separator,
+/// `.` and empty segments dropped, `..` folding into its parent where it has one
+/// (a leading `..` is kept, and matches nothing in particular). Lexical only:
+/// symlinks are the adapter's job, before the path gets here.
+fn path_segments(path: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    for seg in path.split(['/', '\\']) {
+        match seg {
+            "" | "." => {}
+            ".." if out.last().is_some_and(|s| *s != "..") => {
+                out.pop();
+            }
+            s => out.push(s),
+        }
+    }
+    out
+}
+
+/// Does `path` match the glob `pattern` (DECISIONS D83)? Both are split into
+/// segments; `**` matches any number of segments including none, `*` any run of
+/// characters within one segment. Comparison ignores ASCII case: Claude Code on
+/// macOS and Windows loads `claude.md` as `CLAUDE.md`, and on a case-sensitive
+/// filesystem the extra match only errs toward treating a file as an
+/// instruction file.
+pub fn path_glob_match(path: &str, pattern: &str) -> bool {
+    let path = path_segments(path);
+    let pattern: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    segments_match(&path, &pattern)
+}
+
+fn segments_match(path: &[&str], pattern: &[&str]) -> bool {
+    match pattern.split_first() {
+        None => path.is_empty(),
+        Some((&"**", rest)) => (0..=path.len()).any(|skip| segments_match(&path[skip..], rest)),
+        Some((pat, rest)) => match path.split_first() {
+            Some((seg, path_rest)) => segment_match(seg, pat) && segments_match(path_rest, rest),
+            None => false,
+        },
+    }
+}
+
+/// One segment against one pattern segment, `*` matching any run of characters.
+fn segment_match(seg: &str, pat: &str) -> bool {
+    let seg = seg.as_bytes();
+    let pat = pat.as_bytes();
+    // Classic two-pointer wildcard match with backtracking to the last `*`.
+    let (mut s, mut p) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while s < seg.len() {
+        if p < pat.len() && pat[p] != b'*' && pat[p].eq_ignore_ascii_case(&seg[s]) {
+            s += 1;
+            p += 1;
+        } else if p < pat.len() && pat[p] == b'*' {
+            star = Some((p, s));
+            p += 1;
+        } else if let Some((sp, ss)) = star {
+            p = sp + 1;
+            s = ss + 1;
+            star = Some((sp, ss + 1));
+        } else {
+            return false;
+        }
+    }
+    pat[p..].iter().all(|b| *b == b'*')
 }
 
 /// The longest-prefix root rule matching `path`, if any. A rule matches when
@@ -338,4 +454,118 @@ fn pattern_matches_at(mut cmd: &[u8], mut pat: &[u8]) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod path_class_tests {
+    use super::*;
+    use crate::manifest::PathClassSource;
+    use serde_json::json;
+
+    const PATTERNS: [&str; 3] = [
+        "**/CLAUDE.md",
+        "**/.claude/skills/**",
+        "**/.claude/projects/*/memory/**",
+    ];
+
+    fn world() -> CompiledWorld {
+        let source = |action: &str, arg: &str| PathClassSource {
+            action: ActionName::new(action),
+            arg: arg.to_string(),
+        };
+        CompiledWorld::new(CompiledWorldParts {
+            path_classes: vec![PathClassDef {
+                to: ActionName::new("Write_instructions"),
+                from: vec![
+                    source("Write", "file_path"),
+                    source("NotebookEdit", "notebook_path"),
+                ],
+                patterns: PATTERNS.iter().map(|p| p.to_string()).collect(),
+            }],
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn every_spelling_of_one_target_matches() {
+        for p in [
+            "CLAUDE.md",
+            "./CLAUDE.md",
+            "docs/../CLAUDE.md",
+            "/home/u/proj/CLAUDE.md",
+            "claude.md",
+            r"C:\proj\CLAUDE.md",
+            "//?/C:/proj/Claude.MD",
+            "~/.claude/CLAUDE.md",
+            ".claude/skills/x/SKILL.md",
+            "/home/u/.claude/projects/-home-u-proj/memory/MEMORY.md",
+        ] {
+            assert!(PATTERNS.iter().any(|pat| path_glob_match(p, pat)), "{p}");
+        }
+    }
+
+    #[test]
+    fn ordinary_files_do_not_match() {
+        for p in [
+            "src/main.rs",
+            "CLAUDE.md.bak",
+            "docs/CLAUDE.md/../notes.md",
+            ".claude/settings.json",
+            "/home/u/.claude/projects/x/notes/MEMORY.md",
+            "skills/x/SKILL.md",
+        ] {
+            assert!(!PATTERNS.iter().any(|pat| path_glob_match(p, pat)), "{p}");
+        }
+    }
+
+    #[test]
+    fn star_stays_within_one_segment() {
+        assert!(path_glob_match("a/memory/m.md", "*/memory/*.md"));
+        assert!(!path_glob_match("a/b/memory/m.md", "*/memory/*.md"));
+        assert!(path_glob_match("x/agent-notes.md", "x/agent*.md"));
+    }
+
+    #[test]
+    fn classify_call_reads_the_declared_key_and_the_resolved_path() {
+        let w = world();
+        let write = ActionName::new("Write");
+        let nb = ActionName::new("NotebookEdit");
+        let to = ActionName::new("Write_instructions");
+        assert_eq!(
+            w.classify_call(&write, &json!({"file_path": "./CLAUDE.md"}), None),
+            to
+        );
+        assert_eq!(
+            w.classify_call(&nb, &json!({"notebook_path": "CLAUDE.md"}), None),
+            to
+        );
+        // NotebookEdit's key is `notebook_path`; `file_path` is not what it reads.
+        assert_eq!(
+            w.classify_call(&nb, &json!({"file_path": "CLAUDE.md"}), None),
+            nb
+        );
+        // A symlink `notes.md` → `CLAUDE.md`: only the resolved path knows.
+        assert_eq!(
+            w.classify_call(
+                &write,
+                &json!({"file_path": "notes.md"}),
+                Some("/p/CLAUDE.md")
+            ),
+            to
+        );
+        assert_eq!(
+            w.classify_call(
+                &write,
+                &json!({"file_path": "src/x.rs"}),
+                Some("/p/src/x.rs")
+            ),
+            write
+        );
+        // Actions with no path class are untouched.
+        let edit = ActionName::new("Edit");
+        assert_eq!(
+            w.classify_call(&edit, &json!({"file_path": "CLAUDE.md"}), None),
+            edit
+        );
+    }
 }

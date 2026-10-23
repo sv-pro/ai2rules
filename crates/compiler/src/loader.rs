@@ -149,6 +149,53 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
         }
     }
 
+    // Path classifiers (D83). Same family of checks as the command classifiers:
+    // declared actions only, no empty pattern, and one classifier per action — a
+    // second one for the same action would make the verdict depend on which block
+    // the author typed first (finding #17), and an action under both a command and
+    // a path classifier has two answers to one question.
+    let mut path_classified: BTreeSet<&str> = BTreeSet::new();
+    for class in &manifest.path_classes {
+        if !base_names.contains(class.to.as_str()) {
+            return Err(CompileError::Invalid(format!(
+                "path classifier maps to unknown action {}",
+                class.to
+            )));
+        }
+        if class.from.is_empty() || class.patterns.is_empty() {
+            return Err(CompileError::Invalid(format!(
+                "path classifier for {} needs at least one `from` action and one pattern",
+                class.to
+            )));
+        }
+        if class.patterns.iter().any(|p| p.trim().is_empty()) {
+            return Err(CompileError::Invalid(format!(
+                "path classifier for {} contains an empty pattern",
+                class.to
+            )));
+        }
+        for source in &class.from {
+            let name = source.action.as_str();
+            if !base_names.contains(name) {
+                return Err(CompileError::Invalid(format!(
+                    "path classifier for {} reads unknown action {name}",
+                    class.to
+                )));
+            }
+            if source.arg.is_empty() {
+                return Err(CompileError::Invalid(format!(
+                    "path classifier for {} reads {name} without naming its path argument",
+                    class.to
+                )));
+            }
+            if classified.contains(name) || !path_classified.insert(name) {
+                return Err(CompileError::Invalid(format!(
+                    "action {name} has more than one classifier — only one would run"
+                )));
+            }
+        }
+    }
+
     Ok(())
 }
 
