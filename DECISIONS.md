@@ -3317,3 +3317,82 @@ file tools are kept off it, but a person, or an approved Bash command, can delet
 marker. Closing that needs the kernel's state behind a boundary the user cannot
 cross, such as a system service the hook asks. Also unverified: whether `claude
 --bare` skips managed hooks. The docs do not say.
+
+## D84 — The host decision log joins each decision to its outcome; an ASK's answer is inferred, and says so
+
+**Date:** 2026-10-23. **Gap G2** of the "Designing AI Agents" review; AI2-65 / #138.
+Spec: `docs/host-decision-log.md`.
+
+**Context.** `cc-hook --log` (#116, D81) wrote one line per verdict: session, tool,
+action, decision, rule, answer, taint, manifest hash. It could not say which tool
+call a line was, which agent made it, what the person answered to an ASK, or
+whether the call ran. Without those, an ASK cannot be connected to an approval, and
+none of the metrics a world change should rest on (G3: ASK approval and override
+rates) can be computed.
+
+**Decision.**
+
+- **Identity on every decision line.** `tool_use_id`, `agent_id`, `agent_type` and
+  `cwd`, copied from the hook event when the host sends them, `null` when it does
+  not. Nothing is invented: Antigravity sends no tool-call id, so its lines carry
+  `step_idx` (the nearest key into its transcript) and a `null` id.
+- **One file, three kinds of line.** `kind: "decision"` (the gate), `"outcome"` (the
+  observer) and `"policy"` (the console). One append-only file keeps the order in
+  which things happened and gives a reader one thing to open; a missing `kind` is a
+  pre-D84 decision line, so old logs still read.
+- **The observer is the same command on another event.** `harness init` registers
+  the shim for `PostToolUse` and `PostToolUseFailure` beside `PreToolUse`; `cc-hook`
+  dispatches on `hook_event_name`. It is read-only (D77's rule): it prints nothing,
+  exits 0, never touches taint or budget, and does not compile the world. An outcome
+  line records `status` (`ok` / `error` / `interrupted`), the exit code parsed from
+  a failure's `Exit code N`, the error, `duration_ms`, and a result summary.
+- **Result summaries are redacted before they are cut.** The world's
+  `observability.redact` patterns and the D66 scanner run over the full value; then
+  a command keeps the tail of its output, any other long string becomes its size,
+  and the whole summary is cut to 240 characters. Cutting first could leave a token
+  fragment below a detector's length floor. The decision line's `call` now goes
+  through the D66 scanner as well; it did not before.
+- **An ASK's answer is inferred, not attested, and the line says so.** No Claude
+  Code hook observes a person denying a prompt (`PostToolUseFailure` does not fire
+  for permission denials; `PermissionDenied` fires only in auto mode). So an ASK
+  line carries `"human_answer": "inferred"`, and the join reads an outcome as
+  "approved" and its absence as "declined or abandoned". The join only infers in a
+  session with at least one outcome line; elsewhere the observer was not installed,
+  and it reports `unobserved` rather than counting every ASK as declined.
+- **`harness init` turns the log on** (`.claude/state/decisions.jsonl`; machine
+  scopes: their absolute state dir). An outcome line is useless without the decision
+  line it joins, and the state directory is already gitignored and per-machine.
+- **`replay-transcripts --decisions <log>`** joins the log to the transcripts by
+  `tool_use_id`, so a replay against a changed world shows which real verdicts would
+  move, and the report gives the inferred ASK answers.
+
+**Alternatives.**
+
+- *A separate outcomes file.* Rejected: two files written by concurrent hooks lose
+  their relative order, and every reader has to open both.
+- *Record the answer from `PermissionRequest`.* It fires before the prompt, carries
+  no `tool_use_id`, and says nothing about the answer.
+- *Infer the answer in the hook by reading the log back.* The observer would grow
+  with the log and become a reader of its own output; the join belongs to whoever
+  reads the log.
+- *A distinct `cc-observe` subcommand and a second shim.* Two more files to install,
+  keep in step and remove, for a dispatch that is one `match` on the event name.
+- *Wire the observer into this repository's dogfood hook now.* Not done: that hook
+  runs whatever `harness` is installed on the machine, and a pre-D84 binary would
+  treat a post-call event as a second gate call, charging budget counters twice.
+  `init` cannot hit this, because it writes the shim and the settings from the same
+  binary.
+- *OTLP export with the OpenTelemetry GenAI conventions, behind a flag.* Left out:
+  the OpenTelemetry crates are not in the offline crate cache, they are a heavy
+  tree for a binary that runs on every tool call, and network I/O from the hook
+  adds latency to every call and egress from inside the governed session. The
+  follow-up is a separate converter from a finished log to OTLP/JSON for a
+  collector's file receiver, which needs no new dependency.
+
+**Consequence.** A session's log now answers, per call: who proposed it, what the
+kernel decided, what the hook told the host, whether it ran, and how it ended; and
+for an ASK, whether the person (inferably) let it through. That is G3's input. The
+honest limits: the ASK answer is an inference with three named failure cases (no
+observer, a call still running, an outcome line that was not written), and
+Antigravity's ASKs are not joined at all until its post-call hook contract is
+verified.

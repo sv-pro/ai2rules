@@ -275,6 +275,14 @@ E2, E3. **Completes M1. Status:** done.
   → JSON; `replay_bundle` recompiles the world and replays offline.
 - [ ] **E4.6** (Optional) cross-implementation parity harness (e.g. Rego mirror)
   — deferred.
+- [x] **E4.7** Host decision log joined to outcomes (gap G2, AI2-65 / #138,
+  DECISIONS **D84**, `docs/host-decision-log.md`): decision lines carry
+  `tool_use_id` / `agent_id` / `agent_type` / `cwd`; a read-only
+  `PostToolUse` / `PostToolUseFailure` observer appends an outcome line per
+  executed call with a D66-redacted result summary; `harness init` wires it;
+  `replay-transcripts --decisions` joins the log to transcripts and infers ASK
+  answers (stated as inferred). OTLP export left out (no offline dependency);
+  follow-up is a log-to-OTLP/JSON converter.
 
 **Exit:** replay reproduces decisions; redaction holds; the M1 vertical slice
 (`read_file` → kernel → sim executor → trace → replay) passes end to end.

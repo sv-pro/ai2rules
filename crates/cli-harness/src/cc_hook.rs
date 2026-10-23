@@ -28,6 +28,10 @@ use crate::hostkit::{
     canonicalize_root_paths, normalize_tool, persist_taint, persist_usage, read_usage,
     resolve_action_path, sanitize,
 };
+use crate::outcome::{
+    append_line, is_outcome_event, now_ms, outcome_line, redact_patterns, HostIds,
+    HUMAN_ANSWER_INFERRED,
+};
 use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
     gate, host_outcome, BlockKind, GateContext, GateRequest, GateResponse, GateUsage, HostOutcome,
@@ -37,6 +41,7 @@ use harness_types::CompiledWorld;
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::Path;
+use trace_store::secrets::mask_secrets;
 
 /// Compile a world as the hook does: roots resolved against the project `base`
 /// and `home` at the I/O boundary, then the pure compile. `None` on any failure.
@@ -173,6 +178,12 @@ pub(crate) fn call_summary(tool_input: &Value) -> String {
 /// One line of the decision log (`--log`): what the agent tried, what the kernel
 /// decided, and what the hook told the host. `answer` is `null` when the hook
 /// stayed silent and left the call to the host's own permission flow.
+///
+/// `ids` joins the line to the host's transcript and to the outcome line the
+/// observer writes after the call ran (D84). On an ASK the person's answer is not
+/// visible to the hook, so the line says it is `inferred` from that outcome.
+/// The call summary goes through the D66 secret scanner: a token in a command is
+/// masked here exactly as it is in a trace.
 pub(crate) fn decision_line(
     session: &str,
     tool: &str,
@@ -180,44 +191,27 @@ pub(crate) fn decision_line(
     res: &GateResponse,
     answer: Option<&str>,
     reason: &str,
+    ids: &HostIds,
 ) -> Value {
-    let ts_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    json!({
-        "ts_ms": ts_ms,
+    let mut line = json!({
+        "ts_ms": now_ms(),
+        "kind": "decision",
         "session": session,
         "tool": tool,
         "action": res.action,
-        "call": call,
+        "call": mask_secrets(call),
         "decision": res.decision,
         "rule": res.rule,
         "reason": reason,
         "answer": answer,
         "taint": res.context.taint,
         "manifest_hash": res.manifest_hash,
-    })
-}
-
-/// Append one decision-log line. Observability, not enforcement: a log that
-/// cannot be written is reported on stderr and the verdict stands unchanged.
-fn append_decision(path: &Path, line: &Value) {
-    use std::io::Write;
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        let _ = std::fs::create_dir_all(dir);
+    });
+    if answer == Some("ask") {
+        line["human_answer"] = json!(HUMAN_ANSWER_INFERRED);
     }
-    let written = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| writeln!(f, "{line}"));
-    if let Err(e) = written {
-        eprintln!(
-            "harness cc-hook: decision log {} not written: {e}",
-            path.display()
-        );
-    }
+    ids.stamp(&mut line);
+    line
 }
 
 /// Emit a PreToolUse decision (`deny`/`ask`, or `allow` in `--grant` mode) and exit 0.
@@ -251,7 +245,20 @@ pub fn run(
         Err(_) => return 0, // fail-open
     };
 
+    // The outcome observer (D84): the same binary, wired to `PostToolUse` and
+    // `PostToolUseFailure`. Read-only — it prints nothing, exits 0, and touches
+    // neither taint nor budget, so it can never change what the gate decided.
+    if is_outcome_event(&ev) {
+        if let Some(path) = log {
+            if let Some(line) = outcome_line(&ev, &redact_patterns(world_path)) {
+                append_line(path, &line, "cc-hook");
+            }
+        }
+        return 0;
+    }
+
     let tool = ev.get("tool_name").and_then(|t| t.as_str()).unwrap_or("");
+    let ids = HostIds::claude_code(&ev);
     let ti = ev.get("tool_input").cloned().unwrap_or_else(|| json!({}));
     let ti = if ti.is_object() { ti } else { json!({}) };
     let call = call_summary(&ti);
@@ -308,9 +315,10 @@ pub fn run(
     // Every exit below that answers the host records the answer first (`--log`).
     let record = |answer: Option<&str>, reason: &str| {
         if let Some(path) = log {
-            append_decision(
+            append_line(
                 path,
-                &decision_line(&sid, tool, &call, &res, answer, reason),
+                &decision_line(&sid, tool, &call, &res, answer, reason, &ids),
+                "cc-hook",
             );
         }
     };

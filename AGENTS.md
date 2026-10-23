@@ -77,8 +77,8 @@ harness-types (foundation — language-neutral contracts, pure data)
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 61 · compiler 28 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 64 · cli-harness 172 ·
-harness-wasm 0 · govbench 9 · **total 453** (plus the harness-wasm Node smoke
+provider-adapters 5 · agent-core 18 · harness-preview 64 · cli-harness 190 ·
+harness-wasm 0 · govbench 9 · **total 471** (plus the harness-wasm Node smoke
 tests, run via wasm-pack)
 
 ---
@@ -266,6 +266,7 @@ blog/public/demo/law-firm.html`.
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |
 | `docs/harness-gate-abi.md` | Gate ABI schema (D24) |
+| `docs/host-decision-log.md` | The host decision log (`cc-hook --log`): decision, outcome and policy lines, the read-only `PostToolUse` observer, how a decision joins its outcome and why an ASK's answer is inferred, not attested (D84) |
 | `docs/trust-pins.md` | Trust pins design (D29) |
 | `docs/machine-wide-governance.md` | Governing every Claude Code session on a machine: `init --user` (user settings) vs `init --managed` (admin-only managed settings, no user-side kill-switch), the verified Claude Code hook semantics behind the difference, and an example policy (D82) |
 | `docs/demos/jira-copilot/` | E16 JIRA MCP demo runbook |

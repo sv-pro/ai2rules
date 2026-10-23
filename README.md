@@ -334,7 +334,11 @@ Allow / Ask / Off switches (read the web, send data out, delete files, edit proj
 files, run scripts) rewrite the project's world file atomically, and the hook reads
 that file on every call, so the agent's very next action gets the new answer, with no
 restart. `cc-hook --log` feeds the page a live list of what the agent tried and what
-the kernel decided. Off takes the action out of the agent's world (ABSENT, with
+the kernel decided. The same log joins each decision to its outcome (D84): every line
+carries the host's `tool_use_id` and agent, and a read-only `PostToolUse` observer,
+which `harness init` wires in, records how each call that ran ended. That is enough
+to tell an approved ASK from a declined one, inferred from whether the call ran
+([`docs/host-decision-log.md`](docs/host-decision-log.md)). Off takes the action out of the agent's world (ABSENT, with
 `--enforce-absent`); the taint floor has no switch. Runbook and scenario:
 [`docs/demos/policy-console/`](docs/demos/policy-console/README.md).
 
@@ -388,7 +392,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **453 tests** green.
+Builds clean offline with `clippy -D warnings`; **471 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
