@@ -338,7 +338,9 @@ the kernel decided. The same log joins each decision to its outcome (D84): every
 carries the host's `tool_use_id` and agent, and a read-only `PostToolUse` observer,
 which `harness init` wires in, records how each call that ran ended. That is enough
 to tell an approved ASK from a declined one, inferred from whether the call ran
-([`docs/host-decision-log.md`](docs/host-decision-log.md)). Off takes the action out of the agent's world (ABSENT, with
+([`docs/host-decision-log.md`](docs/host-decision-log.md)). `harness export-otlp`
+turns a finished log into OpenTelemetry traces (OTLP/JSON, GenAI `execute_tool`
+spans, one trace per session) for an existing collector, offline. Off takes the action out of the agent's world (ABSENT, with
 `--enforce-absent`); the taint floor has no switch. Runbook and scenario:
 [`docs/demos/policy-console/`](docs/demos/policy-console/README.md).
 
@@ -392,7 +394,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **471 tests** green.
+Builds clean offline with `clippy -D warnings`; **478 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
