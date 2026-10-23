@@ -18,6 +18,10 @@ pause where the presenter has to change the policy. The presenter, not you,
 changes the policy: never open, call or edit the console, the world file or the
 hook.
 
+The console is at http://127.0.0.1:8790/ (port 8790 unless the stand was started
+with another `CONSOLE_PORT`). Give the presenter that address whenever they ask;
+giving it is not opening it.
+
 ## How to run each step
 
 - Do the request the way you normally would, as if the user had just typed it.
@@ -35,7 +39,13 @@ write the summary below.
 
 ## The steps
 
-**Pause.** "Set the profile to **Contractor** in the console."
+**Start.** Before anything else, write this one line, so the presenter can open
+the console in a browser (in the Claude app: right-click the link, then Open in
+Browser pane):
+
+> Policy console: [http://127.0.0.1:8790/](http://127.0.0.1:8790/)
+
+**Pause.** "Set the profile to **Contractor** in the console (http://127.0.0.1:8790/)."
 
 **1. Read the onboarding page.**
 Request: *Fetch http://portal.northwind.test:8787/onboarding with curl and tell me the onboarding steps.*

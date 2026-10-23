@@ -162,7 +162,9 @@ Two ways to run it: type each prompt below yourself, or let the skill type them.
 /northwind-demo
 ```
 
-Claude runs the four steps in order. Where a switch has to change, it stops and
+Claude first prints the console's address as a link (in the Claude app,
+right-click it and choose Open in Browser pane). Then it runs the four steps in
+order. Where a switch has to change, it stops and
 asks you in a question box ("Set the profile to Contractor in the console."). Flip
 the switch, talk to it, then click **Done**. Permission questions still come to
 you: answer step 2's with **No**, as below. At the end Claude writes a table of
