@@ -14,6 +14,7 @@ use trace_store::{ApprovalStore, TraceStore};
 use world_kernel::ExecEnv;
 
 mod agy_hook;
+mod broken_world;
 mod cc_hook;
 mod console;
 mod demo;
@@ -200,7 +201,8 @@ enum Command {
     /// event on stdin, govern it with the kernel in-process, and emit a deny/ask
     /// decision — or, in `--grant`/replace mode, an explicit `allow` that grants
     /// (skips the host's Allow/Deny prompt). Additive by default (never
-    /// auto-allows); fail-open. Replaces the Python `world-gate-adapter.py` —
+    /// auto-allows); fail-open on an unreadable event, and a world that does not
+    /// compile follows `--on-broken-world` (D87). Replaces the Python `world-gate-adapter.py` —
     /// this is the "deep" half governing native tools.
     CcHook {
         /// Path to the world manifest (YAML/JSON) that governs this session.
@@ -247,12 +249,22 @@ enum Command {
         /// log that cannot be written never changes the verdict. Off by default.
         #[arg(long)]
         log: Option<PathBuf>,
+        /// What to do when the world cannot be read or compiled (D87): `closed`
+        /// refuses every call, `open` lets it through ungoverned, `last-good`
+        /// decides with the last world that compiled here (cached in `--state`)
+        /// and falls back to `closed` when none ever did. Every mode warns the
+        /// person. Lives outside the world because a broken world cannot say how
+        /// it wants to be handled.
+        #[arg(long, value_enum, default_value_t = broken_world::BrokenWorldMode::LastGood)]
+        on_broken_world: broken_world::BrokenWorldMode,
     },
     /// Antigravity CLI (`agy`) PreToolUse adapter, in Rust (D48): read an
     /// Antigravity `PreToolUse` payload on stdin, govern it with the kernel
     /// in-process, and emit a deny/force_ask decision — or, in `--grant`/replace
     /// mode, an explicit `allow` that grants (skips the host's prompt). Additive
-    /// by default (never auto-allows); fail-open. The agy sibling of `cc-hook`.
+    /// by default (never auto-allows); fail-open on an unreadable event, and a
+    /// world that does not compile follows `--on-broken-world` (D87). The agy
+    /// sibling of `cc-hook`.
     AgyHook {
         /// Path to the world manifest (YAML/JSON) that governs this session.
         #[arg(long)]
@@ -295,6 +307,14 @@ enum Command {
         /// kernel required.
         #[arg(long)]
         soft_ask: bool,
+        /// What to do when the world cannot be read or compiled (D87): `closed`
+        /// refuses every call, `open` lets it through ungoverned, `last-good`
+        /// decides with the last world that compiled here (cached in `--state`)
+        /// and falls back to `closed` when none ever did. Every mode warns the
+        /// person. Lives outside the world because a broken world cannot say how
+        /// it wants to be handled.
+        #[arg(long, value_enum, default_value_t = broken_world::BrokenWorldMode::LastGood)]
+        on_broken_world: broken_world::BrokenWorldMode,
     },
     /// Front a real upstream MCP server with the kernel: shape its `tools/list`
     /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
@@ -526,6 +546,7 @@ fn main() {
         enforce_absent,
         grant,
         log,
+        on_broken_world,
     }) = &cli.command
     {
         std::process::exit(cc_hook::run(
@@ -536,6 +557,7 @@ fn main() {
             *enforce_absent,
             *grant,
             log.as_deref(),
+            *on_broken_world,
         ));
     }
 
@@ -547,6 +569,7 @@ fn main() {
         enforce_absent,
         grant,
         soft_ask,
+        on_broken_world,
     }) = &cli.command
     {
         std::process::exit(agy_hook::run(
@@ -557,6 +580,7 @@ fn main() {
             *enforce_absent,
             *grant,
             *soft_ask,
+            *on_broken_world,
         ));
     }
 

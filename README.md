@@ -270,7 +270,9 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   `.claude/cc-world.yaml`: ABSENT (opt-in `--enforce-absent`), the monotonic
   **taint floor**, **ASK** on destructive commands (collapsing to DENY under
   `--mode background`), with Bash classified **kernel-side** from the manifest's
-  `command_classes` (D36). Additive (only ever `deny`/`ask`) and fail-open. The
+  `command_classes` (D36). Additive (only ever `deny`/`ask`) and fail-open when its
+  binary is missing; a world that does not compile follows `--on-broken-world`
+  (`last-good` by default, D87). The
   Python engine is archived under `.claude/hooks/superseded/`; the cutover
   consciously drops trust pins (D29) and path-based read-taint until they land
   as typed manifest fields. Cross-agent taint still follows the shared session
@@ -388,7 +390,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **453 tests** green.
+Builds clean offline with `clippy -D warnings`; **466 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

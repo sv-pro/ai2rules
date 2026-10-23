@@ -29,7 +29,7 @@ agy PreToolUse ─→ .agents/hooks/world-gate.sh ─→ harness agy-hook
 | File | Role |
 |---|---|
 | `.agents/hooks.json` | `PreToolUse`, `matcher: ""` (all tools) → the shim |
-| `.agents/hooks/world-gate.sh` | bootstrap shim; locates `harness`, execs `agy-hook`; fail-open |
+| `.agents/hooks/world-gate.sh` | bootstrap shim; locates `harness`, execs `agy-hook`; fail-open when no binary is found |
 | `.agents/agy-world.yaml` | the `WorldManifest` governing agy sessions |
 | `.agents/state/` | per-conversation taint sidecar (gitignored) |
 
@@ -128,6 +128,32 @@ echo '{"conversationId":"t1","workspacePaths":["/w"],
 # {"decision":"deny","reason":"tainted context cannot reach an externally-effectful action …"}
 ```
 
+## A world that does not compile (D87)
+
+A world file that cannot be read, does not compile, or has been deleted is not a
+process failure: `agy-hook --on-broken-world` decides what happens.
+
+| Mode | The call |
+|---|---|
+| `last-good` (default) | decided by the last world that compiled, cached in `--state` as `last-good-world.json`; refused when none ever did |
+| `closed` | `{"decision":"deny","reason":"ai2rules: the world … does not compile (…)"}` |
+| `open` | `{}`: proceeds ungoverned |
+
+Antigravity has no verified user-facing message field, so the warning is written to
+**stderr** on every call while the world is broken (whether agy shows hook stderr
+to the user is unverified), and a refusal carries it as the `deny` reason, which is
+verified to reach the agent. The shim used to pass through when the world file was
+missing; it now leaves that to the hook, so deleting the world no longer switches
+governance off.
+
+```bash
+echo 'world_id: [' > /tmp/broken.yaml
+echo '{"conversationId":"t2","workspacePaths":["/w"],
+       "toolCall":{"name":"run_command","args":{"CommandLine":"ls"}}}'   | ./target/debug/harness agy-hook --world /tmp/broken.yaml --state /tmp/agystate2
+# stderr: ai2rules: the world /tmp/broken.yaml does not compile (…). Broken-world mode `last-good`, but no world has compiled here yet …
+# {"decision":"deny","reason":"ai2rules: the world /tmp/broken.yaml does not compile …"}
+```
+
 ## Gotchas
 
 - **Hook cwd is `.agents/`**, not the project root — Antigravity runs hook
@@ -138,7 +164,8 @@ echo '{"conversationId":"t1","workspacePaths":["/w"],
   `loaded 0 named hooks from 0 hooks.json file(s)`. Use
   `agy --add-dir "$PWD" -p "…"`.
 - **Fail-open must print `{}`.** Antigravity parses stdout; unlike Claude Code,
-  emitting nothing is not a passthrough.
+  emitting nothing is not a passthrough. That covers a missing binary and an
+  unreadable event; a broken world follows `--on-broken-world` (above).
 - **Don't probe via `~/.gemini/config/hooks.json`** unless you mean it — that is
   the machine-global customization root and applies to every project.
 - **Canary detection.** agy refuses prompts that look like security probes

@@ -499,6 +499,8 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 
 - [x] **E13.9** Machine-wide governance (DECISIONS **D82**, `docs/machine-wide-governance.md`): `harness init --user` merges the hook into `~/.claude/settings.json` with an absolute state dir and a world that protects the files able to disable it; `harness init --managed` installs into Claude Code's managed settings (admin-only; no user-side kill-switch, no `HARNESS_BIN`, kernel copied into the policy dir). Both take `--remove`. **Pending**: per-user taint state is still writable by that user (the hook runs as them) — closing it needs a privileged state service; `--bare` vs managed hooks unverified; `harness doctor` does not report user/managed installs yet.
 
+- [x] **E13.11** Broken-world mode for the host hooks (DECISIONS **D87**, AI2-56 / #128): `cc-hook` and `agy-hook` take `--on-broken-world closed|open|last-good`; a world that cannot be read or compiled (or is deleted) no longer fails open. `last-good` (the default) decides with the last world that compiled, cached in the state dir, and falls back to `closed`; `init` writes `last-good`, `init --managed` writes `closed`. Every mode warns (Claude Code `systemMessage`, agy stderr, decision log, console banner, `harness doctor`). **Pending**: a live check that Claude Code renders a PreToolUse `systemMessage`; agy has no decision log.
+
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
 
 ---
