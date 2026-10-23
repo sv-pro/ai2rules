@@ -39,6 +39,9 @@ pub struct ChannelDef {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// A misspelt key (`arg_constraint:`) would otherwise drop the limit it carries
+// without a word (D86).
+#[serde(deny_unknown_fields)]
 pub struct BaseActionDef {
     pub name: ActionName,
     pub action_type: ActionType,
@@ -107,6 +110,7 @@ impl ArgSource {
 /// How the actor may supply one scoped-capability argument (DECISIONS D79).
 /// Both limits apply when both are set.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InputRule {
     /// The name the actor sees and supplies; the kernel maps it back to the base
     /// action's argument name. `None` keeps the base name.
