@@ -3317,3 +3317,105 @@ file tools are kept off it, but a person, or an approved Bash command, can delet
 marker. Closing that needs the kernel's state behind a boundary the user cannot
 cross, such as a system service the hook asks. Also unverified: whether `claude
 --bare` skips managed hooks. The docs do not say.
+
+## D86 — A limit the kernel cannot enforce is refused, never skipped
+
+**Context.** AI2-55 / #127. `world-kernel/src/schema.rs` checked two keywords in
+`arg_constraints`, `enum` and `const`, and skipped every other one. A world that
+wrote `amount: { maximum: 10000 }` compiled, and the limit was never checked. The
+same file let an unknown `type` name through (`_ => true`), and a property's `enum`
+or `maxLength` inside `schema` was skipped as well. An author who writes a limit
+believes it binds, so this was a fail-open in the kernel. It also blocked every
+value condition `docs/action-layers.md` describes, and with it G6 (cumulative caps):
+a threshold that passes silently is worse than none.
+
+**Decision.** The issue's option 3, plus a small enforced set (option 4).
+
+- **One vocabulary, in one place.** `harness_types::arg_schema` lists every keyword
+  the kernel understands. The compiler and the kernel both read it. A keyword is
+  either an *annotation* or an *assertion*:
+  - annotations: `title`, `description`, `default`, `examples`, `format`,
+    `deprecated`, `readOnly`, `writeOnly`, `$schema`, `$id`, `$comment`;
+  - assertions, all enforced: `type` (a name or a list of names), `enum`, `const`,
+    `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`,
+    `maxLength`, `items`, `minItems`, `maxItems`, `properties`, `required`,
+    `additionalProperties` (boolean form only).
+- **One grammar everywhere.** The vocabulary is the same for the root `schema`,
+  each of its properties (recursively, through `items` and nested `properties`), and
+  each `arg_constraints` entry. Nested objects are closed by default, like the root.
+- **Compile time.** Any other keyword fails the world with
+  `CompileError::UnsupportedKeyword`, which names the action, the keyword and where
+  it sits (`arg_constraints.amount`, `schema.properties.tags.items`). A known
+  keyword with a malformed value (`maxLength: -1`, `type: money`, `enum: []`) is
+  `CompileError::Invalid`. The root schema's `type` may only be `object`.
+- **Decision time, as a backstop.** `schema::validate` runs the same check first and
+  denies the call (`schema_violation`) if it fails, even when the constrained
+  argument is absent. `CompiledWorld::new` is public, so a descriptor can reach the
+  kernel without the compiler. A limit the kernel cannot evaluate must deny, not
+  pass.
+- **Type-specific limits fail closed.** In JSON Schema, `maximum` ignores a string.
+  Here, `amount: { maximum: 10000 }` refuses `"10001"` ("must be a number to be
+  checked against `maximum`"). The exception is when the schema's own `type` admits
+  the other type: `type: [number, "null"]` with `maximum` lets `null` through
+  because the author said so.
+- **Small details.** Integer bounds compare exactly, as `i128`. An `f64` rounds
+  2^53 + 1 down to 2^53. String lengths count characters, not bytes. A call with no
+  arguments is an empty object.
+- **Misspelt keys are parse errors.** `BaseActionDef` and `InputRule` now deny
+  unknown fields. Without this, `arg_constraint:` (singular) or
+  `!Input { max_len: 8 }` dropped its limit as silently as `maximum` did.
+
+**Not enforced, so refused:**
+
+- **`pattern`.** The kernel's only regex engine would be Rust's `regex`. It is a
+  different dialect from the ECMA-262 regex that JSON Schema specifies and that
+  authors test against. `\d` matches every Unicode digit in Rust but only ASCII
+  digits in ECMA, so a Rust check would admit *more* than the author tested.
+  Lookaround and backreferences do not exist in Rust's `regex`. Enforcing it would
+  also add a dependency to the pure kernel and to the WASM engine. Scoped `prefix`
+  and `enum` cover the uses we have. Revisit with a pinned, ASCII-only dialect if a
+  world needs it.
+- **`anyOf` / `oneOf` / `allOf` / `not`, `$ref` / `$defs`, `multipleOf`,
+  `uniqueItems`, `patternProperties`, the schema form of `additionalProperties`,
+  and the rest.** Composition needs branch evaluation and error reporting the kernel
+  does not have.
+
+**Costs.**
+
+- **Some upstream MCP schemas will not compile as they stand.** Upstreams generated
+  from Pydantic often spell an optional argument as
+  `anyOf: [{type: X}, {type: "null"}]`, and that is now refused. The author rewrites
+  it as `type: [X, "null"]`. `mcp-author` copies upstream schemas into the world,
+  but it compiles before it saves, so it shows the error instead of writing a world
+  that will not load. `harness doctor` reports the compile error for a world already
+  on disk.
+- **Interplay with the hooks.** A world that compiled before this change and uses a
+  keyword that is now refused stops compiling. `cc-hook` and `agy-hook` fail open on
+  a world that does not compile, so that session would run ungoverned. That behaviour
+  is AI2-56 / #128 (D87), handled separately, and this change should land with or
+  after it. No committed world is affected: none uses `arg_constraints`, and their
+  schemas use only `type`, `required`, `properties` and `description`. A new test
+  (`compiler/tests/committed_worlds.rs`) compiles every world in the repository, so a
+  committed world cannot break unnoticed.
+
+**Alternatives.**
+
+- *Refuse at compile time only (option 1).* Rejected. It leaves the kernel
+  trusting every descriptor's author, and the compiler is not the only way to build
+  one.
+- *Deny at decision time only (option 2).* Rejected as the only line. The author
+  would learn at the first call, possibly in front of an audience, instead of when
+  saving.
+- *Refuse and enforce nothing new.* Rejected. The bounds and lengths are a few lines
+  each, have no dialect question, and are what threshold and length policies need.
+- *A full JSON Schema crate (`jsonschema`).* Rejected. It brings a regex engine,
+  remote `$ref` resolution and format validators into a kernel that is pure, has no
+  I/O and ships as a 576 KB WASM module. It also accepts every keyword, which
+  defeats the point: a keyword we have not reviewed would bind with semantics we did
+  not choose.
+
+**Consequence.** A per-call limit written in a world now binds, or the world does
+not load. `amount: { maximum: 10000 }` denies 10,000.01 with `schema_violation`.
+Still not expressible: a limit that routes to an approval instead of denying ("over
+10,000 needs the CFO"), and sums across calls (G6). Those are the next value
+conditions.

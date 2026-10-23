@@ -171,10 +171,12 @@ floor.
 - *"Only vendors in the vendor master"* needs a set the kernel cannot read: the
   kernel is pure and holds no data. `ContextRef` moves the lookup to the host, which
   is the right place, but the host's resolution is then part of the trusted base.
-- *"Over 10,000 needs the CFO"* is a value condition. `arg_constraints` checks
-  `enum` and `const` only, and a keyword it does not support **passes silently**
-  (`world-kernel/src/schema.rs`). A `maximum` written today would be ignored. That
-  must change before any threshold policy is offered.
+- *"Over 10,000 needs the CFO"* is a value condition routed to a person. A
+  per-call limit binds now: `amount: { maximum: 10000 }` in `arg_constraints` denies
+  10,000.01 with `schema_violation`, and a keyword the kernel does not enforce is
+  refused when the world compiles instead of passing silently (D86). What is missing
+  is the routing: a limit denies, it does not ask the CFO. Sums across calls are not
+  expressible either.
 - *"Invoice data may go to its own vendor and nowhere else"* is information-flow
   control. `data_classes` is declared in every manifest and enforced nowhere; step 6
   is caught by the one-bit taint floor, which is coarser than the rule.
@@ -187,8 +189,8 @@ floor.
 1. **State beyond one bit.** How far can rules over sequences go (data labels,
    process states, "only after step X") while the kernel stays a pure function of
    `(call, context, compiled world)`? Where does the state live, and who may write it?
-2. **Value conditions.** Thresholds, ranges, sums across calls. First, unsupported
-   constraint keywords must fail closed instead of passing.
+2. **Value conditions.** Per-call ranges and lengths bind (D86). Open: a threshold
+   that routes to an approval instead of denying, and sums across calls.
 3. **Reference data.** Vendor masters, client lists, approved domains: compiled into
    the world (stale, big), resolved by the host via `ContextRef` (host is trusted), or
    a signed snapshot the kernel can check by hash?
