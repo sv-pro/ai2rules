@@ -45,63 +45,110 @@ them away too.
 | `world.yaml` | The world the project starts with (the Developer profile) |
 | `setup.sh` | Builds `~/northwind/vendor-desk`, installs ai2rules with the log on and ABSENT enforced |
 | `preflight.sh` | Read-only check of the stand: harness, hook flags, names, receiver, console |
+| `run-demo.sh` | The whole stand in one command: setup, receiver, console, preflight, browser, Claude Code |
 
 The project files and the receiver come from `../live-claude-code/`.
 
-## Before the demo
+## Before the demo (once per machine)
 
-You need `harness` installed outside the project, a version with `harness console`:
+1. **A `harness` with the `console` command, installed outside the project.** Once
+   a release carries it:
 
-```bash
-npm install -g ai2rules-harness@latest
-```
+   ```bash
+   npm install -g ai2rules-harness@latest
+   ```
 
-Once per machine, add the two lines from `../live-claude-code/hosts.txt` to the
-hosts file. In WSL, `/etc/hosts` is regenerated on restart; `preflight.sh` tells
-you when the lines are gone.
+   Until then, use a build of this branch and point `HARNESS` at it in the run
+   command below. CI's `dryrun-harness-*` artifacts are packaging rehearsals that
+   hold one Linux binary in every archive; a real Windows build comes from a manual
+   run of `release.yml` (artifact `harness-x86_64-pc-windows-msvc`).
 
-Rebuild the project (again before every run: it also empties the log):
-
-```bash
-bash docs/demos/policy-console/setup.sh
-```
+2. **The two hosts-file lines** from `../live-claude-code/hosts.txt`
+   (`C:\Windows\System32\drivers\etc\hosts` as Administrator on Windows,
+   `/etc/hosts` with sudo elsewhere). WSL regenerates `/etc/hosts` on restart; the
+   preflight tells you when the lines are gone.
 
 ## Running it
 
-Four panes (Windows Terminal: Alt+Shift+= splits side by side, Alt+Shift+- splits
-top and bottom):
+One command builds and starts the whole stand. Run it from the repository root, in
+Git Bash on Windows or any shell elsewhere:
 
-1. **Receiver**, left running:
+```bash
+bash docs/demos/policy-console/run-demo.sh
+```
+
+When the right `harness` is not first on PATH, name it:
+
+```bash
+HARNESS="$HOME/tools/harness-console/harness-x86_64-pc-windows-msvc/harness.exe" bash docs/demos/policy-console/run-demo.sh
+```
+
+It does five things and prints each:
+
+1. rebuilds the project in `~/northwind/vendor-desk`: a clean copy, an empty
+   decision log, an empty `~/northwind-inbox`;
+2. starts the receiver (port 8787) and the console (port 8790) in the background,
+   logging to `~/northwind-logs`;
+3. runs `preflight.sh` and stops if anything is not ready;
+4. opens the console, <http://127.0.0.1:8790/>, in the browser;
+5. opens Claude Code:
+   - **with the `claude` CLI on PATH** it starts it in the project, on Opus 4.8 and
+     in the asking mode (on Opus 5.5 the model's safeguards stopped the upload step
+     in rehearsal and offered to switch models mid-demo). Answer permission
+     questions with "1. Yes" or "No" only: "don't ask again" and "switch to auto
+     mode" change the next step under you. Follow the receiver in a second pane
+     with `tail -f ~/northwind-logs/receiver.log`;
+   - **without it** (the Claude app on Windows) it prints the folder to open, then
+     shows the receiver's request log in the same terminal. In the app: a new Code
+     session on `C:\Users\<you>\northwind\vendor-desk`, mode **Manual**, model
+     **Opus 4.8**. Answer with **Allow once** or **Deny** only.
+
+Put the browser with the console where the audience looks; the terminal can be
+smaller.
+
+**Stopping and starting over.** Ctrl+C in the terminal, or leaving Claude Code,
+stops the receiver and the console. Close the Claude session, run the command
+again, and open a new session. The script refuses to start while an old receiver
+or console still answers on 8787 or 8790: stop that one first.
+
+Options: `--no-claude` (never start the CLI), `--no-browser`, a different `DEST`
+as the last argument, and `PORT`, `CONSOLE_PORT`, `LOGS`, `RECEIVED` in the
+environment.
+
+### By hand
+
+The same stand without the script, one pane per long-running process (Windows
+Terminal: Alt+Shift+= splits side by side, Alt+Shift+- splits top and bottom):
+
+1. **Project**, rebuilt before every run:
+
+   ```bash
+   bash docs/demos/policy-console/setup.sh
+   ```
+
+2. **Receiver**, left running (`python` instead of `python3` on Windows):
 
    ```bash
    python3 docs/demos/live-claude-code/receiver.py --out ~/northwind-inbox
    ```
 
-2. **Console**, left running, then open <http://127.0.0.1:8790/> in the browser:
+3. **Console**, left running, then open <http://127.0.0.1:8790/>:
 
    ```bash
    harness console --project ~/northwind/vendor-desk
    ```
 
-3. **Preflight**, until it says "Ready to present.":
+4. **Preflight**, until it says "Ready to present.":
 
    ```bash
    bash docs/demos/policy-console/preflight.sh
    ```
 
-4. **Claude Code**, on Opus 4.8 and in the default (asking) mode. On Opus 5.5 its
-   safeguards stopped the upload step in rehearsal and offered to switch models
-   mid-demo:
+5. **Claude Code**, as in step 5 above:
 
    ```bash
    cd ~/northwind/vendor-desk && claude --model claude-opus-4-8 --permission-mode default
    ```
-
-   Answer permission questions with "1. Yes" or "No" only. "Don't ask again" and
-   "switch to auto mode" change the next step under you.
-
-Put the browser with the console where the audience looks; the terminal can be
-smaller.
 
 ## The scenario
 
@@ -164,9 +211,12 @@ console starts the feed over by itself when the log is reset.
   `scp`, `rsync` and the like. With **Edit project files** Off, a
   shell append (`printf … >> report.md`) is such a command, so it asks rather than
   being absent.
-- **PowerShell fetches and uploads share a verb** (`Invoke-WebRequest`), so a
-  PowerShell upload is ambiguous and always asks or is refused, whatever the
-  switches say. The demo runs in WSL, where Claude Code has no PowerShell tool.
+- **On Windows, Claude Code may use its PowerShell tool**, and there it often runs
+  `curl.exe` rather than Bash's `curl` (the first Windows rehearsal did, and got
+  ASK instead of ABSENT until the PowerShell classes learned curl). Any `curl`,
+  `curl.exe`, `wget`, `Invoke-WebRequest` or `irm` there reads the web; one that
+  also carries an upload flag (`-F`, `-InFile`, `-Method Post`, …) is ambiguous and
+  asks first, then is refused once the session has read from outside.
 - **Profiles are presets**, not identities. Binding them to a directory group (Okta,
   Entra) is not built.
 - **After the session has read from outside, reading the web again is refused too**:

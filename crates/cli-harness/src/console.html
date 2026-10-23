@@ -148,7 +148,19 @@ async function api(path, body) {
     body: JSON.stringify(body),
   };
   const res = await fetch(path, opts);
-  return res.json();
+  const out = await res.json();
+  // Each console run mints a new page token. A tab left open from an earlier run
+  // carries the old one, so reload once to pick up this run's page.
+  if (res.status === 403 && body !== undefined && out.error === "missing or wrong page token") {
+    const last = Number(sessionStorage.getItem("harness-console-reloaded") || 0);
+    if (Date.now() - last > 10000) {
+      sessionStorage.setItem("harness-console-reloaded", String(Date.now()));
+      location.reload();
+    } else {
+      out.error = "the console was restarted: reload this page";
+    }
+  }
+  return out;
 }
 
 // ---- policy -------------------------------------------------------------

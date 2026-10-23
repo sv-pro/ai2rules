@@ -104,10 +104,13 @@ command_classes:
     classes:
       - to: PowerShell
         patterns: ["Get-ChildItem", "Get-Content", "Get-Location", "dir ", "ls ", "cat "]
+      # Claude Code on Windows often reaches for `curl.exe` from its PowerShell tool.
       - to: PowerShell_fetch
-        patterns: ["Invoke-WebRequest", "Invoke-RestMethod", "iwr ", "irm "]
+        patterns: ["Invoke-WebRequest", "Invoke-RestMethod", "iwr ", "irm ", "curl ", "curl.exe ", "wget "]
+      # The curl upload flags too, so a curl.exe upload is ambiguous here exactly as
+      # in Bash, never a plain fetch.
       - to: PowerShell_upload
-        patterns: ["-InFile", "-Method Post", "-Method Put", "-Form ", "Start-BitsTransfer", "WebClient"]
+        patterns: ["-InFile", "-Method Post", "-Method Put", "-Form ", "Start-BitsTransfer", "WebClient", "-F ", "-T ", "--form", "--data", "--upload-file", "-d @", "-X POST", "-X PUT"]
       - to: PowerShell_destructive
         patterns: ["Remove-Item", "DeleteDirectory", "DeleteFile", "rm ", "rmdir", "del ", "rd ", "Clear-Content"]
 

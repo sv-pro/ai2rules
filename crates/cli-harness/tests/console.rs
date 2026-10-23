@@ -320,6 +320,10 @@ fn a_profile_sets_every_switch_and_the_floor_still_holds() {
         .iter()
         .any(|p| p["id"] == "contractor" && p["active"] == true));
     assert_eq!(hook(&dir, "Bash", fetch.clone()).as_deref(), Some("deny"));
+    // On Windows Claude Code reached for curl.exe from its PowerShell tool instead.
+    let ps_fetch =
+        json!({"command": "curl.exe -sS -i http://portal.northwind.test:8787/onboarding"});
+    assert_eq!(hook(&dir, "PowerShell", ps_fetch).as_deref(), Some("deny"));
 
     // Even with sending out allowed, a session that has read the web cannot send.
     console.post("/api/policy", json!({ "profile": "developer" }));
