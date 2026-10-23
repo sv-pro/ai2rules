@@ -62,11 +62,31 @@
   .seg button[aria-pressed=true].ask { background: var(--ask-bg); color: var(--ask); font-weight: 600; }
   .seg button[aria-pressed=true].off { background: var(--absent-bg); color: var(--absent); font-weight: 600; }
   .seg.busy { opacity: .55; pointer-events: none; }
-  .locked { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-            padding: 12px 0 2px; border-top: 1px solid var(--line); color: var(--muted); }
-  .locked .name { color: var(--ink); font-weight: 500; }
-  .lock { font-size: 12px; border: 1px dashed var(--line); border-radius: 8px; padding: 5px 10px; white-space: nowrap; }
+  .belowpolicy { padding: 12px 0 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
   #policyError { color: var(--deny); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+  /* The kernel's invariants: above the policy, because no policy changes them. */
+  .invariants { max-width: 1360px; margin: 0 auto; padding: 20px 24px 0; }
+  @media (min-width: 900px) { .invariants { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-bottom: 4px; } }
+  @media (max-width: 900px) { .invariants { padding: 16px 16px 0; } }
+  .invband { background: var(--panel); border: 2px solid var(--ink); border-radius: 14px; padding: 12px 16px 14px; }
+  .invhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
+  .invhead h2 { margin: 0; }
+  .invhead .sub { margin: 0; }
+  .invs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 700px) { .invs { grid-template-columns: 1fr; } }
+  .inv { --c: var(--ink); --c-bg: var(--soft); border: 1px solid var(--line); border-radius: 10px;
+         padding: 9px 12px; background: var(--soft); transition: background .3s, border-color .3s; }
+  .inv.floor { --c: var(--deny); --c-bg: var(--deny-bg); }
+  .inv.marked { --c: var(--ask); --c-bg: var(--ask-bg); }
+  .inv.absent { --c: var(--absent); --c-bg: var(--absent-bg); }
+  .inv b { display: block; font-size: 13.5px; }
+  .inv span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .inv.held { border-color: var(--c); }
+  .inv.held span { color: var(--c); }
+  .inv.hot { background: var(--c-bg); border-color: var(--c); box-shadow: 0 0 0 2px var(--c); }
+  @media (prefers-reduced-motion: reduce) { .inv { transition: none; } }
+  #feed li.byinv .why { color: var(--ink); }
 
   .feedhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
   .feedhead .spacer { flex: 1; }
@@ -105,19 +125,35 @@
   <span class="spacer"></span>
   <span id="conn">connecting…</span>
 </header>
+<section class="invariants" aria-labelledby="invTitle">
+  <div class="invband">
+    <div class="invhead">
+      <h2 id="invTitle">🔒 Kernel invariants</h2>
+      <p class="sub">Hold under every policy. No switch below changes them.</p>
+    </div>
+    <div class="invs">
+      <div class="inv floor" id="invFloor">
+        <b>After reading outside content, nothing leaves</b>
+        <span data-idle="Not needed yet this session">Not needed yet this session</span>
+      </div>
+      <div class="inv marked" id="invMarked">
+        <b>Once marked, a session stays marked</b>
+        <span data-idle="This session is clean">This session is clean</span>
+      </div>
+      <div class="inv absent" id="invAbsent">
+        <b>What is not granted does not exist</b>
+        <span data-idle="Not needed yet this session">Not needed yet this session</span>
+      </div>
+    </div>
+  </div>
+</section>
 <main>
   <section class="card" aria-labelledby="policyTitle">
     <h2 id="policyTitle">Policy</h2>
     <p class="sub">What this agent may do. A change applies to its very next action.</p>
     <div class="profiles" id="profiles"></div>
     <div id="switches"></div>
-    <div class="locked">
-      <div>
-        <span class="name">After reading outside content, nothing leaves</span>
-        <span class="acts">Enforced by the kernel. No policy can turn it off.</span>
-      </div>
-      <span class="lock" aria-label="Always on">🔒 Always on</span>
-    </div>
+    <p class="belowpolicy">The kernel's invariants, above, hold whatever these switches say.</p>
     <div id="policyError" role="alert"></div>
   </section>
 
@@ -238,6 +274,66 @@ const RULE_WORDS = {
   absent: "switched off in this agent's world",
 };
 
+// ---- invariants -------------------------------------------------------------
+// Which verdicts come from a kernel invariant rather than from a switch. This only
+// labels what the kernel already decided; the page decides nothing.
+const FLOOR_RULES = new Set(["taint_invariant", "no_tainted_network", "no_tainted_external",
+  "no_tainted_credential", "no_tainted_memory_write", "no_tainted_persistent_write"]);
+const inv = { floor: 0, absent: 0, markedAt: null, tainted: false };
+const hotTimers = {};
+
+// Flash only for what just happened: a page opened mid-session replays the log, and
+// three cards lighting up at once for old events would say nothing.
+function flash(id, ts) {
+  if (ts && Date.now() - ts > 15000) return;
+  const el = $(id);
+  el.classList.add("hot");
+  clearTimeout(hotTimers[id]);
+  hotTimers[id] = setTimeout(() => el.classList.remove("hot"), 2600);
+}
+
+function setInv(id, text, held) {
+  const el = $(id);
+  const span = el.querySelector("span");
+  span.textContent = text || span.dataset.idle;
+  el.classList.toggle("held", !!held);
+}
+
+function times(n) { return n === 1 ? "once" : n + " times"; }
+
+function resetInvariants() {
+  inv.floor = inv.absent = 0;
+  inv.markedAt = null;
+  inv.tainted = false;
+  for (const id of ["invFloor", "invMarked", "invAbsent"]) {
+    $(id).classList.remove("hot");
+    setInv(id, "", false);
+  }
+}
+
+// Whether a kernel invariant, not a switch, decided this event (marks its feed line).
+function invariantOf(ev, v) {
+  let by = false;
+  if (v === "DENY" && FLOOR_RULES.has(ev.rule)) {
+    inv.floor++;
+    setInv("invFloor", "Held " + times(inv.floor) + " this session", true);
+    flash("invFloor", ev.ts_ms);
+    by = true;
+  } else if (v === "ABSENT") {
+    inv.absent++;
+    setInv("invAbsent", "Held " + times(inv.absent) + " this session", true);
+    flash("invAbsent", ev.ts_ms);
+    by = true;
+  }
+  if (ev.taint === "tainted" && !inv.tainted) {
+    inv.tainted = true;
+    inv.markedAt = ev.ts_ms;
+    setInv("invMarked", "Marked at " + (ev.ts_ms ? hhmmss(ev.ts_ms) : "this step") + ", and stays so", true);
+    flash("invMarked", ev.ts_ms);
+  }
+  return by;
+}
+
 function verdictOf(ev) {
   // What the agent experienced: the kernel's verdict, except that an ALLOW the
   // hook left to the host is still an ALLOW.
@@ -287,6 +383,7 @@ function addEvent(ev) {
     if (lastSession !== null) {
       feed.prepend(row("SESSION", "NEW", "A new agent session started",
         [document.createTextNode("it starts clean: nothing read from outside yet")], ev.ts_ms, false));
+      resetInvariants();
     }
     lastSession = ev.session;
   }
@@ -298,11 +395,15 @@ function addEvent(ev) {
   $("nAsk").textContent = counts.ask;
   $("nStop").textContent = counts.stop;
 
+  const by = invariantOf(ev, v);
   const w = why(ev);
   const code = document.createElement("code");
   code.textContent = w.code;
-  const sub = [document.createTextNode(w.text + (w.code ? " — " : "")), code];
-  feed.prepend(row(v, v, ev.call || ev.tool, sub, ev.ts_ms, true));
+  const lead = by ? "🔒 kernel invariant · " : "";
+  const sub = [document.createTextNode(lead + w.text + (w.code ? " — " : "")), code];
+  const li = row(v, v, ev.call || ev.tool, sub, ev.ts_ms, true);
+  if (by) li.classList.add("byinv");
+  feed.prepend(li);
 
   const tainted = ev.taint === "tainted";
   $("session").textContent = tainted ? "Session: has read outside content" : "Session: clean";
@@ -315,6 +416,7 @@ function resetFeed() {
   counts.allow = counts.ask = counts.stop = 0;
   for (const id of ["nAllow", "nAsk", "nStop"]) $(id).textContent = "0";
   lastSession = null;
+  resetInvariants();
   $("session").textContent = "Session: no activity yet";
   $("session").classList.remove("tainted");
 }

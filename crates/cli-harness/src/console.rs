@@ -16,7 +16,8 @@
 //!
 //! What no switch reaches: once a session has read from outside, nothing it does
 //! may reach the network. The kernel enforces that floor whatever the manifest
-//! says, so the page shows it locked.
+//! says, so the page pins it, with the other kernel invariants a switch cannot
+//! change, in a band above the policy and lights it when a verdict comes from it.
 //!
 //! The write is atomic (temp file + rename) because cc-hook fails open on a world
 //! it cannot compile: a half-written file must never be visible to it.

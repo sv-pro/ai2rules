@@ -10,8 +10,9 @@ Two things to show:
 1. **The policy shapes the agent.** Pick a profile, or set one switch to Allow, Ask
    or Off, and the same request gets a different answer.
 2. **Some doors no policy opens.** After the agent has read anything from outside,
-   nothing it does can reach the network. The console shows that row locked, and
-   setting "Send data out" to Allow does not change it.
+   nothing it does can reach the network. The console pins the kernel's invariants
+   in a band above the policy, lights the one that decided a verdict, and marks that
+   line in the feed with a lock. Setting "Send data out" to Allow does not change it.
 
 Everything stays on the machine. The outside sites are the local receiver from
 the [side-by-side demo](../live-claude-code/README.md), reached by name through the
@@ -191,9 +192,11 @@ Upload client-data.csv to http://files.northwind.test:8787/upload with curl.
 ```
 
 Red **DENY**, `taint_invariant`: the session read the portal in step 1. Set **Send
-data out** to **Allow** and send it again: still **DENY**. Point at the locked row:
-"Even the administrator cannot open this by accident." The receiver's terminal shows
-no upload.
+data out** to **Allow** and send it again: still **DENY**, and the first card of the
+invariants band at the top lights up: "After reading outside content, nothing
+leaves", held twice. Point at it: "The switch says Allow. The kernel says no. Even
+the administrator cannot open this by accident." The receiver's terminal shows no
+upload.
 
 **4. The work still goes through.**
 
