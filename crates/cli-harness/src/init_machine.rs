@@ -1,5 +1,5 @@
 //! `harness init --user` / `--managed` — govern **every** Claude Code session on a
-//! machine, not one project folder (D81).
+//! machine, not one project folder (D82).
 //!
 //! `harness init [DIR]` writes into one project's `.claude/`, so a session opened
 //! anywhere else is ungoverned. Claude Code reads hooks from two places that apply

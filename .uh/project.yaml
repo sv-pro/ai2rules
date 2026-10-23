@@ -30,7 +30,7 @@ resources:
     provider: linear
     locator: team AI2 (ids AI2-<n>)
     access:
-      - { via: mcp, tool: linear }
+      - { via: mcp, tool: linear, note: "the claude.ai Linear connector (enable it under Connectors); the project .mcp.json entry needs its own sign-in" }
       - { via: web, actor: human }
   - id: ci
     kind: ci
@@ -162,7 +162,16 @@ procedures:
     defined_in: AGENTS.md
   - id: trackers-sync
     kind: obligation
-    summary: Reflect every task state change in both GitHub and Linear; done on one side is not done
+    summary: >-
+      Keep live task state in Linear; a GitHub issue exists only for work outsiders should
+      see and is linked both ways ([AI2-<n>] title, GitHub URL on the Linear issue). PRs
+      carry AI2-<n> in branch and title so Linear's GitHub integration moves the issue
+    defined_in: AGENTS.md
+  - id: no-private-in-public
+    kind: prohibition
+    summary: >-
+      Partners, prospects, deals, outreach and people outside the project live only in
+      Linear; never in GitHub issues, PRs, commits or repository files (the repo is public)
     defined_in: AGENTS.md
   - id: decision-record
     kind: obligation
@@ -202,6 +211,7 @@ flows:
     defined_in: docs/FLYWHEEL.md
     carriers:
       primary: tasks-folder
+      # A GitHub issue only when the finding is public-facing (AGENTS.md, 2026-10-22).
       mirrors: [{ carrier: linear-status, sync: manual }, { carrier: gh-issue, sync: manual }]
     states:
       - { id: discovery, values: { tasks-folder: _tasks/1_discovery } }
@@ -219,7 +229,9 @@ flows:
     items: [issue]
     defined_in: AGENTS.md (conventions), branch and commit naming
     carriers:
-      # AGENTS.md treats GitHub and Linear as equals; Linear is primary here because ids lead with AI2-<n>.
+      # Linear plans the work and holds its state (AGENTS.md, split of 2026-10-22). A GitHub
+      # issue mirrors it only when the work is public-facing; the PR is linked by the AI2-<n>
+      # key and Linear's GitHub integration moves the status as the PR opens and merges.
       primary: linear-status
       mirrors: [{ carrier: gh-issue, sync: manual }, { carrier: gh-pr, sync: auto }, { carrier: plan-checkbox, sync: manual }]
     # Linear statuses of team AI2 ("Ai2rules"), read by Codex through its Linear connector on

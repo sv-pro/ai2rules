@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="harness-console-token" content="__HARNESS_CONSOLE_TOKEN__">
+<title>Policy console</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f5f5f2; --panel: #ffffff; --ink: #1c1c1a; --muted: #62625c; --line: #deded8;
+    --soft: #efefea; --accent: #2f5fd0;
+    --allow: #1f7a3a; --allow-bg: #e3f3e7; --ask: #8a5a00; --ask-bg: #fbefd6;
+    --deny: #b42318; --deny-bg: #fbe4e1; --absent: #5f5f5a; --absent-bg: #ececE7;
+    --policy: #3d4fa8; --policy-bg: #e7eafb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1d1d1b; --ink: #ecece7; --muted: #a2a29a; --line: #36362f;
+      --soft: #262623; --accent: #7aa2ff;
+      --allow: #6fcf8a; --allow-bg: #1b3323; --ask: #f0b453; --ask-bg: #3a2c12;
+      --deny: #ff8a7e; --deny-bg: #3e1d19; --absent: #b5b5ad; --absent-bg: #2b2b28;
+      --policy: #a9b6ff; --policy-bg: #232848;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px;
+           padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .1px; }
+  header .brand { color: var(--muted); font-weight: 500; }
+  header .where { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  #conn { font-size: 13px; color: var(--muted); }
+  #conn.bad { color: var(--deny); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 20px;
+         padding: 20px 24px; max-width: 1360px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  section.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  h2 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+
+  .profiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+  @media (max-width: 520px) { .profiles { grid-template-columns: 1fr; } }
+  .profile { text-align: left; font: inherit; color: inherit; background: var(--soft);
+             border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  .profile b { display: block; font-size: 14px; }
+  .profile span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .profile.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--panel); }
+
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 12px 0; border-top: 1px solid var(--line); }
+  .switch .name { font-weight: 500; }
+  .acts { display: block; color: var(--muted); font-size: 11.5px;
+                  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+  .seg button { font: inherit; font-size: 13px; padding: 6px 13px; border: 0; background: transparent;
+                color: var(--muted); cursor: pointer; border-left: 1px solid var(--line); }
+  .seg button:first-child { border-left: 0; }
+  .seg button[aria-pressed=true].allow { background: var(--allow-bg); color: var(--allow); font-weight: 600; }
+  .seg button[aria-pressed=true].ask { background: var(--ask-bg); color: var(--ask); font-weight: 600; }
+  .seg button[aria-pressed=true].off { background: var(--absent-bg); color: var(--absent); font-weight: 600; }
+  .seg.busy { opacity: .55; pointer-events: none; }
+  .belowpolicy { padding: 12px 0 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+  #policyError { color: var(--deny); font-size: 13px; margin-top: 10px; min-height: 1em; }
+
+  /* The kernel's invariants: above the policy, because no policy changes them. */
+  .invariants { max-width: 1360px; margin: 0 auto; padding: 20px 24px 0; }
+  @media (min-width: 900px) { .invariants { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-bottom: 4px; } }
+  @media (max-width: 900px) { .invariants { padding: 16px 16px 0; } }
+  .invband { background: var(--panel); border: 2px solid var(--ink); border-radius: 14px; padding: 12px 16px 14px; }
+  .invhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
+  .invhead h2 { margin: 0; }
+  .invhead .sub { margin: 0; }
+  .invs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 700px) { .invs { grid-template-columns: 1fr; } }
+  .inv { --c: var(--ink); --c-bg: var(--soft); border: 1px solid var(--line); border-radius: 10px;
+         padding: 9px 12px; background: var(--soft); transition: background .3s, border-color .3s; }
+  .inv.floor { --c: var(--deny); --c-bg: var(--deny-bg); }
+  .inv.marked { --c: var(--ask); --c-bg: var(--ask-bg); }
+  .inv.absent { --c: var(--absent); --c-bg: var(--absent-bg); }
+  .inv b { display: block; font-size: 13.5px; }
+  .inv span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .inv.held { border-color: var(--c); }
+  .inv.held span { color: var(--c); }
+  .inv.hot { background: var(--c-bg); border-color: var(--c); box-shadow: 0 0 0 2px var(--c); }
+  @media (prefers-reduced-motion: reduce) { .inv { transition: none; } }
+  #feed li.byinv .why { color: var(--ink); }
+
+  .feedhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
+  .feedhead .spacer { flex: 1; }
+  .badge { font-size: 12.5px; border-radius: 999px; padding: 3px 11px; background: var(--allow-bg); color: var(--allow); }
+  .badge.tainted { background: var(--ask-bg); color: var(--ask); }
+  .counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .count { background: var(--soft); border-radius: 10px; padding: 8px 12px; }
+  .count b { display: block; font-size: 22px; font-weight: 600; }
+  .count span { color: var(--muted); font-size: 12px; }
+  .count.allow b { color: var(--allow); } .count.ask b { color: var(--ask); } .count.stop b { color: var(--deny); }
+
+  #feed { list-style: none; margin: 0; padding: 0; }
+  #feed li { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+             padding: 10px 0; border-top: 1px solid var(--line); }
+  #feed li.fresh { animation: fresh 1.6s ease-out; }
+  @keyframes fresh { from { background: var(--soft); } to { background: transparent; } }
+  @media (prefers-reduced-motion: reduce) { #feed li.fresh { animation: none; } }
+  .chip { font-size: 11.5px; font-weight: 600; letter-spacing: .3px; text-align: center; border-radius: 6px; padding: 3px 0; }
+  .chip.ALLOW { background: var(--allow-bg); color: var(--allow); }
+  .chip.ASK { background: var(--ask-bg); color: var(--ask); }
+  .chip.DENY { background: var(--deny-bg); color: var(--deny); }
+  .chip.ABSENT, .chip.REPLAN { background: var(--absent-bg); color: var(--absent); }
+  .chip.POLICY { background: var(--policy-bg); color: var(--policy); }
+  .chip.SESSION { background: var(--soft); color: var(--muted); }
+  .call { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-word; }
+  .why { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .why code { font-size: 11.5px; }
+  .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .empty { color: var(--muted); font-size: 13.5px; padding: 18px 0 6px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="brand">ai2rules</span> · Policy console</h1>
+  <span class="where" id="where"></span>
+  <span class="spacer"></span>
+  <span id="conn">connecting…</span>
+</header>
+<section class="invariants" aria-labelledby="invTitle">
+  <div class="invband">
+    <div class="invhead">
+      <h2 id="invTitle">🔒 Kernel invariants</h2>
+      <p class="sub">Hold under every policy. No switch below changes them.</p>
+    </div>
+    <div class="invs">
+      <div class="inv floor" id="invFloor">
+        <b>After reading outside content, nothing leaves</b>
+        <span data-idle="Not needed yet this session">Not needed yet this session</span>
+      </div>
+      <div class="inv marked" id="invMarked">
+        <b>Once marked, a session stays marked</b>
+        <span data-idle="This session is clean">This session is clean</span>
+      </div>
+      <div class="inv absent" id="invAbsent">
+        <b>What is not granted does not exist</b>
+        <span data-idle="Not needed yet this session">Not needed yet this session</span>
+      </div>
+    </div>
+  </div>
+</section>
+<main>
+  <section class="card" aria-labelledby="policyTitle">
+    <h2 id="policyTitle">Policy</h2>
+    <p class="sub">What this agent may do. A change applies to its very next action.</p>
+    <div class="profiles" id="profiles"></div>
+    <div id="switches"></div>
+    <p class="belowpolicy">The kernel's invariants, above, hold whatever these switches say.</p>
+    <div id="policyError" role="alert"></div>
+  </section>
+
+  <section class="card" aria-labelledby="feedTitle">
+    <div class="feedhead">
+      <h2 id="feedTitle">What the agent just tried</h2>
+      <span class="spacer"></span>
+      <span class="badge" id="session">Session: no activity yet</span>
+    </div>
+    <div class="counts">
+      <div class="count allow"><b id="nAllow">0</b><span>allowed</span></div>
+      <div class="count ask"><b id="nAsk">0</b><span>asked a person</span></div>
+      <div class="count stop"><b id="nStop">0</b><span>stopped</span></div>
+    </div>
+    <ul id="feed" aria-live="polite"></ul>
+    <p class="empty" id="empty">Nothing yet. Ask the agent to do something.</p>
+  </section>
+</main>
+<script>
+"use strict";
+const TOKEN = document.querySelector('meta[name="harness-console-token"]').content;
+const $ = (id) => document.getElementById(id);
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-harness-console": TOKEN },
+    body: JSON.stringify(body),
+  };
+  const res = await fetch(path, opts);
+  const out = await res.json();
+  // Each console run mints a new page token. A tab left open from an earlier run
+  // carries the old one, so reload once to pick up this run's page.
+  if (res.status === 403 && body !== undefined && out.error === "missing or wrong page token") {
+    const last = Number(sessionStorage.getItem("harness-console-reloaded") || 0);
+    if (Date.now() - last > 10000) {
+      sessionStorage.setItem("harness-console-reloaded", String(Date.now()));
+      location.reload();
+    } else {
+      out.error = "the console was restarted: reload this page";
+    }
+  }
+  return out;
+}
+
+// ---- policy -------------------------------------------------------------
+const WORDS = { allow: "Allow", ask: "Ask", off: "Off" };
+
+function renderState(s) {
+  if (!s.ok) { $("policyError").textContent = s.error; return; }
+  $("where").textContent = s.world_id;
+  $("where").title = s.world_path;
+  $("profiles").replaceChildren(...s.profiles.map((p) => {
+    const b = document.createElement("button");
+    b.className = "profile" + (p.active ? " on" : "");
+    b.setAttribute("aria-pressed", p.active);
+    b.innerHTML = "<b></b><span></span>";
+    b.querySelector("b").textContent = p.label;
+    b.querySelector("span").textContent = p.blurb;
+    b.onclick = () => send({ profile: p.id }, b);
+    return b;
+  }));
+  $("switches").replaceChildren(...s.switches.map((sw) => {
+    const row = document.createElement("div");
+    row.className = "switch";
+    const label = document.createElement("div");
+    label.innerHTML = '<span class="name"></span><span class="acts"></span>';
+    label.querySelector(".name").textContent = sw.label;
+    label.querySelector(".acts").textContent =
+      sw.position === "mixed" ? "mixed — pick one" : sw.actions.join(" · ");
+    const seg = document.createElement("div");
+    seg.className = "seg";
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", sw.label);
+    for (const pos of ["allow", "ask", "off"]) {
+      const b = document.createElement("button");
+      b.className = pos;
+      b.textContent = WORDS[pos];
+      b.setAttribute("aria-pressed", sw.position === pos);
+      b.onclick = () => { if (sw.position !== pos) send({ switches: { [sw.id]: pos } }, seg); };
+      seg.append(b);
+    }
+    row.append(label, seg);
+    return row;
+  }));
+}
+
+async function send(body, busyEl) {
+  busyEl.classList.add("busy");
+  $("policyError").textContent = "";
+  try {
+    const r = await api("/api/policy", body);
+    if (!r.ok) $("policyError").textContent = r.error;
+    else renderState(r.state);
+  } catch (e) {
+    $("policyError").textContent = "The console is not answering. Is `harness console` still running?";
+  } finally {
+    busyEl.classList.remove("busy");
+  }
+  poll();
+}
+
+async function refreshState() {
+  try { renderState(await api("/api/state")); } catch (e) { /* the poll reports it */ }
+}
+
+// ---- live feed ------------------------------------------------------------
+let next = 0;
+let lastSession = null;
+const counts = { allow: 0, ask: 0, stop: 0 };
+
+const RULE_WORDS = {
+  taint_invariant: "this session read outside content, so nothing may leave it",
+  no_tainted_network: "this session read outside content, so nothing may leave it",
+  no_tainted_external: "this session read outside content, so nothing may leave it",
+  approval_required: "needs a person's OK",
+  unknown_to_ontology: "not in this agent's world",
+  absent: "switched off in this agent's world",
+};
+
+// ---- invariants -------------------------------------------------------------
+// Which verdicts come from a kernel invariant rather than from a switch. This only
+// labels what the kernel already decided; the page decides nothing.
+const FLOOR_RULES = new Set(["taint_invariant", "no_tainted_network", "no_tainted_external",
+  "no_tainted_credential", "no_tainted_memory_write", "no_tainted_persistent_write"]);
+const inv = { floor: 0, absent: 0, markedAt: null, tainted: false };
+const hotTimers = {};
+
+// Flash only for what just happened: a page opened mid-session replays the log, and
+// three cards lighting up at once for old events would say nothing.
+function flash(id, ts) {
+  if (ts && Date.now() - ts > 15000) return;
+  const el = $(id);
+  el.classList.add("hot");
+  clearTimeout(hotTimers[id]);
+  hotTimers[id] = setTimeout(() => el.classList.remove("hot"), 2600);
+}
+
+function setInv(id, text, held) {
+  const el = $(id);
+  const span = el.querySelector("span");
+  span.textContent = text || span.dataset.idle;
+  el.classList.toggle("held", !!held);
+}
+
+function times(n) { return n === 1 ? "once" : n + " times"; }
+
+function resetInvariants() {
+  inv.floor = inv.absent = 0;
+  inv.markedAt = null;
+  inv.tainted = false;
+  for (const id of ["invFloor", "invMarked", "invAbsent"]) {
+    $(id).classList.remove("hot");
+    setInv(id, "", false);
+  }
+}
+
+// Whether a kernel invariant, not a switch, decided this event (marks its feed line).
+function invariantOf(ev, v) {
+  let by = false;
+  if (v === "DENY" && FLOOR_RULES.has(ev.rule)) {
+    inv.floor++;
+    setInv("invFloor", "Held " + times(inv.floor) + " this session", true);
+    flash("invFloor", ev.ts_ms);
+    by = true;
+  } else if (v === "ABSENT") {
+    inv.absent++;
+    setInv("invAbsent", "Held " + times(inv.absent) + " this session", true);
+    flash("invAbsent", ev.ts_ms);
+    by = true;
+  }
+  if (ev.taint === "tainted" && !inv.tainted) {
+    inv.tainted = true;
+    inv.markedAt = ev.ts_ms;
+    setInv("invMarked", "Marked at " + (ev.ts_ms ? hhmmss(ev.ts_ms) : "this step") + ", and stays so", true);
+    flash("invMarked", ev.ts_ms);
+  }
+  return by;
+}
+
+function verdictOf(ev) {
+  // What the agent experienced: the kernel's verdict, except that an ALLOW the
+  // hook left to the host is still an ALLOW.
+  return ev.decision || "ALLOW";
+}
+
+function why(ev) {
+  const v = verdictOf(ev);
+  let text;
+  if (v === "ABSENT") text = (ev.rule === "unknown_to_ontology" ? RULE_WORDS.unknown_to_ontology : RULE_WORDS.absent);
+  else if (ev.rule && RULE_WORDS[ev.rule]) text = RULE_WORDS[ev.rule];
+  else if (v === "ALLOW") text = ev.taint === "tainted" ? "allowed · session has now read outside content" : "allowed";
+  else text = ev.reason || "";
+  return { text, code: [ev.action, ev.rule].filter(Boolean).join(" · ") };
+}
+
+function hhmmss(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function row(chipClass, chipText, main, sub, ts, mono) {
+  const li = document.createElement("li");
+  li.className = "fresh";
+  li.innerHTML = '<div class="chip"></div><div><div></div><div class="why"></div></div><div class="when"></div>';
+  const chip = li.querySelector(".chip");
+  chip.className = "chip " + chipClass;
+  chip.textContent = chipText;
+  const m = li.children[1].children[0];
+  m.className = mono ? "call" : "";
+  m.textContent = main;
+  li.querySelector(".why").append(...sub);
+  li.querySelector(".when").textContent = ts ? hhmmss(ts) : "";
+  return li;
+}
+
+function addEvent(ev) {
+  const feed = $("feed");
+  $("empty").hidden = true;
+  if (ev.kind === "policy") {
+    const lines = ev.changes || [];
+    feed.prepend(row("POLICY", "POLICY", ev.headline || lines[0] || "Policy changed",
+      [document.createTextNode((ev.headline ? lines : lines.slice(1)).join(" · "))], ev.ts_ms, false));
+    refreshState();
+    return;
+  }
+  if (ev.session && ev.session !== lastSession) {
+    if (lastSession !== null) {
+      feed.prepend(row("SESSION", "NEW", "A new agent session started",
+        [document.createTextNode("it starts clean: nothing read from outside yet")], ev.ts_ms, false));
+      resetInvariants();
+    }
+    lastSession = ev.session;
+  }
+  const v = verdictOf(ev);
+  if (v === "ALLOW") counts.allow++;
+  else if (v === "ASK") counts.ask++;
+  else counts.stop++;
+  $("nAllow").textContent = counts.allow;
+  $("nAsk").textContent = counts.ask;
+  $("nStop").textContent = counts.stop;
+
+  const by = invariantOf(ev, v);
+  const w = why(ev);
+  const code = document.createElement("code");
+  code.textContent = w.code;
+  const lead = by ? "🔒 kernel invariant · " : "";
+  const sub = [document.createTextNode(lead + w.text + (w.code ? " — " : "")), code];
+  const li = row(v, v, ev.call || ev.tool, sub, ev.ts_ms, true);
+  if (by) li.classList.add("byinv");
+  feed.prepend(li);
+
+  const tainted = ev.taint === "tainted";
+  $("session").textContent = tainted ? "Session: has read outside content" : "Session: clean";
+  $("session").classList.toggle("tainted", tainted);
+}
+
+function resetFeed() {
+  $("feed").replaceChildren();
+  $("empty").hidden = false;
+  counts.allow = counts.ask = counts.stop = 0;
+  for (const id of ["nAllow", "nAsk", "nStop"]) $(id).textContent = "0";
+  lastSession = null;
+  resetInvariants();
+  $("session").textContent = "Session: no activity yet";
+  $("session").classList.remove("tainted");
+}
+
+let polling = false;
+async function poll() {
+  if (polling) return;
+  polling = true;
+  try {
+    const r = await api("/api/events?since=" + next);
+    $("conn").textContent = "live";
+    $("conn").classList.remove("bad");
+    if (r.ok) {
+      if (r.reset) resetFeed();
+      r.events.forEach(addEvent);
+      next = r.next;
+    }
+  } catch (e) {
+    $("conn").textContent = "not connected";
+    $("conn").classList.add("bad");
+  } finally {
+    polling = false;
+  }
+}
+
+refreshState();
+poll();
+setInterval(poll, 700);
+setInterval(refreshState, 4000);
+</script>
+</body>
+</html>

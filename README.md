@@ -328,6 +328,21 @@ harness mcp-author --world my-jira.world.yaml -- harness mock-jira --rovo   # ht
 harness mcp-gateway --world my-jira.world.yaml -- harness mock-jira --rovo
 ```
 
+**Shape a live agent from a policy console (D81, E15.7):** `harness console` opens a
+local page for one Claude Code project governed by `cc-hook`. Its profiles and
+Allow / Ask / Off switches (read the web, send data out, delete files, edit project
+files, run scripts) rewrite the project's world file atomically, and the hook reads
+that file on every call, so the agent's very next action gets the new answer, with no
+restart. `cc-hook --log` feeds the page a live list of what the agent tried and what
+the kernel decided. Off takes the action out of the agent's world (ABSENT, with
+`--enforce-absent`); the taint floor has no switch. Runbook and scenario:
+[`docs/demos/policy-console/`](docs/demos/policy-console/README.md).
+
+```bash
+bash docs/demos/policy-console/setup.sh                       # ~/northwind/vendor-desk
+harness console --project ~/northwind/vendor-desk               # http://127.0.0.1:8790/
+```
+
 **One kernel, many hosts (shipped — D36/D37/D48, `docs/one-kernel-many-hosts.md`):**
 Claude Code, OpenCode, Antigravity CLI, and the MCP gateway all decide through the one Rust kernel
 via thin adapters that hold no policy, no taint algebra, and no command
@@ -373,7 +388,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **440 tests** green.
+Builds clean offline with `clippy -D warnings`; **453 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

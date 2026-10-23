@@ -140,6 +140,86 @@ pub(crate) fn hook_answer(
     }
 }
 
+/// How much of a call the decision log keeps: enough to recognise the call on
+/// screen, never a whole file body or a long script.
+const CALL_SUMMARY_MAX: usize = 160;
+
+/// A one-line summary of what the call does, for the decision log: the command,
+/// path or URL it carries, whitespace collapsed and cut to [`CALL_SUMMARY_MAX`]
+/// characters. File contents (`content`, `new_string`) are deliberately not keys
+/// here: the log shows what was attempted, not the data.
+pub(crate) fn call_summary(tool_input: &Value) -> String {
+    let raw = [
+        "command",
+        "file_path",
+        "notebook_path",
+        "path",
+        "url",
+        "pattern",
+        "query",
+        "description",
+    ]
+    .iter()
+    .find_map(|k| tool_input.get(*k).and_then(|v| v.as_str()))
+    .unwrap_or("");
+    let flat = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= CALL_SUMMARY_MAX {
+        return flat;
+    }
+    let cut: String = flat.chars().take(CALL_SUMMARY_MAX - 1).collect();
+    format!("{cut}…")
+}
+
+/// One line of the decision log (`--log`): what the agent tried, what the kernel
+/// decided, and what the hook told the host. `answer` is `null` when the hook
+/// stayed silent and left the call to the host's own permission flow.
+pub(crate) fn decision_line(
+    session: &str,
+    tool: &str,
+    call: &str,
+    res: &GateResponse,
+    answer: Option<&str>,
+    reason: &str,
+) -> Value {
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    json!({
+        "ts_ms": ts_ms,
+        "session": session,
+        "tool": tool,
+        "action": res.action,
+        "call": call,
+        "decision": res.decision,
+        "rule": res.rule,
+        "reason": reason,
+        "answer": answer,
+        "taint": res.context.taint,
+        "manifest_hash": res.manifest_hash,
+    })
+}
+
+/// Append one decision-log line. Observability, not enforcement: a log that
+/// cannot be written is reported on stderr and the verdict stands unchanged.
+fn append_decision(path: &Path, line: &Value) {
+    use std::io::Write;
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let written = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| writeln!(f, "{line}"));
+    if let Err(e) = written {
+        eprintln!(
+            "harness cc-hook: decision log {} not written: {e}",
+            path.display()
+        );
+    }
+}
+
 /// Emit a PreToolUse decision (`deny`/`ask`, or `allow` in `--grant` mode) and exit 0.
 fn emit(decision: &str, reason: &str) -> ! {
     println!(
@@ -160,6 +240,7 @@ pub fn run(
     source_channel: &str,
     enforce_absent: bool,
     grant: bool,
+    log: Option<&Path>,
 ) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
@@ -173,6 +254,7 @@ pub fn run(
     let tool = ev.get("tool_name").and_then(|t| t.as_str()).unwrap_or("");
     let ti = ev.get("tool_input").cloned().unwrap_or_else(|| json!({}));
     let ti = if ti.is_object() { ti } else { json!({}) };
+    let call = call_summary(&ti);
     let sid = ev
         .get("session_id")
         .and_then(|s| s.as_str())
@@ -211,7 +293,7 @@ pub fn run(
         HookEvent {
             tool,
             tool_input: ti,
-            session_id: sid,
+            session_id: sid.clone(),
         },
         &HookSession {
             tainted,
@@ -223,6 +305,15 @@ pub fn run(
         source_channel,
     );
     let res = gate(&world, &req);
+    // Every exit below that answers the host records the answer first (`--log`).
+    let record = |answer: Option<&str>, reason: &str| {
+        if let Some(path) = log {
+            append_decision(
+                path,
+                &decision_line(&sid, tool, &call, &res, answer, reason),
+            );
+        }
+    };
 
     // Persist the kernel-computed monotonic taint for the next call. The note
     // records the host tool and the kernel's effective action (D36).
@@ -244,10 +335,9 @@ pub fn run(
             "harness cc-hook: cannot record budget counters under {} — refusing the call they would charge",
             state_dir.display()
         );
-        emit(
-            "deny",
-            "budget counters could not be recorded, so this call cannot be counted against the world's limits (untracked_budget)",
-        );
+        let reason = "budget counters could not be recorded, so this call cannot be counted against the world's limits (untracked_budget)";
+        record(Some("deny"), reason);
+        emit("deny", reason);
     }
 
     if res.context.taint == "tainted" && !tainted {
@@ -257,15 +347,20 @@ pub fn run(
                 "harness cc-hook: cannot record session taint under {} — refusing the call that would escalate",
                 state_dir.display()
             );
-            emit(
-                "deny",
-                "session taint could not be recorded, so this ingestion cannot be governed (untracked_taint)",
-            );
+            let reason = "session taint could not be recorded, so this ingestion cannot be governed (untracked_taint)";
+            record(Some("deny"), reason);
+            emit("deny", reason);
         }
     }
 
     match hook_answer(&res, enforce_absent, grant) {
-        Some((decision, reason)) => emit(decision, &reason),
-        None => 0, // defer to the host's permission flow
+        Some((decision, reason)) => {
+            record(Some(decision), &reason);
+            emit(decision, &reason)
+        }
+        None => {
+            record(None, &res.reason);
+            0 // defer to the host's permission flow
+        }
     }
 }

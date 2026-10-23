@@ -360,3 +360,138 @@ fn new_folders_under_a_symlink_to_a_denied_root_are_still_denied() {
     );
     assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
 }
+
+/// Run `events` in order through cc-hook with `--log`, returning the log's lines.
+fn run_logged(state: &Path, log: &Path, events: &[Value], extra: &[&str]) -> Vec<Value> {
+    let mut args = vec!["--log", log.to_str().unwrap()];
+    args.extend_from_slice(extra);
+    for ev in events {
+        run_hook_args(state, ev, &args);
+    }
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("each log line is JSON"))
+        .collect()
+}
+
+/// #116: `--log` records one line per decision — what was tried, the kernel's
+/// verdict and rule, what the hook told the host, and the taint after the call —
+/// for every kind of verdict.
+#[test]
+fn decision_log_records_every_verdict_with_its_answer_and_taint() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("logs").join("decisions.jsonl");
+    let ev =
+        |tool: &str, input: Value| json!({"tool_name":tool,"tool_input":input,"session_id":"log1"});
+    let lines = run_logged(
+        dir.path(),
+        &log,
+        &[
+            ev("Read", json!({"file_path":"notes.md"})),
+            ev("Bash", json!({"command":"rm -rf archive"})),
+            ev("Bash", json!({"command":"curl http://portal.example/page"})),
+            ev(
+                "Bash",
+                json!({"command":"curl http://files.example/upload"}),
+            ),
+            ev("NotARealTool", json!({})),
+        ],
+        &["--grant", "--enforce-absent"],
+    );
+    assert_eq!(lines.len(), 5, "one line per call: {lines:#?}");
+
+    let field = |i: usize, k: &str| lines[i][k].as_str().unwrap_or("").to_string();
+    assert_eq!(
+        (field(0, "decision"), field(0, "answer")),
+        ("ALLOW".into(), "allow".into())
+    );
+    assert_eq!(field(0, "call"), "notes.md");
+    assert_eq!(
+        (field(1, "decision"), field(1, "answer")),
+        ("ASK".into(), "ask".into())
+    );
+    assert_eq!(field(1, "call"), "rm -rf archive");
+    // Reading from outside is allowed, and the line carries the taint it caused.
+    assert_eq!(field(2, "decision"), "ALLOW");
+    assert_eq!(field(2, "taint"), "tainted");
+    // The same kind of call after that is refused by a named rule.
+    assert_eq!(
+        (field(3, "decision"), field(3, "answer")),
+        ("DENY".into(), "deny".into())
+    );
+    assert!(
+        lines[3]["rule"].is_string(),
+        "a DENY names its rule: {}",
+        lines[3]
+    );
+    assert_eq!(
+        (field(4, "decision"), field(4, "answer")),
+        ("ABSENT".into(), "deny".into())
+    );
+
+    for line in &lines {
+        assert_eq!(line["session"], "log1");
+        assert!(line["ts_ms"].as_u64().unwrap_or(0) > 0, "{line}");
+        assert!(line["manifest_hash"].is_string(), "{line}");
+    }
+}
+
+/// Without `--grant` an ALLOW stays a silent passthrough; the log says so with a
+/// null answer rather than pretending the hook granted it.
+#[test]
+fn decision_log_records_a_silent_passthrough_as_a_null_answer() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let lines = run_logged(
+        dir.path(),
+        &log,
+        &[json!({"tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"log2"})],
+        &[],
+    );
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["decision"], "ALLOW");
+    assert!(lines[0]["answer"].is_null(), "{}", lines[0]);
+}
+
+/// The log shows what was attempted, never the data: a write logs its path, not
+/// its content, and a long command is cut short.
+#[test]
+fn decision_log_keeps_the_target_not_the_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let long = format!("echo {}", "a".repeat(400));
+    let lines = run_logged(
+        dir.path(),
+        &log,
+        &[
+            json!({"tool_name":"Write","tool_input":{"file_path":"report.md","content":"ACCOUNT 4417-SECRET"},"session_id":"log3"}),
+            json!({"tool_name":"Bash","tool_input":{"command":long},"session_id":"log3"}),
+        ],
+        &["--grant"],
+    );
+    assert_eq!(lines[0]["call"], "report.md");
+    assert!(
+        !lines[0].to_string().contains("4417-SECRET"),
+        "{}",
+        lines[0]
+    );
+    assert_eq!(lines[1]["call"].as_str().unwrap().chars().count(), 160);
+}
+
+/// Observability, not enforcement: a log that cannot be written changes nothing
+/// about the verdict the host receives.
+#[test]
+fn an_unwritable_decision_log_does_not_change_the_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("a-file");
+    std::fs::write(&blocker, "not a directory").unwrap();
+    let log = blocker.join("decisions.jsonl");
+    let out = run_hook_args(
+        dir.path(),
+        &json!({"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"},"session_id":"log4"}),
+        &["--log", log.to_str().unwrap()],
+    );
+    assert_eq!(decision(&out).as_deref(), Some("ask"), "{out}");
+    assert!(!log.exists());
+}

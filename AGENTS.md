@@ -29,7 +29,7 @@ ai2rules/
 │   ├── safe-mcp-proxy/
 │   └── mcp-tool-projection/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
-├── DECISIONS.md              # ADR-lite decision log (D1–D81)
+├── DECISIONS.md              # ADR-lite decision log (D1–D82)
 ├── README.md                 # Project overview, milestone status, build instructions
 ├── rustfmt.toml              # max_width 100, edition 2021
 └── rust-toolchain.toml       # the pinned compiler — same one locally and in CI
@@ -72,13 +72,13 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
-| **cli-harness** | `harness init [--user \| --managed]`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author`, `harness replay-transcripts` |
+| **cli-harness** | `harness init [--user \| --managed]`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author`, `harness console`, `harness replay-transcripts` |
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all passing, native):**
 harness-types 5 · world-kernel 61 · compiler 28 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 64 · cli-harness 159 ·
-harness-wasm 0 · govbench 9 · **total 440** (plus the harness-wasm Node smoke
+provider-adapters 5 · agent-core 18 · harness-preview 64 · cli-harness 172 ·
+harness-wasm 0 · govbench 9 · **total 453** (plus the harness-wasm Node smoke
 tests, run via wasm-pack)
 
 ---
@@ -121,13 +121,32 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
 
 ## Conventions
 
-- **Task tracking spans GitHub *and* Linear.** The maintainer
-  (sergeyvlasov.pro@gmail.com) manages this project's work in **both** GitHub
-  (issues/PRs) and Linear — the two are kept in sync by hand, not mirrored
-  automatically. When picking up, closing out, or cross-referencing a task,
-  check and update **both** systems; an item done on one side is not done until
-  the other reflects it. `PLAN.md` remains the epic-level source of truth for
-  scope; GitHub + Linear track the live task state.
+- **Linear plans the work; GitHub holds the code.** The maintainer
+  (sergeyvlasov.pro@gmail.com) splits task tracking by audience rather than
+  copying every item into both systems (changed 2026-10-22; before that, every
+  task was duplicated by hand and the two drifted):
+  - **Linear (team `AI2`) is where work is planned and its live state is kept.**
+    Initiatives are business or product goals; Projects are epics, one per
+    `PLAN.md` epic worth tracking; Issues are the work itself, code included.
+    New work starts as a Linear issue.
+  - **Private work lives only in Linear.** This repository and its issues are
+    public. Partners, prospects, deals, outreach and anything naming a person
+    outside the project never go into GitHub issues, PRs, commits or files.
+  - **A GitHub issue exists only when people outside the project should see the
+    work**: a bug or question from a user, a public roadmap item, a research
+    note meant for the community. Link it to its Linear issue both ways (the
+    Linear issue carries the GitHub URL as a link; the GitHub issue title starts
+    with `[AI2-<n>]`).
+  - **PRs link to Linear by key.** Put `AI2-<n>` in the branch name and the PR
+    title (`[AI2-<n> / #<n>]` when a GitHub issue exists too). Linear's GitHub
+    integration then attaches the PR and moves the issue as the PR opens and
+    merges, so nobody updates statuses by hand.
+  - `PLAN.md` stays the source of truth for epic *scope* (design, acceptance
+    invariants); Linear holds the *state*. Keep the epic checkboxes in step when
+    an epic's items land.
+
+  Items created before the split (for example AI2-44…51 / #116…#123) stay
+  linked on both sides; close both when they are done.
 - **Keep `README.md` current on every commit.** If a change affects project
   status, capabilities, crate layout, build/run instructions, or test counts,
   update the README's Status / layout / Build & test sections in the *same*
@@ -138,7 +157,7 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
   harness paths explicitly.
 - **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
   a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
-  can be revisited later. Currently D1–D81.
+  can be revisited later. Currently D1–D82.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
@@ -242,13 +261,13 @@ blog/public/demo/law-firm.html`.
 | `README.md` | Project overview, milestone table, build/run instructions |
 | `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D81; consult before choosing alternatives |
+| `DECISIONS.md` | ADR-lite log D1–D82; consult before choosing alternatives |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |
 | `docs/harness-gate-abi.md` | Gate ABI schema (D24) |
 | `docs/trust-pins.md` | Trust pins design (D29) |
-| `docs/machine-wide-governance.md` | Governing every Claude Code session on a machine: `init --user` (user settings) vs `init --managed` (admin-only managed settings, no user-side kill-switch), the verified Claude Code hook semantics behind the difference, and an example policy (D81) |
+| `docs/machine-wide-governance.md` | Governing every Claude Code session on a machine: `init --user` (user settings) vs `init --managed` (admin-only managed settings, no user-side kill-switch), the verified Claude Code hook semantics behind the difference, and an example policy (D82) |
 | `docs/demos/jira-copilot/` | E16 JIRA MCP demo runbook |
 | `.claude/cc-world.yaml` | Live `WorldManifest` governing Claude Code (dogfood), incl. D36 `command_classes` |
 | `.claude/hooks/world-gate.sh` | PreToolUse bootstrap shim → `harness cc-hook` (the real kernel; D37) |
@@ -256,6 +275,7 @@ blog/public/demo/law-firm.html`.
 | `.agents/hooks.json` + `.agents/hooks/world-gate.sh` | Antigravity PreToolUse wiring → `harness agy-hook` (D48) |
 | `docs/demos/antigravity/` | Antigravity host runbook + the verified hook contract |
 | `docs/demos/law-firm/` | `harness demo --story law-firm`: the embedded law-firm world, the runbook and talking points for a non-engineering audience |
+| `docs/demos/policy-console/` | `harness console` demo (D81): world with switchable action groups, `setup.sh` (hook with `--enforce-absent --log`), preflight, runbook and scenario |
 | `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
 | `docs/benchmarks/mcp-governance/` | Public MCP Governance Benchmark seed (issue #64 / AI2-5, E18): three scenarios, an intentionally weak reference gateway, ai2rules over both transports, and the generated per-scenario report. Runner: `crates/govbench` |
 | `scripts/run-governance-bench.sh` | The one command for the benchmark. Builds, runs both targets over both transports, regenerates `docs/benchmarks/mcp-governance/results/`, and fails if either half of the contrast stops holding (CI job `governance-bench`) |

@@ -3187,7 +3187,57 @@ Not done yet:
   proposal's.
 - `tools/list` in a world without a surface still does not list scoped verbs (D79).
 
-## D81 — Machine-wide governance: a user scope for convenience, a managed scope for control
+## D81 — The policy console writes the world file; the hook it already reads does the rest
+
+**Context.** The playground (E14/E15) shows how a world decides, but in a sandbox: no agent
+acts on it. To show policy shaping a real agent, the page has to change what a running
+Claude Code session may do, and show what that session then tries. `harness cc-hook`
+already re-reads its `--world` file on every call (D34), so the world file is a live control
+surface. What was missing was a way to edit it safely from a page, and a record of what the
+hook decided that something outside Claude Code can read (AI2-44 / #123).
+
+**Decision.**
+
+- **`harness cc-hook --log <file>`** appends one JSON line per decision: time, session,
+  tool, effective action, a short summary of the call (the command, path or URL, cut to 160
+  characters; never file contents), the verdict, rule and reason, what the hook told the
+  host (`allow`, `ask`, `deny`, or `null` when it stayed silent), and the taint after the
+  call. It is off by default and is observability only: a log that cannot be written never
+  changes a verdict.
+- **`harness console --project <dir>`** serves a local page for that project. Its switches
+  each name a group of actions; setting one sets those actions' `projected` and
+  `approval_required` on the real `WorldManifest` (Allow, Ask, or Off = not projected). The
+  server renders through the real serializer, reloads, compiles, and only then writes. Its
+  feed is the hook's log, plus a `policy` line the console appends for every change, so
+  cause and effect sit side by side.
+- **The write is atomic** (temp file, then rename). `cc-hook` fails open on a world it
+  cannot compile, so a half-written file must never be visible to it.
+- **Off is ABSENT, not DENY**, and binds only with `cc-hook --enforce-absent`. The demo world
+  names Claude Code's own bookkeeping tools so that flag does not take them away too.
+- **The taint floor has no switch.** The kernel denies network and external effects from a
+  session that has read outside content whatever the manifest says; the page shows it
+  locked.
+- **The local-page plumbing is shared** with `mcp-author` (`local_page.rs`): 127.0.0.1 only,
+  `Host` check, same-origin POSTs, a per-run token in a custom header, atomic writes.
+
+**Alternatives.**
+
+- *Hot-reload through a running daemon* the hook queries: rejected. The hook is a process
+  per call by design (D34), and the file it already reads is the simplest live channel.
+- *Let the page send raw YAML*, as an editor would: rejected for this page. A switch is the
+  operator's vocabulary, and a page that writes arbitrary manifests is `mcp-author`'s job.
+- *Off as DENY* (keep the action, deny it by rule): rejected. ABSENT is what "this agent
+  does not have it" means (D79), and it is the allowlist posture a buyer recognises.
+- *A separate audit trail in the trace store*: deferred. The log is a feed, not evidence;
+  exporting it with its world and replaying it is #121.
+
+**Consequence.** A world file written by the console loses its comments except the leading
+header block, which the console keeps. Switches only exist for action names the world
+declares, so the console is generic over any world that uses the demo's names, and silent
+about the rest. Command classes stay text patterns: a command that matches two switches'
+classes is unrecognised and asks, whatever either switch says.
+
+## D82 — Machine-wide governance: a user scope for convenience, a managed scope for control
 
 **Date:** 2026-10-21. Adds `harness init --user` and `harness init --managed`
 (`crates/cli-harness/src/init_machine.rs`, `docs/machine-wide-governance.md`).

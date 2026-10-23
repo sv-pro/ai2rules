@@ -1,5 +1,5 @@
 //! `harness init --user` / `--managed` — governance for every session on a
-//! machine, not one project folder (D81).
+//! machine, not one project folder (D82).
 //!
 //! The properties under test: the user's own settings survive an install and an
 //! uninstall, a re-run never registers the hook twice, state never lands in the

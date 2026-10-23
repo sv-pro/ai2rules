@@ -243,7 +243,7 @@ go further.
   that path. But a person, or an approved Bash command, can delete a taint marker
   and un-taint a session. Closing that needs the kernel's state behind a boundary
   the user cannot cross: a system service the hook talks to. That is a different
-  product shape (see D81).
+  product shape (see D82).
 - **Fail-open.** If the kernel binary is missing, the shim lets calls through, so a
   broken install does not brick every session in the company. Only an
   administrator can remove the binary, so this does not hand the user a switch.
