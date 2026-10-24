@@ -349,7 +349,12 @@ decisions retain distinct, stable span IDs and their original call ID for correl
 Call summaries mask
 recognized secrets before whitespace normalization and truncation, so shortening
 cannot expose a credential fragment. Off takes the action out of the agent's world (ABSENT, with
-`--enforce-absent`); the taint floor has no switch. Runbook and scenario:
+`--enforce-absent`); the taint floor has no switch. A **Stop** button (D85) takes every
+effectful base action away at the agent's next call, including custom names and shell
+processes; actions declared Read/None stay as configured. Worlds with effectful scoped
+capabilities show Stop as unavailable, because those capabilities cannot be hidden
+independently. Restore puts the exact previous projection/approval flags back;
+the page says "Stopped" only after the hook has refused a call. Runbook and scenario:
 [`docs/demos/policy-console/`](docs/demos/policy-console/README.md).
 
 ```bash
@@ -402,7 +407,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **491 tests** green. Unix machine-hook
+Builds clean offline with `clippy -D warnings`; **498 tests** green. Unix machine-hook
 tests feed prepared events through stdin so a disabled hook's early exit cannot
 race the fixture writer.
 

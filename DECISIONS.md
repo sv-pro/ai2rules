@@ -3504,3 +3504,65 @@ choices, each closing an alternative:
   have a separate per-session sequence. Inserting another call or a non-decision
   record does not renumber this call; editing its decision sequence can. This
   corrects the original call-only seed: span IDs change once across that fix.
+
+## D85 — Stop is a console position, and it says "stopped" only on the hook's evidence
+
+**Context.** The policy console (D81) changes what an agent may do at its next call, but
+had no single "stop this agent" control. A security reviewer asks for one first: a halt
+outside the agent's process (gap G7 of the *Designing AI Agents* review; AI2-63 / #136).
+The mechanism was already there. What was missing was the position, and an honest way to
+show that it holds.
+
+**Decision.**
+
+- **Stop is a profile (`stop`) behind its own button.** It hides every base action with
+  an effect other than `Read` or `None`, using the supplied manifest, not a name list, and
+  writes the world atomically like any other change, so it binds at the agent's next call.
+  A call already running finishes; killing one mid-call is E8.4.
+- **Custom and unplaced actions are covered.** Process, network, write, memory,
+  credential and external effects all go off regardless of their names. Read/None
+  actions keep their previous flags. The demo's `Bash` and `PowerShell` read-looking
+  classes declare `Process`, so even `ls` is stopped; there is no shell-name exemption.
+- **Effectful scoped capabilities make Stop unavailable.** D79 keeps them projected
+  even when their base is hidden, and there is no independent projection flag. The
+  console refuses the request without writes and shows which capabilities prevent
+  Stop; it never claims a partial Stop. Read-only capabilities remain supported.
+- **Restore puts back exactly what Stop replaced.** The Stop marker in the decision log
+  keeps every base action's exact projection/approval flags (`stop.before`), including
+  approval on hidden actions, so a custom or mixed policy comes back intact. Old string
+  position markers remain readable. Restore is offered only while the last policy change is that Stop. Any later
+  change ends it.
+- **"Stopped" needs evidence from the hook, never just the click.** Off is ABSENT, which
+  binds only under `cc-hook --enforce-absent`. The hook already logs what it told the host
+  (D81): `deny` for an ABSENT it enforced, `null` for one it let through to the host's
+  prompt. The page shows **Stopped** once a call after the Stop was refused that way, and
+  **Not stopped** as soon as the hook's latest ABSENT went through. Before any call, the
+  project's hook script is read as a hint: if the line that runs `cc-hook` lacks the flag,
+  the page warns before the button is pressed.
+
+**Alternatives.**
+
+- *Keep a fixed switch list or exempt shell names.* Rejected: supplied manifests can
+  expose effectful actions and capabilities under arbitrary names. Stop status checks
+  the same complete effect coverage as the write, so an old refusal cannot prove a
+  newly added action is stopped.
+- *Remove scoped capabilities and put their definitions in the restore log.* Rejected:
+  literal arguments can contain secrets, and policy markers must not copy those into
+  observability. Supporting these worlds needs an independent capability projection
+  mechanism; this console fix does not change the manifest/compiler ABI.
+- *Check the flag statically, as `doctor` inspects the hook.* Rejected as the answer. Hooks
+  can be wired from user, project, local or managed settings, and the shim can be edited.
+  A static check can be wrong in both directions. The log records what the hook did. The
+  static check stays only as an early warning.
+- *A sixth switch for reads, so Stop turns them off too.* Not done. An agent that cannot
+  even read cannot explain why it stopped, and reads are not effects. If wanted, it is a
+  separate switch with its own position in every profile.
+- *Restore to a fixed profile, or keep the previous state in the console's memory.*
+  Rejected. A fixed profile loses a custom mix of switches. Memory is lost when the console
+  restarts. The log marker survives both, and it is the record a reviewer reads anyway.
+- *Stop by killing the agent process, or by the shim's `gate-off` file.* Out of scope.
+  `gate-off` turns governance off, the opposite of a stop. Killing a running call is E8.4.
+
+**Consequence.** Stop is as strong as `--enforce-absent`, and the page says which it is.
+Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
+feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.
