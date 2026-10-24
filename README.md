@@ -276,7 +276,11 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   as typed manifest fields. Cross-agent taint still follows the shared session
   sidecar (E13.6, D20), and the containerized governed SUT with an
   egress-allowlist proxy supplies the E8 enforcement floor (E13.7, D21).
-  See `DECISIONS.md` D19–D21, D29, D36, D37.
+  Instruction and memory files (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`,
+  auto-memory, Antigravity's equivalents) are classified by `path_classes` on the
+  canonical path as durable-memory writes, so a tainted session cannot leave
+  instructions for the next one (E13.10, D83).
+  See `DECISIONS.md` D19–D21, D29, D36, D37, D83.
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the
@@ -394,7 +398,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **473 tests** green.
+Builds clean offline with `clippy -D warnings`; **482 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -663,6 +667,12 @@ MCP **proxy sidecar**, the `world-kernel` **library**) and who each is for — i
 **[`docs/USE-CASES.md`](docs/USE-CASES.md)**. The delivery model is *infrastructure, not
 an app* (governance you plug into a host you already run; the standalone-agent path is
 cut) — see `DECISIONS.md` **D31**.
+
+For reviewers who ask which obligation a control is evidence for, and what it leaves
+behind to inspect, **[`docs/compliance-evidence-map.md`](docs/compliance-evidence-map.md)**
+maps each control to its artifact (a file, a test, a decision) and to the EU AI Act,
+NIST AI RMF, ISO/IEC 42001 and OWASP Agentic Top 10 clauses it can support, with the
+host limits of the default configuration beside each row. It is not a compliance claim.
 
 Speculative, research-grade directions that aren't committed work (e.g. a cross-host
 "super-harness" governance plane) are parked in the idea pool at

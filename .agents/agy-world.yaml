@@ -65,6 +65,8 @@ base_actions:
   - { name: propose_code, action_type: Patch, side_effect: FilesystemWrite }
   - { name: edit_notebook, action_type: Patch, side_effect: FilesystemWrite }
   - { name: move, action_type: Patch, side_effect: FilesystemWrite }
+  # --- instruction / memory files, reclassified by `path_classes` (D83) ---
+  - { name: write_instructions, action_type: Write, side_effect: Memory }
   # --- network / egress (taint floor: tainted context -> DENY no_tainted_network) ---
   - { name: search_web, action_type: Web, side_effect: Network }
   - { name: read_url_content, action_type: Web, side_effect: Network }
@@ -95,6 +97,34 @@ command_classes:
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
       - to: run_command_destructive
         patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+
+# Instruction and memory files (D83): Antigravity's own (`GEMINI.md`,
+# `AGENTS.md`, `.agents/rules|skills|workflows/**`) and Claude Code's, since a
+# file one host writes is context the other loads. Matched on the resolved
+# canonical path; the pattern list is byte-identical with .claude/cc-world.yaml
+# (tests/one_kernel.rs). `arg: path` is the neutral key the adapter aliases
+# `TargetFile` / `AbsolutePath` / `FilePath` into. `move` is not listed: its
+# destination key has not been captured from a live session, so a move onto an
+# instruction file stays an ordinary write — a known residual, like shell writes.
+path_classes:
+  - to: write_instructions
+    from:
+      - { action: write_to_file, arg: path }
+      - { action: propose_code, arg: path }
+      - { action: edit_notebook, arg: path }
+    patterns:
+      - "**/CLAUDE.md"
+      - "**/CLAUDE.local.md"
+      - "**/AGENTS.md"
+      - "**/GEMINI.md"
+      - "**/.claude/agents/**"
+      - "**/.claude/commands/**"
+      - "**/.claude/rules/**"
+      - "**/.claude/skills/**"
+      - "**/.claude/projects/*/memory/**"
+      - "**/.agents/rules/**"
+      - "**/.agents/skills/**"
+      - "**/.agents/workflows/**"
 
 # Tainted data cannot reach externally-effectful surfaces (the taint floor,
 # invariant 7). Tainted search_web / read_url_content / mcp_tool /

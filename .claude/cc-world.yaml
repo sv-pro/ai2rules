@@ -48,6 +48,8 @@ base_actions:
   - { name: Write, action_type: Write, side_effect: FilesystemWrite }
   - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
   - { name: NotebookEdit, action_type: Patch, side_effect: FilesystemWrite }
+  # --- instruction / memory files, reclassified by `path_classes` (D83) ---
+  - { name: Write_instructions, action_type: Write, side_effect: Memory }
   # --- network / egress (taint floor: tainted context → DENY no_tainted_network) ---
   - { name: WebFetch, action_type: Web, side_effect: Network }
   - { name: WebSearch, action_type: Web, side_effect: Network }
@@ -69,6 +71,35 @@ command_classes:
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
       - to: Bash_destructive
         patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+
+# Instruction and memory files (D83). A write to one of these is a write to
+# the context the NEXT session loads as trusted, so it is a durable-memory write
+# (`side_effect: Memory`) under the taint floor, not an ordinary FilesystemWrite.
+# Matched on the adapter-resolved canonical path, so `./CLAUDE.md`,
+# `docs/../CLAUDE.md`, an absolute path and `claude.md` are one target. The
+# pattern list is shared by every host manifest (pinned by tests/one_kernel.rs).
+# Shell writes (`echo >> CLAUDE.md`) are not file actions: they stay with the
+# shell classifier above (Bash_unclassified → ASK), D57's known residual.
+path_classes:
+  - to: Write_instructions
+    from:
+      - { action: Write, arg: file_path }
+      - { action: Edit, arg: file_path }
+      - { action: MultiEdit, arg: file_path }
+      - { action: NotebookEdit, arg: notebook_path }
+    patterns:
+      - "**/CLAUDE.md"
+      - "**/CLAUDE.local.md"
+      - "**/AGENTS.md"
+      - "**/GEMINI.md"
+      - "**/.claude/agents/**"
+      - "**/.claude/commands/**"
+      - "**/.claude/rules/**"
+      - "**/.claude/skills/**"
+      - "**/.claude/projects/*/memory/**"
+      - "**/.agents/rules/**"
+      - "**/.agents/skills/**"
+      - "**/.agents/workflows/**"
 
 # Tainted data cannot reach externally-effectful surfaces (the taint floor,
 # invariant 7). Tainted WebFetch/WebSearch/Bash_network/Bash_unclassified all DENY here.
