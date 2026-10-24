@@ -185,7 +185,9 @@ pub fn run(
         // before both decision and authorization. This is the same kernel-owned
         // classification used by the Gate ABI; the provider adapter stays free of
         // policy and a destructive command cannot retain the base action's identity.
-        call.action_name = world.classify_command(&call.action_name, &call.arguments);
+        // Path classes (D83) see the argument as written; this loop has no
+        // adapter-resolved path to offer.
+        call.action_name = world.classify_call(&call.action_name, &call.arguments, None);
 
         let action = call.action_name.as_str().to_string();
         // PACT L2 producer: derive per-argument taint from the actual data flow —

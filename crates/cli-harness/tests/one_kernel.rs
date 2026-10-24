@@ -703,6 +703,172 @@ fn command_class_patterns_are_identical_across_host_manifests() {
     );
 }
 
+/// D83 classifier consistency: every host manifest that declares instruction
+/// files declares the SAME list, routed to a durable-memory action. A file one
+/// host writes is context another host loads, so the lists must not drift.
+#[test]
+fn path_class_patterns_are_identical_across_host_manifests() {
+    let manifests = [
+        "docs/demos/one-kernel/demo-world.yaml",
+        ".claude/cc-world.yaml",
+        "scripts/starter-world.yaml",
+        ".agents/agy-world.yaml",
+    ];
+    let mut pattern_sets: Vec<Vec<String>> = Vec::new();
+    for rel in manifests {
+        let text = std::fs::read_to_string(repo_path(rel)).expect("read manifest");
+        let manifest = compiler::loader::load_yaml(&text).expect("parse manifest");
+        assert_eq!(
+            manifest.path_classes.len(),
+            1,
+            "{rel}: exactly one path classifier"
+        );
+        let class = &manifest.path_classes[0];
+        let target = manifest
+            .base_actions
+            .iter()
+            .find(|a| a.name == class.to)
+            .unwrap_or_else(|| panic!("{rel}: {} is declared", class.to));
+        assert_eq!(
+            target.side_effect,
+            harness_types::SideEffectClass::Memory,
+            "{rel}: an instruction-file write is a durable-memory write"
+        );
+        pattern_sets.push(class.patterns.clone());
+    }
+    for (rel, set) in manifests.iter().zip(&pattern_sets).skip(1) {
+        assert_eq!(
+            &pattern_sets[0], set,
+            "demo-world vs {rel} path-class drift"
+        );
+    }
+}
+
+/// D83 on the real host manifests: Claude Code (`.claude/cc-world.yaml`, keys
+/// `file_path` / `notebook_path`) and Antigravity (`.agents/agy-world.yaml`,
+/// PascalCase keys aliased to `path`). In a tainted session every spelling of
+/// every instruction-file target is refused; an ordinary source file is not.
+#[test]
+fn tainted_instruction_file_writes_are_denied_on_every_host() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = std::fs::canonicalize(tmp.path()).unwrap();
+    let abs = |rel: &str| project.join(rel).to_str().unwrap().to_string();
+    let mut targets: Vec<String> = [
+        "CLAUDE.md",
+        "./CLAUDE.md",
+        "docs/../CLAUDE.md",
+        "claude.md",
+        "AGENTS.md",
+        ".claude/skills/x/SKILL.md",
+        ".claude/agents/reviewer.md",
+        "~/.claude/CLAUDE.md",
+        "~/.claude/projects/-home-dev-proj/memory/MEMORY.md",
+        "GEMINI.md",
+        ".agents/rules/style.md",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    targets.push(abs("CLAUDE.md"));
+    targets.push(abs(".claude/skills/x/SKILL.md"));
+    if cfg!(windows) {
+        // Either separator (AI2-57 tracks the rest of Windows parity).
+        targets.push(r"docs\..\CLAUDE.md".to_string());
+        targets.push(abs(r".claude\skills\x\SKILL.md"));
+    }
+
+    let cc_world = repo_path(".claude/cc-world.yaml");
+    let agy_world = repo_path(".agents/agy-world.yaml");
+    let cc_event = |sid: &str, tool: &str, key: &str, target: &str| json!({ "tool_name": tool, "tool_input": { key: target }, "session_id": sid });
+    let agy_event = |sid: &str, tool: &str, target: &str| {
+        json!({
+            "conversationId": sid,
+            "stepIdx": 1,
+            "workspacePaths": [project.to_str().unwrap()],
+            "toolCall": { "name": tool, "args": { "TargetFile": target } },
+        })
+    };
+    let tainted_state = |sid: &str| {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(format!("taint-{sid}")), "seed\n").unwrap();
+        dir
+    };
+
+    for (i, target) in targets.iter().enumerate() {
+        let sid = format!("s{i}");
+        for (tool, key) in [
+            ("Write", "file_path"),
+            ("Edit", "file_path"),
+            ("MultiEdit", "file_path"),
+            ("NotebookEdit", "notebook_path"),
+        ] {
+            let state = tainted_state(&sid);
+            let event = cc_event(&sid, tool, key, target);
+            let out = hook_with_world(
+                "cc-hook",
+                &cc_world,
+                state.path(),
+                &project,
+                &event,
+                "interactive",
+            );
+            let (d, reason) = hook_decision(&out)
+                .unwrap_or_else(|| panic!("cc {tool} {target}: expected a deny, got {out:?}"));
+            assert_eq!(d, "deny", "cc {tool} {target}: {reason}");
+        }
+        for tool in ["write_to_file", "propose_code", "edit_notebook"] {
+            let state = tainted_state(&sid);
+            let event = agy_event(&sid, tool, target);
+            let out = hook_with_world(
+                "agy-hook",
+                &agy_world,
+                state.path(),
+                &project,
+                &event,
+                "interactive",
+            );
+            let (d, reason) = agy_decision(&out)
+                .unwrap_or_else(|| panic!("agy {tool} {target}: expected a deny, got {out:?}"));
+            assert_eq!(d, "deny", "agy {tool} {target}: {reason}");
+        }
+    }
+
+    // An ordinary source file is unchanged: a tainted write still passes through.
+    for target in [
+        "src/main.rs".to_string(),
+        abs("src/main.rs"),
+        "docs/CLAUDE.md.bak".to_string(),
+    ] {
+        let state = tainted_state("src");
+        let event = cc_event("src", "Write", "file_path", &target);
+        let out = hook_with_world(
+            "cc-hook",
+            &cc_world,
+            state.path(),
+            &project,
+            &event,
+            "interactive",
+        );
+        assert!(
+            out.trim().is_empty(),
+            "cc {target}: ordinary write passes, got {out:?}"
+        );
+        let event = agy_event("src", "write_to_file", &target);
+        let out = hook_with_world(
+            "agy-hook",
+            &agy_world,
+            state.path(),
+            &project,
+            &event,
+            "interactive",
+        );
+        assert!(
+            agy_decision(&out).is_none(),
+            "agy {target}: ordinary write passes, got {out:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Path-scope parity (spatial confinement, D46) — docs/demos/one-kernel/roots-*.yaml
 // ---------------------------------------------------------------------------
@@ -805,9 +971,7 @@ fn gate_cli_with_world(world: &Path, stdin_payload: &str) -> (i32, String) {
 }
 
 /// Run a host adapter subprocess against an explicit world, with `HOME` pinned
-/// so `~` expansion cannot reach the developer's real home directory. Only the
-/// Unix-only roots tests use it.
-#[cfg(unix)]
+/// so `~` expansion cannot reach the developer's real home directory.
 fn hook_with_world(
     subcommand: &str,
     world: &Path,

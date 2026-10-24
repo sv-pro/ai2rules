@@ -146,6 +146,8 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
     // Command classifiers are world data (D36): compiled in, so every host's
     // gate call classifies identically — no adapter carries a pattern copy.
     parts.command_classes = manifest.command_classes.clone();
+    // Path classifiers likewise (D83): one copy, in the world, for every host.
+    parts.path_classes = manifest.path_classes.clone();
 
     // Path-scoped capabilities (roots). Copied as authored — `compile` stays pure
     // (no env reads). `~`/`.` expansion is the adapter's job via `resolve_root_paths`
