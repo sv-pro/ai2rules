@@ -141,6 +141,12 @@ Exit codes follow priority: **error > broken > disabled > partial > unknown > ok
     "shim_missing_binary": "open" | "unknown",
     "adapter_process_error": "open" | "unknown",
     "state_persistence_error": "conditional_deny" | "unknown",
+    "broken_world": {
+      "mode": "closed" | "open" | "last-good" | "unknown",
+      "source": "shim_flag" | "hook_default" | "unknown",
+      "last_good_sha256": "<sha256 of the cached world text>" | null,
+      "last_good_saved_ms": 1761200000000 | null
+    },
     "evidence": [
       "Recognized shim pattern: fail-open on missing binary",
       "Selected binary is not this executable; adapter semantics unknown"

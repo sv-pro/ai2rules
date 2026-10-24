@@ -277,9 +277,12 @@ fn malformed_payload_fails_open_with_the_noop() {
     assert_passthrough(&String::from_utf8(out.stdout).unwrap());
 }
 
-/// An unreadable/uncompilable world is also a process failure, not a DENY.
+/// An unreadable world is NOT a process failure (D87): it follows the
+/// broken-world mode, and the default with no world ever compiled is a refusal.
+/// Before D87 this passed through, so deleting the world switched governance off.
+/// The modes themselves are tested in `tests/broken_world.rs`.
 #[test]
-fn unreadable_world_fails_open_with_the_noop() {
+fn unreadable_world_is_refused_not_passed_through() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("nope.yaml");
     let out = run_hook_with_world_env(
@@ -289,7 +292,7 @@ fn unreadable_world_fails_open_with_the_noop() {
         &[],
         &[],
     );
-    assert_passthrough(&out);
+    assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
 }
 
 /// Finding #16, Antigravity side: an unrecordable taint escalation fails CLOSED

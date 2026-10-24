@@ -82,6 +82,9 @@ pub enum ShimProfile {
         harness_bin: String,
         off_file: String,
         grant: bool,
+        /// The shim's `--on-broken-world` value; `None` when it passes none and the
+        /// hook's default (`last-good`) applies.
+        on_broken_world: Option<String>,
     },
     Unsupported,
 }
@@ -303,10 +306,23 @@ fn parse_current_init_shim(content: &str) -> Option<ShimProfile> {
     // Check for --grant flag
     let grant = content.contains("cc-hook --grant");
 
+    // The broken-world mode the exec line passes (D87), if any.
+    let on_broken_world = content
+        .lines()
+        .filter(|l| l.trim_start().starts_with("exec "))
+        .find_map(|l| {
+            let mut words = l.split_whitespace();
+            words.find(|w| *w == "--on-broken-world")?;
+            words
+                .next()
+                .map(|w| w.trim_matches(['"', '\'']).to_string())
+        });
+
     Some(ShimProfile::CurrentInitGenerated {
         harness_bin,
         off_file,
         grant,
+        on_broken_world,
     })
 }
 
@@ -585,11 +601,30 @@ exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/sta
             harness_bin,
             off_file,
             grant,
+            on_broken_world,
         }) = profile
         {
             assert_eq!(harness_bin, "/usr/local/bin/harness");
             assert!(off_file.contains("ai2rules/off"));
             assert!(!grant);
+            assert_eq!(on_broken_world, None, "a pre-D87 shim passes no mode");
+        }
+    }
+
+    #[test]
+    fn test_parse_current_init_shim_with_broken_world_mode() {
+        let shim = r#"#!/usr/bin/env bash
+# ai2rules governance shim — written by `harness init`. Execs the Rust kernel's
+TRUSTED_BIN='/opt/harness'
+if [ -f /home/user/.claude/ai2rules/off/test ] || [ -f "$HOME/.claude/gate-off" ]; then exit 0; fi
+# `closed` refuses every call instead; `open` lets calls through ungoverned.
+exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state" --on-broken-world closed
+"#;
+        match parse_current_init_shim(shim) {
+            Some(ShimProfile::CurrentInitGenerated {
+                on_broken_world, ..
+            }) => assert_eq!(on_broken_world.as_deref(), Some("closed")),
+            other => panic!("not recognised: {other:?}"),
         }
     }
 

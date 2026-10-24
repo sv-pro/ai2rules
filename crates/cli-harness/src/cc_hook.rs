@@ -20,10 +20,15 @@
 //!   remove native tools from the host's surface, and denying every tool outside
 //!   the manifest would brick the host — so ABSENT-enforcement is an explicit
 //!   opt-in.
-//! - **Fail-open (documented strategy):** any PROCESS error — unreadable event,
-//!   uncompilable world — exits 0 with no output. A broken hook must never brick
-//!   a session. A process failure is never an outcome (see `host.rs`).
+//! - **Fail-open (documented strategy):** a PROCESS error — an unreadable event —
+//!   exits 0 with no output. A broken hook must never brick a session. A process
+//!   failure is never an outcome (see `host.rs`).
+//! - **A broken world is not a process error (D87).** A world that cannot be read
+//!   or compiled is handled by `--on-broken-world` (`closed` / `open` /
+//!   `last-good`, see [`crate::broken_world`]), and the warning reaches the person
+//!   as a `systemMessage` on every answer while it lasts.
 
+use crate::broken_world::{self, BrokenWorld, BrokenWorldMode, WorldLoad};
 use crate::hostkit::{
     canonicalize_root_paths, normalize_tool, persist_taint, persist_usage, read_usage,
     resolve_action_path, sanitize,
@@ -46,13 +51,28 @@ pub(crate) fn compile_hook_world(
     base: Option<&str>,
     home: Option<&str>,
 ) -> Option<CompiledWorld> {
-    let mut m = load_yaml(content).ok()?;
+    hook_world(content, base, home).ok()
+}
+
+/// As [`compile_hook_world`], keeping the error for the broken-world warning.
+fn hook_world(
+    content: &str,
+    base: Option<&str>,
+    home: Option<&str>,
+) -> Result<CompiledWorld, String> {
+    let mut m = load_yaml(content).map_err(|e| e.to_string())?;
     if let Some(r) = &m.roots {
         let roots = resolve_root_paths(r, home, base);
         m.roots = Some(canonicalize_root_paths(&roots));
     }
-    compile(&m).ok()
+    compile(&m).map_err(|e| e.to_string())
 }
+
+/// The way out a `closed` refusal names: the kill-switch every project and user
+/// install honours. A managed install has none by design (D82); its administrator
+/// fixes the world.
+const WAY_OUT: &str = "switch governance off with `touch ~/.claude/gate-off` (project and user \
+                       installs; a managed install is fixed by its administrator)";
 
 /// One PreToolUse event, as the hook sees it.
 pub(crate) struct HookEvent<'a> {
@@ -221,18 +241,51 @@ fn append_decision(path: &Path, line: &Value) {
 }
 
 /// Emit a PreToolUse decision (`deny`/`ask`, or `allow` in `--grant` mode) and exit 0.
+/// While the world is broken the answer also carries the warning as `systemMessage`,
+/// Claude Code's user-facing channel (D87).
 fn emit(decision: &str, reason: &str) -> ! {
-    println!(
-        "{}",
-        json!({"hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": decision,
-            "permissionDecisionReason": reason,
-        }})
-    );
+    let mut out = json!({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": decision,
+        "permissionDecisionReason": reason,
+    }});
+    if let Some(warning) = broken_world::warning() {
+        out["systemMessage"] = json!(warning);
+    }
+    println!("{out}");
     std::process::exit(0);
 }
 
+/// Defer to the host's permission flow: no output, or only the broken-world
+/// warning, which carries no decision.
+fn silent() -> i32 {
+    if let Some(warning) = broken_world::warning() {
+        println!("{}", json!({ "systemMessage": warning }));
+    }
+    0
+}
+
+/// Answer a call that no world can decide: `closed` refuses it, `open` lets it
+/// through ungoverned. Both say so, to the person and in the decision log.
+fn answer_unworlded(
+    broken: &BrokenWorld,
+    log: Option<&Path>,
+    line: impl Fn(Option<&str>) -> Value,
+) -> i32 {
+    let refuse = broken.applied == BrokenWorldMode::Closed;
+    if let Some(path) = log {
+        append_decision(path, &line(refuse.then_some("deny")));
+    }
+    if refuse {
+        emit(
+            "deny",
+            broken_world::warning().unwrap_or("the world does not compile"),
+        );
+    }
+    silent()
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     world_path: &Path,
     state_dir: &Path,
@@ -241,6 +294,7 @@ pub fn run(
     enforce_absent: bool,
     grant: bool,
     log: Option<&Path>,
+    on_broken_world: BrokenWorldMode,
 ) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
@@ -279,13 +333,28 @@ pub fn run(
     let home = std::env::var("HOME").ok();
 
     // Compile the world and decide, in-process (D34). Roots paths are resolved to
-    // absolute here (env-dependent) before the pure compile.
-    let world = match std::fs::read_to_string(world_path)
-        .ok()
-        .and_then(|c| compile_hook_world(&c, base.as_deref(), home.as_deref()))
-    {
-        Some(w) => w,
-        None => return 0, // fail-open
+    // absolute here (env-dependent) before the pure compile. A world that does not
+    // compile is handled by the broken-world mode (D87).
+    let loaded = broken_world::load(world_path, state_dir, on_broken_world, |text| {
+        hook_world(text, base.as_deref(), home.as_deref())
+    });
+    let (world, broken) = match loaded {
+        WorldLoad::Live(w) => (w, None),
+        WorldLoad::Broken { world, broken } => {
+            let warning = broken.message(WAY_OUT);
+            eprintln!("{warning}");
+            broken_world::set_warning(warning.clone());
+            match world {
+                Some(w) => (w, Some(broken)),
+                None => {
+                    return answer_unworlded(&broken, log, |answer| {
+                        broken_world::log_line(
+                            &sid, tool, &call, tainted, &broken, answer, &warning,
+                        )
+                    })
+                }
+            }
+        }
     };
 
     let req = hook_request(
@@ -308,10 +377,11 @@ pub fn run(
     // Every exit below that answers the host records the answer first (`--log`).
     let record = |answer: Option<&str>, reason: &str| {
         if let Some(path) = log {
-            append_decision(
-                path,
-                &decision_line(&sid, tool, &call, &res, answer, reason),
-            );
+            let mut line = decision_line(&sid, tool, &call, &res, answer, reason);
+            if let Some(b) = &broken {
+                line["broken_world"] = b.log_fields();
+            }
+            append_decision(path, &line);
         }
     };
 
@@ -360,7 +430,7 @@ pub fn run(
         }
         None => {
             record(None, &res.reason);
-            0 // defer to the host's permission flow
+            silent() // defer to the host's permission flow
         }
     }
 }
