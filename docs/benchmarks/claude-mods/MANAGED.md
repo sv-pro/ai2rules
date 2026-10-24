@@ -1,13 +1,25 @@
 # Genuine managed-hook setup (AI2-41 / #99)
 
-## Status — 2026-10-05
+## Status — 2026-10-24
 
 Setup recipe prepared; **image build and both live cases NOT RUN here**.
-This workspace has no `docker` or `podman` executable. Its namespace preflight
-(`unshare --user --map-root-user --mount --fork true`) failed with
-`Operation not permitted` while writing `/proc/self/uid_map`. No machine policy
-was changed and no attempt was made to bypass that restriction.
+The current Windows host has Docker client **29.8.0**, with the `desktop-linux`
+context selected, but `docker version` reports `Server: null` and the
+`dockerDesktopLinuxEngine` named pipe is absent. No Docker process was running.
+The WSL Ubuntu 24.04 environment is x86_64 and resolves the same Desktop client;
+it does not provide a separate running engine. Podman was not found.
+No service was started and no host managed policy was modified in this check.
 
+This supersedes the earlier authoring environment's "Docker/Podman absent"
+blocker. The 2026-10-05 namespace failure remains historical evidence; it was
+not retried or worked around. The immediate prerequisite is a **running Linux
+container daemon**, not installing the Docker CLI again.
+
+The npm registry returned the pinned meta and linux-x64 packages for Claude
+Code **2.1.288** and ai2rules-harness **0.6.0**. This was a metadata-only check:
+no packages were installed, and image/base-layer/Debian downloads or container
+startup have not been validated. Keep the pins; do not silently replace either
+version with latest to make the experiment run.
 **Exact prerequisite:** a disposable Linux amd64 container host with a working
 Docker daemon (or a separately provisioned Linux VM), permission to build/run
 the image, and build-time access to the base image, Debian and npm registries.
@@ -54,11 +66,36 @@ managed hook block precedes mods and is final. That is the expected result,
 managed block: absence of `prior=deny` is not by itself a failure. Mod admission
 and its user tier must still be visible in the mod-on debug log.
 
-Sources checked 2026-10-05. These are current documentation, not an immutable
+Managed-settings, mod administration and event-order documentation rechecked 2026-10-24. These are current documentation, not an immutable
 specification for 2.1.288. Record actual binary hashes and loaded tiers; do not
 infer a historical binary's behavior from a newer sec-default README.
 
 ## Build and run only the two managed cases
+
+First start a Linux container engine (Docker Desktop's Linux engine on the
+reviewed Windows host, or a separate disposable Linux amd64 host). Then verify:
+
+```bash
+docker version
+docker info --format '{{.OSType}}/{{.Architecture}}'
+```
+
+Require a populated **Server** section and Linux/amd64 (also reported as
+Linux/x86_64). A client version alone is not a successful preflight. The commands
+below are Bash syntax; on Windows run them in a WSL terminal integrated with the
+started Docker Desktop engine. Keep the production/demo checkout out of mounts.
+
+Before spending time on the image, the oracle can be checked offline on any
+Python 3 host, without Docker or a system policy file:
+
+```bash
+python3 -m unittest discover -s docs/benchmarks/claude-mods -p test_managed_probe.py -v
+```
+
+Eight tests exercise complete denial, denial with an exact effect, missing or
+wrong load/source/decision evidence, wrong permission mode or target, changed
+policy, and unexpected marker content. All passed on 2026-10-24. These synthetic
+checks validate classification only; they do not satisfy either live row.
 
 From the repository root on the disposable container host:
 
@@ -121,3 +158,21 @@ Before closing acceptance, inspect the report and raw logs, retain a sanitized
 versioned report under `results/`, and update both trackers. If loading or source
 attribution cannot be established, preserve the evidence and record the precise
 remaining gap. Do not rerun the project proof or begin a guard in this step.
+
+## Remaining completion checklist
+
+- [ ] Working Linux amd64 daemon and successful image build; retain image metadata
+  and npm lockfile. Build-time base-image/Debian/npm access still needs a real build.
+- [ ] Run `managed-mod-off` and `managed-mod-on` in the same disposable image with
+  `--network none`, fresh per-case state, the pinned versions and no host mounts.
+- [ ] Inspect raw hook/debug logs and the report: real root-owned system policy,
+  empty project settings, exact Write arguments, adapter deny, `acceptEdits`,
+  sec-default/prepend and (mod-on) override/user admission, no refusal/load errors.
+- [ ] Retain actual marker absence or exact content. Expected is DENY_NO_EFFECT
+  twice; DENY_WITH_EFFECT is a finding, not success, and INCOMPLETE needs more evidence.
+- [ ] Inspect and commit sanitized versioned managed evidence under `results/`,
+  then update #99, AI2-41, README, PLAN and handoff with the observed result.
+
+No managed evidence file exists yet. No Enterprise tenant, real API credential,
+paid model call, new production guard, or project-proof rerun is a prerequisite
+for this bounded comparison. Both task trackers remain open and PR #100 draft.

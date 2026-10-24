@@ -20,8 +20,10 @@
 //!
 //! ```text
 //! .claude/cc-world.yaml          the manifest (never clobbered without --force)
-//! .claude/hooks/world-gate.sh    the PreToolUse shim, kill-switch baked in
-//! .claude/settings.json          the hook entry, merged idempotently
+//! .claude/hooks/world-gate.sh    the hook shim, kill-switch baked in
+//! .claude/settings.json          the hook entries, merged idempotently: PreToolUse
+//!                                (the gate) and PostToolUse / PostToolUseFailure
+//!                                (the read-only outcome observer, D84)
 //! .gitignore                     .claude/state/
 //! ```
 //!
@@ -43,7 +45,7 @@ pub const STARTER_WORLD: &str = include_str!("../../../scripts/starter-world.yam
 /// Substring identifying *our* hook entry in someone's `settings.json`, whatever
 /// form it currently takes. Matching on this rather than on an exact string means
 /// a re-run upgrades an older entry in place instead of appending a second one.
-const HOOK_MARKER: &str = "world-gate.sh";
+pub(crate) const HOOK_MARKER: &str = "world-gate.sh";
 const HOOK_TIMEOUT: u64 = 10;
 
 /// The `command` the host runs.
@@ -90,7 +92,7 @@ pub struct Plan {
 
 /// Single-quote a path for embedding in the shim. The project directory is
 /// untrusted input (D37) and so is whatever path the binary was installed to.
-fn sh_quote(s: &str) -> String {
+pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
@@ -107,7 +109,7 @@ fn sh_quote(s: &str) -> String {
 /// dangling symlink leaves); this is the third place it has come up, which is why
 /// the check refuses rather than resolving. Resolving a symlink silently obeys
 /// whoever planted it.
-fn refuse_symlinks(root: &Path, path: &Path) -> Result<(), String> {
+pub(crate) fn refuse_symlinks(root: &Path, path: &Path) -> Result<(), String> {
     let rel = path.strip_prefix(root).unwrap_or(path);
     let mut cur = root.to_path_buf();
     for part in rel.components() {
@@ -153,8 +155,11 @@ fn shim_body(harness_bin: &str, off_file: &str, grant: bool) -> String {
     format!(
         r#"#!/usr/bin/env bash
 # ai2rules governance shim — written by `harness init`. Execs the Rust kernel's
-# PreToolUse adapter; no governance logic lives here. Fail-open: no binary -> exit 0
+# hook adapter; no governance logic lives here. Fail-open: no binary -> exit 0
 # (the tool call falls through to the host's normal permission flow).
+# Registered for PreToolUse (the gate) and PostToolUse / PostToolUseFailure (a
+# read-only observer that appends how each call ended to the decision log, D84);
+# cc-hook tells them apart by the event name.
 #
 # The governed project is untrusted. Never resolve harness from $PD/target; use
 # HARNESS_BIN only when it is an explicit absolute executable, otherwise use the
@@ -186,7 +191,8 @@ else
   BIN="$TRUSTED_BIN"
 fi
 [ -x "$BIN" ] || exit 0  # fail-open: no trusted kernel, normal permissions
-exec "$BIN" cc-hook{grant_flag} --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state"
+exec "$BIN" cc-hook{grant_flag} --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state" \
+  --log "$PD/.claude/state/decisions.jsonl"
 "#,
         bin = sh_quote(harness_bin),
         off_file = off_file,
@@ -321,6 +327,62 @@ pub fn merge_settings(existing: Option<&str>, command: &str) -> Result<(String, 
     Ok((out, outcome))
 }
 
+/// The host events the outcome observer is registered for (D84).
+pub(crate) const OBSERVER_EVENTS: [&str; 2] = ["PostToolUse", "PostToolUseFailure"];
+
+/// Register the same shim for the observer events: one entry per event, matcher
+/// `"*"`. Idempotent on the marker, like [`merge_settings`]: an entry of ours
+/// with an outdated command is rewritten in place, never duplicated. Returns the
+/// document and whether anything was added.
+///
+/// The observer is optional by construction. A settings file without these
+/// entries keeps working exactly as before; its decision log simply has no
+/// outcome lines, and readers report its ASKs as `unobserved`.
+pub fn merge_observers(existing: &str, command: &str) -> Result<(String, bool), String> {
+    let mut root: Value = serde_json::from_str(existing)
+        .map_err(|e| format!("settings.json is not valid JSON: {e}"))?;
+    let hooks = root
+        .as_object_mut()
+        .ok_or("settings.json does not contain a JSON object")?
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or("settings.json `hooks` is not an object")?;
+    let mut added = false;
+    for event in OBSERVER_EVENTS {
+        let arr = hooks
+            .entry(event)
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| format!("settings.json `hooks.{event}` is not an array"))?;
+        let mut ours = false;
+        for entry in arr.iter_mut() {
+            if let Some(list) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
+                for h in list.iter_mut() {
+                    let marked = h
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .is_some_and(|c| c.contains(HOOK_MARKER));
+                    if marked {
+                        ours = true;
+                        h["command"] = json!(command);
+                    }
+                }
+            }
+        }
+        if !ours {
+            arr.push(json!({
+                "matcher": "*",
+                "hooks": [{ "type": "command", "command": command, "timeout": HOOK_TIMEOUT }]
+            }));
+            added = true;
+        }
+    }
+    let mut out = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    out.push('\n');
+    Ok((out, added))
+}
+
 fn merge_gitignore(existing: Option<&str>) -> Option<String> {
     let current = existing.unwrap_or("");
     let missing: Vec<&str> = GITIGNORE_LINES
@@ -394,6 +456,7 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
     let settings_path = target.join(".claude/settings.json");
     let current = fs::read_to_string(&settings_path).ok();
     let (merged, outcome) = merge_settings(current.as_deref(), &hook_command(target))?;
+    let (merged, observer_added) = merge_observers(&merged, &hook_command(target))?;
     writes.push((settings_path, merged));
     steps.push(Step {
         verb: "write",
@@ -412,6 +475,13 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
             ),
         },
     });
+    if observer_added {
+        steps.push(Step {
+            verb: "write",
+            path: ".claude/settings.json".into(),
+            note: "PostToolUse / PostToolUseFailure observer added (outcomes in .claude/state/decisions.jsonl)".into(),
+        });
+    }
 
     // 4. gitignore
     let gitignore = target.join(".gitignore");
@@ -434,8 +504,43 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
     Ok(Plan { steps, writes })
 }
 
+/// Write every file in the plan, each one write-then-rename. Shared with
+/// `init --user`, which writes into the user's own config directory.
+pub(crate) fn apply(writes: &[(PathBuf, String)]) -> Result<(), String> {
+    for (path, body) in writes {
+        if let Some(parent) = path.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                return Err(format!("cannot create {}: {e}", parent.display()));
+            }
+        }
+        // Write-then-rename. `settings.json` is the user's own config and a
+        // truncating write that dies midway corrupts it; the shell installer this
+        // replaces used `> tmp && mv` for the same reason, so a direct write was a
+        // regression rather than a new risk.
+        let tmp = path.with_extension(format!(
+            "{}.harness-tmp",
+            path.extension().and_then(|e| e.to_str()).unwrap_or("")
+        ));
+        if let Err(e) = fs::write(&tmp, body) {
+            return Err(format!("cannot write {}: {e}", tmp.display()));
+        }
+        if path.extension().and_then(|e| e.to_str()) == Some("sh") {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755));
+            }
+        }
+        if let Err(e) = fs::rename(&tmp, path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("cannot write {}: {e}", path.display()));
+        }
+    }
+    Ok(())
+}
+
 /// Resolve the absolute path of the running binary, for baking into the shim.
-fn current_harness() -> Result<String, String> {
+pub(crate) fn current_harness() -> Result<String, String> {
     let exe =
         std::env::current_exe().map_err(|e| format!("cannot resolve current executable: {e}"))?;
     let exe = exe.canonicalize().unwrap_or(exe);
@@ -503,37 +608,9 @@ pub fn run(target: &Path, grant: bool, force: bool, dry_run: bool) -> i32 {
         return 0;
     }
 
-    for (path, body) in &plan.writes {
-        if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("harness init: cannot create {}: {e}", parent.display());
-                return 1;
-            }
-        }
-        // Write-then-rename. `settings.json` is the user's own config and a
-        // truncating write that dies midway corrupts it; the shell installer this
-        // replaces used `> tmp && mv` for the same reason, so a direct write was a
-        // regression rather than a new risk.
-        let tmp = path.with_extension(format!(
-            "{}.harness-tmp",
-            path.extension().and_then(|e| e.to_str()).unwrap_or("")
-        ));
-        if let Err(e) = fs::write(&tmp, body) {
-            eprintln!("harness init: cannot write {}: {e}", tmp.display());
-            return 1;
-        }
-        if path.extension().and_then(|e| e.to_str()) == Some("sh") {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755));
-            }
-        }
-        if let Err(e) = fs::rename(&tmp, path) {
-            let _ = fs::remove_file(&tmp);
-            eprintln!("harness init: cannot write {}: {e}", path.display());
-            return 1;
-        }
+    if let Err(e) = apply(&plan.writes) {
+        eprintln!("harness init: {e}");
+        return 1;
     }
 
     let mode = if grant {

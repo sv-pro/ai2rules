@@ -112,9 +112,14 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
             .insert(cap.name.clone(), cap.clone());
     }
 
-    // Default projection exposes the whole ontology. Dynamic narrowing by taint
-    // and context is a runtime concern (E2 / Layer 2).
+    // Default projection exposes the whole ontology, minus base actions the
+    // manifest keeps off the surface (D79): they stay in the ontology so scoped
+    // capabilities can name them, but the model sees them as ABSENT. Dynamic
+    // narrowing by taint and context is a runtime concern (E2 / Layer 2).
     parts.projected = parts.ontology.clone();
+    for action in manifest.base_actions.iter().filter(|a| !a.projected) {
+        parts.projected.remove(&action.name);
+    }
 
     // Capability matrix.
     for grant in &manifest.capabilities {
@@ -141,11 +146,14 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
     // Command classifiers are world data (D36): compiled in, so every host's
     // gate call classifies identically — no adapter carries a pattern copy.
     parts.command_classes = manifest.command_classes.clone();
+    // Path classifiers likewise (D83): one copy, in the world, for every host.
+    parts.path_classes = manifest.path_classes.clone();
 
     // Path-scoped capabilities (roots). Copied as authored — `compile` stays pure
     // (no env reads). `~`/`.` expansion is the adapter's job via `resolve_root_paths`
     // at the I/O boundary, so rule paths reaching here are already absolute.
     parts.roots = manifest.roots.clone();
+    parts.mcp_surface = manifest.mcp_surface.clone();
 
     parts.budget = manifest.budget.clone();
     parts.redaction = manifest.observability.redact.clone();

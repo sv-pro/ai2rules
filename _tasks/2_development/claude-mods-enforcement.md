@@ -28,3 +28,22 @@ permitted. Image build and both live rows remain NOT RUN. Need a disposable
 Linux amd64 Docker host with build-time registry access, not an Enterprise
 tenant or API credentials. Next: execute only the two managed cases with the
 documented commands and retain source/tier/decision/effect evidence. No guard.
+
+## 2026-10-24 — main integration and current prerequisites
+
+Integrated main eefdfe1 on an isolated branch. The sole conflict was README;
+kept both D83 instruction/memory protection and the bounded mod finding.
+Docker client 29.8.0 is present, but desktop-linux Server is null: the engine
+pipe is absent and no Docker process is running. WSL resolves the same client.
+The original Docker-absent note is historical, not the current blocker.
+All four pinned npm meta/platform package versions remain available.
+
+Added eight offline oracle tests; all pass. These validate DENY_NO_EFFECT,
+DENY_WITH_EFFECT and INCOMPLETE classification only. They are not host evidence.
+MANAGED.md now gives daemon preflight, the offline command, and a completion
+checklist. Build and both managed rows remain NOT RUN; no system settings,
+production runtime, demo checkout or deferred PRs were modified. The project
+runner and its recorded results remain unchanged. Next: start/provide a Linux
+amd64 Docker daemon, build the recipe, run only the two managed cases, inspect
+and preserve sanitized source/tier/deny/effect evidence. Keep #99 / AI2-41 open
+and PR #100 draft; no merge authorized.

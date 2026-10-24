@@ -128,6 +128,15 @@ echo '{"conversationId":"t1","workspacePaths":["/w"],
 # {"decision":"deny","reason":"tainted context cannot reach an externally-effectful action …"}
 ```
 
+## Decision log
+
+`agy-hook --log <file>` writes `cc-hook`'s decision-line format
+([`docs/host-decision-log.md`](../../host-decision-log.md), D84). Antigravity sends
+no tool-call id and no agent identity, so `tool_use_id`, `agent_id` and `agent_type`
+are `null`; `step_idx` and the call's `Cwd` are recorded instead. No outcome observer
+is wired for this host: its post-call hook contract has not been verified, so its
+ASKs cannot be joined to an outcome.
+
 ## Gotchas
 
 - **Hook cwd is `.agents/`**, not the project root — Antigravity runs hook

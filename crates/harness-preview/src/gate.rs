@@ -10,16 +10,27 @@
 //! backs the `harness gate` subcommand and the WASM engine, the way [`preview`]
 //! does for the authoring tool. Wire schema: `docs/harness-gate-abi.md`.
 //!
+//! Because it is decision-only, the response also says **what to run**: on
+//! `ALLOW` / `ASK` the [`GateEffective`] carries the lowered call — backing tool,
+//! arguments after a scoped capability's stripping, renaming and literal
+//! injection, and the names it stripped (D80). A host that executes the
+//! *proposed* call instead drops the scoping on the floor. An in-process host
+//! that executes can take the `ExecutionSpec` itself from [`gate_and_lower`].
+//!
 //! [`preview`]: crate::preview
 
 use harness_types::{
     ActionName, ActionType, BackingIdentity, CallId, ChannelPolicy, CompiledWorld, ContentHash,
-    Decision, ExecutionMode, Provenance, Provider, RootAccess, SessionId, SideEffectClass, Taint,
-    TaintContext, ToolCall,
+    Decision, EffectMode, ExecutionMode, ExecutionSpec, Provenance, Provider, RootAccess,
+    SessionId, SideEffectClass, Taint, TaintContext, ToolCall, TraceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use world_kernel::{charge, decide, BudgetUsage, EvalContext, KernelOutcome};
+use std::collections::BTreeMap;
+use world_kernel::{
+    build_execution_spec, charge, decide, effective_call, BudgetUsage, EvalContext, ExecEnv,
+    IntentIR, KernelOutcome,
+};
 
 /// The current ABI version. Bumped only on a breaking wire change (§8).
 pub const ABI_VERSION: u32 = 1;
@@ -135,6 +146,56 @@ pub struct GateResponse {
     pub approval: Option<GateApproval>,
     /// First 12 hex of the compiled manifest hash, for drift/trace correlation.
     pub manifest_hash: String,
+    /// The call to execute, present on `ALLOW` and `ASK` (D80). A backward-
+    /// compatible v1 addition: hosts that ignore it keep today's behaviour —
+    /// which, for a scoped capability, is the bug this field exists to fix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective: Option<GateEffective>,
+}
+
+/// The lowered call a host must execute instead of the proposal (D80). Mirrors
+/// [`world_kernel::EffectiveCall`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateEffective {
+    /// The base action the call lowers to (the action itself if not scoped).
+    pub base_action: String,
+    pub backing: GateBacking,
+    /// Arguments to execute with, under the base action's names: surviving
+    /// actor input plus literals.
+    pub arguments: Value,
+    /// Argument → context key for `ContextRef` arguments; the host fills these
+    /// from its own trusted context, never from the model.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub context_refs: BTreeMap<String, String>,
+    /// Names the actor sent that the scoping dropped. Non-empty means the
+    /// proposal tried to set something the world fixes — a signal worth recording.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stripped: Vec<String>,
+}
+
+/// What executes an effective call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GateBacking {
+    /// A host-local handler (for a native host: its own tool of this name).
+    Local { handler: String },
+    /// A tool on an MCP server.
+    Mcp { server: String, tool: String },
+}
+
+impl GateEffective {
+    fn from_kernel(call: world_kernel::EffectiveCall) -> Self {
+        Self {
+            base_action: call.base_action.as_str().to_string(),
+            backing: match call.backing {
+                BackingIdentity::LocalHandler(handler) => GateBacking::Local { handler },
+                BackingIdentity::McpServer { server, tool } => GateBacking::Mcp { server, tool },
+            },
+            arguments: call.arguments,
+            context_refs: call.context_refs,
+            stripped: call.stripped,
+        }
+    }
 }
 
 /// Post-call state the adapter must persist for the next call (§4).
@@ -160,24 +221,98 @@ pub struct GateApproval {
 /// Govern one proposed call against a compiled world. Pure and deterministic in
 /// `(world, req)` — the runtime half of the kernel, exposed as a value function.
 pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
-    // The effective action: the world's own command classifiers run first
-    // (D36), so classification is kernel data, identical for every host.
-    let action = world.classify_command(&ActionName::new(&req.tool), &req.arguments);
+    gate_inner(world, req, false).0
+}
+
+/// [`gate`], plus — for an `ALLOW` — the `ExecutionSpec` the kernel lowers the
+/// call to (D79). A scoped capability's renamed arguments, injected literals and
+/// stripped extras are applied there, so an adapter that executes forwards the
+/// spec rather than the call it was proposed as: only an `ExecutionSpec` crosses
+/// into execution. `None` for any other verdict; `Some(Err)` when an allowed call
+/// cannot be lowered, which the adapter must treat as a refusal.
+///
+/// Native-only. The verdict is exactly [`gate`]'s, so the WASM build, which has
+/// nothing to execute, needs no counterpart.
+pub fn gate_and_lower(
+    world: &CompiledWorld,
+    req: &GateRequest,
+) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
+    lower(world, req, false)
+}
+
+/// Trusted native resume after the runtime has durably consumed an exact-bound
+/// authorization. This does not bypass policy, budgets, taint or lowering.
+/// Never derive this authority from a request-supplied approval token.
+pub fn gate_and_lower_authorized(
+    world: &CompiledWorld,
+    req: &GateRequest,
+) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
+    lower(world, req, true)
+}
+
+fn lower(
+    world: &CompiledWorld,
+    req: &GateRequest,
+    approval_granted: bool,
+) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
+    let (response, allowed) = gate_inner(world, req, approval_granted);
+    let spec = allowed.map(|(intent, effect_mode)| {
+        build_execution_spec(
+            world,
+            &intent,
+            effect_mode,
+            &ExecEnv::default(),
+            TraceId::new(&req.context.session_id),
+        )
+        .map_err(|e| e.to_string())
+    });
+    (response, spec)
+}
+
+/// The verdict, plus the sealed intent and its effect mode when the final
+/// decision is `ALLOW` (after path scope has had its chance to tighten it).
+fn gate_inner(
+    world: &CompiledWorld,
+    req: &GateRequest,
+    approval_granted: bool,
+) -> (GateResponse, Option<(IntentIR, EffectMode)>) {
+    // The effective action: the world's own command classifiers (D36) and path
+    // classifiers (D83) run first, so classification is kernel data, identical
+    // for every host. Path classes read the adapter-resolved `path` as well as the
+    // argument, so every spelling of `CLAUDE.md` lands in the same class.
+    let action = world.classify_call(
+        &ActionName::new(&req.tool),
+        &req.arguments,
+        req.path.as_deref(),
+    );
     let carried = req.context.usage.unwrap_or_default();
     let inbound = match parse_taint(req.context.taint.as_deref()) {
         Ok(t) => t,
-        Err(rule) => return denied_response(world, &action, rule, Taint::Tainted, carried),
+        Err(rule) => {
+            return (
+                denied_response(world, &action, rule, Taint::Tainted, carried),
+                None,
+            )
+        }
     };
     let channel = match parse_channel(world, req.context.source_channel.as_deref()) {
         Ok(c) => c,
-        Err(rule) => return denied_response(world, &action, rule, inbound, carried),
+        Err(rule) => {
+            return (
+                denied_response(world, &action, rule, inbound, carried),
+                None,
+            )
+        }
     };
     // Budget counters are session state the pure kernel cannot hold, so the adapter
     // carries them (finding #16). A world that counts calls therefore requires them:
     // otherwise a thin adapter silently disables every limit by omission, which is
     // the same failure `missing_path` closes for roots.
     if world.budget().counts_calls() && req.context.usage.is_none() {
-        return denied_response(world, &action, "missing_usage", inbound, carried);
+        return (
+            denied_response(world, &action, "missing_usage", inbound, carried),
+            None,
+        );
     }
     let inbound = inbound.join(channel.taint);
     let session = SessionId::new(&req.context.session_id);
@@ -201,18 +336,27 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         taint: TaintContext::from_taint(inbound),
         mode,
         usage: BudgetUsage::from(carried),
-        // The gate ABI is intentionally pure and has no verifier callback or
-        // store access. A request-supplied token is untrusted input, so it must
-        // never grant approval at this boundary.
-        approval_granted: false,
+        // Wire entry points always pass false; request-supplied tokens are
+        // untrusted. Only the native resume entry point can supply authority,
+        // after its runtime has durably consumed an exact-bound authorization.
+        approval_granted,
     };
 
+    let mut sealed = None;
+    let mut effect_mode = None;
     let (mut decision, mut rule) = match decide(world, &call, provenance, &ctx) {
         KernelOutcome::UnknownToOntology { .. } => {
             (Decision::Absent, "unknown_to_ontology".to_string())
         }
         KernelOutcome::NotRepresentable { decision, rule, .. } => (decision, rule),
-        KernelOutcome::Evaluated { disposition, .. } => (disposition.decision, disposition.rule),
+        KernelOutcome::Evaluated {
+            intent,
+            disposition,
+        } => {
+            sealed = Some(intent);
+            effect_mode = disposition.effect_mode;
+            (disposition.decision, disposition.rule)
+        }
     };
 
     // Spatial scope (roots): when the world declares roots, path-scoped file
@@ -261,7 +405,7 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
     let mut out_taint = inbound;
     if decision == Decision::Allow {
         if let Some(se) = world.side_effect(&action) {
-            out_taint = out_taint.join(side_effect_taint(se));
+            out_taint = out_taint.join(side_effect_taint(se, world.action_type(&action)));
         }
         // Remote ingress (finding #13). An action served by an MCP server returns
         // bytes from another process we do not trust — whatever side effect the
@@ -295,12 +439,22 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         carried
     };
 
+    // What the host must run (D80): only for a call that may run.
+    let effective = if matches!(decision, Decision::Allow | Decision::Ask) {
+        sealed
+            .as_ref()
+            .and_then(|intent| effective_call(world, intent))
+            .map(GateEffective::from_kernel)
+    } else {
+        None
+    };
+
     let approval = (decision == Decision::Ask).then(|| GateApproval {
         token: format!("{}:{}", req.context.session_id, action.as_str()),
         required: true,
     });
 
-    GateResponse {
+    let response = GateResponse {
         v: ABI_VERSION,
         decision: decision_str(decision).to_string(),
         action: action.as_str().to_string(),
@@ -313,7 +467,12 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         },
         approval,
         manifest_hash: short_hash(world),
-    }
+        effective,
+    };
+    let allowed = sealed
+        .zip(effect_mode)
+        .filter(|_| decision == Decision::Allow);
+    (response, allowed)
 }
 
 fn default_version() -> u32 {
@@ -339,6 +498,7 @@ fn denied_response(
         },
         approval: None,
         manifest_hash: short_hash(world),
+        effective: None,
     }
 }
 
@@ -393,8 +553,16 @@ fn parse_channel(world: &CompiledWorld, s: Option<&str>) -> Result<ChannelPolicy
 /// network/external/memory ingress brings in untrusted data; pure effects and
 /// local reads do not. The finer, path-sensitive taint-source policy is the
 /// deferred manifest-schema item (`docs/harness-gate-abi.md` §7).
-fn side_effect_taint(se: SideEffectClass) -> Taint {
+///
+/// A **file write** into memory brings nothing back (D83): writing `CLAUDE.md`
+/// returns an acknowledgement, not stored content, so it leaves the session's
+/// taint as it was. Memory reached any other way (`action_type: Memory`, a
+/// recall) is still ingress.
+fn side_effect_taint(se: SideEffectClass, at: Option<ActionType>) -> Taint {
     match se {
+        SideEffectClass::Memory if matches!(at, Some(ActionType::Write | ActionType::Patch)) => {
+            Taint::Clean
+        }
         SideEffectClass::Network | SideEffectClass::External | SideEffectClass::Memory => {
             Taint::Tainted
         }
@@ -565,6 +733,20 @@ mod tests {
         assert_eq!(res.decision, "ASK");
         assert_eq!(res.rule.as_deref(), Some("approval_required"));
         assert!(res.approval.is_some());
+    }
+
+    #[test]
+    fn trusted_resume_rechecks_the_kernel_and_does_not_change_the_wire_gate() {
+        let world = compile_default();
+        let mut r = req("start_pty", "clean");
+        let (res, _) = gate_and_lower_authorized(&world, &r);
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(gate(&world, &r).decision, "ASK");
+        r = req("fetch_web", "tainted");
+        assert_eq!(gate_and_lower_authorized(&world, &r).0.decision, "DENY");
+        r = req("write_workspace", "clean");
+        r.context.source_channel = Some("web".into());
+        assert_eq!(gate_and_lower_authorized(&world, &r).0.decision, "ABSENT");
     }
 
     #[test]
@@ -1068,6 +1250,41 @@ budget:
     }
 
     #[test]
+    fn gate_and_lower_returns_gates_verdict_and_a_spec_only_for_allow() {
+        let world = compile_default();
+        for tool in [
+            "read_workspace",
+            "fetch_web",
+            "start_pty",
+            "send_email",
+            "run_tests",
+        ] {
+            for taint in ["clean", "tainted"] {
+                let r = req(tool, taint);
+                let (res, spec) = gate_and_lower(&world, &r);
+                assert_eq!(
+                    serde_json::to_value(&res).unwrap(),
+                    serde_json::to_value(gate(&world, &r)).unwrap(),
+                    "the verdict must be gate's for {tool}/{taint}"
+                );
+                assert_eq!(
+                    spec.is_some(),
+                    res.decision == "ALLOW",
+                    "a spec exactly when allowed, for {tool}/{taint}"
+                );
+            }
+        }
+        // The spec is the kernel's lowering: a scoped capability's literal is in it.
+        let (res, spec) = gate_and_lower(&world, &req("run_tests", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        let spec = spec.unwrap().expect("lowers");
+        assert_eq!(
+            spec.operation(),
+            &harness_types::Operation::Argv(vec!["pytest".to_string()])
+        );
+    }
+
+    #[test]
     fn gate_is_deterministic() {
         let world = compile_default();
         for tool in ["read_workspace", "fetch_web", "start_pty", "send_email"] {
@@ -1217,5 +1434,184 @@ roots:
             &path_req("read_workspace", "/etc/shadow", "clean"),
         );
         assert_eq!(res.decision, "ALLOW"); // classify_path returns None -> unaffected
+    }
+
+    // ---- D80: the effective call on the wire ----
+
+    const SCOPED_PR_WORLD: &str = r#"
+world_id: scoped-pr
+channels:
+  - { name: user_prompt, trust: Trusted, taint: false }
+capabilities:
+  - { trust: Trusted, actions: [Mcp] }
+base_actions:
+  - name: create_pull_request
+    action_type: Mcp
+    side_effect: External
+    projected: false
+    backing: !McpServer { server: codehost, tool: create_pull_request }
+    schema:
+      type: object
+      properties: { repo: { type: string }, title: { type: string } }
+    arg_roles: { repo: Target, title: Content }
+scoped_capabilities:
+  - name: open_change_pr
+    base_action: create_pull_request
+    args: { repo: !Literal "acme/svc", title: !Input { as: summary } }
+"#;
+
+    fn scoped_pr_world() -> CompiledWorld {
+        compiler::compile(&compiler::load_yaml(SCOPED_PR_WORLD).unwrap()).unwrap()
+    }
+
+    fn call(tool: &str, arguments: serde_json::Value) -> GateRequest {
+        GateRequest {
+            arguments,
+            ..req(tool, "clean")
+        }
+    }
+
+    #[test]
+    fn a_hidden_backing_action_is_absent_and_carries_no_effective_call() {
+        let world = scoped_pr_world();
+        let res = gate(
+            &world,
+            &call(
+                "create_pull_request",
+                serde_json::json!({ "repo": "attacker/fork", "title": "t" }),
+            ),
+        );
+        assert_eq!(res.decision, "ABSENT");
+        assert!(res.effective.is_none());
+    }
+
+    #[test]
+    fn a_scoped_verb_returns_its_lowering_with_what_it_stripped() {
+        let world = scoped_pr_world();
+        let res = gate(
+            &world,
+            &call(
+                "open_change_pr",
+                serde_json::json!({ "summary": "Fix", "repo": "attacker/fork", "title": "x" }),
+            ),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        let effective = res.effective.expect("ALLOW carries the effective call");
+        assert_eq!(effective.base_action, "create_pull_request");
+        assert_eq!(
+            effective.backing,
+            GateBacking::Mcp {
+                server: "codehost".to_string(),
+                tool: "create_pull_request".to_string()
+            }
+        );
+        // The renamed argument is mapped back; the literal wins; both names the
+        // world fixes or renamed away are reported.
+        assert_eq!(
+            effective.arguments,
+            serde_json::json!({ "repo": "acme/svc", "title": "Fix" })
+        );
+        assert_eq!(
+            effective.stripped,
+            vec!["repo".to_string(), "title".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_ask_carries_the_effective_call_for_the_approval_prompt() {
+        let res = gate(&compile_default(), &req("start_pty", "clean"));
+        assert_eq!(res.decision, "ASK");
+        let effective = res.effective.expect("ASK carries the effective call");
+        assert_eq!(effective.base_action, "start_pty");
+    }
+
+    #[test]
+    fn a_blocked_call_carries_no_effective_call() {
+        let res = gate(&compile_default(), &req("fetch_web", "tainted"));
+        assert_eq!(res.decision, "DENY");
+        assert!(res.effective.is_none());
+    }
+
+    #[test]
+    fn the_effective_call_is_on_the_wire_only_when_present() {
+        let world = compile_default();
+        let allowed = serde_json::to_value(gate(
+            &world,
+            &call("run_tests", serde_json::json!({ "command": "rm -rf /" })),
+        ))
+        .unwrap();
+        assert_eq!(
+            allowed["effective"],
+            serde_json::json!({
+                "base_action": "run_command",
+                "backing": { "kind": "local", "handler": "run_command" },
+                "arguments": { "command": "pytest" },
+                "stripped": ["command"]
+            })
+        );
+        let denied = serde_json::to_value(gate(&world, &req("fetch_web", "tainted"))).unwrap();
+        assert!(denied.get("effective").is_none());
+    }
+
+    #[test]
+    fn gate_and_lower_agrees_with_the_effective_call() {
+        // One lowering: the spec an in-process host forwards carries exactly the
+        // arguments the wire field tells an out-of-process host to send.
+        let world = scoped_pr_world();
+        let (res, spec) = gate_and_lower(
+            &world,
+            &call(
+                "open_change_pr",
+                serde_json::json!({ "summary": "Fix", "repo": "attacker/fork" }),
+            ),
+        );
+        let effective = res.effective.expect("effective");
+        let spec = spec.expect("ALLOW lowers").expect("lowering succeeds");
+        match spec.operation() {
+            harness_types::Operation::Structured(op) => {
+                assert_eq!(op["input"], effective.arguments);
+                assert_eq!(op["tool"], serde_json::json!("create_pull_request"));
+            }
+            other => panic!("expected an MCP operation, got {other:?}"),
+        }
+    }
+
+    /// D83: a path class reads the adapter-resolved `path` as well as the
+    /// argument, so a file whose name hides that it is `CLAUDE.md` (a symlink the
+    /// adapter resolved) is still an instruction file; and a clean file write into
+    /// memory brings nothing back, so the session stays clean.
+    fn instruction_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: instructions
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+base_actions:
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: write_instructions, action_type: Write, side_effect: Memory }
+path_classes:
+  - to: write_instructions
+    from: [ { action: write, arg: file_path } ]
+    patterns: ["**/CLAUDE.md"]
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_path_class_matches_the_resolved_path_and_a_write_ingests_nothing() {
+        let world = instruction_world();
+        let mut r = req("write", "tainted");
+        r.arguments = serde_json::json!({ "file_path": "notes.md" });
+        r.path = Some("/proj/CLAUDE.md".into());
+        let res = gate(&world, &r);
+        assert_eq!(res.action, "write_instructions");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+
+        let mut r = req("write", "clean");
+        r.arguments = serde_json::json!({ "file_path": "CLAUDE.md" });
+        let res = gate(&world, &r);
+        assert_eq!(res.action, "write_instructions");
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "clean", "a file write ingests nothing");
     }
 }

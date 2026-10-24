@@ -1,5 +1,18 @@
 # AI2-41 / #99 — Claude mods enforcement probe
 
+## 2026-10-24 — conflict repair and refreshed preflight
+
+Worktree: pr100-managed-policy; local branch codex/ai2-41-pr100-managed-policy.
+Integrating main eefdfe1; only README conflicted. Resolution preserves main's
+D83 memory protection and this PR's bounded project-mod finding. No PR merge
+is authorized; demo and deferred PRs #129/#148/#149 are untouched.
+
+Docker client 29.8.0 now exists, desktop-linux context selected, but Server is
+null and dockerDesktopLinuxEngine pipe is absent. No Docker process was found.
+No service was started, host managed policy changed, or live case attempted.
+Pinned Claude 2.1.288 / harness 0.6.0 npm metadata is available. Build and both
+managed cases remain NOT RUN. Next: validate the oracle offline, publish the
+conflict resolution and record the exact remaining environment/evidence gates.
 ## 2026-10-05 — managed setup prepared, runtime prerequisite remains
 
 Added `docs/benchmarks/claude-mods/MANAGED.md`, `managed.Dockerfile`,
@@ -47,3 +60,4 @@ Done for next step: both managed cases have pinned configuration, live adapter
 response and marker-effect evidence; report/trackers updated. Full issue stays
 open while those rows are missing. Consult linked PR and both trackers before
 continuing. No live prompt-injection or persistence claim is established.
+Offline oracle: all 8 tests passed. Pinned npm meta/platform versions all available. MANAGED.md refreshed with Docker Server prerequisite and exact remaining evidence checklist. No runtime experiment or image build attempted because engine is unavailable. Next: syntax/JSON/diff checks, commit integration, push PR #100, fresh CI and tracker sync.

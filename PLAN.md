@@ -275,6 +275,16 @@ E2, E3. **Completes M1. Status:** done.
   → JSON; `replay_bundle` recompiles the world and replays offline.
 - [ ] **E4.6** (Optional) cross-implementation parity harness (e.g. Rego mirror)
   — deferred.
+- [x] **E4.7** Host decision log joined to outcomes (gap G2, AI2-65 / #138,
+  DECISIONS **D84**, `docs/host-decision-log.md`): decision lines carry
+  `tool_use_id` / `agent_id` / `agent_type` / `cwd`; a read-only
+  `PostToolUse` / `PostToolUseFailure` observer appends an outcome line per
+  executed call with a D66-redacted result summary; `harness init` wires it;
+  `replay-transcripts --decisions` joins the log to transcripts and infers ASK
+  answers (stated as inferred). OTLP: not from the hook (no offline dependency,
+  no egress per call); `harness export-otlp` converts a finished log to OTLP/JSON
+  GenAI `execute_tool` spans, one trace per session (AI2-66 / #141). Repeated
+  decisions for one call retain distinct span IDs and per-decision ASK/DENY inferences.
 
 **Exit:** replay reproduces decisions; redaction holds; the M1 vertical slice
 (`read_file` → kernel → sim executor → trace → replay) passes end to end.
@@ -450,7 +460,7 @@ regression gates enforced.
   - `GET /api/world/default`: the bundled default manifest YAML (seeds the editor).
   - `POST /api/preview {yaml}`: compiles a draft manifest and returns a parse/compile error, or the projected tool surface (name, base/scoped kind, action/side-effect type, scoped-cap args) plus a per-action decision matrix.
 - [x] **E11.3** Live preview UI: renders the projected tool surface and a color-coded clean-vs-tainted decision matrix (ALLOW/ASK/DENY/ABSENT/REPLAN/UNKNOWN + the deciding rule) that updates as the manifest changes. (Collision flags / simulated-execution previews deferred.)
-- [ ] **E11.4** Manifest Exporter: Support local download/save of validated YAML manifest files (updating the workspace `.agents/default_world.yaml` if configured).
+- [ ] **E11.4** Manifest Exporter: Support local download/save of validated YAML manifest files (updating the workspace `.agents/default_world.yaml` if configured). *Partial:* `harness mcp-author` saves validated manifests for MCP surfaces (E13.4c); `harness serve` still has no export.
 - [ ] **E11.5** Integration with E10.5: Embed manifest-drafting LLM assistant and trace-failure explainer in the UI (e.g., loading an audit trace file to visually trace a denied action and suggest manifest edits to resolve it).
 
 **Exit:** Developer can start `cli-harness serve`, edit the manifest YAML side-by-side with live compilation and tool-surface preview, and download/commit the result.
@@ -485,6 +495,10 @@ and managed-only runner are prepared. Image build and both live rows remain NOT
 RUN: Docker/Podman unavailable and namespace creation denied in this workspace.
 Next prerequisite is a working disposable Linux amd64 container host with
 build-time registry access. Project proof unchanged; no guard work started.
+**2026-10-24 preflight:** Docker client 29.8.0 is installed on the Windows host,
+but the desktop-linux engine pipe is absent; no daemon/server is reachable.
+The pinned npm versions remain available. Build and both managed rows are still
+NOT RUN. See MANAGED.md for the refreshed prerequisites and completion checklist.
 
 **Design — Claude Code exposes two enforcement surfaces that mirror the kernel's two stages:**
 1. *What tools exist* — a subagent's `tools` allowlist + which MCP tools are connected = **projection / representability / ABSENT** (a tool not on the surface literally cannot be called).
@@ -499,13 +513,22 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 - [x] **E13.1** Scaffold the Flywheel "Correcting Reviewer" as a real subagent (`.claude/agents/correcting-reviewer.md`) + `/review-blog` command (`.claude/commands/review-blog.md`). *[step (a) — commit + push to both remotes]*
 - [ ] **E13.2** First slice: a manifest-driven `PreToolUse` hook + taint sidecar that ports the kernel's three signature behaviors onto Claude Code — (1) **ABSENT-for-native** (deny native tools not in the projected set), (2) **taint floor** (once a tainted file/web result is read, deny network/egress), (3) **ASK** on writes / destructive commands. Wire into `settings.json` via the `update-config` skill. *[step (b)]*
 - [x] **E13.3** Design `harness compile --target claude-code`: emit `.claude/settings.json` hooks, `.mcp.json` (→ shim), and subagent allowlists from one `WorldManifest` — design + manifest→host mapping recorded in `DECISIONS.md` **D19**. (Emitter implementation is future work; E13.4/E13.5 build it out.) *[step (c)]*
-- [ ] **E13.4** *(later)* MCP projection shim for scoped-capability arg-locking, reusing `safe-mcp-proxy` / `mcp-tool-projection`.
+- [x] **E13.4** MCP projection shim for scoped-capability arg-locking, reusing `safe-mcp-proxy` / `mcp-tool-projection`. Three phases:
+    - [x] **E13.4a** Manifest + kernel (D79): `ArgSource::Input { as, one_of, prefix }`, JSON literals, `projected: false` base actions, `mcp_surface`, and `model_facing_schema`.
+    - [x] **E13.4b** `harness mcp-gateway` serves scoped capabilities: lists them under their own names with the world-derived schema, forwards the kernel's lowered `{server, tool, input}` rather than the raw call, and announces `mcp_surface.name` (D79 amendment). Opt-in: worlds without `mcp_surface` are listed exactly as before; a scoped capability in one is forwarded to its base action's tool with the lowered input (D79 amendment, 2026-10-21). The wire gate returns the same lowering as `GateResponse.effective` (D80).
+    - [x] **E13.4c** Authoring page (`harness mcp-author --world W -- <upstream>`): pick tools, rename, limit arguments, try calls through the real gate, save the manifest (D79 amendment).
+    - [x] **E13.4d** Out-of-band MCP approvals (AI2-72 / #17, D89): operator CLI, exact-bound five-minute consent, durable pre-effect consumption, kernel reevaluation and scoped forwarding. Unknown outcomes retain consumed consent; concurrency and upstream-disconnect regression coverage. MCP elicitation remains future work.
 - [x] **E13.5** Demo: the first-slice hook neutralizing a prompt-injection → egress attempt (feeds the "Running Claude Code Safely" article + a VHS recording). **Done**: `.claude/hooks/demo-injection-egress.sh` is a self-contained, side-effect-free walk of the classic chain — read an untrusted ticket carrying an injection (in an HTML comment) → session tainted → `WebFetch`/`curl`/`wget` exfil all denied by the taint floor, with a clean-session baseline proving it's the taint, not a URL blocklist. The "Running Claude Code Safely" article gains a *Dogfooding* section with the verified transcript; `.claude/hooks/demo-injection-egress.tape` renders the recording to `blog/src/assets/demo-injection-egress.gif` once `vhs` is installed.
 - [x] **E13.6** Cross-agent taint propagation: make taint follow the subagent↔parent information-flow edge (a tainted subagent taints its parent; a tainted parent seeds its child). The E13.2 POC keys taint by `session_id`, and subagents get their own — so a subagent can launder untrusted data back to the parent (the ZombieAgent pattern, intra-run): a **fail-open** gap. Empirically confirm subagent session/linkage semantics, implement propagation via `SubagentStop` (and/or PreToolUse parent linkage), ship a runnable demo, and write a case-study article. **Done** (see DECISIONS **D20**): the experiment showed Claude Code shares one in-process `session_id` across the agent tree, so taint already propagates parent↔subagent via the shared sidecar; added `taint-notify.py` (SubagentStop: observability + distinct-session union), `demo-cross-agent.sh`, and the article `subagent-taint-experiment.md`. Isolated/background/remote agents (distinct session + `.claude/state`) remain a documented limitation.
 
 - [x] **E13.7** Containerized **governed Claude Code** SUT (`docker/`): a throwaway Claude Code instance running the repo's PreToolUse governance under OS-level isolation — separates the agent-under-test from the host dev session, and provides the **E8** enforcement floor (network egress policy, non-root, dropped caps, write confinement) the hooks' decisions need. A shared named-volume taint store is the cross-instance fix for the local sidecar's locality limit (D20). Image + `run.sh` + README shipped; the live **egress-allowlist proxy** (the full E8 network floor) is shipped + verified in `docker/compose.yaml` + `docker/egress-proxy/` — the agent runs on an internal no-gateway network whose only egress is a tinyproxy allowlisting `anthropic.com`. See DECISIONS **D21**. *(advances E8)*
 
 - [x] **E13.8** Host-neutral **gate ABI** — the integration port that makes the kernel host-independent (see DECISIONS **D24**, `docs/harness-gate-abi.md`). A `harness gate --world <manifest>` subcommand reads a `GateRequest` JSON on stdin and writes the kernel's verdict (`ABSENT/ALLOW/DENY/ASK/REPLAN` + rule + post-call taint) on stdout, so every host (Claude Code, a Hermes agent, Codex CLI, an MCP proxy) integrates through a **thin adapter calling the real kernel** — not a per-host reimplementation. **Done**: (1) the pure `harness_preview::gate()` (12 tests) + the `harness gate` subcommand honoring the ABI exit-code contract (verdict on stdout, exit 0 even for DENY/ASK; bad input/manifest → 2), verified end-to-end; (2) migrated the Claude Code world to a real `WorldManifest` (`.claude/cc-world.yaml`), with `Bash` adapter-classified into `Bash`/`Bash_network`/`Bash_destructive` (DECISIONS **D25**) — verified the taint floor, ASK, and ABSENT verdicts come from the real kernel; (3) built the host adapter shim (`.claude/hooks/world-gate-adapter.py`, DECISIONS **D26**) — pure plumbing calling `harness gate` (no decision logic), validated in isolation by `test-gate-adapter.sh` (taint floor incl. classified Bash-curl, ASK on `rm -rf`, escalation) with the live host hook left untouched. **Done (2026-07-12, the one-kernel-many-hosts increment — D36/D37, `docs/one-kernel-many-hosts.md`)**: (4) **live-hook cutover** — `settings.json` → `.claude/hooks/world-gate.sh` bootstrap shim → `harness cc-hook` (in-process `gate()`, D34); `world-gate.py` replaced **in place** with the same shim (hook configs snapshot at session start); the Python engine + `cc-world.json` archived under `.claude/hooks/superseded/`; (5) **kernel-side command classification** (D36) — `command_classes` is manifest data compiled into `CompiledWorld`; `gate()` returns the effective `action`; the Rust/TS/Python pattern copies are deleted; (6) the shared `host_outcome()` layer (ABSENT ≠ DENY on every host, unknown verdicts fail closed) consumed by `cc-hook` + `mcp-gateway`; (7) the **conformance suite** `tests/one_kernel.rs` over `docs/demos/one-kernel/{demo-world.yaml,cases.yaml}` pinning decision/rule/taint/manifest_hash equal across in-process gate, the gate CLI, the cc-hook contract, OpenCode-shaped requests, and the mcp-gateway; plus `scripts/demo-one-kernel-many-hosts.sh` (offline, <5 min). **Pending**: wire the adapter into the E13.7 container SUT (ship the `harness` binary in the image) + run the in-container injection→egress dogfood; the native↔wasm gate golden-vector conformance guard (E14.4); path-based read-taint (deferred design item, D25); and the typed `trust_pins` manifest field (dropped at cutover, D29/D37). Separately, **trust pins** (DECISIONS **D29**, `docs/trust-pins.md`) landed in the live hook: operator attestations pinned to content identity that re-classify a vouched read source as Trusted (drift re-taints), turning the taint sidecar into a recomputed cause-ledger (shared logic in `.claude/hooks/_gatelib.py`, validated by `test-gate.sh` §4) — the canonical `trust_pins` field on the compiled `WorldManifest` + pure `gate()` follows with the host cutover, and it resolves D25's deferred read-taint (a pin is the Trusted-channel exception to an untrusted read).
+
+- [ ] **Doctor acceptance matrix (AI2-25 / #87)**: PR #95 covers 40 passing Unix fixtures, including host-valid command hooks, invalid-type diagnostics, distinct per-project/global switches and read-only proofs. Three ignored specification divergences and the documented remaining matrix rows still need follow-up; this partial slice does not close #87.
+- [x] **E13.9** Machine-wide governance (DECISIONS **D82**, `docs/machine-wide-governance.md`): `harness init --user` merges the hook into `~/.claude/settings.json` with an absolute state dir and a world that protects the files able to disable it; `harness init --managed` installs into Claude Code's managed settings (admin-only; no user-side kill-switch, no `HARNESS_BIN`, kernel copied into the policy dir). Both take `--remove`. **Pending**: per-user taint state is still writable by that user (the hook runs as them) — closing it needs a privileged state service; `--bare` vs managed hooks unverified; `harness doctor` does not report user/managed installs yet.
+
+- [x] **E13.10** Instruction and memory files count as durable memory (DECISIONS **D83**, AI2-64 / #137, gap G1 of the *Designing AI Agents* review): a `path_classes` world section reclassifies `Write`/`Edit`/`MultiEdit`/`NotebookEdit` (and Antigravity's `write_to_file`/`propose_code`/`edit_notebook`) to a `side_effect: Memory` action when the canonical path or the normalized argument matches `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/{agents,commands,rules,skills}/**`, auto-memory or `.agents/{rules,skills,workflows}/**`. Tainted → `DENY taint_invariant`; clean → ALLOW in project worlds, ASK in `--user`/`--managed` worlds. One pattern list, pinned across host manifests. **Pending**: shell writes (`echo >> CLAUDE.md`, D57 residual), Antigravity `move` (destination key not captured), path classes for the OpenCode and DeepSeek Harness worlds.
 
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
 
@@ -532,6 +555,7 @@ Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × s
 - [ ] **E15.3** **Decision-Matrix Playground** — manifest editor ↔ a live action × {clean, tainted} ALLOW/ASK/DENY/ABSENT grid; the public, polished evolution of the E11 authoring tool (candidate to *unify* with E11 once E14.5 lands).
 - [ ] **E15.4** **Attack Sandbox (with / without physics)** — an editable prompt-injection payload run side-by-side: ungoverned (secrets exfiltrate) vs governed (egress severed at the taint floor); the persuasion piece, paired with "Why Deny is Dangerous" / "AI Aikido".
 - [ ] **E15.5** **Provenance Flow Graph** — an animated information-flow DAG (data + tool-call nodes) coloured by provenance / taint; untrusted reads spread "red" through the session and break proposed network edges. Shares its scenario model with E15.2.
+- [ ] **E15.7** **Policy console — the playground, connected to a live agent** (AI2-44 / #123). `harness console --project <dir>` serves a local page whose profiles and Allow / Ask / Off switches rewrite the project's world file atomically; `harness cc-hook` already re-reads that file on every call, so a real Claude Code session changes behaviour on its next tool call with no restart, and a decision log the hook appends feeds the page's live verdict stream. The page authors the world and shows verdicts; the kernel still decides. The taint floor is shown locked: no switch can open it. Skeleton: decision log (#116), console server (#117), page (#118), demo wiring (#119). Polish: WASM matrix with predicted-vs-enforced verdicts (#120), prompt counter and evidence export (#121), decision record and talk track (#122). **Skeleton done (2026-10-22, DECISIONS D81):** `cc-hook --log`, `harness console` with profiles, switches, the locked floor and the live feed, and `docs/demos/policy-console/` (world, setup with `--enforce-absent --log`, preflight, runbook); verified against a real Claude Code session on Opus 4.8, where switching "Edit project files" off turned the next Edit and Write ABSENT. Polish pending. **Stop position done (2026-10-23, AI2-63 / #136, DECISIONS D85):** a Stop button hides every effectful base action from the supplied manifest at the next call, including custom names and shell processes. Read/None actions stay as configured; worlds with effectful scoped capabilities explicitly refuse Stop. Restore returns exact projection/approval flags, and the page says "Stopped" only after the hook has refused a call.
 - [ ] **E15.6** **`/playground` hub + embeds** — a gallery page on `ai2rules.dev` indexing the visualizations, each cross-linked from the post it illustrates (a destination plus an internal-link / SEO surface).
 
 **Exit:** `ai2rules.dev/playground` hosts several real-kernel-backed interactive visualizations — led by the Taint-Flow Simulator embedded in the sandbox guide — each running entirely in the reader's browser and each provably faithful via the E14 fidelity guard.
@@ -588,6 +612,13 @@ New task list:
   `addCommentToJiraIssue` **ALLOW** in a clean session (comment posted) and **DENY** in a tainted
   session — same call, gate-side, before reaching Atlassian. Only an optional recorded
   walkthrough remains.
+
+- [x] **Confluence authoring skin** (AI2-71 / PR #16): create pinned to tenant/space,
+  update pinned to tenant/page with ASK. All remote reads have MCP backings and
+  taint the session, so subsequent external writes are refused. Five offline
+  regressions in `tests/confluence_world.rs` include the gateway read-to-create
+  sequence. The original live evidence predates these corrections; the corrected
+  manifest has not been rerun against live Atlassian.
 
 *(The original Python-path tasks below are superseded by D33; kept for history.)*
 
@@ -766,6 +797,13 @@ are published per scenario with no reassuring aggregate score.
   upstream over `harness mcp-gateway`.
 - [ ] **E18.12** External reproduction (AI2-9): one engineer outside this repository runs the
   pack from `docs/benchmarks/mcp-governance/README.md` alone and reports what was unclear.
+- [ ] **E18.13** OpenClaw 2.0 external target ([#77](https://github.com/sv-pro/ai2rules/issues/77)
+  / [Linear AI2-21](https://linear.app/ai2rules/issue/AI2-21/benchmark-evaluate-openclaw-20-default-vs-hardened-execution)): pin `v2026.8.1` and run identical probes against documented
+  `default-personal` and `hardened-team` profiles. Measure capability shaping, execution
+  placement, approval binding/replay, protected-secret egress, shared-session role limits,
+  and failure direction with runner-owned effect counts. The registered target profile is
+  [`docs/benchmarks/openclaw-2/README.md`](docs/benchmarks/openclaw-2/README.md); it remains
+  outside generated results until the executable evidence contract is met.
 
 **Exit:** the runner detects every intentional weak-baseline failure, ai2rules produces
 evidence-backed expected outcomes without an LLM, and an external engineer can reproduce the

@@ -1,0 +1,7 @@
+# Two lines for the hosts file, so the demo's sites have ordinary names.
+# Windows: C:\Windows\System32\drivers\etc\hosts (edit as Administrator)
+# macOS / Linux: /etc/hosts (sudo)
+# Both names are under .test, reserved by RFC 6761: without these lines they do
+# not resolve anywhere, so nothing can reach the internet by mistake.
+127.0.0.1 portal.northwind.test
+127.0.0.1 files.northwind.test

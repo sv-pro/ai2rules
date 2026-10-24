@@ -12,6 +12,104 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Changed
+
+- The law-firm story no longer suggests the kernel recognises a poisoned email.
+  The closing line now says reading one email from outside closed the exits,
+  whatever it said, and step 3 says any outside email does this, harmless or not.
+  The runbook answers the follow-ups: no detection, no way to clear a marked
+  session, a new session starts clean, and session-wide marking is today's limit.
+
+### Added
+
+- `harness demo --story law-firm --html <PATH>` also writes the run as a
+  self-contained page to step through in a browser (arrow keys, a session badge
+  that turns when the email is read, the hidden text shown as hidden, the kernel's
+  own request and reason under each step, and the audit summary). The page only
+  renders this run's verdicts; it decides nothing. It needs no network and is the
+  same bytes for the same binary. A copy is published at
+  <https://ai2rules.dev/demo/law-firm.html>; `scripts/check-demos.sh` fails if it
+  is no longer what the current binary writes.
+- The story's terminal output is coloured: green `ALLOW`, red `DENY`, yellow `ASK`
+  and taint, dimmed `ABSENT`, the hidden email text in magenta. Piped output and
+  `NO_COLOR` stay plain text, so logs and the demo checks are unchanged.
+
+## [0.7.0] — 2026-10-21
+
+A minor release rather than a patch: D78 breaks persisted approval and staged-commit
+logs (see Upgrading).
+
+### Upgrading
+
+- Stores written by 0.6.x or earlier are refused as written by an older version.
+  Delete the approval log, the commit log, their keys and any `.head` files; pending
+  approvals are simply asked again.
+
+### Security
+
+- **Approval and staged-commit logs are chained and head-anchored** (D78). Deleting a
+  signed line — the approval log's `Consumed`, or the commit log's `AttemptStarted` /
+  `AttemptFinished` — used to hand a single-use grant back or release an
+  idempotency key while every remaining line still verified. Lines now carry `seq`
+  and `prev`, a MACed `<log>.head` anchors the end (at most one line of crash
+  slack, re-anchored on open), and each open store refuses a log shorter than it has
+  already seen. **Breaking** for stores written by earlier versions: they are refused
+  as old (D73/D78 wording); delete the log and its key. Known limit, pinned by a test:
+  a head saved between approval and consumption can still roll back a store that a
+  fresh process opens.
+- **`mcp-gateway` no longer forwards a scoped capability as proposed** (D79). In a
+  world without an `mcp_surface`, a scoped verb went upstream under its own name with
+  the caller's arguments, so its literals were never applied and a locked argument
+  the caller added was sent. It now goes to the tool named after its base action,
+  with the kernel's lowered input, and is refused when it cannot be lowered.
+
+### Fixed
+
+- **A write into a folder that does not exist yet is no longer denied as
+  `missing_path`.** With roots enabled, the hooks resolved only a new file's
+  immediate parent, so `docs/new-dir/README.md` before `new-dir/` existed was
+  refused. A new path is now classified by its nearest existing ancestor,
+  canonicalized as before (so a symlink there still resolves to its real
+  destination), plus the components below it. A `..` among those components is
+  refused, since the filesystem cannot resolve it there. Found by replaying real
+  sessions through the hook.
+
+### Added
+
+- **Scoped MCP surfaces** (D79, E13.4). A scoped capability can rename an argument
+  and limit it to a list of values or a prefix (`!Input { as, one_of, prefix }`);
+  literals take any JSON value; `projected: false` keeps a base action in the
+  ontology but off the surface; `mcp_surface: { name, upstream }` makes
+  `harness mcp-gateway` offer scoped capabilities under their own names, with a
+  world-derived schema, and forward the kernel's lowered call.
+- **`harness mcp-author --world W -- <upstream>`**: a local page that connects to an
+  MCP server, lets you pick, rename and limit its tools, try calls through the real
+  gate, and save the manifest.
+- **`GateResponse.effective`** (D80). On `ALLOW` / `ASK` the gate returns the call to
+  execute: base action, backing, arguments after a scoped capability's stripping,
+  renaming and literal injection, unresolved context refs, and the names it
+  stripped. A backward-compatible v1 field. A wire host
+  that executes this instead of the proposal gets the world's scoping without
+  linking the kernel. `world_kernel::effective_call` is the single lowering that
+  `build_execution_spec` now also uses.
+- **`mcp-gateway` audits stripped arguments** (D80): an allowed call whose
+  proposal tried to set what the world fixes gets its own `stripped` record.
+- **`harness replay-transcripts [PATH…]`**: evidence before enforcement. It
+  replays every tool call in past Claude Code transcripts (default
+  `~/.claude/projects`) through the kernel exactly as `cc-hook` would have decided
+  it: the same request and answer mapping, now shared with the hook, with taint and
+  budget carried per session across a session's subagent transcripts. It reports
+  how often the hook would have stayed silent, asked or denied, by rule with
+  examples, which sessions became tainted and by what, and which tools the world
+  does not know. `--json` gives every call. Nothing is executed.
+- **`harness demo --story law-firm`**: the first proof as a story for
+  non-engineers. An AI legal assistant reads a client email with a hidden
+  instruction; sending, uploading, deleting overnight and touching the trust
+  account are refused or absent, while its work goes on. The world is embedded,
+  so it runs from any folder with no `harness init`. Each verdict is the real
+  kernel's, the session's taint is carried exactly as an adapter carries it, and the
+  10 decisions are traced and replayed. Runbook: `docs/demos/law-firm/`.
+
 ## [0.6.0] — 2026-09-19
 
 ### Added
@@ -777,7 +875,8 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sv-pro/ai2rules/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sv-pro/ai2rules/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...v0.4.1

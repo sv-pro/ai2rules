@@ -136,6 +136,9 @@ fn a_0_4_1_approval_log_is_refused_as_old_rather_than_as_forged() {
         })
         .collect();
     std::fs::write(&path, downgraded.join("\n") + "\n").unwrap();
+    // A store written by that version never had a head anchor (D78); keeping the
+    // one this version created would test a log that could not exist.
+    std::fs::remove_file(dir.path().join("approvals.jsonl.head")).unwrap();
     eprintln!("0.4.1-shaped log:\n{}", downgraded.join("\n"));
 
     let message = match ApprovalStore::open(&path) {
