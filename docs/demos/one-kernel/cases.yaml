@@ -116,6 +116,137 @@ cases:
       taint: tainted
       action: bash_unclassified
 
+  # Instruction and memory files (D83). A write to a file the next session
+  # loads as trusted context is a durable-memory write: `path_classes`
+  # reclassifies it to `write_instructions` (side_effect: Memory), and in a
+  # tainted session the hard taint floor denies it — the same rule as tainted
+  # egress. Every spelling of one target lands on the same verdict, because the
+  # classifier normalizes the path (and reads the adapter-resolved one too).
+  - name: tainted_write_to_claude_md_is_denied
+    request:
+      tool: write
+      arguments: { file_path: CLAUDE.md }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  - name: tainted_write_to_agents_md_is_denied
+    request:
+      tool: write
+      arguments: { file_path: AGENTS.md }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  - name: tainted_write_to_a_skill_is_denied
+    request:
+      tool: write
+      arguments: { file_path: .claude/skills/x/SKILL.md }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  - name: tainted_write_to_auto_memory_is_denied
+    request:
+      tool: write
+      arguments: { file_path: "~/.claude/projects/-home-dev-proj/memory/MEMORY.md" }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  - name: tainted_edit_of_claude_md_dot_slash_is_denied
+    request:
+      tool: edit
+      arguments: { file_path: ./CLAUDE.md }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  - name: tainted_edit_of_claude_md_via_dotdot_is_denied
+    request:
+      tool: edit
+      arguments: { file_path: docs/../CLAUDE.md }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  - name: tainted_write_to_claude_md_absolute_is_denied
+    request:
+      tool: write
+      arguments: { file_path: /home/dev/proj/CLAUDE.md }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  - name: tainted_write_to_claude_md_lowercase_is_denied
+    request:
+      tool: write
+      arguments: { file_path: claude.md }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  - name: tainted_write_to_claude_md_backslashes_is_denied
+    request:
+      tool: write
+      arguments: { file_path: 'docs\..\CLAUDE.md' }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  # NotebookEdit carries its target as `notebook_path`, not `file_path`.
+  - name: tainted_notebookedit_of_claude_md_is_denied
+    request:
+      tool: notebookedit
+      arguments: { notebook_path: CLAUDE.md }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: tainted
+      action: write_instructions
+  # An ordinary source file is still an ordinary FilesystemWrite.
+  - name: tainted_write_to_source_file_is_unchanged
+    request:
+      tool: write
+      arguments: { file_path: src/main.rs }
+      context: { taint: tainted, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: ALLOW
+      rule: null
+      taint: tainted
+      action: write
+  # Clean, in a project world (D83): allowed, and a file write ingests nothing,
+  # so the session stays clean. Machine-wide worlds ask instead (init --user/--managed).
+  - name: clean_write_to_claude_md_is_allowed_and_stays_clean
+    request:
+      tool: write
+      arguments: { file_path: CLAUDE.md }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt, usage: {} }
+    expect:
+      decision: ALLOW
+      rule: null
+      taint: clean
+      action: write_instructions
+
   # Monotonicity: an allowed read in a tainted session stays tainted — taint
   # never decreases.
   - name: post_call_taint_never_decreases

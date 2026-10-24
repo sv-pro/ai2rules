@@ -32,6 +32,8 @@ base_actions:
   - { name: Write, action_type: Write, side_effect: FilesystemWrite }
   - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
   - { name: NotebookEdit, action_type: Patch, side_effect: FilesystemWrite }
+  # instruction / memory files (D83), reclassified by `path_classes` below
+  - { name: Write_instructions, action_type: Write, side_effect: Memory }
   # network / egress (taint floor applies)
   - { name: WebFetch, action_type: Web, side_effect: Network }
   - { name: WebSearch, action_type: Web, side_effect: Network }
@@ -50,6 +52,34 @@ command_classes:
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
       - to: Bash_destructive
         patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+
+# Instruction and memory files (D83): a write to one is a write to what the next
+# session loads as trusted context, so it is a durable-memory write under the
+# taint floor. Matched on the resolved canonical path; the pattern list is shared
+# by every host manifest (tests/one_kernel.rs). A tainted session cannot write
+# them; a clean one can in this project world. `harness init --user/--managed`
+# makes a clean write ASK. Shell writes (`echo >> CLAUDE.md`) stay with
+# Bash_unclassified (ASK), D57's known residual.
+path_classes:
+  - to: Write_instructions
+    from:
+      - { action: Write, arg: file_path }
+      - { action: Edit, arg: file_path }
+      - { action: MultiEdit, arg: file_path }
+      - { action: NotebookEdit, arg: notebook_path }
+    patterns:
+      - "**/CLAUDE.md"
+      - "**/CLAUDE.local.md"
+      - "**/AGENTS.md"
+      - "**/GEMINI.md"
+      - "**/.claude/agents/**"
+      - "**/.claude/commands/**"
+      - "**/.claude/rules/**"
+      - "**/.claude/skills/**"
+      - "**/.claude/projects/*/memory/**"
+      - "**/.agents/rules/**"
+      - "**/.agents/skills/**"
+      - "**/.agents/workflows/**"
 
 # Path-scoped capabilities (spatial confinement). Longest-prefix match wins; a
 # longer Deny shadows a broader allow. `.` = the project dir, `~` = $HOME (both
