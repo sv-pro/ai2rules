@@ -190,6 +190,37 @@ fn default_command_arg() -> String {
     "command".to_string()
 }
 
+/// One file action a path classifier inspects, and the argument that carries its
+/// target path in this host's vocabulary (`file_path` for Claude Code's
+/// `Write`/`Edit`/`MultiEdit`, `notebook_path` for `NotebookEdit`, `path` for
+/// Antigravity after the adapter's alias step).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathClassSource {
+    pub action: ActionName,
+    pub arg: String,
+}
+
+/// A manifest-declared **path classifier** (DECISIONS D83): a call proposed as
+/// one of the `from` actions is reclassified to `to` when its target path matches
+/// any of `patterns`. Where `command_classes` (D36) reads a raw command string,
+/// this reads a *path*: the adapter-resolved canonical path (`GateRequest.path`)
+/// and the lexically normalized argument, so `./CLAUDE.md`, `docs/../CLAUDE.md`,
+/// an absolute path and `claude.md` all reach the same class. Patterns are
+/// case-insensitive `/`-separated globs: `*` within one segment, `**` across any
+/// number of them (including none).
+///
+/// It exists for instruction and memory files: a write to `CLAUDE.md` is a write
+/// to the next session's trusted context, so it belongs under the taint floor
+/// (`side_effect: Memory`), not beside ordinary `FilesystemWrite`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathClassDef {
+    pub to: ActionName,
+    #[serde(default)]
+    pub from: Vec<PathClassSource>,
+    #[serde(default)]
+    pub patterns: Vec<String>,
+}
+
 /// How a filesystem path may be accessed under a root rule (spatial scope).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RootAccess {
@@ -299,6 +330,10 @@ pub struct WorldManifest {
     /// pre-D36 manifests keep their manifest hash.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub command_classes: Vec<CommandClassDef>,
+    /// Path classifiers for instruction and memory files (DECISIONS D83). Skipped
+    /// when empty so earlier manifests keep their manifest hash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_classes: Vec<PathClassDef>,
     #[serde(default)]
     pub transition_policies: Vec<TransitionPolicy>,
     /// Path-scoped capabilities (spatial confinement). Absent ⇒ no path scope, so

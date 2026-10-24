@@ -422,3 +422,20 @@ fn decision_log_uses_the_shared_format_with_what_antigravity_sends() {
         assert_eq!(line["answer"], sent["decision"]);
     }
 }
+
+#[test]
+fn decision_calls_mask_secrets_before_shortening() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let padding = "x".repeat(140);
+    let command = format!("echo {padding} ghp_{}", "A".repeat(40));
+    run_hook_args(
+        dir.path(),
+        &json!({"conversationId": "boundary", "toolCall": {
+            "name": "run_command", "args": {"CommandLine": command}}}),
+        &["--log", log.to_str().unwrap()],
+    );
+    let line: Value = serde_json::from_str(std::fs::read_to_string(log).unwrap().trim()).unwrap();
+    assert_eq!(line["host"], "antigravity");
+    assert_eq!(line["call"], format!("echo {padding} [REDACTED]"));
+}

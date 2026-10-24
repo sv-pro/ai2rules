@@ -69,6 +69,10 @@ base_actions:
   # --- native tools (host-neutral lowercase) ---
   - { name: read, action_type: Read, side_effect: Read }
   - { name: webfetch, action_type: Web, side_effect: Network }
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: edit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: notebookedit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: write_instructions, action_type: Write, side_effect: Memory }
   - { name: bash, action_type: Command, side_effect: Process }
   - { name: bash_network, action_type: Command, side_effect: Network }
   - { name: bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
@@ -89,6 +93,34 @@ command_classes:
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
       - to: bash_destructive
         patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+
+# Instruction and memory files (D83): the shared pattern list, byte-identical
+# with .claude/cc-world.yaml and .agents/agy-world.yaml (tests/one_kernel.rs).
+# This world is host-neutral, so each action is read under both spellings the
+# hosts send: Claude Code's `file_path` / `notebook_path`, and the `path`
+# Antigravity's adapter aliases its PascalCase keys into.
+path_classes:
+  - to: write_instructions
+    from:
+      - { action: write, arg: file_path }
+      - { action: write, arg: path }
+      - { action: edit, arg: file_path }
+      - { action: edit, arg: path }
+      - { action: notebookedit, arg: notebook_path }
+      - { action: notebookedit, arg: path }
+    patterns:
+      - "**/CLAUDE.md"
+      - "**/CLAUDE.local.md"
+      - "**/AGENTS.md"
+      - "**/GEMINI.md"
+      - "**/.claude/agents/**"
+      - "**/.claude/commands/**"
+      - "**/.claude/rules/**"
+      - "**/.claude/skills/**"
+      - "**/.claude/projects/*/memory/**"
+      - "**/.agents/rules/**"
+      - "**/.agents/skills/**"
+      - "**/.agents/workflows/**"
 
 # Tainted data cannot reach externally-effectful surfaces (the taint floor,
 # invariant 7).

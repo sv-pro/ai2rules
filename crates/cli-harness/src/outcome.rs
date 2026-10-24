@@ -260,7 +260,7 @@ pub(crate) fn outcome_line(ev: &Value, redact_patterns: &[String]) -> Option<Val
         "event": event,
         "session": ev.get("session_id").and_then(Value::as_str).unwrap_or("default"),
         "tool": ev.get("tool_name").and_then(Value::as_str).unwrap_or(""),
-        "call": mask_secrets(&call_summary(&tool_input)),
+        "call": call_summary(&tool_input),
         "ran": true,
         "status": status,
         // Only a failure reports one: Claude Code routes a non-zero exit to

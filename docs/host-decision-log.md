@@ -93,8 +93,11 @@ Written by `harness console` (D81) when a switch or profile rewrites the world f
    bodies, patches and page text are data, not an outcome.
 4. The whole summary is cut to 240 characters.
 
-The decision line's `call` goes through the D66 scanner too, so a token in a
-`curl -H 'Authorization: …'` is masked in the log as it is in a trace.
+The `call` field on decision and outcome lines uses the same summary function
+(also used by Antigravity). It runs the D66 scanner over the full selected input
+value **before** collapsing whitespace or cutting to 160 characters. A token in
+a command, a PEM private-key block, or a password in a URL is therefore masked
+while its complete shape is still available to the scanner.
 
 ## Joining, and what is inferred
 
