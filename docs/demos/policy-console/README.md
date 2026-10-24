@@ -35,9 +35,16 @@ which ask first (DECISIONS D81).
 | Run scripts | `python`, `node`, `bash`, … | no interpreters |
 
 Off is ABSENT, not DENY: the action is not in the agent's world. That binds
-because `setup.sh` runs the hook with `--enforce-absent`; the world names Claude
-Code's own bookkeeping tools (`TodoWrite`, `Task`, …) so that switch does not take
-them away too.
+because `setup.sh` runs the hook with `--enforce-absent`, under which a tool the
+world does not name is absent too, harmless or not. So the world names every
+built-in tool of Claude Code and of the Claude app. The bookkeeping ones
+(`TodoWrite`, the app's task list, chapters, …) are reads. The ones with real
+effects (the browser pane, `Monitor`, artifacts, scheduling, starting other
+sessions) are named but not projected, so the feed says "not projected", not
+"unknown". A tool from an account's own connectors stays unknown, and so absent.
+
+The hook belongs to the folder the session **started** in. Changing folder inside
+the session does not leave this world, so start working sessions somewhere else.
 
 ## Files
 
