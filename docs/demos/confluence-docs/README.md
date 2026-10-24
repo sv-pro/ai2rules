@@ -1,67 +1,102 @@
 # Governed Confluence doc authoring
 
 The [JIRA skin](../jira-copilot/REAL-ATLASSIAN.md) shows one manifest shaping the
-Atlassian **Jira** surface. This is the same `harness mcp-gateway`, the same real
-Atlassian Rovo MCP upstream, but a **different world** — one that lets an AI agent
-write **documentation** into a single Confluence space, and revise a single page
-behind an approval. Same kernel, no code change; only the manifest differs.
+Atlassian Jira surface. This example uses the same `harness mcp-gateway` with a
+different world: creation is confined to one Confluence tenant/space, and updates
+to one tenant/page require approval. No kernel or gateway implementation changes.
 
-It's a worked example of two ideas from the thesis:
-
-- **Design-time stochastic, runtime deterministic** (PLAN principle 7). An LLM may
-  *draft* [`confluence-docs.world.yaml`](confluence-docs.world.yaml); a human reviews
-  it; the compiler freezes it. The runtime gate that enforces it is the pure kernel.
-- **Object-capability scoping.** Create is locked to a *space*; update is locked to a
-  single *page id* — a capability handed to exactly one object, not an ambient
-  permission over a namespace.
+An LLM may draft [the manifest](confluence-docs.world.yaml); a human reviews its
+tenant and object pins before the compiler freezes it. The pure kernel enforces
+the resulting world at runtime (PLAN principle 7).
 
 ## What the world grants
 
-| Tool | Grant | Enforcement at the gate |
+| Tool | Scope | Gate behavior |
 |---|---|---|
-| `getConfluenceSpaces`, `getPagesInConfluenceSpace`, `getConfluencePage`, `searchConfluenceUsingCql`, `getAccessibleAtlassianResources` | reads | ALLOW when clean |
-| `createConfluencePage` | **one space** | `arg_constraints: spaceId const` — any other space → **DENY** (`schema_violation`) |
-| `updateConfluencePage` | **one page, behind approval** | `arg_constraints: pageId const` + `approval_required` — wrong page → **DENY**; right page → **ASK** |
-| everything else (all Jira, comments, Compass, admin) | — | **ABSENT** (not declared) |
+| `getAccessibleAtlassianResources`, `getConfluenceSpaces`, `getPagesInConfluenceSpace`, `getConfluencePage`, `searchConfluenceUsingCql` | reads available to the upstream account | ALLOW; the MCP result taints the session |
+| `createConfluencePage` | one `cloudId` + `spaceId` pair | clean context: ALLOW; wrong/missing tenant or space: DENY (`schema_violation`) |
+| `updateConfluencePage` | one `cloudId` + `pageId` pair | clean context: ASK; wrong/missing tenant or page: DENY (`schema_violation`) |
+| everything else (Jira, comments, Compass, admin) | absent | ABSENT |
 
-All writes are `side_effect: External`, so the taint floor severs them in a tainted
-session (`no_tainted_external`).
+The reads have explicit `McpServer` backings, even though their side effect is
+`Read`. Returned remote content is untrusted. The gateway carries that taint into
+later calls: **after any of these reads, both create and update are DENY**
+(`taint_invariant`, enforcing `no_tainted_external`). Further reads remain allowed.
+An allowed create also returns remote content and taints the session. These pins
+limit writes; they do not confine reads to the chosen tenant/space/page.
 
-## Run it
+This is not a read-edit-write workflow: the manifest deliberately prevents remote
+page content from driving an external write. Do not reset taint while retaining
+that content or relabel it as trusted input. A clean write must originate from
+independently trusted input in a clean session.
 
-Point the gateway's `MANIFEST` here (resolve your own `spaceId`/`pageId` first and
-replace the two `REPLACE_WITH_*` placeholders):
+## Configure and run
+
+During trusted setup, resolve your tenant and object identifiers separately, then
+replace all occurrences of these three placeholders in a copy of the manifest:
+
+| Placeholder | Meaning |
+|---|---|
+| `REPLACE_WITH_CLOUD_ID` | the same tenant identifier in **both** write constraints |
+| `REPLACE_WITH_SPACE_ID` | the space in that tenant where creation is permitted |
+| `REPLACE_WITH_PAGE_ID` | the page in that tenant where an update may be proposed |
+
+Page and space IDs alone do not identify a tenant. Changing only `cloudId` must
+fail, even when the numeric page/space ID matches. Both coordinates are required
+and constrained by the kernel.
+
+From the repository root, point the existing launcher at your configured copy:
 
 ```bash
-MANIFEST=docs/demos/confluence-docs/confluence-docs.world.yaml \
+MANIFEST=/absolute/path/to/confluence-docs.world.yaml \
 UPSTREAM="npx -y mcp-remote https://mcp.atlassian.com/v1/mcp/authv2" \
 bash docs/demos/jira-copilot/run-proxy.sh
 ```
 
-`mcp-remote` handles OAuth in your browser on first launch (token caches under
-`~/.mcp-auth`); the manifest never holds credentials — only tool names and pinned ids.
+The OAuth bridge handles sign-in; the manifest contains identifiers, not
+credentials. The offline regressions below do not launch this bridge or access
+Atlassian.
 
-## The three composed guarantees
+## Approval boundary
 
-1. **Pin** (which page/space) — `arg_constraints const`, enforced by the kernel's
-   schema check.
-2. **Explicit consent** (may this update happen, now) — `approval_required` → `ASK`;
-   the durable binding (`ApprovalStore`, E6.4) grants only for the identical
-   action + params + world + descriptor, so an approval is **voided by drift**.
-3. **No silent clobber** (don't overwrite a manual edit) — Confluence's own version
-   concurrency rejects a stale update.
+For a correctly scoped, clean update, `approval_required` produces ASK. The
+current MCP gateway returns that as an error and **does not forward the update**;
+it does not implement a human approval/retry flow. Background updates are DENY
+(`background_denies_ask`). A tainted update is DENY before approval is considered.
 
-Only #2 asks a human — which is where it belongs.
+The pure gate's `approval_token` is a correlation ID, not a grant (D41). The
+separate `ApprovalStore` contract does not mean this gateway can consume approvals.
+An upstream version/concurrency check cannot be evidence here because ASK prevents
+the update from reaching the server.
 
-## Live-validated
+## Offline regression evidence
 
-Run against the `ai2rules.atlassian.net` site (space **FH**, id `65709`):
+```bash
+cargo test -p cli-harness --test confluence_world --offline
+```
 
-- `tools/list` → the 5 reads + create (+ update); the ~40-tool Rovo surface is shaped away.
-- `createConfluencePage` → **ALLOW**, a real guide page created (id `196809`).
-- `updateConfluencePage` on `196809` through the gateway → **ASK**, surfaced as a
-  non-forwarded block (`isError: "ASK: human approval is required"`); the page stays
-  at **version 1** — the attempt never reached Atlassian.
-- Offline gate matrix: wrong space/page → **DENY** `schema_violation`; tainted →
-  **DENY** `taint_invariant`; background → **DENY** `background_denies_ask`; approved
-  token → **ALLOW**.
+Five tests compile the committed template with synthetic IDs and exercise:
+
+- All five reads: ALLOW with the correct MCP backing, returned taint carried into
+  create/update -> DENY, and continued reads retaining taint.
+- Clean positive controls: the pinned tenant/space creates; the pinned tenant/page
+  asks. Changing or omitting either coordinate, or using a wrong type, is denied.
+- Background update refusal and undeclared tools remaining ABSENT.
+- A real gateway process over `harness mock-jira --rovo`: a page read returns
+  `Mock Page`, then create is denied with carried taint in the audit log.
+
+The mock provides the page read only; this test does not claim live write execution
+or full current Rovo surface compatibility. The pre-fix manifest failed the read
+taint, both tenant-scope tests and the gateway sequence.
+
+## Historical live evidence (before the review fixes)
+
+The original July 2026 PR reported a run against `ai2rules.atlassian.net`, space
+FH (`65709`): the surface exposed five reads plus create/update, creation produced
+page `196809`, and an update returned ASK without advancing that page's version.
+That run used the old manifest, which omitted MCP backing on reads and the write
+tenant pins. It does **not** validate the corrected read -> write behavior.
+
+The original claim that an approval token makes the pure gate ALLOW is obsolete
+under D41. The corrected manifest is verified offline; no new live Atlassian run
+has been performed for this repair (AI2-71 / PR #16).

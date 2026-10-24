@@ -15,10 +15,10 @@
 #   UPSTREAM="npx -y mcp-remote https://mcp.atlassian.com/v1/mcp/authv2" \
 #   bash docs/demos/jira-copilot/run-proxy.sh
 #
-# INSTANCE-SPECIFIC IDS: the two arg-locks below pin a space and a page by numeric
-# id. Replace REPLACE_WITH_SPACE_ID / REPLACE_WITH_PAGE_ID with your own (resolve
-# them with the getConfluenceSpaces read, then getPagesInConfluenceSpace). See
-# README.md for a fully worked, live-validated example.
+# INSTANCE-SPECIFIC IDS: both write grants pin the tenant as well as the object.
+# Replace REPLACE_WITH_CLOUD_ID (in both writes), REPLACE_WITH_SPACE_ID and
+# REPLACE_WITH_PAGE_ID. Resolve them separately during trusted setup; reads through
+# this gateway taint the session and prevent subsequent writes. See README.md.
 world_id: confluence-docs-authoring
 
 actors:
@@ -44,37 +44,41 @@ capabilities:
     actions: [Read]
 
 base_actions:
-  # --- Allowed: Confluence reads (navigate + read pages, resolve cloudId/space) ---
+  # --- Remote reads: ALLOW, then taint the session via their MCP backing. ---
   - name: getAccessibleAtlassianResources
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: confluence, tool: getAccessibleAtlassianResources }
     schema: { type: object, properties: {} }
   - name: getConfluenceSpaces
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: confluence, tool: getConfluenceSpaces }
     schema: { type: object, properties: { cloudId: { type: string } } }
   - name: getPagesInConfluenceSpace
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: confluence, tool: getPagesInConfluenceSpace }
     schema:
       type: object
       properties: { cloudId: { type: string }, spaceId: { type: string } }
   - name: getConfluencePage
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: confluence, tool: getConfluencePage }
     schema:
       type: object
       properties: { cloudId: { type: string }, pageId: { type: string } }
   - name: searchConfluenceUsingCql
     action_type: Read
     side_effect: Read
+    backing: !McpServer { server: confluence, tool: searchConfluenceUsingCql }
     schema:
       type: object
       properties: { cloudId: { type: string }, cql: { type: string } }
 
-  # --- Allowed write: create a page, ARG-LOCKED to one space. External side-effect
-  #     => taint-floored. The gate DENYs (SchemaViolation) any create whose spaceId
-  #     is missing or != the pinned value, so the agent cannot author elsewhere. ---
+  # --- Allowed write: create in one tenant/space, from a clean context only.
+  #     A missing or different cloudId OR spaceId is SchemaViolation. ---
   - name: createConfluencePage
     action_type: Mcp
     side_effect: External
@@ -88,15 +92,14 @@ base_actions:
         title: { type: string }
         body: { type: string }
     arg_constraints:
+      cloudId: { const: "REPLACE_WITH_CLOUD_ID" }
       spaceId: { const: "REPLACE_WITH_SPACE_ID" }
 
-  # --- Governed update: an OBJECT-CAPABILITY grant to ONE page. `pageId` carries no
-  #     space, so instead of a space lock we pin the page itself: the gate DENYs any
-  #     update whose pageId != the pinned value. `approval_required` makes every
-  #     update an ASK — the human's explicit per-update consent (E6). In the
+  # --- Governed update: an OBJECT-CAPABILITY grant to ONE tenant/page pair.
+  #     Wrong or missing cloudId/pageId is DENY; a valid clean update is ASK.
+  #     `approval_required` requires explicit per-update consent (E6). In the
   #     mcp-gateway path ASK is surfaced as a non-forwarded block, so an automated
-  #     agent cannot self-approve. Pin (which page) + ASK (may I, now) + Confluence's
-  #     own version concurrency (don't clobber a manual edit) compose. ---
+  #     agent cannot self-approve. This gateway has no approval/retry flow. ---
   - name: updateConfluencePage
     action_type: Mcp
     side_effect: External
@@ -111,6 +114,7 @@ base_actions:
         title: { type: string }
         body: { type: string }
     arg_constraints:
+      cloudId: { const: "REPLACE_WITH_CLOUD_ID" }
       pageId: { const: "REPLACE_WITH_PAGE_ID" }
 
 # DELIBERATELY ABSENT (not declared): every Jira tool, the Confluence comment tools,
