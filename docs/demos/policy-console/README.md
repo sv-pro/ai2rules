@@ -54,6 +54,7 @@ the session does not leave this world, so start working sessions somewhere else.
 | `setup.sh` | Builds `~/northwind/vendor-desk`, installs ai2rules with the log on and ABSENT enforced |
 | `preflight.sh` | Read-only check of the stand: harness, hook flags, names, receiver, console |
 | `run-demo.sh` | The whole stand in one command: setup, receiver, console, preflight, browser, Claude Code |
+| `skill/SKILL.md` | The scenario as a Claude Code skill; `setup.sh` installs it as `/northwind-demo` |
 
 The project files and the receiver come from `../live-claude-code/`.
 
@@ -160,7 +161,27 @@ Terminal: Alt+Shift+= splits side by side, Alt+Shift+- splits top and bottom):
 
 ## The scenario
 
-Click **Contractor** in the console. Then type each prompt into Claude Code.
+Two ways to run it: type each prompt below yourself, or let the skill type them.
+
+**With the skill.** In the Claude Code session, type:
+
+```
+/northwind-demo
+```
+
+Claude first prints the console's address as a link (in the Claude app,
+right-click it and choose Open in Browser pane). Then it runs the four steps in
+order. Where a switch has to change, it stops and
+asks you in a question box ("Set the profile to Contractor in the console."). Flip
+the switch, talk to it, then click **Done**. Permission questions still come to
+you: answer step 2's with **No**, as below. At the end Claude writes a table of
+what it was told at each step; the console's feed is the record. Say it out loud:
+"The prompts follow a script. Every verdict is live." The skill never touches the
+console: an agent that changed its own policy would be the very thing this demo
+says cannot happen. A good mix is to type step 1 yourself, then run the skill
+for the rest.
+
+**By hand.** Click **Contractor** in the console. Then type each prompt into Claude Code.
 
 **1. A profile takes a capability away.**
 
@@ -235,6 +256,11 @@ console starts the feed over by itself when the log is reset.
   `curl.exe`, `wget`, `Invoke-WebRequest` or `irm` there reads the web; one that
   also carries an upload flag (`-F`, `-InFile`, `-Method Post`, …) is ambiguous and
   asks first, then is refused once the session has read from outside.
+- **The skill lives in the project**, so with **Edit project files** on, the agent
+  could edit its own script. The world declares no path rules (`roots`) because
+  enabling them changes every pathless file action's verdict (D61). A model
+  rewriting the demo script is not a risk worth that change before the demo, but
+  it is not prevented.
 - **Profiles are presets**, not identities. Binding them to a directory group (Okta,
   Entra) is not built.
 - **After the session has read from outside, reading the web again is refused too**:
