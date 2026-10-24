@@ -281,6 +281,17 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   canonical path as durable-memory writes, so a tainted session cannot leave
   instructions for the next one (E13.10, D83).
   See `DECISIONS.md` D19–D21, D29, D36, D37, D83.
+  **Mods coverage finding (2026-10-03):** on Claude Code 2.1.288 with released
+  harness 0.6.0, a user-tier mod overrode a project PreToolUse `deny` and the
+  native Write tool created the denied temporary marker. The kernel correctly
+  denied; the host did not retain that decision as final. See the
+  [reproducible probe and evidence](docs/benchmarks/claude-mods/).
+  **Managed comparison (2026-10-24, AI2-41 / #99):** in an isolated Linux
+  container, the genuine system-file hook denied the same native Write with
+  mod off and on; neither marker was created. sec-default loaded in prepend
+  and explicitly admitted the user-tier test mod. See the
+  [managed report and limits](docs/benchmarks/claude-mods/MANAGED.md).
+  This is a versioned native-tool result, not a sandbox or arbitrary-mod guarantee.
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the

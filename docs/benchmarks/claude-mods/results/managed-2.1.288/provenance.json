@@ -1,0 +1,179 @@
+{
+  "recorded_at": "2026-10-24T15:18:21.997171+00:00",
+  "source_parent_commit": "32725813edd92e6141b89af75625c8d46966cb2e",
+  "source_sha256": {
+    "managed.Dockerfile": "e1073e7a89b7d807e7a30515ea40a3198647fe60e1275e2c872276623cd85b39",
+    "managed_probe.py": "506b12868852b20cc2e2f7a9ad6628a32cf43cfa026b44ed8ac7bc24a54cff67",
+    "managed_hook.py": "45350cf986c92ad9da3a393ec8bdde3af659093652d76f15a625103a21f19c7d",
+    "managed-settings.json": "4ff8f9d6c4b240ef4270b9d8d66f1108ad5e5c615bb3e44fb6b6f1f4fd691a01",
+    "probe.py": "5988efe0dc44c46591f0fb32a2815c31bebaeac89a942ea977be55b5372fb102"
+  },
+  "docker_server": {
+    "Platform": {
+      "Name": "Docker Desktop 4.92.0 (240144)"
+    },
+    "Version": "29.8.0",
+    "ApiVersion": "1.56",
+    "MinAPIVersion": "1.40",
+    "Os": "linux",
+    "Arch": "amd64",
+    "Components": [
+      {
+        "Name": "Engine",
+        "Version": "29.8.0",
+        "Details": {
+          "ApiVersion": "1.56",
+          "Arch": "amd64",
+          "BuildTime": "Thu Sep  3 21:51:20 2026",
+          "Experimental": "false",
+          "GitCommit": "3ce5872",
+          "GoVersion": "go1.26.8",
+          "KernelVersion": "6.18.33.2-microsoft-standard-WSL2",
+          "MinAPIVersion": "1.40",
+          "Module": "github.com/moby/moby/v2",
+          "ModuleVersion": "v2.0.0+unknown",
+          "Os": "linux"
+        }
+      },
+      {
+        "Name": "containerd",
+        "Version": "v2.3.5",
+        "Details": {
+          "GitCommit": "1294c24a7da8e5a793ed378161673abe94118892"
+        }
+      },
+      {
+        "Name": "runc",
+        "Version": "1.5.1",
+        "Details": {
+          "GitCommit": "v1.5.1-0-g8f2685a4"
+        }
+      },
+      {
+        "Name": "docker-init",
+        "Version": "0.19.0",
+        "Details": {
+          "GitCommit": "de40ad0"
+        }
+      }
+    ],
+    "GitCommit": "3ce5872",
+    "GoVersion": "go1.26.8",
+    "KernelVersion": "6.18.33.2-microsoft-standard-WSL2",
+    "BuildTime": "2026-09-03T21:51:20.000000000+00:00"
+  },
+  "base_image": "node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d",
+  "image": {
+    "Id": "sha256:ecd365ac6ca00a5dd4517a3438d51bdeae1bbcb97875b4478662fedd84a1f154",
+    "RepoDigests": [
+      "ai2rules-managed-probe@sha256:ecd365ac6ca00a5dd4517a3438d51bdeae1bbcb97875b4478662fedd84a1f154"
+    ],
+    "Created": "2026-10-24T15:18:01.185587094Z",
+    "Architecture": "amd64",
+    "Os": "linux",
+    "RootFS": {
+      "Type": "layers",
+      "Layers": [
+        "sha256:9b35de7893378218e365c34c2c735fb0032a859112fb7345ca8ea73f9aa1db70",
+        "sha256:73455f008d2c29b7bd012ed6034808c2eb31011ad5585202f9162c661bcfee9f",
+        "sha256:304cbc337ac002298f36802ea165638e0751e9d71f3065025df466bfac483932",
+        "sha256:0d441fd7f082d3ceb0aa923bbaf1c53fa09b6c5b3e4eeeb60a0980faa13b1a1a",
+        "sha256:a6a14a60a059ce70d9917ac911eb5ee06263ece91632613de6e562cfec9027d1",
+        "sha256:b07ca8ff0aa9a1a80c884abf47762b101e50ab71b3d14579706ec3a71beaa587",
+        "sha256:39e013bf69604e4f533ee86fd12bdc22dd0137168332d14229ab0be947900186",
+        "sha256:c3e8b4b288bd816c753fc78f47c6d9bb598f7e79779685c0909c501dc71a6312",
+        "sha256:573cf44965b33bb005e85b963178e4c89616d0f21ee72600514b629d10955673",
+        "sha256:3e05eaa492fbb79a55671ef9dfc052d3e0768fb057789430f0113cb82b24a73e",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+      ]
+    }
+  },
+  "container": {
+    "image": "sha256:ecd365ac6ca00a5dd4517a3438d51bdeae1bbcb97875b4478662fedd84a1f154",
+    "user": "node",
+    "mounts": [],
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-10-24T15:18:19.392495477Z",
+      "FinishedAt": "2026-10-24T15:18:22.720721441Z"
+    },
+    "isolation": {
+      "NetworkMode": "none",
+      "CapDrop": [
+        "ALL"
+      ],
+      "SecurityOpt": [
+        "no-new-privileges"
+      ],
+      "Privileged": false,
+      "Binds": null
+    }
+  },
+  "retention": "Report, full debug/hook logs, project settings and world retained. Only the generated /evidence/managed-* root is replaced with <RUN_DIR>; original archive hashes below identify local raw copies. Container-only synthetic IDs/paths remain. No host credentials/config were supplied. Debug token placeholder is emitted by Claude itself.",
+  "files": [
+    {
+      "file": "managed-mod-off-debug.txt",
+      "raw_sha256": "c17baa00ba7bab431aec29add45395f27338cb115ad6621cdba11c0b777e8f63",
+      "retained_sha256": "34226ae2fbdb7fdc64fbe1c0260fdc21db9682f54bbfc2e4beafb2cbc3bbcca6"
+    },
+    {
+      "file": "managed-mod-off-hook.jsonl",
+      "raw_sha256": "a6c260cbd37c865d37dec0be634fe29875dfdbf585caacfd9b39360f8609c64f",
+      "retained_sha256": "cd2df73fd095fb848a04debdbe39fcd0ff6085f587565faf784d1c279781d0a0"
+    },
+    {
+      "file": "managed-mod-off-world.yaml",
+      "raw_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc",
+      "retained_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc"
+    },
+    {
+      "file": "managed-mod-off-project-settings.json",
+      "raw_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "retained_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "file": "managed-mod-on-debug.txt",
+      "raw_sha256": "7510a724c86609d69edabb139cff8e875f1a3594196dc2f7f47cb4f5c778988c",
+      "retained_sha256": "f076184e4e1557d1c0e64d21286c8a07d0a4aeee5559b0ebc1a21140ae527a0c"
+    },
+    {
+      "file": "managed-mod-on-hook.jsonl",
+      "raw_sha256": "d09ef358196865aea5f6c50124046c4124a320ae84fc692f0a38206fa26b600c",
+      "retained_sha256": "a0412c97e780bd25b68353494f58f657b22db9a2fd42b371bbdcb51bb6afa16d"
+    },
+    {
+      "file": "managed-mod-on-world.yaml",
+      "raw_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc",
+      "retained_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc"
+    },
+    {
+      "file": "managed-mod-on-project-settings.json",
+      "raw_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "retained_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    }
+  ],
+  "package_lock_sha256": "5e136ca924be025a468015e5c7cd9abd2707752b84c29c5e0d89a7dd730562f8",
+  "raw_archives_sha256": {
+    "initial": "9c473a7edbc559be8644b84992988a911be303817726137aa4d176d394a1857f",
+    "final": "3d10c11093d44d4cc444ebc9b72d0aeaf60894dccb51dea651d61c6a2290c925"
+  },
+  "initial_image_id": "sha256:6df9a8ece9746108657a3119a9818497c12df00366069af8145bfda941782132",
+  "initial_exit_code": 1,
+  "final_exit_code": 0,
+  "source_lf_sha256": {
+    "managed.Dockerfile": "b7e20aa77d43b279a02d51554acfcd137db9208791194391e30937a4e23f7f99",
+    "managed_probe.py": "326b9fd1e61f76e25439e805b37cd7016b87816f34c0ae0fbb7bde41d7b5d1c3",
+    "managed_hook.py": "7cbd4cce6aace9b845ec76ded2b148155bcf0b628e583be9d736d38a4bb17961",
+    "managed-settings.json": "7fa25a4c7c8d0121e40e92f241676a7223c5960002a1f61de5b8cb227c2a37a8",
+    "probe.py": "f35d6212511a9282225e89611895264e301af6b7f8dc7a1486900eb6166a99b6"
+  },
+  "source_hash_note": "source_sha256 identifies the bytes copied into the tested image; source_lf_sha256 identifies the same files after Git CRLF-to-LF normalization."
+}

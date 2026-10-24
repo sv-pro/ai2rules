@@ -483,6 +483,25 @@ regression gates enforced.
 ### E13 — Harness ↔ Claude Code Integration (dogfooding)
 **Goal:** Apply the deterministic governance kernel to the **Claude Code CLI** host via a config-driven gateway, so one `WorldManifest` governs both the *tool surface* (projection / ABSENT) and *per-call decisions* (taint floor, ASK, budgets) — including the native tools an MCP proxy alone can't see. **Depends on:** E1, E2, E7 (+ the `safe-mcp-proxy` / `mcp-tool-projection` references). **Status:** 🚧 in progress.
 
+**2026-10-03 coverage qualification (AI2-41 / #99):** the
+[Claude mods probe](docs/benchmarks/claude-mods/) reproduces a user-tier mod
+overriding a project PreToolUse denial on Claude Code 2.1.288 + harness 0.6.0.
+The historical surface description below predates mods. The kernel's DENY is
+not necessarily the host's final authority. Project cases are verified.
+The managed follow-up below completes the bounded comparison, not the epic.
+
+**2026-10-24 managed evidence (AI2-41 / #99):** Docker Desktop started and the
+[isolated file-policy experiment](docs/benchmarks/claude-mods/MANAGED.md) ran
+with Claude 2.1.288 / released harness 0.6.0. Both mod off/on: live managed
+adapter deny, no marker, DENY_NO_EFFECT. sec-default loaded in prepend; the
+user-tier test mod was explicitly admitted. The initial analyzer false alarm
+(background plugin refresh disabled) is retained beside a fresh successful pair
+and a narrow tested classifier correction. Reports, debug/hook logs, binary and
+policy hashes, image metadata and npm lockfile are committed. Earlier namespace
+and stopped-daemon blockers are superseded. No project rerun or production
+change. #99 / AI2-41 stay open for evidence review and the next diagnostics/docs
+decision; no epic completion or generalized mod isolation claim.
+
 **Design — Claude Code exposes two enforcement surfaces that mirror the kernel's two stages:**
 1. *What tools exist* — a subagent's `tools` allowlist + which MCP tools are connected = **projection / representability / ABSENT** (a tool not on the surface literally cannot be called).
 2. *What a call may do, in context* — a **`PreToolUse` hook** returning `permissionDecision: allow|deny|ask` = **`decide()` / disposition**; this is the *only* lever over **native** tools (`Bash`/`Edit`/`Write`/`Read`/`WebFetch`).
