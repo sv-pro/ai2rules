@@ -441,7 +441,11 @@ impl DoctorReport {
 
             // Extract shim path from command (recognize: bash '<path>')
             for hook in &pretooluse_hooks {
-                let invocation = if hook.command.contains("world-gate.sh") {
+                // Only command hooks execute a shim. A command-shaped field on an
+                // unsupported hook type is not evidence of an installed gate.
+                let invocation = if hook.kind == "PreToolUse/command"
+                    && hook.command.contains("world-gate.sh")
+                {
                     if let Some(path) = extract_shim_path(&hook.command) {
                         shim_path = Some(PathBuf::from(path.clone()));
                         format!("bash '{}'", path)

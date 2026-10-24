@@ -75,11 +75,12 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **cli-harness** | `harness init [--user \| --managed]`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author`, `harness console`, `harness replay-transcripts`, `harness export-otlp` |
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
-**Test counts (all passing, native):**
+**Test counts (all active tests passing, native Linux):**
 harness-types 9 · world-kernel 61 · compiler 29 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 66 · cli-harness 224 ·
-harness-wasm 0 · govbench 9 · **total 512** (plus the harness-wasm Node smoke
-tests, run via wasm-pack)
+provider-adapters 5 · agent-core 18 · harness-preview 66 · cli-harness 264 ·
+harness-wasm 0 · govbench 9 · **total 552** (plus the harness-wasm Node smoke
+tests, run via wasm-pack). The Unix-only doctor fixture suite includes
+40 passing tests and 3 ignored #87 specification gaps.
 
 ---
 

@@ -26,7 +26,7 @@
 //! - FIFO input - causes test hangs; needs timeout handling
 //! - Oversize manifest (>1 MiB) - doctor_collector MAX_FILE_SIZE enforcement needs verification
 //!
-//! ## Test Coverage (42 tests: 39 passing, 3 ignored)
+//! ## Test Coverage (43 tests: 40 passing, 3 ignored)
 //!
 //! **Passing tests cover:**
 //! - Modern init fixtures (additive, --grant, 0644 shim)
@@ -67,11 +67,11 @@ fn harness_bin() -> PathBuf {
 }
 
 /// Run `harness init` to generate real fixtures
-fn init_project(target: &Path, args: &[&str]) -> std::process::Output {
+fn init_project(target: &Path, home: &Path, args: &[&str]) -> std::process::Output {
     let mut cmd = Command::new(harness_bin());
     cmd.arg("init").arg(target).args(args);
     cmd.env_clear();
-    cmd.env("HOME", target.join("fake-home")); // init needs HOME
+    cmd.env("HOME", home); // same synthetic HOME for init and doctor
     cmd.env("PATH", "/usr/bin:/bin"); // minimal PATH for bash
     cmd.output().expect("run harness init")
 }
@@ -115,7 +115,7 @@ fn write_settings_with_hook(path: &Path, matcher: &str, command: &str) {
                     "matcher": matcher,
                     "hooks": [
                         {
-                            "type": "external",
+                            "type": "command",
                             "command": command
                         }
                     ]
@@ -136,7 +136,7 @@ fn write_settings_with_multiple_hooks(path: &Path, hooks: &[(&str, &str)]) {
             "matcher": matcher,
             "hooks": [
                 {
-                    "type": "external",
+                    "type": "command",
                     "command": command
                 }
             ]
@@ -373,13 +373,12 @@ fn modern_init_additive_ok() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let project = tmp.path().join("project");
     fs::create_dir_all(&project).expect("mkdir project");
-
-    // Generate real fixtures via harness init
-    let out = init_project(&project, &[]);
-    assert!(out.status.success(), "init failed");
-
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).expect("mkdir home");
+
+    // Generate real fixtures via harness init
+    let out = init_project(&project, &home, &[]);
+    assert!(out.status.success(), "init failed");
 
     let state_before = FilesystemState::capture(&project);
 
@@ -432,12 +431,11 @@ fn modern_init_with_grant_flag() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let project = tmp.path().join("project");
     fs::create_dir_all(&project).expect("mkdir project");
-
-    let out = init_project(&project, &["--grant"]);
-    assert!(out.status.success(), "init --grant failed");
-
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).expect("mkdir home");
+
+    let out = init_project(&project, &home, &["--grant"]);
+    assert!(out.status.success(), "init --grant failed");
 
     let out = run_doctor(&project, &home, &["--json"], &[]);
 
@@ -504,7 +502,7 @@ fn narrow_matcher_registration() {
     fs::create_dir_all(&home).expect("mkdir home");
 
     // Generate real fixtures
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Overwrite settings with narrow matcher
@@ -531,7 +529,7 @@ fn duplicate_conflicting_managed_registrations() {
     fs::create_dir_all(&home).expect("mkdir home");
 
     // Generate real fixtures first
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Overwrite with multiple conflicting registrations
@@ -656,6 +654,34 @@ fn invalid_json_settings() {
 }
 
 #[test]
+fn invalid_hook_type_is_not_a_command_registration() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let project = tmp.path().join("project");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    assert!(init_project(&project, &home, &[]).status.success());
+
+    let settings_path = project.join(".claude/settings.json");
+    let mut settings: Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+    assert_eq!(
+        settings["hooks"]["PreToolUse"][0]["hooks"][0]["type"],
+        "command"
+    );
+    settings["hooks"]["PreToolUse"][0]["hooks"][0]["type"] = "external".into();
+    fs::write(&settings_path, serde_json::to_vec(&settings).unwrap()).unwrap();
+
+    let out = run_doctor(&project, &home, &["--json"], &[]);
+    let report = parse_json_report(&out.stdout);
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(report["summary"]["installation"], "broken");
+    assert_eq!(report["hook"]["status"], "unsupported");
+    assert!(has_finding(&report, "CC_SHIM_UNSUPPORTED"));
+    assert_eq!(report["hook"]["entries"][0]["kind"], "PreToolUse/external");
+    assert_eq!(report["hook"]["entries"][0]["invocation"], "unsupported");
+}
+
+#[test]
 fn invalid_hooks_shape() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let project = tmp.path().join("project");
@@ -704,7 +730,7 @@ fn missing_selected_binary() {
     fs::create_dir_all(&home).expect("mkdir home");
 
     // Generate real fixtures
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // The binary referenced in the shim is the actual test harness (which exists)
@@ -735,7 +761,7 @@ fn missing_harness_bin_override() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let nonexistent = "/nonexistent/harness/binary";
@@ -760,7 +786,7 @@ fn readable_0644_shim_recognized() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Remove execute bit from shim
@@ -793,7 +819,7 @@ fn absent_interpreter() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Set PATH to a directory without bash
@@ -825,7 +851,7 @@ fn absent_claude_candidate_on_path() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // PATH without claude (default test env has this)
@@ -857,12 +883,26 @@ fn modern_per_project_off_file_enabled() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
-    // For this test, use the global gate-off which is always checked
-    fs::create_dir_all(home.join(".claude")).expect("mkdir .claude");
-    fs::write(home.join(".claude/gate-off"), "").expect("write gate-off");
+    // Read the literal path emitted by the installer, independently of doctor's
+    // switch discovery. Keep both alternative switches absent.
+    let shim = fs::read_to_string(project.join(".claude/hooks/world-gate.sh")).unwrap();
+    let off_file = PathBuf::from(
+        shim.lines()
+            .find_map(|line| line.strip_prefix("#   this project : touch "))
+            .expect("init documents the per-project switch"),
+    );
+    assert!(off_file.starts_with(home.join(".claude/ai2rules/off")));
+    assert!(!off_file.starts_with(&project));
+    assert!(!home.join(".claude/gate-off").exists());
+    assert!(!project.join(".claude/gate-off").exists());
+
+    let before = run_doctor(&project, &home, &["--json"], &[]);
+    assert_eq!(before.status.code(), Some(0), "switch absent -> ok");
+    fs::create_dir_all(off_file.parent().unwrap()).expect("mkdir switches");
+    fs::write(&off_file, "").expect("enable per-project switch");
 
     let out = run_doctor(&project, &home, &["--json"], &[]);
 
@@ -870,6 +910,20 @@ fn modern_per_project_off_file_enabled() {
     let report = parse_json_report(&out.stdout);
     assert_eq!(report["summary"]["installation"].as_str(), Some("disabled"));
     assert!(has_finding(&report, "CC_KILL_SWITCH_ENABLED"));
+    let enabled: Vec<_> = report["switches"]["observed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|switch| switch["state"] == "on")
+        .collect();
+    assert_eq!(enabled.len(), 1, "only the per-project switch is enabled");
+    assert_eq!(enabled[0]["kind"], "project_modern");
+    assert_eq!(enabled[0]["path"], off_file.to_str().unwrap());
+
+    fs::remove_file(&off_file).expect("disable per-project switch");
+    let after = run_doctor(&project, &home, &["--json"], &[]);
+    assert_eq!(after.status.code(), Some(0), "switch removed -> ok");
+    assert_eq!(after.stdout, before.stdout, "restores the original report");
 }
 
 #[test]
@@ -880,7 +934,7 @@ fn global_user_off_file_enabled() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Create global gate-off
@@ -905,7 +959,7 @@ fn modern_shim_with_obsolete_project_gate_off_spec_expectation() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Create obsolete project/.claude/gate-off
@@ -933,7 +987,7 @@ fn modern_shim_with_obsolete_project_gate_off_divergence() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     fs::write(project.join(".claude/gate-off"), "").expect("write obsolete gate-off");
@@ -960,7 +1014,7 @@ fn directory_at_switch_filename() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Create directory where off-file would be
@@ -981,7 +1035,7 @@ fn relative_harness_bin_override_broken() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let out = run_doctor(
@@ -1005,7 +1059,7 @@ fn nonexecutable_harness_bin_override_broken() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let nonexec = tmp.path().join("harness-nonexec");
@@ -1034,7 +1088,7 @@ fn claude_project_dir_mismatch_broken() {
     fs::create_dir_all(&wrong_dir).expect("mkdir wrong");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let out = run_doctor(
@@ -1097,7 +1151,7 @@ fn missing_manifest_broken() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Remove manifest
@@ -1123,7 +1177,7 @@ fn invalid_manifest_broken() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     write_manifest(
@@ -1156,7 +1210,7 @@ fn semantic_manifest_edit_new_hash() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let out1 = run_doctor(&project, &home, &["--json"], &[]);
@@ -1192,7 +1246,7 @@ fn yaml_formatting_only_edit_same_hash() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let out1 = run_doctor(&project, &home, &["--json"], &[]);
@@ -1234,7 +1288,7 @@ fn different_home_base_roots() {
     fs::create_dir_all(&home1).expect("mkdir home1");
     fs::create_dir_all(&home2).expect("mkdir home2");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home1, &[]);
     assert!(out.status.success());
 
     // Run with two different HOME values - should use exact same pipeline
@@ -1268,7 +1322,7 @@ fn broken_manifest_and_enabled_switch_both_findings_spec_expectation() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Break manifest
@@ -1307,7 +1361,7 @@ fn broken_manifest_and_enabled_switch_both_findings_divergence() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     write_manifest(&project.join(".claude/cc-world.yaml"), "invalid yaml");
@@ -1350,7 +1404,7 @@ fn interpreter_symlink() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Create fake bash as symlink
@@ -1385,7 +1439,7 @@ fn foreign_selected_binary_version_unknown() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Point to a different (fake) harness binary
@@ -1424,7 +1478,7 @@ fn no_trap_executables_invoked() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Create trap executables on PATH
@@ -1458,7 +1512,7 @@ fn no_writes_to_project_or_home() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let project_before = FilesystemState::capture(&project);
@@ -1483,7 +1537,7 @@ fn identical_env_produces_identical_report() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     // Run twice with identical environment
@@ -1510,7 +1564,7 @@ fn human_and_json_mode_consistency() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let human_out1 = run_doctor(&project, &home, &[], &[]);
@@ -1598,7 +1652,7 @@ fn symlink_loop_in_binary_path() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let bin_a = tmp.path().join("harness-a");
@@ -1627,7 +1681,7 @@ fn dangling_symlink_in_binary_path() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let bin_link = tmp.path().join("harness-link");
@@ -1660,7 +1714,7 @@ fn paths_with_spaces_quotes_metacharacters() {
     fs::create_dir_all(&project).expect("mkdir project");
     fs::create_dir_all(&home).expect("mkdir home");
 
-    let out = init_project(&project, &[]);
+    let out = init_project(&project, &home, &[]);
     assert!(out.status.success());
 
     let out = run_doctor(&project, &home, &["--json"], &[]);

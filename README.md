@@ -419,9 +419,15 @@ Consent is exact-bound, expires after five minutes, and is durably consumed befo
 forwarding; uncertain upstream outcomes require operator reconciliation. See the
 [approval workflow](docs/approval-capable-hosts.md).
 
-Builds clean offline with `clippy -D warnings`; **512 tests** green. Unix machine-hook
+Builds clean offline with `clippy -D warnings`; **552 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
 tests feed prepared events through stdin so a disabled hook's early exit cannot
 race the fixture writer.
+The Unix-only doctor integration suite includes **40 passing tests and 3 explicitly
+ignored specification gaps** (#87 / #95). It uses command-hook fixtures, verifies
+the external per-project switch separately from the global switch, and rejects a
+non-command registration as evidence of a working shim. The remaining #87 matrix
+rows and three diagnostic divergences are still open.
+
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
