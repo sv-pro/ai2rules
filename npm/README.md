@@ -5,11 +5,15 @@
 ```bash
 npm install -g ai2rules-harness
 harness init
+harness demo   # prove the kernel decides — 8 cases, no execution, no credentials
 ```
 
-That writes a governance manifest, a `PreToolUse` shim, and the host settings entry
+`init` writes a governance manifest, a `PreToolUse` shim, and the host settings entry
 into the current project. It is safe to run twice, it never replaces a manifest you
-have tuned, and turning it off is one file.
+have tuned, and turning it off is one file. `demo` is the credential-free first proof:
+it runs eight cases through the real kernel (Read, Write, Shell, JIRA_CREATE_ISSUE,
+scoped actions, path roots, poisoned knowledge, classification), records each verdict,
+and replays them to prove deterministic decisions. Decision-only, no tool execution.
 
 > **Install it globally, not into a project.** `harness init` **refuses** to run
 > when the binary lives inside the project it would govern — a local
@@ -48,9 +52,24 @@ This installs a deterministic kernel between the agent and the world. No model
 takes part in the decision: a verdict is a pure function of the proposed call, the
 session's context, and a compiled manifest.
 
-## Prove it in five seconds
+## Prove it works
 
-After `init`, ask the kernel directly — no agent session needed:
+After `init`, run the built-in demonstration:
+
+```bash
+harness demo
+```
+
+Eight cases through the real kernel (ALLOW for in-root read, DENY for out-of-root
+write, DENY for tainted network, ASK for destructive shell, DENY for background
+destructive shell, and three classification/scoped/knowledge cases), with immediate
+replay to prove deterministic decisions. No credentials, no execution.
+
+The demo footer says "Next: harness doctor" — that command is planned (issue AI2-25)
+but not yet shipped; the reference is honest about what comes next, not a claim it
+exists today.
+
+Or ask the kernel directly about one call — no agent session needed:
 
 ```bash
 echo '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd"}}' \

@@ -12,15 +12,234 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
-The tree carries `0.4.2-rc.2`, and **`0.4.2` is deliberately unreleased.** Everything
-between it and `0.4.1` is CI and packaging — no kernel, adapter or CLI behaviour
-changed — so moving `latest` would ask every installed copy to update for nothing.
+### Changed
 
-The machinery it exercises is verified, which is the point of stopping here rather
-than pressing on: two candidates published end to end, and a cold install of
-`0.4.2-rc.2` from the public registry governs a project, denies a write outside it,
-denies egress under taint, and refuses when it cannot record either. **Cut `0.4.2`
-when real code lands, not before.**
+- The law-firm story no longer suggests the kernel recognises a poisoned email.
+  The closing line now says reading one email from outside closed the exits,
+  whatever it said, and step 3 says any outside email does this, harmless or not.
+  The runbook answers the follow-ups: no detection, no way to clear a marked
+  session, a new session starts clean, and session-wide marking is today's limit.
+
+### Added
+
+- `harness demo --story law-firm --html <PATH>` also writes the run as a
+  self-contained page to step through in a browser (arrow keys, a session badge
+  that turns when the email is read, the hidden text shown as hidden, the kernel's
+  own request and reason under each step, and the audit summary). The page only
+  renders this run's verdicts; it decides nothing. It needs no network and is the
+  same bytes for the same binary. A copy is published at
+  <https://ai2rules.dev/demo/law-firm.html>; `scripts/check-demos.sh` fails if it
+  is no longer what the current binary writes.
+- The story's terminal output is coloured: green `ALLOW`, red `DENY`, yellow `ASK`
+  and taint, dimmed `ABSENT`, the hidden email text in magenta. Piped output and
+  `NO_COLOR` stay plain text, so logs and the demo checks are unchanged.
+
+## [0.7.0] — 2026-10-21
+
+A minor release rather than a patch: D78 breaks persisted approval and staged-commit
+logs (see Upgrading).
+
+### Upgrading
+
+- Stores written by 0.6.x or earlier are refused as written by an older version.
+  Delete the approval log, the commit log, their keys and any `.head` files; pending
+  approvals are simply asked again.
+
+### Security
+
+- **Approval and staged-commit logs are chained and head-anchored** (D78). Deleting a
+  signed line — the approval log's `Consumed`, or the commit log's `AttemptStarted` /
+  `AttemptFinished` — used to hand a single-use grant back or release an
+  idempotency key while every remaining line still verified. Lines now carry `seq`
+  and `prev`, a MACed `<log>.head` anchors the end (at most one line of crash
+  slack, re-anchored on open), and each open store refuses a log shorter than it has
+  already seen. **Breaking** for stores written by earlier versions: they are refused
+  as old (D73/D78 wording); delete the log and its key. Known limit, pinned by a test:
+  a head saved between approval and consumption can still roll back a store that a
+  fresh process opens.
+- **`mcp-gateway` no longer forwards a scoped capability as proposed** (D79). In a
+  world without an `mcp_surface`, a scoped verb went upstream under its own name with
+  the caller's arguments, so its literals were never applied and a locked argument
+  the caller added was sent. It now goes to the tool named after its base action,
+  with the kernel's lowered input, and is refused when it cannot be lowered.
+
+### Fixed
+
+- **A write into a folder that does not exist yet is no longer denied as
+  `missing_path`.** With roots enabled, the hooks resolved only a new file's
+  immediate parent, so `docs/new-dir/README.md` before `new-dir/` existed was
+  refused. A new path is now classified by its nearest existing ancestor,
+  canonicalized as before (so a symlink there still resolves to its real
+  destination), plus the components below it. A `..` among those components is
+  refused, since the filesystem cannot resolve it there. Found by replaying real
+  sessions through the hook.
+
+### Added
+
+- **Scoped MCP surfaces** (D79, E13.4). A scoped capability can rename an argument
+  and limit it to a list of values or a prefix (`!Input { as, one_of, prefix }`);
+  literals take any JSON value; `projected: false` keeps a base action in the
+  ontology but off the surface; `mcp_surface: { name, upstream }` makes
+  `harness mcp-gateway` offer scoped capabilities under their own names, with a
+  world-derived schema, and forward the kernel's lowered call.
+- **`harness mcp-author --world W -- <upstream>`**: a local page that connects to an
+  MCP server, lets you pick, rename and limit its tools, try calls through the real
+  gate, and save the manifest.
+- **`GateResponse.effective`** (D80). On `ALLOW` / `ASK` the gate returns the call to
+  execute: base action, backing, arguments after a scoped capability's stripping,
+  renaming and literal injection, unresolved context refs, and the names it
+  stripped. A backward-compatible v1 field. A wire host
+  that executes this instead of the proposal gets the world's scoping without
+  linking the kernel. `world_kernel::effective_call` is the single lowering that
+  `build_execution_spec` now also uses.
+- **`mcp-gateway` audits stripped arguments** (D80): an allowed call whose
+  proposal tried to set what the world fixes gets its own `stripped` record.
+- **`harness replay-transcripts [PATH…]`**: evidence before enforcement. It
+  replays every tool call in past Claude Code transcripts (default
+  `~/.claude/projects`) through the kernel exactly as `cc-hook` would have decided
+  it: the same request and answer mapping, now shared with the hook, with taint and
+  budget carried per session across a session's subagent transcripts. It reports
+  how often the hook would have stayed silent, asked or denied, by rule with
+  examples, which sessions became tainted and by what, and which tools the world
+  does not know. `--json` gives every call. Nothing is executed.
+- **`harness demo --story law-firm`**: the first proof as a story for
+  non-engineers. An AI legal assistant reads a client email with a hidden
+  instruction; sending, uploading, deleting overnight and touching the trust
+  account are refused or absent, while its work goes on. The world is embedded,
+  so it runs from any folder with no `harness init`. Each verdict is the real
+  kernel's, the session's taint is carried exactly as an adapter carries it, and the
+  10 decisions are traced and replayed. Runbook: `docs/demos/law-firm/`.
+
+## [0.6.0] — 2026-09-19
+
+### Added
+
+- **`harness demo` — deterministic first-proof over the real compiled world**
+  (issue #82). Runs eight cases — `Read`, `Write`, `Shell`, `JIRA_CREATE_ISSUE`,
+  scoped actions, path roots, poisoned knowledge, and classification — through the
+  same host-neutral gate used by live adapters, records every request/response pair,
+  and immediately replays the requests to prove deterministic decisions. The command
+  intentionally does not execute host tools, so it is safe to run after `harness
+  init` with no credentials, network, or live model. Added CI job
+  `demo-platform-smoke` to prove `npx ai2rules-harness demo` on native platforms
+  (darwin-arm64, darwin-x64, linux-x64, windows-x64) under the npm shim.
+
+### Changed
+
+- **`agent-core` now feeds governance outcomes into model turns** (PR #72). The
+  orchestrator exposes governance feedback context (decisions, verdicts, and trace
+  provenance) to the model client through `SessionState` and `context::build`. This
+  enables governed agentic workflows where the model can observe and react to
+  governance decisions. **No user-facing CLI capabilities changed** — the binary
+  still ships the same commands; this is an internal agent-core capability for
+  embedders and demonstration workflows.
+
+## [0.5.0] — 2026-08-28
+
+**The `0.4.2` hold is lifted, because the thing it was waiting for happened.** The
+hold had one condition: everything between `0.4.1` and the tree was CI and
+packaging, so moving `latest` would have asked every installed copy to update for
+nothing, and the note said to cut when real code landed. It has. `harness` grew a
+command, and the artifact that authorizes an `ASK` was replaced.
+
+**`0.4.2` stays permanently unreleased**, and this is a minor rather than the
+patch that number reserved: a new command and changed authorization semantics are
+not a patch. `0.4.2-rc.1` and `-rc.2` remain on npm under `next`, where they did
+the job they were cut for — proving the publish path end to end before a real
+release depended on it.
+
+### Added
+
+- **`harness project` — shape a host's offered tool schemas through a compiled
+  world** (D72). Reads a projection request on stdin, writes the visible schemas
+  plus the manifest and schema identities on stdout. Discovery is a sibling of the
+  gate ABI rather than a second opinion inside it: the world owns which actions
+  exist and the host owns their schema, so an action the world does not project is
+  never offered, instead of being offered and then denied. `gate` and `project`
+  mint the world through one shared loader, so the two wire operations cannot
+  correlate different manifest hashes for the same file.
+
+- **The MCP governance benchmark seed** (issue #64, D76): three scenarios —
+  cross-principal discovery-cache leakage, approval argument substitution and
+  replay, cross-principal handle reuse — run against an intentionally weak
+  reference gateway and against this kernel under one deterministic oracle, with
+  no LLM. `bash scripts/run-governance-bench.sh`; see
+  `docs/benchmarks/mcp-governance/`. Not shipped in the `harness` binary: the
+  runner is a separate, unpublished workspace crate. The measured target is named
+  `ai2rules-reference-host` — kernel components composed with the benchmark's own
+  trusted-host wiring — because `harness` does not yet ship the consume-then-invoke
+  boundary as a command (E18.10).
+
+- **`StagedEffect` and independent external commit** (D74), in `harness-types` and
+  `trace-store` only. Staging, commit and receipt states exist as durable types
+  with their own tests; **no command reaches them**, so nothing the binary does
+  changes. Listed here because the store's on-disk vocabulary grew, and a reader
+  comparing versions will see it.
+
+### Changed
+
+- **An `ASK` authorization is now an exact, durable, single-use claim** (D73). This
+  is the entry an existing caller should read. `ApprovalToken` survives as an alias
+  for `AuthorizationInstance`, so source still compiles — but it is no longer the
+  same artifact. It binds a trusted-runtime principal, the normalized action and
+  complete arguments, a stable resource label, world and schema epochs, provenance,
+  effect mode, an exclusive expiry, and exactly one remaining use. The store
+  appends `Consumed` **before** the external effect, and appends signed
+  `ConsumptionRejected` evidence with a specific reason when it will not.
+
+  *What this changes for a caller:* one authorization admits at most one attempt at
+  its exact effect. Substitution, cross-principal or cross-session reuse, expiry,
+  epoch drift, concurrent reuse and restart replay all fail closed with durable
+  evidence. **A retry after a failed effect needs a fresh human authorization.**
+  The old `is_granted → execute → mark_executed` sequence let two runtimes observe
+  one approved token and both execute, and a crash inside that window resurrected
+  the grant after restart; burning the claim is the only deterministic fail-closed
+  recovery without a transactional effect sink. Recovery is at-most-once, not an
+  unsafe promise of exactly-once external I/O.
+
+  *Upgrading:* an approval log written by `0.4.1` cannot be read by this version —
+  see **Fixed** below for what it says when it refuses. Delete the log and its key;
+  pending approvals are simply asked again. The `harness` CLI keeps its store in a
+  per-run tempdir, so this reaches embedders rather than CLI users.
+
+- **Discovery projection moved into `harness-preview`, beside `gate`** (D75).
+  `harness project` is now a wire skin over `harness_preview::project`, so an
+  in-process Rust host, the CLI and (when exported) WASM cannot answer a
+  discovery question differently. **No wire behaviour changed** — `harness
+  project` answers byte-identically, and the benchmark runs every scenario over
+  both transports to keep it that way.
+
+- **An *engaged* host adapter fails closed on gate unavailability** (D71, issue
+  #55). The DeepSeek Harness `tools/pre-execute` adapter
+  (`docs/demos/deepseek-harness/`) now denies on every path that cannot produce a
+  trustworthy `ALLOW` — missing binary, non-zero exit, unparseable stdout,
+  unmappable verdict, unpersistable sidecar — with `AI2RULES_DISABLE=1` as the only
+  sanctioned bypass. **Not a change to the shipped binary:** `cc-hook` and the
+  OpenCode plugin stay fail-open on purpose (D37), because a bootstrap shim that
+  cannot locate the kernel never governed the session in the first place. The rule
+  attaches to an adapter that has already engaged.
+
+### Fixed
+
+- **The authorization store's lock no longer expires on a scheduler's whim**
+  (#68). Acquisition spun for 10,000 `yield_now()` attempts — a count, not a
+  duration, so it could run out in milliseconds while the competing consumer was
+  still flushing and syncing its durable event. It turned `main` red once. The wait
+  is now a five-second monotonic deadline with a 1 ms backoff, and still fails
+  closed with `WouldBlock` once the deadline passes.
+
+- **An approval log written by `0.4.1` is refused as old, not as forged.** The five
+  fields D73 added each carry a `#[serde(default)]` describing a legacy record — an
+  empty principal "never consumes", a zero expiry marks a "non-consumable
+  artifact". Those defaults were unreachable: the MAC covers a re-serialization of
+  the *parsed* event rather than the bytes on disk, so an old record parses and then
+  hashes to something its own version never wrote, and it is refused one step
+  earlier, at authentication. Refusing is correct and is unchanged. What was wrong
+  was the message — "the log has been modified by something without the key" sends
+  an operator hunting an intruder when the cause is an upgrade. **Same
+  fail-open/fail-closed confusion as the rc.2 pack guard, a third time:** a failure
+  to *read* an artifact reported as a verdict *about* it. `tests/legacy_upgrade.rs`
+  pins it with a genuine 0.4.1 line, MAC'd over its own bytes.
 
 ## [0.4.2-rc.2] — 2026-08-15
 
@@ -656,7 +875,10 @@ First version a stranger can install and use: `harness init` writes a starter
 manifest, the `PreToolUse` shim and the host settings entry, with nothing but the
 binary — no checkout, no `cargo`, no `jq`.
 
-[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sv-pro/ai2rules/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sv-pro/ai2rules/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/sv-pro/ai2rules/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/sv-pro/ai2rules/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sv-pro/ai2rules/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sv-pro/ai2rules/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/sv-pro/ai2rules/compare/v0.3.0...v0.3.1

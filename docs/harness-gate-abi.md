@@ -1,6 +1,6 @@
 # `harness gate` — the host-neutral governance ABI
 
-Status: **shipped (v1 + the D36 `action` addition)**, updated 2026-07-23.
+Status: **shipped (gate v1 + discovery projection v1)**, updated 2026-08-21.
 Decisions: `DECISIONS.md` **D24** (refines D19), **D34** (in-process vs wire),
 **D36** (kernel-side classification), **D37** (live-hook cutover), **D41**
 (approval tokens are correlation ids, not bearer grants), **D42** (gate context
@@ -107,11 +107,14 @@ evaluated verdict (exit `0`), not a malformed-process error, so every host
 handles it through the same verdict channel.
 
 `context.approval_token` is not a bearer credential. A host that supports
-approval resumption must validate a durable approval-store binding at a trusted
-adapter/orchestrator boundary (action, params, world, descriptor, provenance, and
-effect mode) before setting `EvalContext.approval_granted`. The public
-`harness gate` ABI has no verifier or store access, so a non-null token still
-returns `ASK` for approval-required actions.
+approval resumption must use it only to locate a durable `AuthorizationInstance`
+at a trusted adapter/orchestrator boundary. That boundary atomically consumes one
+explicit instance before execution and validates trusted principal, canonical
+effect (action + complete arguments), resource, world/schema epochs, provenance,
+effect mode, expiry, and remaining-use budget. It then re-runs the kernel; the
+instance can narrow an `ASK`, never expand the compiled world's ceiling. The
+public `harness gate` ABI has no verifier or store access, so a non-null token
+still returns `ASK` for approval-required actions.
 
 ## 4. `GateResponse` (stdout)
 
@@ -131,6 +134,18 @@ returns `ASK` for approval-required actions.
 }
 ```
 
+On `ALLOW` / `ASK` the response also carries the call to execute (D80):
+
+```json
+"effective": {
+  "base_action": "create_pull_request",
+  "backing": { "kind": "mcp", "server": "codehost", "tool": "create_pull_request" },
+  "arguments": { "repo": "acme/svc", "title": "Fix rounding" },
+  "context_refs": { "base": "change.base" },
+  "stripped": ["repo"]
+}
+```
+
 | Field | Meaning |
 |---|---|
 | `decision` | `ABSENT` \| `ALLOW` \| `DENY` \| `ASK` \| `REPLAN`. (`UnknownToOntology` is surfaced as `ABSENT` with `rule:"unknown_to_ontology"`, per `KernelOutcome::decision()`.) |
@@ -141,6 +156,7 @@ returns `ASK` for approval-required actions.
 | `context.usage` | **Post-call** budget counters the adapter must persist for the next call. Charged only on an `ALLOW` that will actually run — a blocked call consumes nothing, so a refusal never pushes a session toward its limit. Tokens are carried through unchanged; only a caller that has seen a model response can count them. |
 | `approval` | On `ASK`: `{ "token": "<id>", "required": true }`. Else `null`. The token is a correlation id for the adapter's approval UI/store, not a grant credential. |
 | `manifest_hash` | First 12 hex of the compiled manifest hash — drift correlation + trace join. |
+| `effective` | On `ALLOW` / `ASK` only (D80): the lowered call. `base_action` and `backing` (`local` handler or `mcp` server/tool) say what runs; `arguments` are the proposal after a scoped capability stripped locked/unknown arguments, mapped renamed ones back to the base action's names (D79) and injected literals; `context_refs` (omitted when empty) names arguments the host must fill from its own trusted context; `stripped` (omitted when empty) lists the names the proposal sent that the scoping dropped — something the world fixes, or a renamed argument under its base name — record it. **Execute this, not the proposal**: the gate decided on the proposal, but for a scoped capability only this call carries the world's scoping. *Which tool name to call:* in a world with an `mcp_surface` (D79) the backing is authoritative — call `backing.tool`. Otherwise, for a scoped capability (`base_action` ≠ `action`) call the base action; for anything else keep the tool the host proposed, since `action` may be a `command_classes` rename, which is a policy name, not a tool. This is what the reference `mcp-gateway` does. Backward-compatible v1 addition; in-process Rust hosts can take the full `ExecutionSpec` from `harness_preview::gate_and_lower` instead. |
 
 ## 5. Exit codes (process-level, **not** the verdict)
 
@@ -173,6 +189,8 @@ Every host adapter, regardless of language, does exactly this:
    to persist is a budget that silently stops counting (D59's rule, applied to
    budgets).
 7. Map `response.decision` → the host's decision shape; fail-open/closed on `≠0`.
+   On `ALLOW`, execute `response.effective` where the host can (D80); a host that
+   can only run the proposal as-is should not offer scoped capabilities.
 
 No governance logic lives in the adapter — only event-shape translation and
 session-state plumbing (taint and budget counters). **The taint *algebra*, the rules (incl. which inputs taint), and —
@@ -220,6 +238,11 @@ kernel's, driven by `cc-world.yaml` — a real `WorldManifest`.
 - **Conformance (E14.4+):** golden GateRequest→GateResponse vectors, asserted equal
   for native and WASM `gate()`, with the reference harness as oracle.
 
+What a host adapter **records** about each verdict, and how it joins that record
+to the call's outcome, is specified separately in
+[`host-decision-log.md`](host-decision-log.md) (D84). The log is observability:
+nothing in it is read back by the gate.
+
 ## 8. Versioning
 
 `v` is an integer; v1 additions are backward-compatible (new optional fields,
@@ -232,3 +255,40 @@ breaking for a caller relying on the omission — but such a caller was silently
 running ungoverned, which is the condition being removed, and a version bump would
 let it keep doing so by pinning v1. A caller that sends the full context is
 unaffected by all of them.
+
+## 9. Discovery projection wire operation (D72)
+
+`gate` decides a proposed invocation; it cannot make a host stop advertising an
+ABSENT tool. Non-Rust hosts use the sibling operation at their authoritative
+prompt/tool-schema seam:
+
+```bash
+harness project --world world.yaml
+```
+
+stdin:
+
+```json
+{"v":1,"context":{"source_channel":"user_cli"},"tools":[{"name":"read","description":"Read a file","parameters":{"type":"object"}}]}
+```
+
+stdout:
+
+```json
+{"v":1,"tools":[…],"absent":[],"manifest_hash":"ab12cd34ef56","schema_hash":"<sha256>"}
+```
+
+The operation compiles the world through the same loader/root-normalization path
+as `gate`, keeps only offered names in `CompiledWorld::projected_actions()` that
+the declared source channel's capability matrix can see, and preserves each
+surviving host schema as the same JSON value. The compiled world owns
+whether a capability exists; the host registry owns its operational schema. The
+response binds the exact visible schema array to a deterministic SHA-256 identity
+and uses the same 12-hex manifest identity as `GateResponse`, so discovery and
+invocation evidence join directly.
+
+Missing/undeclared source context, malformed input, duplicate names,
+world/compiler failure, or serialization failure
+is a process error (`2` for request/world, `1` for internal output). An engaged
+adapter must fail discovery closed—normally an empty surface—rather than restore
+the host's unfiltered catalog.

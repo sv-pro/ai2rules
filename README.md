@@ -37,13 +37,17 @@ npm install -g ai2rules-harness   # or: cargo install --git https://github.com/s
 harness init                      # additive: adds deny/ask on top of the host's permissions
 harness init --grant              # replace: the manifest becomes the allowlist
 harness init --dry-run            # print the plan, write nothing
+harness init --user               # every session this account opens, in any folder
+harness init --managed            # every session on the machine; admin-installed, the user cannot turn it off
+harness demo                      # decision-only proof: 5 cases through the real kernel, no execution
+harness demo --story law-firm     # the same kind of proof as a story, for non-engineers; no init needed
 ```
 
 Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
-**no dependencies and no install script.** The binary ships in a per-platform
-package that npm resolves by `os`/`cpu`, so installing performs no network access,
-no shell execution and no chmod, and the binary is covered by the integrity hash
-npm writes into your lockfile.
+**no install script.** The binary ships in a per-platform package that npm
+resolves by `os`/`cpu`. Downloading the npm packages requires network access;
+there is no package install script that downloads or modifies a binary. The
+binary is covered by the integrity hash npm writes into your lockfile.
 
 > **Install globally, not into a project.** `harness init` **refuses** when the
 > binary sits inside the project it would govern — a local `node_modules` install
@@ -62,8 +66,40 @@ you just ran. It writes four things and is safe to run twice:
 .gitignore                    .claude/state/   (the runtime taint state)
 ```
 
-**Prove it is real in five seconds**, without starting an agent session — ask the
-kernel directly:
+**Prove it is real**, without starting an agent session or supplying credentials:
+
+```bash
+harness demo
+# Runs 5 cases through the real kernel over this project's world: a local write
+# (ALLOW), an out-of-root write in background (DENY), a network call from a tainted
+# session (DENY), and `rm -rf` interactive (ASK) and in background (DENY). It records
+# each verdict and replays them to prove determinism. Decision-only, no tool execution.
+```
+
+For someone who does not write code, tell it as a story instead. An AI legal
+assistant reads a client email with a hidden instruction, and every way out of the
+firm closes. It runs from any folder, over its own embedded world; the runbook and
+talking points are in [`docs/demos/law-firm/`](docs/demos/law-firm/):
+
+```bash
+harness demo --story law-firm
+```
+
+**Before you turn it on, see what it would have done in your own sessions.** This
+replays every tool call in your past Claude Code transcripts through the kernel,
+exactly as the hook would have decided them, and reports how often it would have
+asked or denied, and why. Nothing is executed:
+
+```bash
+harness replay-transcripts                       # every session under ~/.claude/projects
+harness replay-transcripts path/to/session.jsonl --world .claude/cc-world.yaml --json
+```
+
+Run it on the OS the sessions ran on: path rules resolve paths against today's
+filesystem, so Windows paths replayed on Linux, and folders deleted since, show
+up as `missing_path`.
+
+Or ask the kernel directly about one proposed call:
 
 ```bash
 echo '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd"}}' \
@@ -90,6 +126,17 @@ The manifest is compiled by the real compiler *before* anything is written, so w
 lands in your project is known to build. `init` supersedes the per-project half of
 [`scripts/install-governance.sh`](scripts/install-governance.sh), which is still
 there for the per-machine half (putting a binary on `PATH` from a checkout).
+
+**Every folder, not one.** `harness init --user` puts the same hook into
+`~/.claude/settings.json`, so every session you open is governed, wherever it
+starts; its world and taint state live under `~/.claude/ai2rules/user/`. It is a
+personal seatbelt: a project can still switch user hooks off with
+`disableAllHooks`. For an organisation, `harness init --managed` (elevated)
+installs into Claude Code's **managed settings**, which nothing below an
+administrator can disable, with no user-side kill-switch and the kernel copied
+into the admin-owned directory. Both take `--remove`. The difference, an example
+policy, and what neither scope stops yet are in
+[`docs/machine-wide-governance.md`](docs/machine-wide-governance.md).
 
 ---
 
@@ -128,7 +175,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
 | **M1** Deterministic Core | kernel works in simulation | ✅ done (E0–E4) |
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
-| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; E8, E10 planned |
+| M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; **E18 governance benchmark seed delivered**; E8, E10 planned |
 | M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (576 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
 
 **Done so far:**
@@ -162,24 +209,44 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   `provider-adapters` Anthropic adapter normalizes `tool_use`/`tool_result`/tool
   defs ↔ the neutral `ToolCall`; `agent-core` exposes only the projected tool
   surface, then runs propose → adapt → `decide` → execute (simulated) → perceive
-  (tainted) → repeat, recording every decision to the trace. A `ModelClient`
-  trait + deterministic `ScriptedModel` keep it fully offline (a live HTTP client
-  is a later, feature-gated add). Reinforces invariants 3 and 4 — starting
-  Milestone 2.
+  (tainted) → return the correlated provider `tool_result` → repeat, recording
+  every decision to the trace. Non-executed `DENY`/`ABSENT`/`ASK` outcomes use
+  that same first-class feedback path, with structured decision/rule evidence;
+  observers remain presentation-only. A `ModelClient` trait + deterministic
+  `ScriptedModel` keep it fully offline (a live HTTP client is a later,
+  feature-gated add). Reinforces invariants 3 and 4 — starting Milestone 2.
 - **E6 — Approvals & Execution Modes:** human-in-the-loop as durable state. The
   kernel branches on `ExecutionMode` — an approval-required action `ASK`s
   interactively but **fails closed to `DENY` in background**; a durable
-  `ApprovalStore` (`trace-store`) mints/persists tokens (`pending → approved →
-  executed`) bound to the exact call, so drift voids reuse; the orchestrator
-  resumes an approved `ASK` to `ALLOW`. Honors invariants 9, 10 — **completing
-  Milestone 2.**
+  `ApprovalStore` (`trace-store`) mints/persists single-use
+  `AuthorizationInstance`s (`pending → approved → consumed → executed`). Each
+  is bound to the trusted principal, canonical effect, resource, world/schema
+  epochs, provenance, effect mode, and expiry. Consumption is atomic and durable
+  before execution, so substitution, replay, concurrent reuse, and restart fail
+  closed; the orchestrator then re-decides the `ASK` under the unchanged world
+  ceiling. Honors invariants 9, 10 — **completing Milestone 2.**
+- **Staged external finality (AI2-8 / D74):** `StagedEffect` is a sealed,
+  explicitly non-effective artifact between admission and an external actuator.
+  Its independent durable commit path revalidates the artifact, current
+  world/schema epochs, consequence metadata, actuator operation, and the exact
+  `AuthorizationInstance`; reserves the idempotency key before actuation; and
+  emits a causal `ExecutionReceipt`. Known completion, simulation, failure,
+  duplicate, rejection, and ambiguous finality remain receipt states rather than
+  new kernel verdicts. See [`docs/staged-effect-commit.md`](docs/staged-effect-commit.md).
 - **E7 — MCP, Web & Scoped Capabilities:** broader reach through the one gate.
   Scoped capabilities narrow a base action — `build_execution_spec` strips
   locked/unknown args and injects literals (so `run_tests` always runs `pytest`,
   invariant 12); MCP calls dispatch via a pluggable `McpTransport` through the
   same descriptor/drift path (invariant 11); web fetch is an always-tainted
   channel (invariant 7). MCP/web use deterministic **mock** transports (real
-  stdio/HTTP deferred). Part of Milestone 3.
+  stdio/HTTP deferred). Part of Milestone 3. Since D79 a scoped capability can
+  also rename an argument and limit it to a list of values or a prefix, a base
+  action can be kept off the surface (`projected: false`) while scoped capabilities
+  wrap it, and `mcp_surface` names the server a gateway will present. With a
+  surface declared, `harness mcp-gateway` offers scoped capabilities under their
+  own names and forwards the kernel's lowered call (renamed arguments mapped back,
+  literals injected) rather than the call as proposed — E13.4a/b. `harness
+  mcp-author` is the authoring page for such a surface (E13.4c, below).
 - **E9 — CLI / TUI:** `cargo run --bin harness` is now an
   interactive session — `clap` flags (`--world`/`--simulate`/`--background`), a
   human-driven `ModelClient` that proposes from the projected tool surface via
@@ -209,7 +276,11 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   as typed manifest fields. Cross-agent taint still follows the shared session
   sidecar (E13.6, D20), and the containerized governed SUT with an
   egress-allowlist proxy supplies the E8 enforcement floor (E13.7, D21).
-  See `DECISIONS.md` D19–D21, D29, D36, D37.
+  Instruction and memory files (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`,
+  auto-memory, Antigravity's equivalents) are classified by `path_classes` on the
+  canonical path as durable-memory writes, so a tainted session cannot leave
+  instructions for the next one (E13.10, D83).
+  See `DECISIONS.md` D19–D21, D29, D36, D37, D83.
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the
@@ -231,6 +302,13 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   decision is the pure `harness_preview::gate()`, shared native and WASM. Schema:
   [`docs/harness-gate-abi.md`](docs/harness-gate-abi.md).
 
+- **Discovery projection ABI (D72):** `harness project --world <manifest>` reads
+  the exact schemas a host is about to advertise, removes names the compiled world
+  does not project, and returns joinable manifest/schema identities. DeepSeek's
+  adapter runs it at `system-prompt/assemble`, then uses `gate` at
+  `tools/pre-execute`; a revoked tool disappears on the next model step and a call
+  retained from stale context still has no authority.
+
 The same gate also powers the **governability demo** (`docs/demos/jira-copilot/`,
 DECISIONS D33): `harness mcp-gateway` fronts an MCP server — shaping its `tools/list`
 (ABSENT) and gating each `tools/call` on the real kernel — over a self-contained
@@ -240,6 +318,49 @@ Atlassian skin** (E16.E) swaps that mock upstream for the Atlassian Rovo MCP Ser
 via an `mcp-remote` OAuth bridge with no kernel change — and its shaping is proven
 offline (no creds) by `harness mock-jira --rovo`, which advertises the genuine Rovo
 tool names (see [`docs/demos/jira-copilot/REAL-ATLASSIAN.md`](docs/demos/jira-copilot/REAL-ATLASSIAN.md)).
+
+**Author your own MCP surface (D79, E13.4):** `harness mcp-author` connects to an MCP
+server and opens a local page where you name the surface the gateway will present
+(say `My_Jira`), tick the tools that exist (everything else is ABSENT), rename them,
+fix arguments to hidden values, and limit the rest to a list of values or a prefix.
+"Try it" runs a call through the real gate and shows exactly what the gateway would
+send upstream; it calls the upstream only when you choose to send. Save writes a
+validated manifest, which the gateway then serves:
+
+```bash
+harness mcp-author --world my-jira.world.yaml -- harness mock-jira --rovo   # http://127.0.0.1:8788/
+harness mcp-gateway --world my-jira.world.yaml -- harness mock-jira --rovo
+```
+
+**Shape a live agent from a policy console (D81, E15.7):** `harness console` opens a
+local page for one Claude Code project governed by `cc-hook`. Its profiles and
+Allow / Ask / Off switches (read the web, send data out, delete files, edit project
+files, run scripts) rewrite the project's world file atomically, and the hook reads
+that file on every call, so the agent's very next action gets the new answer, with no
+restart. `cc-hook --log` feeds the page a live list of what the agent tried and what
+the kernel decided. The same log joins each decision to its outcome (D84): every line
+carries the host's `tool_use_id` and agent, and a read-only `PostToolUse` observer,
+which `harness init` wires in, records how each call that ran ended. That is enough
+to tell an approved ASK from a declined one, inferred from whether the call ran
+([`docs/host-decision-log.md`](docs/host-decision-log.md)). `harness export-otlp`
+turns a finished log into OpenTelemetry traces (OTLP/JSON, GenAI `execute_tool`
+spans, one trace per session) for an existing collector, offline. Repeated hook
+decisions retain distinct, stable span IDs and their original call ID for correlation.
+Call summaries mask
+recognized secrets before whitespace normalization and truncation, so shortening
+cannot expose a credential fragment. Off takes the action out of the agent's world (ABSENT, with
+`--enforce-absent`); the taint floor has no switch. A **Stop** button (D85) takes every
+effectful base action away at the agent's next call, including custom names and shell
+processes; actions declared Read/None stay as configured. Worlds with effectful scoped
+capabilities show Stop as unavailable, because those capabilities cannot be hidden
+independently. Restore puts the exact previous projection/approval flags back;
+the page says "Stopped" only after the hook has refused a call. Runbook and scenario:
+[`docs/demos/policy-console/`](docs/demos/policy-console/README.md).
+
+```bash
+bash docs/demos/policy-console/setup.sh                       # ~/northwind/vendor-desk
+harness console --project ~/northwind/vendor-desk               # http://127.0.0.1:8790/
+```
 
 **One kernel, many hosts (shipped — D36/D37/D48, `docs/one-kernel-many-hosts.md`):**
 Claude Code, OpenCode, Antigravity CLI, and the MCP gateway all decide through the one Rust kernel
@@ -271,6 +392,13 @@ OpenCode (E17 / DECISIONS D35) is dogfooded the same way: the
 `permission` rules) calls the same `harness gate` wire ABI, sending raw tool
 names — see `docs/demos/opencode/`.
 
+DeepSeek Harness (issue #55 / D71/D72) is the fourth host and the first one here
+whose plugin shapes both sides: the authoritative prompt assembly is projected
+before the model sees tools, and the pre-execute waterfall gates every call. The
+same `deepseek-world.yaml` can govern OpenCode because both hosts use the same
+lowercase tool vocabulary; revocation, stale invocation, Code Mode fail-closed,
+and projection/gate outage behavior are pinned in the real dsh service spec.
+
 **Antigravity CLI (`agy`, DECISIONS D48)** is the third live host: `.agents/hooks.json`
 runs a bootstrap shim that `exec`s **`harness agy-hook`**, which links `gate()`
 in-process like `cc-hook`. Its hook ABI is not vendor-published — the contract was
@@ -279,7 +407,15 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **304 tests** green.
+The MCP gateway supports out-of-band approvals with `--approvals <store>
+--principal <operator-assigned-id>` and `harness approvals list|approve|reject`.
+Consent is exact-bound, expires after five minutes, and is durably consumed before
+forwarding; uncertain upstream outcomes require operator reconciliation. See the
+[approval workflow](docs/approval-capable-hosts.md).
+
+Builds clean offline with `clippy -D warnings`; **507 tests** green. Unix machine-hook
+tests feed prepared events through stdin so a disabled hook's early exit cannot
+race the fixture writer.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -298,11 +434,13 @@ crates/               the harness implementation
   trace-store/        append-only audit, redaction, replay (E4)
   provider-adapters/  provider tool-call → neutral ToolCall (E5)
   agent-core/         context packing, projected tool surface, model loop (E5)
-  cli-harness/        terminal entrypoint + `serve`/`gate`/`mcp-gateway`/`cc-hook`/`agy-hook`/`mock-jira` (binary `harness`) (E9, E11, E16, D48)
-  harness-preview/    pure design-time preview + runtime gate() ABI, shared by serve + wasm + `harness gate` (E11/E14, D24)
+  cli-harness/        terminal entrypoint + `serve`/`gate`/`project`/`mcp-gateway`/`mcp-author`/host adapters (binary `harness`) (E9, E11, E13.4, E16, D48, D72, D79)
+  harness-preview/    pure preview + runtime gate() ABI + discovery projection, shared by serve, wasm, `harness gate` and `harness project` (E11/E14, D24, D75)
   harness-wasm/       the real compiler + kernel compiled to WASM, callable from JS (E14)
+  govbench/           MCP governance benchmark runner: 3 scenarios, weak baseline vs ai2rules (E18)
 docs/                 architecture (harness-architecture.md is canonical; one-kernel-many-hosts.md = cross-host parity)
-scripts/              runnable demos (demo-one-kernel-many-hosts.sh)
+  benchmarks/mcp-governance/  the governance smoke pack + its generated report (issue #64)
+scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
@@ -341,6 +479,37 @@ runs `scripts/check-demos.sh` — every example and demo script, asserting the
 verdict lines each one claims to show. The unit tests cover the kernel; that
 script covers what a reader actually sees.
 
+The blog CI job also checks the homepage-to-playground journey in Chromium at
+390px and 1440px widths, including the real WASM taint/tool-toggle transitions.
+The `homepage-browser-qa` artifact retains screenshots and JSON results for
+14 days. Browser tooling is version-pinned and installed outside the blog; it
+is not a production dependency.
+
+### The governance benchmark
+
+```bash
+bash scripts/run-governance-bench.sh      # offline, no LLM, ~10s
+```
+
+Three scenarios — cross-principal discovery-cache leakage, approval argument
+substitution and replay, cross-principal handle reuse — run against an
+intentionally weak reference gateway and against this kernel, under one
+deterministic oracle. The weak gateway turns one human "yes" into three
+irreversible transfers; the ai2rules target refuses the substitution
+(`authorization_effect_mismatch`), the replay (`authorization_exhausted`) and the
+stolen handle (`authorization_principal_mismatch`), and applies exactly one.
+
+That target is named `ai2rules-reference-host`, deliberately: it is kernel
+components plus this benchmark's own trusted-host wiring, because ai2rules does
+not yet ship the consume-then-invoke boundary as a command (PLAN.md E18.10).
+
+PASS needs all three halves — the verdict, the downstream effect count the runner
+watched, and evidence the oracle actually checks — and there is no aggregate
+score. Read
+[`docs/benchmarks/mcp-governance/`](docs/benchmarks/mcp-governance/), including
+what the pack does **not** claim. CI job `governance-bench` re-runs it and fails
+if the committed report has drifted, or if the weak baseline stops failing.
+
 ### Release binaries (no local toolchain needed)
 
 Pushing a `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml),
@@ -357,6 +526,44 @@ git tag v0.1.0 && git push gh v0.1.0   # → cross-OS binaries on the v0.1.0 Rel
 
 The demos below are the raw list; [`docs/TUTORIAL.md`](docs/TUTORIAL.md) walks the
 same ground in a deliberate order, with what each one is meant to prove.
+
+### Five-minute governed coding workflow
+
+Run one deterministic, credential-free scenario from a fresh fixture:
+
+```bash
+cargo run -p agent-core --example governed_coding_workflow
+```
+
+The example starts with a broken `calc.py`, then drives the real `agent-core`
+loop through four dependent tool calls:
+
+```text
+read_repo_file → fetch_web (DENY) → apply_workspace_patch → read_repo_file
+```
+
+The first read adds workspace-derived taint. The model then asks for external
+help; the kernel returns `DENY (taint_invariant)` as a correlated Anthropic
+`tool_result`. The next model turn reads that structured result and replans to a
+permitted local patch. The example prints the final diff, verifies the fixture
+moved from `FAIL` to `PASS`, reads its JSONL trace back, and replays every
+recorded decision against the same compiled world.
+
+| Workflow behavior | Evidence in the run |
+|---|---|
+| Multi-step orchestration | Four dependent calls complete before the final answer |
+| Tool use and projection | The full projected tool surface and each selected call are printed |
+| State / observation feedback | The first read taints the session; each result returns to the next model turn |
+| Governance boundary | External help is not executed: `DENY`, rule `taint_invariant` |
+| Approval / replanning | This shortest path exercises replanning after `DENY`; approval is not invoked because a hard denial is not approvable |
+| Evaluation | The expected unified diff is emitted and the fixture test changes `FAIL → PASS` |
+| Traceability | The retained `trace.jsonl` path is printed and replay must report `4/4 decisions reproduced` |
+
+The printed artifact directory remains under `target/demo-artifacts/` for
+inspection and also contains `final.diff`. Replay deliberately re-runs the pure
+governance decisions, not model sampling or side effects. `scripts/check-demos.sh`
+runs this same path in CI, so the walkthrough fails if the refusal, replan,
+verification, or replay evidence disappears.
 
 For a quick noninteractive demo, run the kernel plus the execution boundary. It
 compiles the default world, feeds it a handful of
@@ -415,8 +622,9 @@ cargo run -p agent-core --example approvals_demo
 ```
 
 A `start_pty` (approval-required) action: interactive + auto-approve resumes it
-`ASK → APPROVED → ALLOW` (a durable token minted → approved → executed); in
-background it fails closed to `DENY` with no token minted.
+`ASK → APPROVED → ALLOW` (a durable authorization is minted → approved →
+atomically consumed → executed); in background it fails closed to `DENY` with
+no authorization minted.
 
 For **scoped capabilities + MCP + web**, run:
 
@@ -476,6 +684,12 @@ MCP **proxy sidecar**, the `world-kernel` **library**) and who each is for — i
 **[`docs/USE-CASES.md`](docs/USE-CASES.md)**. The delivery model is *infrastructure, not
 an app* (governance you plug into a host you already run; the standalone-agent path is
 cut) — see `DECISIONS.md` **D31**.
+
+For reviewers who ask which obligation a control is evidence for, and what it leaves
+behind to inspect, **[`docs/compliance-evidence-map.md`](docs/compliance-evidence-map.md)**
+maps each control to its artifact (a file, a test, a decision) and to the EU AI Act,
+NIST AI RMF, ISO/IEC 42001 and OWASP Agentic Top 10 clauses it can support, with the
+host limits of the default configuration beside each row. It is not a compliance claim.
 
 Speculative, research-grade directions that aren't committed work (e.g. a cross-host
 "super-harness" governance plane) are parked in the idea pool at

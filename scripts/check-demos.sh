@@ -58,6 +58,12 @@ check() {
 echo "== building (once) =="
 cargo build --workspace --examples --quiet || { echo "build failed"; exit 1; }
 
+# Shell demos take `$HARNESS`, else whatever `harness` is on PATH. Pin them to the
+# binary just built: an installed release (in WSL, even a Windows npm shim via the
+# inherited PATH) would otherwise be what got checked, and a stale or foreign one
+# fails open — every beat printed `<silent: defer to host>`.
+export HARNESS="$PWD/target/debug/harness"
+
 echo
 echo "== crate examples =="
 
@@ -81,6 +87,15 @@ check "trace_demo — redaction, replay, drift" \
 check "agent_loop — propose/decide/perceive" \
   "cargo run -q -p agent-core --example agent_loop" \
   'Deny (taint_invariant)' 'UNKNOWN_TO_ONTOLOGY' 'ASK (pending approval)'
+
+check "governed_coding_workflow — deny, replan, replay" \
+  "cargo run -q -p agent-core --example governed_coding_workflow" \
+  'baseline fixture test: FAIL' \
+  'projected tools:' \
+  'fetch_web -> Deny (taint_invariant)' \
+  'apply_workspace_patch -> ALLOW' \
+  'final fixture test: PASS' \
+  'replay: 4/4 decisions reproduced'
 
 check "tools_demo — scoped caps, MCP, web" \
   "cargo run -q -p agent-core --example tools_demo" \
@@ -111,6 +126,42 @@ check "replace-permissions/demo.sh" \
   '(taint floor) -> deny' \
   '(destructive -> ask) -> ask' \
   'ABSENT) -> deny'
+
+check "live-claude-code/compare.sh" \
+  "bash docs/demos/live-claude-code/compare.sh" \
+  '2. Upload client-data.csv out LEAKS deny' \
+  '3. Upload it with python instead LEAKS deny' \
+  '4. Upload it with PowerShell instead LEAKS deny' \
+  '5. Delete the archive folder DELETES ask' \
+  '7. Write a status report runs allow' \
+  'verdicts match'
+
+echo
+echo "== story demos =="
+
+check "harness demo --story law-firm" \
+  "cargo run -q -p cli-harness -- demo --story law-firm" \
+  'ALLOW | session now TAINTED' \
+  'DENY (taint_invariant)' \
+  'ASK (approval_required)' \
+  'DENY (background_denies_ask)' \
+  'ABSENT (unknown_to_ontology)' \
+  'Replay: 10/10 decisions reproduced from the log'
+
+# The published page (ai2rules.dev/demo/law-firm.html) is a build output kept in
+# git, like the WASM engine: regenerate it and fail if the committed copy differs.
+# It embeds the version, so a release bump needs a regenerated page too.
+PUBLISHED=blog/public/demo/law-firm.html
+page="$(mktemp)"
+if cargo run -q -p cli-harness -- demo --story law-firm --html "$page" >/dev/null 2>&1 \
+  && cmp -s "$page" "$PUBLISHED"; then
+  printf 'ok    %s\n' "$PUBLISHED is current"
+else
+  printf 'FAIL  %s — stale; regenerate with:\n' "$PUBLISHED"
+  printf '        cargo run -q -p cli-harness -- demo --story law-firm --html %s\n' "$PUBLISHED"
+  fails=$((fails + 1))
+fi
+rm -f "$page"
 
 echo
 if [ "$fails" -gt 0 ]; then

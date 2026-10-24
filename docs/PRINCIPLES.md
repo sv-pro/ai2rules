@@ -91,6 +91,20 @@ LLM-drafted manifest. If manifests are generated and rubber-stamped, the stochas
 process re-enters through the back door. This assumption is **unstated and
 untested**, and it may be the softest point in the whole argument.
 
+### P12 — Ingress context constrains; it never grants authority  **[Forced]**
+Protocol/channel metadata, authenticated caller identity, session or continuation
+identifiers, and caller-controlled request options may select or **restrict** a
+projection, but they may not create a capability that is absent from the compiled
+world or weaken an existing `DENY` / `ASK` boundary. A channel is context, not an
+authority source; a session or continuation handle is not a bearer grant merely by
+existing.
+
+*Why forced:* once the same agent or workflow can be reached through Responses,
+Telegram, A2A, MCP, or another adapter, treating an ingress adapter as an authority
+source creates a side door around P2/P6. The compiled world must remain the upper
+bound. Identity/session mapping can refine who the caller is and which world is
+projected; it cannot mint a larger world.
+
 ---
 
 ## Part B — Arbitrary-choice register (free parameters)
@@ -193,6 +207,21 @@ requires a fragment or corpus we don't yet have wired.
   Outcome without distortion.
 - **Proof:** high fit → Triad is a good primitive.
 - **Reject:** frequent distortion → the 3-slot schema is arbitrary and lossy; widen it.
+
+### T10 — Can ingress adapters amplify authority? *(tests P6, P12)* **[needs ingress fixture]**
+- **Trial:** run the same agent target and requested effect through several ingress
+  contexts (for example internal A2A, OpenAI Responses, and Telegram) against one
+  compiled-world authority ceiling. Include ambiguous cross-channel identity
+  linking, continuation/session reuse, caller-controlled options, and an
+  `Agent A → MCP → privileged Workflow B` composition case.
+- **Proof:** ingress context can reduce the effective surface/verdict, but can never
+  make an `ABSENT` capability present, turn `DENY`/`ASK` into `ALLOW`, or use a
+  session/continuation identifier as authority by itself. The trace explains the
+  ingress facts responsible for any legitimate difference.
+- **Reject:** any adapter creates authority not present in the compiled world → the
+  boundary is incomplete. Fix the context/identity representation or mandatory
+  enforcement seam before adding production channel integrations.
+- **Tracking:** [`#74`](https://github.com/sv-pro/ai2rules/issues/74).
 
 ---
 

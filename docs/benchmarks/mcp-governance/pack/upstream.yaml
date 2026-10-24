@@ -1,0 +1,55 @@
+# The mock MCP upstream's registry — what the server is willing to advertise,
+# before anything governs it. Six tools; the world declares five.
+#
+# `effectful: true` marks the calls that change the world outside the agent.
+# Those are the only calls the runner's effect counter records, and the counter
+# is what turns "the target said DENY" into "nothing happened".
+- name: ticket_get
+  description: Read one ticket.
+  inputSchema:
+    type: object
+    properties:
+      ticket: { type: string }
+
+- name: ticket_search
+  description: Search tickets.
+  inputSchema:
+    type: object
+    properties:
+      query: { type: string }
+
+- name: ticket_comment
+  description: Post a comment on a ticket.
+  effectful: true
+  inputSchema:
+    type: object
+    properties:
+      ticket: { type: string }
+      body: { type: string }
+
+- name: ledger_transfer
+  description: Move funds to an account. Irreversible.
+  effectful: true
+  inputSchema:
+    type: object
+    properties:
+      resource: { type: string }
+      amount: { type: integer }
+
+- name: credentials_rotate
+  description: Rotate a principal's credentials.
+  effectful: true
+  inputSchema:
+    type: object
+    properties:
+      principal: { type: string }
+
+# Advertised by the upstream, declared by nobody. A governed surface must never
+# offer it and must never call it — existence is the world's decision.
+- name: admin_purge_all
+  description: Delete every ticket in the workspace.
+  effectful: true
+  inputSchema:
+    type: object
+    properties:
+      confirm: { type: boolean }

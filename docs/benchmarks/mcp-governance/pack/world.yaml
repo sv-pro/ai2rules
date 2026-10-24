@@ -1,0 +1,101 @@
+# Public MCP Governance Benchmark — the world the ai2rules target is configured
+# with. A REAL WorldManifest, compiled by the real compiler; nothing in the
+# benchmark reimplements governance.
+#
+# Read it beside pack/upstream.yaml: the upstream offers six tools, this world
+# declares five of them, and the sixth (`admin_purge_all`) is therefore ABSENT
+# for every principal — existence is the world's decision, not the upstream's.
+world_id: mcp-governance-bench
+
+actors:
+  - { name: operator, kind: User }
+  - { name: assistant, kind: Model }
+  - { name: ledger, kind: McpServer }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+# Two proposing channels with deliberately different trust. Channel names come
+# from the kernel's closed vocabulary (`docs/GLOSSARY.md`): `user_cli` is the
+# supervised operator, `generated` is the model's own proposals.
+#
+# `taint` is false on both, deliberately. These three scenarios ask about
+# *authority*; a proposing channel that also tainted every call would answer
+# scenarios 2 and 3 with the taint floor instead of with the authorization
+# boundary actually under test. `mcp_output` keeps the honest taint flag, so the
+# floor is still a live rule in this world.
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: generated, trust: Derived, taint: false }
+  - { name: mcp_output, trust: Untrusted, taint: true }
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Mcp] }
+  - { trust: Derived, actions: [Read] }
+  - { trust: SemiTrusted, actions: [Read] }
+  - { trust: Untrusted, actions: [Read] }
+
+base_actions:
+  # Reads — visible to every declared channel.
+  - name: ticket_get
+    action_type: Read
+    side_effect: Read
+    backing: !McpServer { server: ledger, tool: ticket_get }
+    schema:
+      type: object
+      properties:
+        ticket: { type: string }
+  - name: ticket_search
+    action_type: Read
+    side_effect: Read
+    backing: !McpServer { server: ledger, tool: ticket_search }
+    schema:
+      type: object
+      properties:
+        query: { type: string }
+
+  # Effectful surfaces — Mcp, so only a Trusted channel may reach them at all.
+  - name: ticket_comment
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: ledger, tool: ticket_comment }
+    schema:
+      type: object
+      properties:
+        ticket: { type: string }
+        body: { type: string }
+  - name: ledger_transfer
+    action_type: Mcp
+    side_effect: External
+    approval_required: true
+    backing: !McpServer { server: ledger, tool: ledger_transfer }
+    schema:
+      type: object
+      properties:
+        # `resource` is the destination account handle. The name is not
+        # decorative: `trace_store::effect_resource` reads it as this effect's
+        # resource label, so an authorization is bound to the destination as
+        # well as to the whole argument object.
+        resource: { type: string }
+        amount: { type: integer }
+  - name: credentials_rotate
+    action_type: Mcp
+    side_effect: Credential
+    approval_required: true
+    backing: !McpServer { server: ledger, tool: credentials_rotate }
+    schema:
+      type: object
+      properties:
+        principal: { type: string }
+
+# DELIBERATELY NOT DECLARED: `admin_purge_all`. The upstream advertises it; the
+# world does not know it, so it is ABSENT — never offered, never invocable.
+
+transition_policies:
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+
+observability:
+  redact:
+    - "env.*_TOKEN"
+    - "env.*_KEY"

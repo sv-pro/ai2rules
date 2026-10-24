@@ -15,10 +15,32 @@
 //! boundary, so project-local symlinks cannot choose their own root. Keep that
 //! property — it is the reason these are shared rather than copied.
 
-use harness_types::RootsDef;
+use compiler::{compile, loader::load_yaml, resolve_root_paths};
+use harness_types::{CompiledWorld, RootsDef};
 use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+/// Load, normalize, and compile one world at a CLI I/O boundary.
+///
+/// `gate` and `project` must mint the same immutable world from the same file.
+/// Keeping root expansion and filesystem canonicalization here prevents the two
+/// wire operations from correlating different manifest hashes for one path.
+pub fn load_compiled_world(world_path: &Path) -> Result<CompiledWorld, String> {
+    let content = std::fs::read_to_string(world_path)
+        .map_err(|e| format!("cannot read world {}: {e}", world_path.display()))?;
+    let mut manifest = load_yaml(&content)
+        .map_err(|e| format!("cannot parse world {}: {e}", world_path.display()))?;
+    if let Some(roots) = &manifest.roots {
+        let base = std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string());
+        let home = std::env::var("HOME").ok();
+        let resolved = resolve_root_paths(roots, home.as_deref(), base.as_deref());
+        manifest.roots = Some(canonicalize_root_paths(&resolved));
+    }
+    compile(&manifest).map_err(|e| format!("cannot compile world {}: {e}", world_path.display()))
+}
 
 /// Filesystem-safe form of a host session identifier, for the taint sidecar
 /// filename. Host session ids are untrusted input (Claude Code's `session_id`,
@@ -140,22 +162,44 @@ pub fn normalize_dots(p: &str) -> String {
 }
 
 /// Canonicalize an action target for root policy. Existing files/directories are
-/// resolved directly; new file writes are classified by a canonicalized existing
-/// parent plus the proposed leaf name. If the parent cannot be resolved, return
-/// `None` so roots-enabled file actions fail closed as `missing_path`.
+/// resolved directly. A path that does not exist yet — a new file, possibly in
+/// new folders — is classified by its **nearest existing ancestor**, canonicalized
+/// (so a symlink there still resolves to its real destination, D46), plus the
+/// components below it as written. Those components do not exist, so none of them
+/// can be a symlink; a `..` among them could step back out of the ancestor, so it
+/// is refused. `None` — no ancestor resolves, or the tail has a `..` — makes a
+/// roots-enabled file action fail closed as `missing_path`.
+///
+/// Resolving only the immediate parent, as this once did, denied every write into
+/// a folder the agent had not created yet (found by `harness replay-transcripts`).
 pub fn canonicalize_action_path(path: &Path) -> Option<PathBuf> {
     if let Ok(canonical) = std::fs::canonicalize(path) {
         return Some(canonical);
     }
-    let parent = path.parent()?;
-    let leaf = path.file_name()?;
-    let parent = std::fs::canonicalize(parent).ok()?;
-    Some(parent.join(leaf))
+    let mut tail = Vec::new();
+    let mut current = path;
+    loop {
+        // `file_name` is `None` for a path ending in `..`: the refusal.
+        tail.push(current.file_name()?);
+        current = current.parent()?;
+        if let Ok(ancestor) = std::fs::canonicalize(current) {
+            let mut resolved = ancestor;
+            resolved.extend(tail.iter().rev());
+            return Some(resolved);
+        }
+    }
 }
 
 /// Canonicalize manifest roots at the same adapter boundary as action paths.
 /// Missing roots stay lexical, preserving portable manifests for paths that may
 /// not exist yet while still resolving real symlinked roots such as `.` and `~/.ssh`.
+///
+/// Except a missing **drive-letter** path (Windows): kept lexical it is
+/// `C:\project/.claude/settings.json` — the expanded base in native form plus the
+/// rule's tail — while the action path it should match arrives canonical
+/// (`//?/C:/project/.claude/settings.json`), so the rule never matched and a
+/// read-only rule on a not-yet-created file silently fell to the default. It is
+/// resolved the way the action path is, from its nearest existing ancestor.
 pub fn canonicalize_root_paths(roots: &RootsDef) -> RootsDef {
     let mut out = roots.clone();
     for rule in &mut out.rules {
@@ -164,6 +208,10 @@ pub fn canonicalize_root_paths(roots: &RootsDef) -> RootsDef {
             .unwrap_or_else(|_| {
                 if rule.path.starts_with('/') {
                     normalize_dots(&rule.path)
+                } else if Path::new(&rule.path).is_absolute() {
+                    canonicalize_action_path(Path::new(&rule.path))
+                        .map(path_to_string)
+                        .unwrap_or_else(|| normalize_kernel_path_string(&rule.path))
                 } else {
                     rule.path.clone()
                 }
@@ -172,8 +220,20 @@ pub fn canonicalize_root_paths(roots: &RootsDef) -> RootsDef {
     out
 }
 
+/// Convert a filesystem-native path into the kernel's path vocabulary.
+///
+/// Root matching in `harness-types` is deliberately pure and uses `/` as the
+/// component separator (`root/…`). Windows canonicalization returns native
+/// `\\?\C:\…` paths; passing those through verbatim means a descendant never
+/// matches `root/…` and silently degrades to the roots default. Normalize only
+/// representation here, after filesystem canonicalization, so the D46 symlink
+/// property remains intact and the kernel stays platform-neutral.
+fn normalize_kernel_path_string(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 pub fn path_to_string(path: PathBuf) -> String {
-    path.to_string_lossy().into_owned()
+    normalize_kernel_path_string(&path.to_string_lossy())
 }
 
 /// Host-tool-name normalization — a *mapping*, not policy: use the exact host
@@ -204,6 +264,22 @@ mod tests {
     }
 
     #[test]
+    fn kernel_path_strings_use_the_platform_neutral_separator() {
+        assert_eq!(
+            normalize_kernel_path_string(r"\\?\D:\repo\project\file.txt"),
+            "//?/D:/repo/project/file.txt"
+        );
+        assert_eq!(
+            normalize_kernel_path_string(r"D:\repo\project\file.txt"),
+            "D:/repo/project/file.txt"
+        );
+        assert_eq!(
+            normalize_kernel_path_string("/repo/project/file.txt"),
+            "/repo/project/file.txt"
+        );
+    }
+
+    #[test]
     fn resolve_action_path_reads_file_path_and_absolutizes() {
         let dir = tempfile::tempdir().unwrap();
         let base = std::fs::canonicalize(dir.path()).unwrap();
@@ -224,8 +300,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_new_file_in_new_folders_resolves_under_the_nearest_existing_ancestor() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(base.join("docs")).unwrap();
+
+        let nested = json!({"file_path": "docs/demos/law-firm/README.md"});
+        assert_eq!(
+            resolve_action_path(&nested, base.to_str().unwrap(), None),
+            Some(path_to_string(base.join("docs/demos/law-firm/README.md")))
+        );
+    }
+
+    #[test]
+    fn a_dotdot_below_the_existing_ancestor_is_refused() {
+        // `new` does not exist, so `..` after it cannot be resolved by the
+        // filesystem; taking it lexically could climb out of the project.
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        let climb = json!({"file_path": "new/../../../etc/passwd"});
+        assert_eq!(
+            resolve_action_path(&climb, base.to_str().unwrap(), None),
+            None
+        );
+        let trailing = json!({"file_path": "new/sub/.."});
+        assert_eq!(
+            resolve_action_path(&trailing, base.to_str().unwrap(), None),
+            None
+        );
+    }
+
+    #[test]
+    fn a_dotdot_inside_the_existing_part_is_resolved_by_the_filesystem() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(base.join("a/b")).unwrap();
+        let up = json!({"file_path": "a/b/../new/file.txt"});
+        assert_eq!(
+            resolve_action_path(&up, base.to_str().unwrap(), None),
+            Some(path_to_string(base.join("a/new/file.txt")))
+        );
+    }
+
+    /// D46 still holds for new folders: a symlink in the existing part resolves to
+    /// its real destination before the new components are appended.
+    #[cfg(unix)]
+    #[test]
+    fn new_folders_under_a_symlink_resolve_to_its_real_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("link")).unwrap();
+
+        let via_link = json!({"file_path": "link/new/dir/file"});
+        assert_eq!(
+            resolve_action_path(&via_link, project.to_str().unwrap(), None),
+            Some(path_to_string(outside.join("new/dir/file")))
+        );
+    }
+
     /// The D46 property (findings #8/#9): a project-local symlink cannot choose
     /// its own root — the target resolves to the symlink's real destination.
+    #[cfg(unix)]
     #[test]
     fn resolve_action_path_canonicalizes_through_symlinks() {
         let dir = tempfile::tempdir().unwrap();

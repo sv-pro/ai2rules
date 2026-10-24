@@ -1,0 +1,26 @@
+[package]
+name = "govbench"
+description = "Runner for the Public MCP Governance Benchmark smoke pack: three scenarios, an intentionally weak reference gateway, and ai2rules under one deterministic oracle."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "govbench"
+path = "src/main.rs"
+
+[lib]
+name = "govbench"
+path = "src/lib.rs"
+
+[dependencies]
+harness-types = { workspace = true }
+harness-preview = { workspace = true }
+compiler = { workspace = true }
+trace-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+tempfile = { workspace = true }

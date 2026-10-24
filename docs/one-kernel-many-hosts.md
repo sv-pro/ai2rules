@@ -1,9 +1,9 @@
 # One kernel, many hosts
 
-Status: **shipped**, 2026-07-12; extended 2026-07-26 with a third live host.
+Status: **shipped**, 2026-07-12; extended 2026-08-21 with DeepSeek Harness discovery.
 Decisions: **D24** (gate ABI), **D34** (in-process vs wire), **D35** (OpenCode),
 **D36** (manifest-declared command classification), **D37** (Claude Code
-live-hook cutover), **D48** (Antigravity CLI). Verified by
+live-hook cutover), **D48** (Antigravity CLI), **D72** (projection wire ABI). Verified by
 `crates/cli-harness/tests/one_kernel.rs` against
 `docs/demos/one-kernel/{demo-world.yaml,cases.yaml}`; demonstrated by
 `scripts/demo-one-kernel-many-hosts.sh`.
@@ -15,8 +15,8 @@ the one Rust kernel**, reached through thin adapters —
 Claude Code    ─┐
 OpenCode       ─┤
 Antigravity CLI ┼─→ thin adapter → GateRequest → one Rust kernel
-MCP Gateway    ─┘                        ↓
-                                    GateResponse
+DeepSeek dsh   ─┤                        ↓
+MCP Gateway    ─┘                   GateResponse
 ```
 
 ```
@@ -50,7 +50,9 @@ its documented fail-open/fail-closed strategy.
 | `.opencode/plugin/ai2rules-gate.ts` (TS, wire ABI `harness gate`) | `tool.execute.before` ↔ throw-to-block; taint in `.opencode/ai2rules-state.json`; `AI2RULES_MODE` |
 | `harness agy-hook` (Rust, in-process `gate()`) | Antigravity `PreToolUse` payload ↔ `decision`; protojson camelCase envelope (`toolCall{name,args}`, `conversationId`); **PascalCase→neutral argument aliasing** (`CommandLine`→`command`, `AbsolutePath`/`TargetFile`→`path`); project base from `workspacePaths`; taint sidecar `.agents/state/taint-<cid>`; `--mode`; `--enforce-absent`; `--grant`; `--soft-ask` |
 | `harness mcp-gateway` (Rust, in-process `gate()`) | MCP `tools/list` shaping (ABSENT never offered; each survivor re-issued from the *world's* descriptor, D51) + `tools/call` ↔ `isError` with the decision label; in-process monotonic session taint; `--mode` |
+| DeepSeek `ai2rules-gate.ts` (TS, wire `project` + `gate`) | authoritative `system-prompt/assemble` schema filtering; `tools/pre-execute` ↔ allow/deny/ask; manifest/schema evidence; sidecar taint + usage; engaged failure closes both discovery and invocation |
 | `harness gate` (CLI) | stdin/stdout JSON marshalling only |
+| `harness project` (CLI) | offered host schemas ↔ world-projected schemas + ABSENT names + manifest/schema identities |
 
 ## Duplication survey (before → after this increment)
 
@@ -76,6 +78,7 @@ does not synthesize a verdict; it applies its documented strategy:
 | OpenCode plugin | **fail-open** (warn + allow) | same; only an explicit kernel verdict blocks |
 | `harness agy-hook` | **fail-open** (exit 0, emits `{}`) | same — but the host parses stdout, so the no-op must be *printed*: a response carrying no `decision` is Antigravity's documented passthrough. Silence is not a passthrough here |
 | `harness mcp-gateway` | **fail-closed** (an unevaluated call is never forwarded upstream) | the gateway *is* the surface; nothing passes around it |
+| DeepSeek plugin | **fail-closed once mounted** (empty discovery surface; invocation deny) | an engaged adapter must not silently drop governance (D71) |
 | `harness gate` CLI | exit codes `0/1/2` report evaluation vs process error and **never encode a verdict** (D24) | verdict→convention mapping is the adapter's job |
 
 On the verdict channel itself, an **unknown decision string** maps to
@@ -83,8 +86,10 @@ On the verdict channel itself, an **unknown decision string** maps to
 
 ## The parity guarantee
 
-Host worlds are separate manifests (`cc-world.yaml`, `opencode-world.yaml`,
-`agy-world.yaml`, `demo-world.yaml`), so hashes *across worlds* differ by design.
+Most host worlds are separate manifests (`cc-world.yaml`, `agy-world.yaml`,
+`demo-world.yaml`), so hashes *across worlds* differ by design. DeepSeek and
+OpenCode can deliberately share `deepseek-world.yaml` because their native tool
+vocabulary is the same; this is the literal one-compiled-world cross-host case.
 The guarantee is: **same manifest + same request ⇒ same decision / rule /
 post-call taint / manifest_hash on every entry point** — in-process `gate()`, the
 `harness gate` CLI, the cc-hook event contract, the OpenCode wire shape, the
@@ -112,6 +117,11 @@ pins exactly that with a same-command aliased/unaliased pair.
   `ABSENT:` prefix) as an explicit opt-in; default stays additive.
 - **OpenCode has no structured ask channel** — ASK surfaces as a block (throw);
   pair with OpenCode `permission` rules for an approval UX (D35).
+- **DeepSeek code-only presentation narrows to empty.** Its generated SDK is an
+  unstructured prompt section, not the structured schema list the projector can
+  safely filter. The adapter removes the SDK and reserved transport instead of
+  parsing host prose; `both` mode retains projected native tools, and every Code
+  Mode sub-dispatch remains invocation-gated.
 - **Antigravity's `ask` is cache-satisfiable** — its plain `ask` respects the
   host's stored "Always Allow" grants, so a kernel ASK could be answered by a
   past decision rather than a present human. `agy-hook` therefore emits

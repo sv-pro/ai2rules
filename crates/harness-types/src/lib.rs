@@ -20,6 +20,7 @@ pub mod ids;
 pub mod manifest;
 pub mod perception;
 pub mod provenance;
+pub mod staged;
 pub mod tool_call;
 
 pub use action::*;
@@ -33,6 +34,7 @@ pub use ids::*;
 pub use manifest::*;
 pub use perception::*;
 pub use provenance::*;
+pub use staged::*;
 pub use tool_call::*;
 
 #[cfg(test)]
@@ -90,8 +92,11 @@ mod tests {
     fn approval_token_transitions_are_guarded() {
         let mut token = ApprovalToken::pending(
             ApprovalTokenId::new("t1"),
+            PrincipalId::new("session:s"),
             ActionName::new("git_commit"),
             ContentHash::new("p"),
+            ContentHash::new("effect"),
+            "path:repo".to_string(),
             WorldId::new("w"),
             ManifestHash::new("m"),
             DescriptorHash::new("d"),
@@ -101,10 +106,13 @@ mod tests {
                 ContentHash::new("c"),
             ),
             EffectMode::Execute,
+            2_000,
         );
         // Cannot execute before approval.
         assert!(token.mark_executed().is_err());
         assert!(token.approve().is_ok());
+        assert!(token.mark_executed().is_err());
+        assert!(token.consume().is_ok());
         assert!(token.mark_executed().is_ok());
         // Cannot reject after execution.
         assert!(token.reject().is_err());

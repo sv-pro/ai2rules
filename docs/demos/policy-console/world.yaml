@@ -1,0 +1,198 @@
+# Northwind vendor desk: the world Claude Code runs under in this folder.
+#
+# Each group of actions below can be allowed, made to ask first, or switched off
+# (not projected: the agent does not have it at all). Whatever the switches say,
+# once the session has read from outside, nothing it does may reach the network.
+world_id: northwind-vendor-desk
+
+actors:
+  - { name: developer, kind: User }
+  - { name: claude, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  # Looking around: always on.
+  - { name: Read, action_type: Read, side_effect: Read }
+  - { name: Glob, action_type: Read, side_effect: Read }
+  - { name: Grep, action_type: Read, side_effect: Read }
+  - { name: LS, action_type: Read, side_effect: Read }
+  - { name: Bash, action_type: Command, side_effect: Process }
+  # Claude Code's own bookkeeping tools. Named so that switching an action off can
+  # mean "absent" without also taking away the agent's to-do list. Under
+  # --enforce-absent a tool this file does not name is absent, harmless or not, so
+  # every built-in tool is named here: these as reads, the ones with real effects
+  # further down as not projected. A host update that adds a tool needs a line.
+  - { name: TodoWrite, action_type: Read, side_effect: Read }
+  - { name: Task, action_type: Read, side_effect: Read }
+  - { name: Agent, action_type: Read, side_effect: Read }
+  - { name: TaskCreate, action_type: Read, side_effect: Read }
+  - { name: TaskUpdate, action_type: Read, side_effect: Read }
+  - { name: TaskList, action_type: Read, side_effect: Read }
+  - { name: TaskGet, action_type: Read, side_effect: Read }
+  - { name: TaskOutput, action_type: Read, side_effect: Read }
+  - { name: TaskStop, action_type: Read, side_effect: Read }
+  - { name: BashOutput, action_type: Read, side_effect: Read }
+  - { name: KillShell, action_type: Read, side_effect: Read }
+  - { name: KillBash, action_type: Read, side_effect: Read }
+  - { name: ExitPlanMode, action_type: Read, side_effect: Read }
+  - { name: EnterPlanMode, action_type: Read, side_effect: Read }
+  - { name: AskUserQuestion, action_type: Read, side_effect: Read }
+  - { name: ToolSearch, action_type: Read, side_effect: Read }
+  - { name: Skill, action_type: Read, side_effect: Read }
+  - { name: SlashCommand, action_type: Read, side_effect: Read }
+  - { name: NotebookRead, action_type: Read, side_effect: Read }
+  - { name: ListAgents, action_type: Read, side_effect: Read }
+  - { name: ReportFindings, action_type: Read, side_effect: Read }
+  - { name: ReadNotifications, action_type: Read, side_effect: Read }
+  - { name: ListSkills, action_type: Read, side_effect: Read }
+  - { name: SearchSkills, action_type: Read, side_effect: Read }
+  - { name: SuggestSkills, action_type: Read, side_effect: Read }
+  - { name: ListPlugins, action_type: Read, side_effect: Read }
+  - { name: SearchPlugins, action_type: Read, side_effect: Read }
+  - { name: SuggestPluginInstall, action_type: Read, side_effect: Read }
+  # The Claude app's own tools: its task list, end-of-turn box, chapters, and the
+  # inline visuals it draws in the conversation. Nothing leaves the app.
+  - { name: mcp__ccd_turn__update_plan, action_type: Read, side_effect: Read }
+  - { name: mcp__ccd_turn__wrap_up, action_type: Read, side_effect: Read }
+  - { name: mcp__ccd_session__mark_chapter, action_type: Read, side_effect: Read }
+  - { name: mcp__ccd_session__dismiss_task, action_type: Read, side_effect: Read }
+  - { name: mcp__visualize__read_me, action_type: Read, side_effect: Read }
+  - { name: mcp__visualize__show_widget, action_type: Read, side_effect: Read }
+
+  # Built-in tools this desk does not give the agent. Named, with what they would
+  # do, and not projected: absent by decision, not because nobody knew they exist.
+  # No switch turns them on; edit this file for that. Tools from an account's own
+  # connectors (Gmail, Drive, Linear, ...) have per-account names and cannot be
+  # listed here: under --enforce-absent they are absent as unknown.
+  #   Commands that would bypass the shell classifier below.
+  - { name: Monitor, action_type: Command, side_effect: Process, projected: false }
+  - { name: mcp__terminal__run_in_terminal, action_type: Command, side_effect: Process, projected: false }
+  - { name: mcp__terminal__read_terminal, action_type: Read, side_effect: Read, projected: false }
+  #   Work that outlives the session, or starts another agent.
+  - { name: ScheduleWakeup, action_type: Command, side_effect: PersistentWrite, projected: false }
+  - { name: CronCreate, action_type: Command, side_effect: PersistentWrite, projected: false }
+  - { name: CronDelete, action_type: Command, side_effect: PersistentWrite, projected: false }
+  - { name: CronList, action_type: Read, side_effect: Read, projected: false }
+  - { name: RemoteTrigger, action_type: Command, side_effect: External, projected: false }
+  - { name: EnterWorktree, action_type: Write, side_effect: FilesystemWrite, projected: false }
+  - { name: ExitWorktree, action_type: Write, side_effect: FilesystemWrite, projected: false }
+  - { name: mcp__ccd_session__start_session, action_type: Command, side_effect: Process, projected: false }
+  - { name: mcp__ccd_session__hand_off_to_session, action_type: Command, side_effect: Process, projected: false }
+  #   Messages and pages that leave this session.
+  - { name: SendMessage, action_type: Mcp, side_effect: External, projected: false }
+  - { name: FetchInboxMessage, action_type: Mcp, side_effect: Network, projected: false }
+  - { name: SendUserFile, action_type: Mcp, side_effect: External, projected: false }
+  - { name: PushNotification, action_type: Mcp, side_effect: External, projected: false }
+  - { name: Artifact, action_type: Mcp, side_effect: External, projected: false }
+  - { name: ArtifactComments, action_type: Mcp, side_effect: External, projected: false }
+  - { name: ArtifactData, action_type: Mcp, side_effect: External, projected: false }
+  - { name: DesignSync, action_type: Mcp, side_effect: External, projected: false }
+  #   The app's browser pane: reading and acting on the web outside "Read the web".
+  - { name: mcp__Claude_Browser__navigate, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__preview_start, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__browser_batch, action_type: Web, side_effect: External, projected: false }
+  - { name: mcp__Claude_Browser__computer, action_type: Web, side_effect: External, projected: false }
+  - { name: mcp__Claude_Browser__form_input, action_type: Web, side_effect: External, projected: false }
+  - { name: mcp__Claude_Browser__javascript_tool, action_type: Web, side_effect: External, projected: false }
+  - { name: mcp__Claude_Browser__get_page_text, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__read_page, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__find, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__read_network_requests, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__read_console_messages, action_type: Web, side_effect: Network, projected: false }
+  - { name: mcp__Claude_Browser__tabs_context, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__tabs_create, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__tabs_select, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__tabs_close, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__resize_window, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__preview_list, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__preview_logs, action_type: Read, side_effect: Read, projected: false }
+  - { name: mcp__Claude_Browser__preview_stop, action_type: Read, side_effect: Read, projected: false }
+
+  # Read the web. Reading anything from the network marks the session.
+  - { name: WebFetch, action_type: Web, side_effect: Network }
+  - { name: WebSearch, action_type: Web, side_effect: Network }
+  - { name: Bash_fetch, action_type: Command, side_effect: Network }
+  - { name: PowerShell_fetch, action_type: Command, side_effect: Network }
+
+  # Send data out.
+  - { name: Bash_upload, action_type: Command, side_effect: External, approval_required: true }
+  - { name: PowerShell_upload, action_type: Command, side_effect: External, approval_required: true }
+
+  # Delete files.
+  - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: PowerShell_destructive, action_type: Command, side_effect: Process, approval_required: true }
+
+  # Edit project files.
+  - { name: Edit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: NotebookEdit, action_type: Patch, side_effect: FilesystemWrite }
+
+  # Run scripts. An interpreter can do anything, including reach the network.
+  - { name: Bash_script, action_type: Command, side_effect: Network }
+
+  # A command this world cannot place: it asks first, and after the session has
+  # read from outside it is refused.
+  - { name: Bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+  - { name: PowerShell, action_type: Command, side_effect: Process }
+  - { name: PowerShell_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+
+# Patterns match at a word boundary anywhere in the command. Any curl or wget is a
+# read of the web, whatever its flags (`curl -sS -i http://...` included). A command
+# matched by two different classes falls to default_to, so a curl that also carries
+# an upload flag (`curl -F file=@x http://...`) is ambiguous and is treated as
+# unrecognised: it asks first, and once the session has read from outside it is
+# refused. Uploads without curl (scp, rsync, ...) are "Send data out" proper.
+command_classes:
+  - action: Bash
+    arg: command
+    default_to: Bash_unclassified
+    classes:
+      - to: Bash
+        patterns: ["ls ", "cat ", "head ", "tail ", "wc ", "find ", "grep ", "pwd", "git status", "git log", "git diff"]
+      - to: Bash_fetch
+        patterns: ["curl ", "curl.exe ", "wget "]
+      - to: Bash_upload
+        patterns: ["-F ", "-T ", "--form", "--data", "--upload-file", "-d @", "-d '", "-d \"", "-X POST", "-X PUT", "--request POST", "scp ", "sftp ", "rsync ", "nc ", "ncat ", "telnet ", "ssh "]
+      - to: Bash_destructive
+        patterns: ["rm ", "rmdir", "unlink ", "shred ", "Remove-Item"]
+      - to: Bash_script
+        patterns: ["python", "node ", "perl ", "ruby ", "php ", "bash ", "sh ", "deno ", "npx ", "pwsh", "powershell"]
+  - action: PowerShell
+    arg: command
+    default_to: PowerShell_unclassified
+    classes:
+      - to: PowerShell
+        patterns: ["Get-ChildItem", "Get-Content", "Get-Location", "dir ", "ls ", "cat "]
+      # Claude Code on Windows often reaches for `curl.exe` from its PowerShell tool.
+      - to: PowerShell_fetch
+        patterns: ["Invoke-WebRequest", "Invoke-RestMethod", "iwr ", "irm ", "curl ", "curl.exe ", "wget "]
+      # The curl upload flags too, so a curl.exe upload is ambiguous here exactly as
+      # in Bash, never a plain fetch.
+      - to: PowerShell_upload
+        patterns: ["-InFile", "-Method Post", "-Method Put", "-Form ", "Start-BitsTransfer", "WebClient", "-F ", "-T ", "--form", "--data", "--upload-file", "-d @", "-X POST", "-X PUT"]
+      - to: PowerShell_destructive
+        patterns: ["Remove-Item", "DeleteDirectory", "DeleteFile", "rm ", "rmdir", "del ", "rd ", "Clear-Content"]
+
+# Once the session has read from outside, nothing leaves it. The kernel enforces
+# this even without these lines; they name the rule.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000

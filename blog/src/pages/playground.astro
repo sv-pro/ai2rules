@@ -15,8 +15,10 @@ const description =
     <BaseHead title={title} description={description} />
     <style>
       main {
+        box-sizing: border-box;
         width: 1080px;
         max-width: calc(100% - 2em);
+        padding: clamp(1.25rem, 4vw, 3rem);
       }
       .intro { margin-bottom: 1.5rem; }
       .intro h1 { font-size: 2rem; margin: 0 0 0.5rem; line-height: 1.1; }

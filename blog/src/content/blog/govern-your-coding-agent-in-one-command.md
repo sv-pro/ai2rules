@@ -10,7 +10,14 @@ Start with the part you can check yourself, in a directory you do not care about
 ```bash
 npm install -g ai2rules-harness
 harness init
+harness demo
 ```
+
+`demo` runs eight cases through the real kernel (Read, Write, Shell, JIRA_CREATE_ISSUE,
+scoped actions, path roots, poisoned knowledge, classification), records each verdict,
+and replays them to prove deterministic decisions. Decision-only, no tool execution,
+no credentials. The footer says "Next: harness doctor" — that command is planned but
+not yet shipped.
 
 Then, without starting an agent session at all, ask the gate what it thinks of a
 write to `/etc/passwd`:
