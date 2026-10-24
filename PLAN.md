@@ -499,6 +499,8 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 
 - [x] **E13.9** Machine-wide governance (DECISIONS **D82**, `docs/machine-wide-governance.md`): `harness init --user` merges the hook into `~/.claude/settings.json` with an absolute state dir and a world that protects the files able to disable it; `harness init --managed` installs into Claude Code's managed settings (admin-only; no user-side kill-switch, no `HARNESS_BIN`, kernel copied into the policy dir). Both take `--remove`. **Pending**: per-user taint state is still writable by that user (the hook runs as them) — closing it needs a privileged state service; `--bare` vs managed hooks unverified; `harness doctor` does not report user/managed installs yet.
 
+- [x] **E13.10** Instruction and memory files count as durable memory (DECISIONS **D83**, AI2-64 / #137, gap G1 of the *Designing AI Agents* review): a `path_classes` world section reclassifies `Write`/`Edit`/`MultiEdit`/`NotebookEdit` (and Antigravity's `write_to_file`/`propose_code`/`edit_notebook`) to a `side_effect: Memory` action when the canonical path or the normalized argument matches `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/{agents,commands,rules,skills}/**`, auto-memory or `.agents/{rules,skills,workflows}/**`. Tainted → `DENY taint_invariant`; clean → ALLOW in project worlds, ASK in `--user`/`--managed` worlds. One pattern list, pinned across host manifests. **Pending**: shell writes (`echo >> CLAUDE.md`, D57 residual), Antigravity `move` (destination key not captured), path classes for the OpenCode and DeepSeek Harness worlds.
+
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
 
 ---
@@ -759,6 +761,13 @@ are published per scenario with no reassuring aggregate score.
   upstream over `harness mcp-gateway`.
 - [ ] **E18.12** External reproduction (AI2-9): one engineer outside this repository runs the
   pack from `docs/benchmarks/mcp-governance/README.md` alone and reports what was unclear.
+- [ ] **E18.13** OpenClaw 2.0 external target ([#77](https://github.com/sv-pro/ai2rules/issues/77)
+  / [Linear AI2-21](https://linear.app/ai2rules/issue/AI2-21/benchmark-evaluate-openclaw-20-default-vs-hardened-execution)): pin `v2026.8.1` and run identical probes against documented
+  `default-personal` and `hardened-team` profiles. Measure capability shaping, execution
+  placement, approval binding/replay, protected-secret egress, shared-session role limits,
+  and failure direction with runner-owned effect counts. The registered target profile is
+  [`docs/benchmarks/openclaw-2/README.md`](docs/benchmarks/openclaw-2/README.md); it remains
+  outside generated results until the executable evidence contract is met.
 
 **Exit:** the runner detects every intentional weak-baseline failure, ai2rules produces
 evidence-backed expected outcomes without an LLM, and an external engineer can reproduce the

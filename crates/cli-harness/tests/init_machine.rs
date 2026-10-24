@@ -215,6 +215,63 @@ fn the_user_world_protects_the_files_that_can_switch_it_off() {
     compiler::compile(&manifest).expect("compiles");
 }
 
+/// D83: a write to an instruction or memory file is a durable-memory write. A
+/// tainted session is refused everywhere; a clean one asks in a machine-scope
+/// world, which governs every project and `~/.claude` itself, and is allowed in
+/// the per-project world `harness init` writes.
+#[test]
+fn machine_worlds_ask_before_a_clean_instruction_file_write() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let policy = tmp.path().join("ClaudeCode");
+    fs::create_dir_all(&policy).unwrap();
+    ok(&init(tmp.path(), &["--user"]));
+    ok(&init(
+        tmp.path(),
+        &["--managed", "--policy-dir", policy.to_str().unwrap()],
+    ));
+    let project = fs::read_to_string(repo_root().join("scripts/starter-world.yaml")).unwrap();
+    let user = fs::read_to_string(tmp.path().join(".claude/ai2rules/user/cc-world.yaml")).unwrap();
+    let managed = fs::read_to_string(policy.join("ai2rules/cc-world.yaml")).unwrap();
+
+    let action = harness_types::ActionName::new("Write_instructions");
+    for (name, text, asks) in [
+        ("project", &project, false),
+        ("user", &user, true),
+        ("managed", &managed, true),
+    ] {
+        let world = compiler::compile(&compiler::loader::load_yaml(text).unwrap()).unwrap();
+        let classified = world.classify_call(
+            &harness_types::ActionName::new("Write"),
+            &json!({ "file_path": "CLAUDE.md" }),
+            None,
+        );
+        assert_eq!(
+            classified, action,
+            "{name}: CLAUDE.md is an instruction file"
+        );
+        assert_eq!(
+            world.requires_approval(&action),
+            asks,
+            "{name}: does a clean write ask?"
+        );
+
+        let req: harness_preview::GateRequest = serde_json::from_value(json!({
+            "tool": "Write",
+            "arguments": { "file_path": "CLAUDE.md" },
+            "path": "/home/dev/proj/CLAUDE.md",
+            "context": { "taint": "tainted", "mode": "interactive", "source_channel": "user_cli", "usage": {} },
+        }))
+        .unwrap();
+        let res = harness_preview::gate(&world, &req);
+        assert_eq!(res.decision, "DENY", "{name}: tainted instruction write");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"), "{name}");
+    }
+}
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
 #[test]
 fn user_remove_restores_the_settings_that_were_there() {
     let tmp = tempfile::tempdir().expect("tmp");
@@ -491,11 +548,25 @@ mod shim {
 
         // …while ordinary work in the project, including the rest of `.claude/`,
         // is untouched.
-        for target in [project.join("main.rs"), project.join(".claude/skills/x.md")] {
+        for target in [project.join("main.rs"), project.join(".claude/notes.md")] {
             let v = event(&shim, &home, &project, write("w", &target), &[]);
             assert!(
                 v.trim().is_empty(),
                 "Write {} was blocked: {v:?}",
+                target.display()
+            );
+        }
+
+        // An instruction file is not ordinary work at machine scope (D83): a clean
+        // session is asked before it changes what every later session loads.
+        for target in [
+            project.join(".claude/skills/x.md"),
+            project.join("CLAUDE.md"),
+        ] {
+            let v = event(&shim, &home, &project, write("w", &target), &[]);
+            assert!(
+                v.contains("\"ask\""),
+                "Write {} did not ask: {v:?}",
                 target.display()
             );
         }

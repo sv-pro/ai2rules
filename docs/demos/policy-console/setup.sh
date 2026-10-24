@@ -50,6 +50,12 @@ cp -r "$KIT/project/." "$DESK/"
 "$HARNESS" init --grant "$DESK" >/dev/null
 cp "$HERE/world.yaml" "$DESK/.claude/cc-world.yaml"
 
+# The scenario as a skill: `/northwind-demo` runs the four steps and pauses for
+# each switch the presenter flips. Only here, not in the shared project kit, so
+# the side-by-side demo's copies do not get it.
+mkdir -p "$DESK/.claude/skills/northwind-demo"
+cp "$HERE/skill/SKILL.md" "$DESK/.claude/skills/northwind-demo/SKILL.md"
+
 # Two flags the starter shim does not set:
 #   --enforce-absent  an action switched Off is refused, not left to Claude Code's
 #                     own prompt, so Off means "this agent does not have it"
