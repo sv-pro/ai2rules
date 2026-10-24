@@ -402,7 +402,9 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **491 tests** green.
+Builds clean offline with `clippy -D warnings`; **491 tests** green. Unix machine-hook
+tests feed prepared events through stdin so a disabled hook's early exit cannot
+race the fixture writer.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
