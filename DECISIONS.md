@@ -3494,6 +3494,13 @@ choices, each closing an alternative:
   redacted call and result summaries as `ai2rules.call` / `ai2rules.result`, not as
   `gen_ai.tool.call.arguments` / `.result`, which the conventions define as the
   argument and result objects the log deliberately does not keep.
-- *Ids are derived, not random* (`md5`, already in the build, over the session and
-  call id): re-exporting a log yields the same trace, so a collector deduplicates
-  instead of doubling.
+- *Ids are derived, not random* (`md5`, already in the build): trace IDs use the
+  session; span IDs use a framed tuple of session, optional call ID and a per-call
+  occurrence index (`ai2rules.decision_index`). Re-exporting the same finished
+  log preserves IDs. Repeated hooks can log multiple decisions for one call;
+  coalescing them would discard distinct verdicts and ASK/DENY inferences, so
+  each remains a span, correlated by the unchanged host call ID and session.
+  These spans count decisions rather than distinct executions. Id-less records
+  have a separate per-session sequence. Inserting another call or a non-decision
+  record does not renumber this call; editing its decision sequence can. This
+  corrects the original call-only seed: span IDs change once across that fix.

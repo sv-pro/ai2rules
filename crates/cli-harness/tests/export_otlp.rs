@@ -227,3 +227,115 @@ fn a_missing_log_is_a_clear_error() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("cannot read"));
 }
+
+#[test]
+fn repeated_decisions_have_distinct_stable_span_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let d = json!({"kind": "decision", "session": "s", "tool_use_id": "t",
+        "ts_ms": 1, "tool": "Write", "decision": "ALLOW"});
+    let legacy = json!({"session": "s", "ts_ms": 1, "tool": "Read", "decision": "ALLOW"});
+    let other_session = json!({"session": "other", "tool_use_id": "t",
+        "ts_ms": 1, "tool": "Write", "decision": "ALLOW"});
+    let mut lines = vec![d.clone(), d, legacy.clone(), legacy, other_session];
+    let write = |lines: &[Value]| {
+        std::fs::write(
+            &log,
+            lines
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+    };
+    write(&lines);
+    let first = export(&log, &[]);
+    let spans = first["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        .as_array()
+        .unwrap();
+    assert_eq!(spans.len(), 5);
+    let ids: std::collections::HashSet<_> = spans
+        .iter()
+        .map(|sp| (&sp["traceId"], &sp["spanId"]))
+        .collect();
+    assert_eq!(
+        ids.len(),
+        5,
+        "every decision must survive collector deduplication"
+    );
+    assert_eq!(spans[0]["traceId"], spans[1]["traceId"]);
+    assert_eq!(s(&spans[0], "gen_ai.tool.call.id"), "t");
+    assert_eq!(s(&spans[1], "gen_ai.tool.call.id"), "t");
+    assert!(attr(&spans[2], "gen_ai.tool.call.id").is_none());
+    assert!(attr(&spans[3], "gen_ai.tool.call.id").is_none());
+    assert_ne!(spans[0]["traceId"], spans[4]["traceId"]);
+    assert_eq!(
+        attr(&spans[0], "ai2rules.decision_index").unwrap()["intValue"],
+        "0"
+    );
+    assert_eq!(
+        attr(&spans[1], "ai2rules.decision_index").unwrap()["intValue"],
+        "1"
+    );
+    assert_eq!(export(&log, &[]), first);
+
+    // Unrelated records must not renumber decisions for an existing call.
+    lines.insert(1, json!({"kind": "policy", "ts_ms": 1}));
+    lines.insert(
+        2,
+        json!({"kind": "decision", "session": "s", "tool_use_id": "unrelated",
+        "ts_ms": 1, "tool": "Read", "decision": "ALLOW"}),
+    );
+    write(&lines);
+    let extended = export(&log, &[]);
+    let after = extended["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        .as_array()
+        .unwrap();
+    for (before, after) in spans.iter().zip(
+        after
+            .iter()
+            .filter(|sp| s(sp, "gen_ai.tool.call.id") != "unrelated"),
+    ) {
+        assert_eq!(before["spanId"], after["spanId"]);
+    }
+}
+
+#[test]
+fn repeated_call_keeps_each_decisions_inference() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let lines = [
+        json!({"kind": "decision", "session": "s", "tool_use_id": "t",
+            "ts_ms": 1, "tool": "Write", "decision": "ASK", "answer": "ask"}),
+        json!({"kind": "decision", "session": "s", "tool_use_id": "t",
+            "ts_ms": 2, "tool": "Write", "decision": "DENY", "answer": "deny"}),
+        json!({"kind": "outcome", "session": "s", "tool_use_id": "t", "ts_ms": 3, "status": "ok"}),
+    ];
+    std::fs::write(
+        &log,
+        lines
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    let v = export(&log, &[]);
+    let spans = v["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        .as_array()
+        .unwrap();
+    assert_eq!(spans.len(), 2);
+    assert_eq!(s(&spans[0], "ai2rules.human_answer"), "approved");
+    assert!(attr(&spans[0], "ai2rules.ran_despite_deny").is_none());
+    assert!(attr(&spans[1], "ai2rules.human_answer").is_none());
+    assert_eq!(
+        attr(&spans[1], "ai2rules.ran_despite_deny").unwrap()["boolValue"],
+        true
+    );
+    for sp in spans {
+        assert_eq!(sp["endTimeUnixNano"], "3000000");
+        assert_eq!(sp["events"][1]["name"], "ai2rules.outcome");
+        assert_eq!(attr(sp, "ai2rules.ran").unwrap()["boolValue"], true);
+    }
+}

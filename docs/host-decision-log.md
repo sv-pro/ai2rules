@@ -187,6 +187,18 @@ still exported only with `--with-summaries`, as `ai2rules.call` and
 `ai2rules.result`: `gen_ai.tool.call.arguments` is defined as the argument object,
 which the log deliberately does not keep.
 
-Ids are derived from the session and `tool_use_id`, so the same log always exports
-the same trace. A pre-D84 line (no `kind`, no id) still exports, without
-`gen_ai.tool.call.id`.
+Trace IDs are derived from the session. Span IDs hash a framed tuple of session,
+optional `tool_use_id` and a zero-based occurrence index for that session/call.
+The index is exported as `ai2rules.decision_index`. Repeated hook invocations
+(including identical decision lines) therefore retain separate spans, correlated
+by `gen_ai.conversation.id` and the unchanged `gen_ai.tool.call.id`. Each span
+keeps its own decision and ASK/DENY inference, joined to the call's shared outcome.
+These spans count decisions, not distinct tool executions.
+
+Re-exporting the same finished log yields the same IDs. Interleaving other calls,
+outcomes or policy markers does not renumber a call's decisions; removing or
+reordering decisions within that call can change their IDs. A pre-D84 line (no
+`kind`, no id) still exports without `gen_ai.tool.call.id`; id-less decisions use
+their own per-session occurrence sequence. The occurrence scheme changes span IDs
+from the original exporter, so re-exporting a previously ingested log across this
+change may duplicate those historical spans in a collector.

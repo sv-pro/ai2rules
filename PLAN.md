@@ -283,7 +283,8 @@ E2, E3. **Completes M1. Status:** done.
   `replay-transcripts --decisions` joins the log to transcripts and infers ASK
   answers (stated as inferred). OTLP: not from the hook (no offline dependency,
   no egress per call); `harness export-otlp` converts a finished log to OTLP/JSON
-  GenAI `execute_tool` spans, one trace per session (AI2-66 / #141).
+  GenAI `execute_tool` spans, one trace per session (AI2-66 / #141). Repeated
+  decisions for one call retain distinct span IDs and per-decision ASK/DENY inferences.
 
 **Exit:** replay reproduces decisions; redaction holds; the M1 vertical slice
 (`read_file` → kernel → sim executor → trace → replay) passes end to end.

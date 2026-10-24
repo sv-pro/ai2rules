@@ -344,7 +344,9 @@ which `harness init` wires in, records how each call that ran ended. That is eno
 to tell an approved ASK from a declined one, inferred from whether the call ran
 ([`docs/host-decision-log.md`](docs/host-decision-log.md)). `harness export-otlp`
 turns a finished log into OpenTelemetry traces (OTLP/JSON, GenAI `execute_tool`
-spans, one trace per session) for an existing collector, offline. Call summaries mask
+spans, one trace per session) for an existing collector, offline. Repeated hook
+decisions retain distinct, stable span IDs and their original call ID for correlation.
+Call summaries mask
 recognized secrets before whitespace normalization and truncation, so shortening
 cannot expose a credential fragment. Off takes the action out of the agent's world (ABSENT, with
 `--enforce-absent`); the taint floor has no switch. Runbook and scenario:
@@ -400,7 +402,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **489 tests** green.
+Builds clean offline with `clippy -D warnings`; **491 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

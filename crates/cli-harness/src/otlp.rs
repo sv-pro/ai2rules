@@ -30,7 +30,7 @@
 //! An ASK's answer stays labelled as what it is: `ai2rules.human_answer` is
 //! inferred from whether the call ran (D84), never attested.
 
-use crate::outcome::{join, read_log, Joined};
+use crate::outcome::{join, read_log};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
@@ -119,14 +119,15 @@ pub fn export(lines: &[Value], with_summaries: bool) -> Value {
             outcomes.insert(k, l);
         }
     }
-    let joined: HashMap<(String, String), Joined> = join(lines)
-        .into_iter()
-        .map(|j| ((j.session.clone(), j.tool_use_id.clone()), j))
-        .collect();
+    // join preserves decision order and skips only decisions without call ids.
+    // A map keyed by call would overwrite the earlier decisions' ASK/DENY
+    // inferences when duplicate hook registrations observe the same call.
+    let mut joined = join(lines).into_iter();
+    let mut occurrences: HashMap<(String, Option<String>), u64> = HashMap::new();
 
     let mut spans = Vec::new();
     let mut host = None;
-    for (i, d) in lines.iter().enumerate() {
+    for d in lines {
         // A missing `kind` is a pre-D84 decision line.
         if !matches!(
             d.get("kind").and_then(Value::as_str),
@@ -139,7 +140,12 @@ pub fn export(lines: &[Value], with_summaries: bool) -> Value {
         let id = text(d, "tool_use_id");
         let k = id.clone().map(|id| (session.clone(), id));
         let outcome = k.as_ref().and_then(|k| outcomes.get(k)).copied();
-        let j = k.as_ref().and_then(|k| joined.get(k));
+        let j = id.as_ref().and_then(|_| joined.next());
+        let next = occurrences
+            .entry((session.clone(), id.clone()))
+            .or_default();
+        let decision_index = *next;
+        *next += 1;
         host = host.or_else(|| text(d, "host"));
 
         let start = d["ts_ms"].as_u64().unwrap_or(0);
@@ -180,6 +186,7 @@ pub fn export(lines: &[Value], with_summaries: bool) -> Value {
             ("ai2rules.manifest_hash", d["manifest_hash"].clone()),
             ("ai2rules.host", d["host"].clone()),
             ("ai2rules.step_idx", d["step_idx"].clone()),
+            ("ai2rules.decision_index", json!(decision_index)),
         ]);
         if let Some(id) = &id {
             a.extend(attr("gen_ai.tool.call.id", &json!(id)));
@@ -231,10 +238,13 @@ pub fn export(lines: &[Value], with_summaries: bool) -> Value {
             }));
         }
 
-        let span_seed = match &id {
-            Some(id) => format!("{session}\u{1f}{id}"),
-            None => format!("{session}\u{1f}{start}\u{1f}{i}"),
-        };
+        // Keep every decision, including byte-identical duplicate hook events.
+        // The per-call ordinal is stable for a finished log and unaffected by
+        // interleaved outcomes, policy records or other calls. The original
+        // host call id correlates these spans; it is never invented or changed.
+        // JSON framing separates absent ids from strings and avoids delimiter
+        // ambiguity in host-supplied session/call ids.
+        let span_seed = json!(["ai2rules-decision", session, id, decision_index]).to_string();
         let mut span = json!({
             "traceId": hex_id(&format!("ai2rules-session\u{1f}{session}"), 16),
             "spanId": hex_id(&span_seed, 8),
