@@ -18,6 +18,10 @@ pause where the presenter has to change the policy. The presenter, not you,
 changes the policy: never open, call or edit the console, the world file or the
 hook.
 
+Use a fresh session after setup. This skill always starts at step 1; it does not
+resume an earlier manual run. If you already fetched the portal in this session,
+stop and ask the presenter to restart the stand and open a new session.
+
 The console is at http://127.0.0.1:8790/ (port 8790 unless the stand was started
 with another `CONSOLE_PORT`). Give the presenter that address whenever they ask;
 giving it is not opening it.

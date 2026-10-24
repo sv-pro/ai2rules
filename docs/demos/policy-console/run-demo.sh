@@ -60,7 +60,7 @@ PY=python3
 
 # A receiver or console left over from an earlier run would answer the checks with
 # the wrong project, or make ours fail to bind. Refuse rather than guess.
-answers() { curl -s -o /dev/null --max-time 2 "$1"; }
+answers() { curl --noproxy '*' -fsS -o /dev/null --max-time 2 "$1" 2>/dev/null; }
 if answers "http://127.0.0.1:$PORT/health"; then
   echo "run-demo: something already answers on port $PORT (an old receiver?). Stop it first." >&2
   exit 1

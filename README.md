@@ -28,6 +28,10 @@ replayable. See [Status](#status).
 > ~45 minutes, all offline and credential-free — from the five verdicts, to one
 > kernel deciding for four different hosts, to governing a project of your own.
 
+The [policy-console demo](docs/demos/policy-console/README.md) includes the
+`/northwind-demo` skill and read-only stand checks. Start a fresh session and
+rehearse interactively; passing preflight does not establish live-agent readiness.
+
 ---
 
 ## Govern a project in one command
