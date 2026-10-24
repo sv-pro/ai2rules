@@ -100,6 +100,25 @@ class ManagedOracleTests(unittest.TestCase):
                 result["hook_records"][0]["event"].update(changes)
                 self.assertEqual(self.observe(result), "INCOMPLETE")
 
+    def test_refresh_notice_is_retained_without_masking_admission_failures(self):
+        notice = ("2026-10-24T15:16:10.401Z [DEBUG] Plugin autoupdate: command-source refresh "
+                  "disabled by tengu_plugin_command_source_refresh (still excluding "
+                  "command-sourced plugins from the regular pass)")
+        failures = ["[DEBUG] plugin refused by managed policy",
+                    "[DEBUG] mod disabled by allowManagedModsOnly",
+                    "[ERROR] plugin FAILED TO LOAD",
+                    notice + " unexpected extra text"]
+        admission, background = probe.classify_diagnostics(notice)
+        self.assertEqual(admission, [])
+        self.assertEqual(background, [notice])
+        admission, background = probe.classify_diagnostics("\n".join([notice] + failures))
+        self.assertEqual(admission, failures)
+        self.assertEqual(background, [notice])
+        # Even a loaded module does not cancel a subsequent admission diagnostic.
+        result = copy.deepcopy(self.fixture)
+        result["admission_diagnostics"] = admission
+        self.assertEqual(self.observe(result), "INCOMPLETE")
+
     def test_policy_change_is_incomplete(self):
         self.policy.write_text('{"changed": true}', encoding="utf-8")
         self.assertEqual(self.observe(copy.deepcopy(self.fixture)), "INCOMPLETE")

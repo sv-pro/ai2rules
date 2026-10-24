@@ -47,3 +47,22 @@ runner and its recorded results remain unchanged. Next: start/provide a Linux
 amd64 Docker daemon, build the recipe, run only the two managed cases, inspect
 and preserve sanitized source/tier/deny/effect evidence. Keep #99 / AI2-41 open
 and PR #100 draft; no merge authorized.
+
+## 2026-10-24 — managed live comparison complete
+
+Started Docker Desktop as requested; built the pinned Linux amd64 recipe.
+Ran mod off/on without network, mounts, credentials or capabilities, as uid1000.
+Both: genuine root-owned system hook emits deny; exact marker absent.
+sec-default/prepend loaded, override/user explicitly admitted in mod-on.
+Initial run was INCOMPLETE solely because the classifier caught background
+plugin-refresh diagnostics. Preserved that report; added an exact-notice
+classification and regression test, rebuilt and reran both in a new container.
+Final: DENY_NO_EFFECT twice, exit0, no evidence gaps; nine offline tests pass.
+
+Artifacts: docs/benchmarks/claude-mods/results/managed-2.1.288.json and
+results/managed-2.1.288/ (full normalized debug/hook logs, policy fixtures,
+provenance, npm lockfile, initial report and human interpretation).
+Original project probe/results, runtime policy and hook shim unchanged.
+No merge, production guard, demo change or deferred PR change. #99 / AI2-41
+remain open for review and the next targeted coverage/doctor/docs decision.
+Do not rerun completed project proof or infer arbitrary-mod isolation.

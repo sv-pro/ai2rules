@@ -19,9 +19,28 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def classify_diagnostics(debug):
+    """Keep unknown admission warnings fail-closed; retain known background noise."""
+    admission, background = [], []
+    # Observed verbatim in 2.1.288. This disables background refresh, not loading
+    # the inline fixture. Do not ignore other "disabled by" messages.
+    refresh = ("Plugin autoupdate: command-source refresh disabled by "
+               "tengu_plugin_command_source_refresh (still excluding "
+               "command-sourced plugins from the regular pass)")
+    for line in debug.splitlines():
+        if any(token in line.lower() for token in ("refused by", "disabled by", "failed to load")):
+            if line.partition("[DEBUG] ")[2] == refresh:
+                background.append(line)
+            else:
+                admission.append(line)
+    return admission, background
+
+
 def inspect_case(result, policy_hash):
     """Separate evidence gaps from an observed denial-with-effect finding."""
     gaps = []
+    if result.get("admission_diagnostics"):
+        gaps.append("Admission diagnostics require inspection")
     if result["host"].get("exit_code") != 0 or len(result["model_calls"]) != 2:
         gaps.append("Expected successful host completion and two scripted exchanges")
     if not result["hook_records"]:
@@ -93,15 +112,11 @@ def main():
         debug = debug_path.read_text() if debug_path.exists() else ""
         result["expected_input"] = {"file_path": str(root / name / "project/denied-marker.txt"),
                                     "content": "AI2RULES_MODS_PROBE\n"}
-        result["admission_diagnostics"] = [line for line in debug.splitlines()
-            if "refused by" in line or "disabled by" in line or "failed to load" in line.lower()]
+        result["admission_diagnostics"], result["background_diagnostics"] = classify_diagnostics(debug)
         project_settings = root / name / "project/.claude/settings.json"
         if json.loads(project_settings.read_text()) != {}:
             raise SystemExit("Unexpected project hook/settings")
         inspect_case(result, policy_hash)
-        if result["admission_diagnostics"]:
-            result["evidence_gaps"].append("Admission diagnostics require inspection")
-            result["observation"] = "INCOMPLETE"
         (root / name / "evidence.json").write_text(json.dumps(result, indent=2) + "\n")
         results.append(result)
         print(name, result["observation"], flush=True)

@@ -1,3 +1,26 @@
+# Current handoff — PR #100 managed comparison
+
+## 2026-10-24 — managed live comparison complete
+
+Started Docker Desktop as requested; built the pinned Linux amd64 recipe.
+Ran mod off/on without network, mounts, credentials or capabilities, as uid1000.
+Both: genuine root-owned system hook emits deny; exact marker absent.
+sec-default/prepend loaded, override/user explicitly admitted in mod-on.
+Initial run was INCOMPLETE solely because the classifier caught background
+plugin-refresh diagnostics. Preserved that report; added an exact-notice
+classification and regression test, rebuilt and reran both in a new container.
+Final: DENY_NO_EFFECT twice, exit0, no evidence gaps; nine offline tests pass.
+
+Artifacts: docs/benchmarks/claude-mods/results/managed-2.1.288.json and
+results/managed-2.1.288/ (full normalized debug/hook logs, policy fixtures,
+provenance, npm lockfile, initial report and human interpretation).
+Original project probe/results, runtime policy and hook shim unchanged.
+No merge, production guard, demo change or deferred PR change. #99 / AI2-41
+remain open for review and the next targeted coverage/doctor/docs decision.
+Do not rerun completed project proof or infer arbitrary-mod isolation.
+
+Earlier entries below are historical and superseded where they say NOT RUN.
+
 # AI2-41 / #99 — Claude mods enforcement probe
 
 ## 2026-10-24 — conflict repair and refreshed preflight
@@ -61,3 +84,4 @@ response and marker-effect evidence; report/trackers updated. Full issue stays
 open while those rows are missing. Consult linked PR and both trackers before
 continuing. No live prompt-injection or persistence claim is established.
 Offline oracle: all 8 tests passed. Pinned npm meta/platform versions all available. MANAGED.md refreshed with Docker Server prerequisite and exact remaining evidence checklist. No runtime experiment or image build attempted because engine is unavailable. Next: syntax/JSON/diff checks, commit integration, push PR #100, fresh CI and tracker sync.
+FINAL 2026-10-24: pushed 32725813edd92e6141b89af75625c8d46966cb2e to existing PR #100. 10/10 CI checks passed (40105171659), CLEAN/MERGEABLE. PR remains draft, #99 and AI2-41 open; all three updated with current prerequisites. Managed build/mod-off/mod-on remain NOT RUN: Docker client present, Linux daemon unavailable. Stand clean main f70af23 untouched. This final local handoff note is intentionally uncommitted; cloud continuity is in PR/trackers.

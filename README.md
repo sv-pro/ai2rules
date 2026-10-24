@@ -286,10 +286,12 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   native Write tool created the denied temporary marker. The kernel correctly
   denied; the host did not retain that decision as final. See the
   [reproducible probe and evidence](docs/benchmarks/claude-mods/).
-  Managed-hook comparison remains NOT RUN (AI2-41 / #99); the
-  [disposable managed-policy recipe](docs/benchmarks/claude-mods/MANAGED.md)
-  needs a working Linux amd64 Docker daemon. On the reviewed Windows host,
-  the Docker client is installed but the Linux engine is not running.
+  **Managed comparison (2026-10-24, AI2-41 / #99):** in an isolated Linux
+  container, the genuine system-file hook denied the same native Write with
+  mod off and on; neither marker was created. sec-default loaded in prepend
+  and explicitly admitted the user-tier test mod. See the
+  [managed report and limits](docs/benchmarks/claude-mods/MANAGED.md).
+  This is a versioned native-tool result, not a sandbox or arbitrary-mod guarantee.
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the

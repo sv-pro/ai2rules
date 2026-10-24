@@ -3,10 +3,10 @@
 Tracking: [AI2-41](https://linear.app/ai2rules/issue/AI2-41/) /
 [#99](https://github.com/sv-pro/ai2rules/issues/99).
 
-Managed follow-up: [disposable container setup and two-case runner](MANAGED.md)
-prepared 2026-10-05. Build/live execution remains **NOT RUN**: this workspace
-has no Docker/Podman and cannot create the required namespace. The runbook names
-the exact external runtime prerequisite; no machine-managed policy was changed.
+Managed follow-up completed 2026-10-24: [both isolated system-file cases](MANAGED.md)
+returned live deny with no marker, including an admitted user-tier override mod.
+See the [managed report](results/managed-2.1.288/README.md) for source/tier evidence,
+container provenance and the limits of this versioned result.
 
 ## Observed result — 2026-10-03
 
@@ -19,7 +19,8 @@ both correctly returned DENY. The host did not retain that decision as final.
 | Control: hook absent, mod absent | Not installed | — | Created |
 | Project hook, mod absent | `deny` | — | Absent |
 | Project hook, exact-call override mod | `deny` | `prior=deny`, returns `allow` | Created with expected content |
-| Managed hook, mod absent/present | NOT RUN | Unknown | Unknown |
+| Managed hook, mod absent (2026-10-24) | `deny` | No override mod | Absent |
+| Managed hook, mod present (2026-10-24) | `deny` | Admitted; no `prior=deny` execution observed | Absent |
 
 The three project/control cases reproduced in two independent temporary roots.
 The checked-in [evidence](results/project-2.1.288.json) is the second run, with
@@ -103,7 +104,7 @@ temporary directories printed/created by your run when no longer needed.
 ## Limits and next step
 
 - This tests a **project** hook in `acceptEdits`, with no observed built-in
-  guard load. It does not establish results for managed hooks, Team/Enterprise,
+  guard load. The separate managed result is scoped in MANAGED.md. Neither establishes Team/Enterprise,
   auto mode, all Claude versions, or all ai2rules integration modes.
 - The harness target is the **released 0.6.0 binary**, not a fresh build of main.
   The source context was inspected at `087857c797f11d8ec24454a6a1c5e66bdee12ccb`.
@@ -113,13 +114,12 @@ temporary directories printed/created by your run when no longer needed.
   against an installed mod with permission-decision control. A DENY trace alone
   does not prove that the effect was prevented.
 
-**Next bounded experiment:** run the same hook/mod comparison with genuine
-managed settings in a disposable container/VM, recording the actual loaded
-guard/tier. Anthropic documents managed-hook blocks as final, including
-rechecking rewritten calls; that remains **documented, not observed here**.
-Do not substitute `--settings` or project JSON and call it managed. Keep #99 and
-AI2-41 open until required managed rows have evidence. A guard implementation
-and publication remain separate follow-ups.
+**Next bounded step:** review the completed managed comparison and choose a
+focused coverage/doctor/docs follow-up. The recorded project denial was
+successfully overridden; the system-file managed denial survived the admitted
+mod in both runs. Rewritten-call checks, direct mod effects, remote policy,
+persistence and sandbox escape remain untested. #99 and AI2-41 stay open for
+review; a guard implementation and publication remain separate follow-ups.
 
 ## Contract references
 

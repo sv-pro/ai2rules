@@ -487,18 +487,20 @@ regression gates enforced.
 [Claude mods probe](docs/benchmarks/claude-mods/) reproduces a user-tier mod
 overriding a project PreToolUse denial on Claude Code 2.1.288 + harness 0.6.0.
 The historical surface description below predates mods. The kernel's DENY is
-not necessarily the host's final authority. Project cases are verified;
-genuine managed-hook comparison remains open. No epic completion is claimed.
+not necessarily the host's final authority. Project cases are verified.
+The managed follow-up below completes the bounded comparison, not the epic.
 
-**2026-10-05 setup follow-up:** a [file-based managed-policy container recipe](docs/benchmarks/claude-mods/MANAGED.md)
-and managed-only runner are prepared. Image build and both live rows remain NOT
-RUN: Docker/Podman unavailable and namespace creation denied in this workspace.
-Next prerequisite is a working disposable Linux amd64 container host with
-build-time registry access. Project proof unchanged; no guard work started.
-**2026-10-24 preflight:** Docker client 29.8.0 is installed on the Windows host,
-but the desktop-linux engine pipe is absent; no daemon/server is reachable.
-The pinned npm versions remain available. Build and both managed rows are still
-NOT RUN. See MANAGED.md for the refreshed prerequisites and completion checklist.
+**2026-10-24 managed evidence (AI2-41 / #99):** Docker Desktop started and the
+[isolated file-policy experiment](docs/benchmarks/claude-mods/MANAGED.md) ran
+with Claude 2.1.288 / released harness 0.6.0. Both mod off/on: live managed
+adapter deny, no marker, DENY_NO_EFFECT. sec-default loaded in prepend; the
+user-tier test mod was explicitly admitted. The initial analyzer false alarm
+(background plugin refresh disabled) is retained beside a fresh successful pair
+and a narrow tested classifier correction. Reports, debug/hook logs, binary and
+policy hashes, image metadata and npm lockfile are committed. Earlier namespace
+and stopped-daemon blockers are superseded. No project rerun or production
+change. #99 / AI2-41 stay open for evidence review and the next diagnostics/docs
+decision; no epic completion or generalized mod isolation claim.
 
 **Design — Claude Code exposes two enforcement surfaces that mirror the kernel's two stages:**
 1. *What tools exist* — a subagent's `tools` allowlist + which MCP tools are connected = **projection / representability / ABSENT** (a tool not on the surface literally cannot be called).
