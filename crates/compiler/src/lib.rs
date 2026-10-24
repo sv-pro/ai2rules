@@ -398,4 +398,126 @@ scoped_capabilities:
         let yaml = SURFACE.replace("upstream: atlassian", "upstream: github");
         assert!(invalid(&yaml).contains("no base action is backed by that server"));
     }
+
+    // --- Argument-schema vocabulary (D86) ---
+
+    /// A one-action world whose `amount` argument carries `constraint`.
+    fn constrained(constraint: &str) -> String {
+        format!(
+            r#"
+world_id: w
+base_actions:
+  - name: pay
+    action_type: Mcp
+    side_effect: External
+    schema:
+      type: object
+      properties:
+        amount: {{ type: number, description: "How much to pay." }}
+    arg_constraints:
+      amount: {constraint}
+"#
+        )
+    }
+
+    #[test]
+    fn every_unsupported_keyword_is_refused_by_name() {
+        for (keyword, constraint) in [
+            ("pattern", r#"{ pattern: "^[0-9]+$" }"#),
+            ("multipleOf", "{ multipleOf: 5 }"),
+            ("anyOf", "{ anyOf: [{ type: number }] }"),
+            ("oneOf", "{ oneOf: [{ type: number }] }"),
+            ("allOf", "{ allOf: [{ type: number }] }"),
+            ("not", "{ not: { const: 0 } }"),
+            ("$ref", "{ $ref: '#/defs/amount' }"),
+            ("uniqueItems", "{ uniqueItems: true }"),
+            ("patternProperties", "{ patternProperties: {} }"),
+            ("maximun", "{ maximun: 10000 }"),
+        ] {
+            let manifest = load_yaml(&constrained(constraint)).expect("parses");
+            match compile(&manifest) {
+                Err(CompileError::UnsupportedKeyword {
+                    action,
+                    at,
+                    keyword: named,
+                }) => {
+                    assert_eq!(action, "pay");
+                    assert_eq!(at, "arg_constraints.amount");
+                    assert_eq!(named, keyword);
+                }
+                other => panic!("{keyword}: expected UnsupportedKeyword, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn an_unsupported_keyword_inside_the_schema_is_refused_too() {
+        let yaml = constrained("{ maximum: 10 }").replace(
+            "type: number, description",
+            r#"type: string, pattern: "^a", description"#,
+        );
+        let err = compile(&load_yaml(&yaml).expect("parses")).unwrap_err();
+        assert!(matches!(
+            &err,
+            CompileError::UnsupportedKeyword { at, keyword, .. }
+                if at == "schema.properties.amount" && keyword == "pattern"
+        ));
+        assert!(err.to_string().contains("action pay"), "{err}");
+    }
+
+    #[test]
+    fn supported_keywords_and_annotations_compile() {
+        for constraint in [
+            "{ minimum: 1, maximum: 10000 }",
+            "{ exclusiveMinimum: 0, exclusiveMaximum: 10000.5 }",
+            "{ enum: [1, 2, 3] }",
+            "{ const: 7 }",
+            "{ type: [number, \"null\"], title: Amount, format: decimal, default: 1 }",
+        ] {
+            compile(&load_yaml(&constrained(constraint)).expect("parses"))
+                .unwrap_or_else(|e| panic!("{constraint}: {e}"));
+        }
+        let lists = constrained("{ maximum: 1 }").replace(
+            "amount: { type: number, description: \"How much to pay.\" }",
+            "amount: { type: number }\n        tags: { type: array, items: { type: string, minLength: 1, maxLength: 20 }, minItems: 1, maxItems: 5 }\n        memo: { type: object, properties: { text: { type: string } }, required: [text], additionalProperties: false }",
+        );
+        compile(&load_yaml(&lists).expect("parses")).expect("compiles");
+    }
+
+    #[test]
+    fn malformed_keyword_values_are_refused() {
+        for (constraint, fragment) in [
+            ("{ maximum: lots }", "`maximum` must be a number"),
+            (
+                "{ maxLength: -1 }",
+                "`maxLength` must be a non-negative integer",
+            ),
+            ("{ type: money }", "`type` must be one of"),
+            ("{ enum: [] }", "`enum` must be a non-empty list"),
+            (
+                "{ additionalProperties: {} }",
+                "`additionalProperties` must be true or false",
+            ),
+            ("10000", "must be a mapping of schema keywords"),
+        ] {
+            let detail = invalid(&constrained(constraint));
+            assert!(detail.contains(fragment), "{constraint}: {detail}");
+            assert!(detail.contains("action pay"), "{detail}");
+        }
+    }
+
+    #[test]
+    fn a_root_schema_must_describe_an_object() {
+        let yaml = constrained("{ maximum: 1 }").replace("type: object", "type: string");
+        assert!(invalid(&yaml).contains("must be `object`"));
+    }
+
+    #[test]
+    fn a_misspelt_action_or_input_rule_key_is_a_parse_error() {
+        // Without this, `arg_constraint:` (singular) would drop the limit silently.
+        let yaml = constrained("{ maximum: 1 }").replace("arg_constraints:", "arg_constraint:");
+        assert!(matches!(load_yaml(&yaml), Err(CompileError::Parse(_))));
+        let yaml = SURFACE.replace("prefix: \"PLAT-\"", "prefix: \"PLAT-\", max_len: 8");
+        assert!(matches!(load_yaml(&yaml), Err(CompileError::Parse(_))));
+    }
 }

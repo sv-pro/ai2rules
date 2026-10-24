@@ -13,6 +13,13 @@ pub enum CompileError {
     NameCollision(String),
     /// A scoped capability references a base action that does not exist.
     UnknownBaseAction { capability: String, base: String },
+    /// A base action's `schema` or `arg_constraints` uses a keyword the kernel
+    /// does not enforce (D86). `at` locates it, e.g. `arg_constraints.amount`.
+    UnsupportedKeyword {
+        action: String,
+        at: String,
+        keyword: String,
+    },
     /// Any other structural problem with a human-readable detail.
     Invalid(String),
 }
@@ -35,6 +42,14 @@ impl std::fmt::Display for CompileError {
                     "scoped capability {capability} references unknown base action {base}"
                 )
             }
+            CompileError::UnsupportedKeyword {
+                action,
+                at,
+                keyword,
+            } => write!(
+                f,
+                "action {action}: `{keyword}` at {at} is not a keyword the kernel enforces;                  remove it or express the limit another way, since it would not be checked"
+            ),
             CompileError::Invalid(detail) => write!(f, "invalid manifest: {detail}"),
         }
     }
