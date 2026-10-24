@@ -746,9 +746,12 @@ fn events(log: &Path, since: usize) -> Value {
         (since, false)
     };
     let to = (from + EVENTS_PER_CALL).min(lines.len());
+    // Outcome lines (D84) say how an already-shown call ended; the feed counts
+    // verdicts, so they would read as extra ALLOWs.
     let events: Vec<Value> = lines[from..to]
         .iter()
-        .filter_map(|l| serde_json::from_str(l).ok())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|ev| ev["kind"] != "outcome")
         .collect();
     json!({ "ok": true, "next": to, "reset": reset, "events": events })
 }

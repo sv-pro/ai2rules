@@ -299,11 +299,9 @@ fn a_switch_changes_the_very_next_verdict_and_both_reach_the_feed() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|e| {
-            e["kind"]
-                .as_str()
-                .map(String::from)
-                .unwrap_or_else(|| e["decision"].as_str().unwrap().to_string())
+        .map(|e| match e["kind"].as_str() {
+            Some("decision") | None => e["decision"].as_str().unwrap().to_string(),
+            Some(kind) => kind.to_string(),
         })
         .collect();
     assert_eq!(kinds, ["ASK", "policy", "ABSENT", "policy", "ALLOW"]);

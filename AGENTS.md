@@ -72,13 +72,13 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
-| **cli-harness** | `harness init [--user \| --managed]`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author`, `harness console`, `harness replay-transcripts` |
+| **cli-harness** | `harness init [--user \| --managed]`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author`, `harness console`, `harness replay-transcripts`, `harness export-otlp` |
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all passing, native):**
 harness-types 9 · world-kernel 61 · compiler 29 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 65 · cli-harness 182 ·
-harness-wasm 0 · govbench 9 · **total 469** (plus the harness-wasm Node smoke
+provider-adapters 5 · agent-core 18 · harness-preview 65 · cli-harness 211 ·
+harness-wasm 0 · govbench 9 · **total 498** (plus the harness-wasm Node smoke
 tests, run via wasm-pack)
 
 ---
@@ -266,6 +266,7 @@ blog/public/demo/law-firm.html`.
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |
 | `docs/harness-gate-abi.md` | Gate ABI schema (D24) |
+| `docs/host-decision-log.md` | The host decision log (`cc-hook --log`): decision, outcome and policy lines, the read-only `PostToolUse` observer, how a decision joins its outcome and why an ASK's answer is inferred, not attested (D84); `harness export-otlp`, the offline OTLP/JSON export (AI2-66) |
 | `docs/trust-pins.md` | Trust pins design (D29) |
 | `docs/machine-wide-governance.md` | Governing every Claude Code session on a machine: `init --user` (user settings) vs `init --managed` (admin-only managed settings, no user-side kill-switch), the verified Claude Code hook semantics behind the difference, and an example policy (D82) |
 | `docs/demos/jira-copilot/` | E16 JIRA MCP demo runbook |

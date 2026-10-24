@@ -26,6 +26,8 @@ mod local_page;
 mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
+mod otlp;
+mod outcome;
 mod project;
 mod replay_transcripts;
 mod serve;
@@ -144,6 +146,27 @@ enum Command {
         /// Every call with its verdict and reason, as JSON.
         #[arg(long)]
         json: bool,
+        /// The hook's decision log (`cc-hook --log`): join each replayed call to
+        /// the live verdict and its outcome by `tool_use_id` (D84).
+        #[arg(long)]
+        decisions: Option<PathBuf>,
+    },
+    /// Convert a finished host decision log (`cc-hook --log`) to OpenTelemetry
+    /// traces as OTLP/JSON, for a collector's `otlpjsonfile` receiver (AI2-66).
+    /// One trace per session, one GenAI `execute_tool` span per decision, from
+    /// the verdict to the call's outcome. Offline: nothing is sent anywhere.
+    ExportOtlp {
+        /// The decision log to convert.
+        #[arg(long)]
+        log: PathBuf,
+        /// Write here instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Also export the call and result summaries (already redacted, D66).
+        /// Off by default: the GenAI conventions make tool arguments and
+        /// results opt-in, as they may be sensitive.
+        #[arg(long)]
+        with_summaries: bool,
     },
     /// Launch the World Authoring Tool: a local browser editor for world
     /// manifests, backed by the real compiler + kernel (E11).
@@ -242,8 +265,11 @@ enum Command {
         #[arg(long)]
         grant: bool,
         /// Append one JSON line per decision to this file: what the agent tried,
-        /// the verdict, the rule and the session's taint after the call. It is
-        /// what `harness console` shows as its live feed. Observability only: a
+        /// the verdict, the rule, the session's taint after the call, and the
+        /// host's `tool_use_id` / `agent_id` / `agent_type` / `cwd`. It is what
+        /// `harness console` shows as its live feed. Wired to `PostToolUse` and
+        /// `PostToolUseFailure` as well, the same command appends an outcome line
+        /// per executed call, keyed by `tool_use_id` (D84). Observability only: a
         /// log that cannot be written never changes the verdict. Off by default.
         #[arg(long)]
         log: Option<PathBuf>,
@@ -295,6 +321,12 @@ enum Command {
         /// kernel required.
         #[arg(long)]
         soft_ask: bool,
+        /// Append one JSON line per decision to this file, in `cc-hook --log`'s
+        /// format (D84). Antigravity sends no tool-call id, so its lines carry
+        /// `step_idx` instead. Observability only: a log that cannot be written
+        /// never changes the verdict. Off by default.
+        #[arg(long)]
+        log: Option<PathBuf>,
     },
     /// Front a real upstream MCP server with the kernel: shape its `tools/list`
     /// (ABSENT) and gate every `tools/call`, forwarding only ALLOW (D33 / E16.B).
@@ -474,6 +506,7 @@ fn main() {
         grant,
         examples,
         json,
+        decisions,
     }) = &cli.command
     {
         std::process::exit(replay_transcripts::run(&replay_transcripts::Options {
@@ -485,6 +518,20 @@ fn main() {
             grant: *grant,
             examples: *examples,
             json: *json,
+            decisions: decisions.as_deref(),
+        }));
+    }
+
+    if let Some(Command::ExportOtlp {
+        log,
+        out,
+        with_summaries,
+    }) = &cli.command
+    {
+        std::process::exit(otlp::run(&otlp::Options {
+            log,
+            out: out.as_deref(),
+            with_summaries: *with_summaries,
         }));
     }
 
@@ -547,6 +594,7 @@ fn main() {
         enforce_absent,
         grant,
         soft_ask,
+        log,
     }) = &cli.command
     {
         std::process::exit(agy_hook::run(
@@ -557,6 +605,7 @@ fn main() {
             *enforce_absent,
             *grant,
             *soft_ask,
+            log.as_deref(),
         ));
     }
 

@@ -36,8 +36,8 @@
 //! policy serves every account on the machine and each needs its own state.
 
 use crate::init::{
-    apply, current_harness, merge_settings, refuse_symlinks, sh_quote, Merge, Plan, Step,
-    HOOK_MARKER, STARTER_WORLD,
+    apply, current_harness, merge_observers, merge_settings, refuse_symlinks, sh_quote, Merge,
+    Plan, Step, HOOK_MARKER, OBSERVER_EVENTS, STARTER_WORLD,
 };
 use compiler::loader::load_yaml;
 use serde_json::Value;
@@ -318,7 +318,7 @@ else
   BIN="$TRUSTED_BIN"
 fi
 [ -x "$BIN" ] || exit 0  # fail-open: no trusted kernel, normal permissions
-exec "$BIN" cc-hook{grant_flag} --world "$WORLD" --state "$STATE"
+exec "$BIN" cc-hook{grant_flag} --world "$WORLD" --state "$STATE" --log "$STATE/decisions.jsonl"
 "#,
                 bin = sh_quote(harness_bin),
                 world = sh_quote(&world),
@@ -344,7 +344,7 @@ WORLD={world}
 [ -x "$BIN" ] || exit 0  # fail-open: a broken install must not brick every session
 # Per-user state: one policy serves every account on the machine.
 STATE="${{HOME:-/tmp}}/.claude/ai2rules/managed/state"
-exec "$BIN" cc-hook{grant_flag} --world "$WORLD" --state "$STATE"
+exec "$BIN" cc-hook{grant_flag} --world "$WORLD" --state "$STATE" --log "$STATE/decisions.jsonl"
 "#,
             bin = sh_quote(harness_bin),
             world = sh_quote(&world),
@@ -392,6 +392,7 @@ pub fn plan(layout: &Layout, harness_bin: &str, grant: bool, force: bool) -> Res
 
     let current = fs::read_to_string(&layout.settings).ok();
     let (merged, outcome) = merge_settings(current.as_deref(), &layout.hook_command())?;
+    let (merged, observer_added) = merge_observers(&merged, &layout.hook_command())?;
     writes.push((layout.settings.clone(), merged));
     steps.push(Step {
         verb: "write",
@@ -407,6 +408,13 @@ pub fn plan(layout: &Layout, harness_bin: &str, grant: bool, force: bool) -> Res
             ),
         },
     });
+    if observer_added {
+        steps.push(Step {
+            verb: "write",
+            path: show(&layout.settings),
+            note: "PostToolUse / PostToolUseFailure observer added (D84)".into(),
+        });
+    }
 
     for (path, _) in &writes {
         refuse_symlinks(&layout.root, path)?;
@@ -418,7 +426,8 @@ pub fn plan(layout: &Layout, harness_bin: &str, grant: bool, force: bool) -> Res
 ///
 /// Matches on the shim path, not the generic `world-gate.sh` marker, so a
 /// project-style ai2rules hook someone registered here by hand is not touched.
-/// Containers we may have created (`PreToolUse`, `hooks`) are dropped once empty,
+/// The gate (`PreToolUse`) and the observer events (D84) are all cleaned.
+/// Containers we may have created (the event arrays, `hooks`) are dropped once empty,
 /// so install-then-remove gives back the document that was there before.
 /// `Ok(None)` when there was nothing of ours to remove.
 pub fn unmerge_settings(existing: &str, shim: &str) -> Result<Option<String>, String> {
@@ -435,21 +444,24 @@ pub fn unmerge_settings(existing: &str, shim: &str) -> Result<Option<String>, St
 
     let mut removed = false;
     if let Some(hooks) = obj.get_mut("hooks").and_then(Value::as_object_mut) {
-        if let Some(pre) = hooks.get_mut("PreToolUse").and_then(Value::as_array_mut) {
-            for entry in pre.iter_mut() {
+        for event in std::iter::once("PreToolUse").chain(OBSERVER_EVENTS) {
+            let Some(arr) = hooks.get_mut(event).and_then(Value::as_array_mut) else {
+                continue;
+            };
+            for entry in arr.iter_mut() {
                 if let Some(list) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
                     let before = list.len();
                     list.retain(|h| !ours(h));
                     removed |= list.len() != before;
                 }
             }
-            pre.retain(|e| {
+            arr.retain(|e| {
                 e.get("hooks")
                     .and_then(Value::as_array)
                     .is_none_or(|l| !l.is_empty())
             });
-            if pre.is_empty() {
-                hooks.remove("PreToolUse");
+            if arr.is_empty() {
+                hooks.remove(event);
             }
         }
         if hooks.is_empty() {
