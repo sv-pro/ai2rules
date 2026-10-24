@@ -96,6 +96,7 @@ mod tests {
             },
             approval: None,
             manifest_hash: "abc".to_string(),
+            effective: None,
         }
     }
 

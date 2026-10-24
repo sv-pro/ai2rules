@@ -22,7 +22,7 @@ pub mod taint;
 
 pub use disposition::{charge, evaluate, BudgetUsage, EvalContext};
 pub use intent::{IRBuilder, IntentIR};
-pub use spec::{build_execution_spec, ExecEnv, SpecError};
+pub use spec::{build_execution_spec, effective_call, EffectiveCall, ExecEnv, SpecError};
 
 use harness_types::{
     ActionName, BuildError, CompiledWorld, Decision, Disposition, Provenance, ToolCall,

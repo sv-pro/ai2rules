@@ -2921,3 +2921,674 @@ outcome/provider-result seam and become direct input to the next model turn. The
 AI2-12 showcase replans with `observer: None`, and a regression model asserts call
 correlation plus the full verdict range. No kernel, Gate ABI, trace, policy, or
 executor semantics changed.
+
+## D78 — Signed logs are chained and head-anchored; a missing line is tampering, not history
+
+**Context.** Since finding #15 / D67 every line of the approval log (and, since D74,
+the staged-commit log) carries an HMAC, so a line cannot be forged or edited without
+the key. A per-line MAC says nothing about lines that are *not there*. Deleting the
+signed `Consumed` line from `approvals.jsonl` folded the authorization back to
+`Approved`, and the next `consume` succeeded — a single-use grant used twice, with no
+key and every remaining line verifying. The same holds for `AttemptStarted` /
+`AttemptFinished` in the commit log, which own an idempotency key. Found while
+checking an external write-up of the kernel; pinned by
+`deleting_the_consumed_line_does_not_revive_the_grant`, which failed on `41a4eda`.
+
+**Decision.** Both logs chain and anchor (`trace-store/src/chain.rs`):
+
+- line `n` carries `seq = n` and `prev` = the MAC of line `n-1` (`"genesis"` for 0);
+  its MAC covers `(seq, prev, event)` under a domain-separated prefix. Deleting,
+  reordering, or splicing a line breaks the chain (`out of chain`);
+- a chain cannot see its own tail being cut, so every append also rewrites
+  `<log>.head` — the last `(seq, mac)`, itself MACed — via temp file + rename (and a
+  best-effort directory sync). On load the log must *reach* the head and may run **at
+  most one line** past it — what a crash between append and head write leaves;
+  `open` re-anchors such a log under the lock, so the slack never accumulates;
+- every open store keeps a **high-water mark** — the furthest `(seq, mac)` it has
+  loaded or written — and refuses a later load that falls short of it;
+- a store with entries but no head is refused, not re-anchored: deleting the head is
+  the next step of cutting the tail. A fresh store writes a genesis head on open. A
+  log whose first line has no chain link is left to the line check, so a genuine
+  pre-D78 store is reported as old, not as tampered (the D73 distinction).
+
+**Alternatives.** A per-line counter without `prev` catches deletion but not splicing
+lines from another log under the same key. Chaining without a head misses tail
+truncation, which is exactly the `Consumed`-is-last case. Storing the head inside the
+key file couples two files with different lifecycles and permissions checks. Making
+`consume` idempotent-by-state elsewhere just moves the file.
+
+**Consequence.** Breaking for stores written before this change: an unchained line is
+refused with a message naming D78 ("delete the log, its key and its head file"), the
+same direction as D73's refusal of 0.4.1 records. The shipped CLI keeps its approval
+store in a per-run tempdir, so embedders holding a store across the upgrade are the
+ones affected. `open` now takes the store lock when it has to anchor (a fresh store
+or a crash-ahead log), so a stale `.lock` can make such an open fail after 5 s where
+it used to succeed. **Not covered**, and pinned by
+`known_limit_a_matching_old_snapshot_fools_a_new_process`: the log is append-only, so
+every older log is a prefix of the current one, and a copy of the *head alone*, saved
+between `Approved` and `Consumed`, lets someone cut the log back to it — against a
+process that has not already seen the longer chain. Rollback to a consistent earlier
+state needs a monotonic counter outside the attacker's reach; the store's placement
+outside the governed project (D57/D67) remains the primary defence. What D78 changes
+is the bar: from "delete a line" to "have saved the head at the right moment".
+
+## D79 — A scoped capability can rename and limit an MCP tool's arguments; the world can hide the tool it wraps
+
+**Date:** 2026-10-05. Phase 1 of **E13.4** (the MCP projection shim): manifest and kernel
+only. The gateway does not serve these tools yet; that is phase 2.
+
+**Context.** The goal is a governed stand-in for an MCP server: the operator picks which
+upstream tools exist, renames them, and limits what the model may pass — "only issues
+starting `PLAT-`", "only these three projects". Scoped capabilities already narrowed a base
+action (locked literals, stripped extras, invariant 12), and an MCP-backed action already
+lowered to `{server, tool, input}`. Three things were missing. A scoped capability could not
+rename an argument or limit its values. The base action it wrapped stayed on the surface
+beside it, so narrowing `getJiraIssue` into `get_platform_issue` left `getJiraIssue` callable.
+And literals were strings only, so `maxResults: 20` could not be pinned.
+
+**Decision.**
+
+- **`ArgSource::Input { as, one_of, prefix }`** beside `ActorInput`. `as` is the name the actor
+  supplies; the kernel reads the value under that name and passes it on under the base
+  action's name, both when validating against the base schema and when lowering to the
+  `ExecutionSpec`. `one_of` and `prefix` are checked on the value the actor sent, before
+  mapping; a value either rule refuses is `schema_violation` (DENY). Both apply when both are
+  set. A prefix only ever matches a string.
+- **The base name is not a back door.** A value sent under the base name of a renamed argument
+  is never read: it is stripped like any undeclared extra, so a call carrying only that name
+  is missing its required argument and is refused, never run without its limit.
+- **`projected: false` on a base action** keeps it in the ontology, so scoped capabilities can
+  name it, and out of the projection, so the model sees it as ABSENT. The name is the
+  compiled world's own (`CompiledWorld::is_projected`, invariant 2: known but not projected
+  is ABSENT). An earlier draft of this branch called it `exposed`; it was renamed before
+  release, so no manifest carries the old spelling. The same flag closes the bypass an
+  external review of the kernel found on its own: a scoped verb that pins `repo` was
+  pointless while its unscoped base action stayed callable with any `repo`.
+- **`ArgSource::Literal` holds any JSON value.** A string literal serializes exactly as before.
+- **`mcp_surface: { name, upstream }`** records the server name a gateway will announce and
+  the `McpServer` backing it fronts. Validation requires some base action to use that backing.
+- **`world_kernel::schema::model_facing_schema`** derives what the model is shown for a scoped
+  capability: actor-supplied arguments only, under their actor names, with `enum` for a list
+  and `pattern` (`^` plus the escaped prefix) for a prefix, closed with
+  `additionalProperties: false` because extras are stripped anyway. This is the advertisement;
+  the gate is the check. Per D51 the world owns this schema, not the upstream.
+- **L2 taint follows the rename.** An argument role is declared on the base name; the floor now
+  reads per-argument taint under the name the actor used.
+- **Every new field is skipped when it holds its default**, so no manifest written before this
+  changes its hash. The governance benchmark regenerates with no diff.
+
+**Alternatives.**
+
+- *A regex rule.* Rejected for now: it adds a dependency to the pure kernel and to the WASM
+  build, and a prefix covers the common case (issue keys, project keys). A list or prefix
+  cannot constrain free-text arguments such as JQL; templated arguments are a separate design.
+- *Put renames and limits in the gateway.* Rejected: policy in an adapter is the D34/D36/D48
+  drift, and other hosts would not get it. The gateway will forward the kernel's lowered
+  operation instead of the raw call.
+- *Derive the scoped descriptor's schema and validate against it.* Rejected: it would change
+  the descriptor hash of every existing scoped capability and replace strip-then-validate with
+  a closed check, changing behavior for the default world. Validation stays on base names.
+- *Hide a base action automatically when a scoped capability wraps it.* Rejected: an operator
+  may want both, and an implicit rule would surprise. The flag is explicit.
+- *Reuse `arg_constraints` for limits.* Rejected: those sit on the base action and apply to
+  every capability wrapping it; the limits here belong to one scoped capability.
+
+**Consequence.** A manifest can now express the stand-in fully, and the kernel enforces it.
+The committed WASM engine grows from 523 KB to 567 KB, measured against a rebuild of the
+previous commit with the same toolchain and `wasm-opt -Oz`. Until phase 2 the MCP gateway
+still lists tools by upstream name only, so scoped capabilities are not served over MCP yet.
+
+**Related:** D33, D45, D51, D68, D72; PLAN E13.4;
+`crates/world-kernel/tests/scoped_mcp_surface.rs`.
+
+### D79 amendment (2026-10-05) — phase 2: the gateway serves the surface (E13.4b)
+
+- **A declared `mcp_surface` switches the gateway to the backing as the source of truth.** An
+  action is served when its `McpServer` backing names the surface's upstream, under the
+  backing's tool name, so several scoped capabilities can wrap one upstream tool. The model is
+  offered each under its own name with `model_facing_schema`. A projected action backed by
+  another server is not served, even if the upstream advertises a tool of that name.
+- **Without a surface, nothing changes.** Every earlier world names upstream tools by action
+  name, and their backings were never read by the gateway — the mock demo worlds back
+  `jira_get_issue` with a tool called `get_issue`, which the upstream does not have. Making the
+  backing authoritative everywhere would have silently emptied those surfaces. The governance
+  benchmark regenerates with no diff.
+- **What is forwarded is the kernel's `ExecutionSpec`.** `harness_preview::gate_and_lower`
+  returns `gate`'s verdict unchanged plus, for an `ALLOW`, the lowered spec; the gateway sends
+  its `{tool, input}` upstream — renamed arguments mapped back, literals injected, extras
+  stripped. An allowed call that cannot be lowered, or is not served by this upstream, is
+  refused (`REFUSED (gateway)`, audited as `not_forwardable`). `gate`'s wire ABI is unchanged,
+  and `gate_and_lower` is native-only: the WASM build has nothing to execute.
+- **A refused forward ingests nothing and spends nothing.** The gate's post-call taint and
+  budget charge assume the call runs; when the gateway does not forward it, the session keeps
+  its pre-call taint and usage.
+- **Scoped capabilities may carry a `description`.** The gateway shows it instead of the
+  upstream's, which names the base action's arguments and is untrusted text (D51's residual).
+  Base actions still show the upstream's description.
+- **The gateway announces `mcp_surface.name`** as its `serverInfo.name`.
+- **Rejected:** *adding the lowered operation to `GateResponse`* — a wire ABI change for every
+  host when only this adapter executes; *re-running `decide` in the gateway to lower* — a second
+  verdict that could disagree with the first.
+
+### D79 amendment (2026-10-06) — phase 3: the authoring page (E13.4c)
+
+- **`harness mcp-author --world W -- <upstream>`** spawns the upstream once and serves a local
+  page: name the surface, tick the tools that exist, rename them, fix or limit each argument,
+  try calls, save `W`. `harness mcp-gateway --world W -- <upstream>` then serves it.
+- **The page builds the manifest as JSON; the server owns YAML.** It parses the JSON into the
+  real `WorldManifest`, renders it with `serde_yaml`, reloads the rendering and refuses to
+  continue unless it equals what was sent, then compiles it. Save refuses anything that does
+  not compile. There is no YAML writer and no governance logic in the page (D18).
+- **"Try it" is the gateway's own path** (`govern` → `forward_target`), so it shows the
+  verdict and the exact `{tool, arguments}` the gateway would send. It calls the upstream only
+  when asked to *send*, and the page confirms first: a send runs with the operator's upstream
+  credentials.
+- **The server is stricter than `harness serve`**, because this page can call a credentialed
+  upstream and write a file. It binds to 127.0.0.1, refuses a `Host` other than its own (DNS
+  rebinding), refuses a foreign `Origin`, and requires a per-run token in a custom header on
+  every POST; the token lives only in the served page. It writes only the `--world` path from
+  the command line. The upstream command is never written into the file: it can carry
+  credentials, and the file is meant to be committed. Everything the upstream sends is placed
+  in the page as text, never as HTML — tested with a hostile upstream.
+- **A loaded world keeps its own schemas.** When the upstream now describes a tool's arguments
+  differently, the saved schema stays and the page says so (D51). Parts of a world the page
+  cannot edit — another server's actions, a second scoped capability over one tool, context
+  references — are kept as written and named in a banner, never dropped.
+- **Shape of what the page writes.** A tool left as-is is a base action. A renamed, described
+  or limited tool becomes a hidden base action named `<tool>__upstream` plus one scoped
+  capability; the gateway finds the tool through the backing, so the base action's name is
+  free. A new world starts with one trusted channel, `Read`/`Mcp` capabilities, and the taint
+  floor on external and network effects.
+- **Rejected:** *generating YAML in the page* — a second serializer that could disagree with the
+  loader; *letting the page choose the save path* — a request could then write anywhere the
+  user can; *sending on every Try* — a write tool would run while the operator was still
+  designing it.
+
+### D79 amendment (2026-10-21) — worlds without a surface forward the lowering too
+
+- **The gap.** Phase 2 forwarded the kernel's lowering only when the world declared an
+  `mcp_surface`. Without one, the gateway sent `(action, arguments)` exactly as proposed. For
+  a scoped capability that meant its own name, which the upstream has never heard of, and the
+  caller's arguments: no literal was injected, and a locked argument the caller added
+  (`issue_key: SEC-9` beside a pinned `PLAT-1`) went through. An external review of the
+  kernel found the same shape independently. The same path also forwarded an unscoped call
+  under the action the kernel decided on, after `command_classes` (D36), not under the tool
+  name the client called.
+- **Decision.** Without a surface, an unscoped call is forwarded under the requested name
+  with its arguments, as before D79. A scoped capability goes to the upstream tool named
+  after its **base action**, which is how a surface-less world names upstream tools, with
+  the input of the kernel's `ExecutionSpec`. A call that cannot be lowered (a `ContextRef`
+  the gateway has no trusted source for) or does not lower to an MCP call is refused, and
+  audited as `not_forwardable`, like any other refused forward.
+- **Listing is unchanged.** Scoped capabilities in a surface-less world stay callable by name
+  and are not listed; listing them would change `tools/list` for existing worlds. Declare a
+  surface to have them offered.
+- **Rejected:** *refusing every scoped capability without a surface* — fail-closed as well,
+  but it makes scoped capabilities useless in exactly the worlds that already route by
+  action name, when the lowering that serves them already exists.
+
+## D80 — The gate returns the effective call; hosts execute that, not the proposal
+
+**Context.** The gate is decision-only (D24): on `ALLOW` the host runs its own tool. But the
+kernel decides on the *proposed* call, and a scoped capability runs with different
+arguments: locked and unknown actor arguments are stripped, renamed ones are mapped back to
+the base action's names (D79), and literals are injected (invariant 12). D79's phase 2 gave
+the in-process `mcp-gateway` that lowering through `gate_and_lower`, which returns the
+`ExecutionSpec`. A host that calls `harness gate` over the wire still got none of it: the
+gate would `ALLOW` `open_change_pr` with `repo: attacker/fork` beside a literal `repo`, and a
+host executing the proposal would send the attacker's value. An external review of the
+kernel found this independently (its G2). D79's phase 2 considered adding the lowered
+operation to `GateResponse` and rejected it as "a wire ABI change for every host when only
+this adapter executes". That premise does not hold for the port D24 exists to be: every
+out-of-process host executes, and only the wire can tell it what to run.
+
+**Decision.**
+
+- **`world_kernel::effective_call(world, intent) -> EffectiveCall`** is the single
+  lowering. It returns:
+  - the base action and its backing;
+  - the arguments after stripping, renaming and literal injection, under the base
+    action's names;
+  - `ContextRef` arguments, listed by key and not resolved, since runtime values are not
+    the pure kernel's to hold;
+  - the actor-supplied names the scoping dropped, including a renamed argument sent under
+    its base name.
+
+  `build_execution_spec` lowers through it and only resolves the context refs, so
+  `gate_and_lower`'s spec and the wire field cannot disagree.
+- **`GateResponse.effective`** carries it on `ALLOW` and `ASK`, so an approval prompt can
+  show what will actually run. It is a backward-compatible v1 field, skipped when absent.
+  (The WASM engine compiles the same `gate` but exports only `preview`, so the field is not
+  observable there yet.) It is not the `ExecutionSpec`: the spec also holds
+  runtime policy (cwd, roots, env, timeout) that belongs to whoever executes, and a
+  decision-only gate would have to fill it with placeholder values.
+- **`mcp-gateway` keeps forwarding `gate_and_lower`'s spec**, so in-process only an
+  `ExecutionSpec` still crosses into execution. It adds a `stripped` audit record when the
+  proposal tried to set what the world fixes. The lowering already defeats the attempt;
+  the record is the signal.
+
+**Alternatives.**
+
+- *Reject locked arguments outright* (`schema_violation`): deferred, not rejected. It
+  changes a verdict hosts rely on today, and `stripped` already makes the attempt visible.
+  It is the better default for a strict mode.
+- *Re-implement lowering in each adapter*: rejected by D24's own reasoning.
+- *Keep the lowering native-only*, as D79's phase 2 did: rejected for the reason above. A
+  wire host that has no lowering either drops the scoping or has to refuse scoped verbs.
+- *Serialize the whole `ExecutionSpec`*: rejected because of the placeholder runtime
+  policy described above.
+
+**Consequence.** A host that honours `effective` gets the world's scoping without linking
+the kernel. Hosts that ignore it keep today's behaviour, so adoption is per adapter.
+
+Not done yet:
+- `cc-hook` and `agy-hook` do not rewrite native tool input from `effective`.
+- Roots path scope still reads the adapter's `path`, which for a literal-path verb is the
+  proposal's.
+- `tools/list` in a world without a surface still does not list scoped verbs (D79).
+
+## D81 — The policy console writes the world file; the hook it already reads does the rest
+
+**Context.** The playground (E14/E15) shows how a world decides, but in a sandbox: no agent
+acts on it. To show policy shaping a real agent, the page has to change what a running
+Claude Code session may do, and show what that session then tries. `harness cc-hook`
+already re-reads its `--world` file on every call (D34), so the world file is a live control
+surface. What was missing was a way to edit it safely from a page, and a record of what the
+hook decided that something outside Claude Code can read (AI2-44 / #123).
+
+**Decision.**
+
+- **`harness cc-hook --log <file>`** appends one JSON line per decision: time, session,
+  tool, effective action, a short summary of the call (the command, path or URL, cut to 160
+  characters; never file contents), the verdict, rule and reason, what the hook told the
+  host (`allow`, `ask`, `deny`, or `null` when it stayed silent), and the taint after the
+  call. It is off by default and is observability only: a log that cannot be written never
+  changes a verdict.
+- **`harness console --project <dir>`** serves a local page for that project. Its switches
+  each name a group of actions; setting one sets those actions' `projected` and
+  `approval_required` on the real `WorldManifest` (Allow, Ask, or Off = not projected). The
+  server renders through the real serializer, reloads, compiles, and only then writes. Its
+  feed is the hook's log, plus a `policy` line the console appends for every change, so
+  cause and effect sit side by side.
+- **The write is atomic** (temp file, then rename). `cc-hook` fails open on a world it
+  cannot compile, so a half-written file must never be visible to it.
+- **Off is ABSENT, not DENY**, and binds only with `cc-hook --enforce-absent`. The demo world
+  names Claude Code's own bookkeeping tools so that flag does not take them away too.
+- **The taint floor has no switch.** The kernel denies network and external effects from a
+  session that has read outside content whatever the manifest says; the page shows it
+  locked.
+- **The local-page plumbing is shared** with `mcp-author` (`local_page.rs`): 127.0.0.1 only,
+  `Host` check, same-origin POSTs, a per-run token in a custom header, atomic writes.
+
+**Alternatives.**
+
+- *Hot-reload through a running daemon* the hook queries: rejected. The hook is a process
+  per call by design (D34), and the file it already reads is the simplest live channel.
+- *Let the page send raw YAML*, as an editor would: rejected for this page. A switch is the
+  operator's vocabulary, and a page that writes arbitrary manifests is `mcp-author`'s job.
+- *Off as DENY* (keep the action, deny it by rule): rejected. ABSENT is what "this agent
+  does not have it" means (D79), and it is the allowlist posture a buyer recognises.
+- *A separate audit trail in the trace store*: deferred. The log is a feed, not evidence;
+  exporting it with its world and replaying it is #121.
+
+**Consequence.** A world file written by the console loses its comments except the leading
+header block, which the console keeps. Switches only exist for action names the world
+declares, so the console is generic over any world that uses the demo's names, and silent
+about the rest. Command classes stay text patterns: a command that matches two switches'
+classes is unrecognised and asks, whatever either switch says.
+
+## D82 — Machine-wide governance: a user scope for convenience, a managed scope for control
+
+**Date:** 2026-10-21. Adds `harness init --user` and `harness init --managed`
+(`crates/cli-harness/src/init_machine.rs`, `docs/machine-wide-governance.md`).
+
+**Context.** `harness init` governs one folder. A session opened anywhere else, even
+next door to a governed project, is ungoverned. The question came up while preparing
+the live demo ("can it govern all of Claude Code, whatever the folder?"), and again
+from the enterprise side ("it should install like a corporate endpoint agent: on
+the work machine, and the employee cannot turn it off"). Claude Code reads hooks
+from two scopes that apply to every folder. Checked against its docs on 2026-10-21:
+
+- user settings `~/.claude/settings.json`;
+- managed settings, a `managed-settings.json` in an admin-only system directory, or
+  HKLM / MDM / the claude.ai console.
+
+Hooks from all scopes merge, and the strictest PreToolUse answer wins
+(deny > defer > ask > allow). The two scopes differ in one property that decides
+everything: `disableAllHooks` in any non-managed file, a project's committed
+`.claude/settings.json` included, turns off user hooks, but **nothing below the
+managed tier can turn off a managed hook**.
+
+**Decision.** Two install scopes, sharing the starter manifest, the settings merge
+and the symlink refusal with project `init`:
+
+- **`--user`** writes the world, shim and state under `~/.claude/ai2rules/user/` and
+  merges the hook into `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR`).
+  - Additive by default. A user-scope `--grant` would skip Claude Code's prompts in
+    every folder.
+  - State is absolute: cc-hook's default `.claude/state` is cwd-relative and would
+    scatter sidecars into every project.
+  - `--remove` unregisters the hook and drops the containers it created, so
+    install-then-remove gives back the original document.
+- **`--managed`** writes into the system policy directory. It copies the kernel in
+  (admin-owned, so it cannot be swapped). Its shim has **no kill-switch and no
+  `HARNESS_BIN` override**: both live where the governed user can write, and either
+  would make the policy optional. State is per-user, resolved from `$HOME` at run
+  time.
+- **The machine-scope world protects what can switch it off.** The starter makes a
+  project's whole `.claude/` read-only. At machine scope that would block ordinary
+  work in every repository. So the rule is narrowed to:
+  - the project's `settings.json` and `settings.local.json`, where `disableAllHooks`
+    would go;
+  - `~/.claude/ai2rules`: the world, shim, state and every kill-switch;
+  - `~/.claude/settings.json`.
+- **A project with its own ai2rules hook runs both.** Each keeps its own state;
+  Claude Code takes the stricter verdict. The user hook never steps aside when it
+  sees a project hook. Stepping aside would let any repository plant a weak hook to
+  switch the user one off.
+
+Found while smoke-testing on Windows, and fixed in `hostkit::canonicalize_root_paths`:
+a root on a not-yet-existing drive-letter path stayed lexical (`C:\p/.claude/x`),
+while the action path is canonical (`//?/C:/p/.claude/x`). The rule never matched,
+so a read-only rule on a file that did not exist yet fell to the roots default. Such
+roots now resolve from their nearest existing ancestor, the way action paths already
+did. Roots starting with `/` are untouched, so Linux and macOS behave as before.
+
+**Alternatives.**
+
+- *Only the user scope.* Rejected as the organisation answer, because a single line
+  in a cloned repository's settings switches it off. Kept as the personal one.
+- *Have `init --managed` set `allowManagedHooksOnly`.* Rejected as a default. It
+  disables every developer and project hook in the organisation, which is a policy
+  choice, not an install step, and ai2rules does not need it: a managed `deny`
+  already beats any other hook's `allow`. Documented as optional hardening.
+- *Fail closed when the managed kernel is missing.* Rejected for now. Only an
+  administrator can remove it, so fail-open hands the user no switch, while
+  fail-closed turns a bad deployment into an outage for everyone.
+- *Write the policy to the HKLM registry.* Not done. The file is the documented
+  lowest-common-denominator across Windows, macOS and Linux, and fleet tools
+  deliver either form.
+
+**Consequence.** One command now covers every session for an account, and one
+elevated command covers a whole machine in a way its user cannot undo. The honest
+limit, which is also where an endpoint product would go next: the taint state is
+per-user and writable by that user, because the hook runs as that user. The agent's
+file tools are kept off it, but a person, or an approved Bash command, can delete a
+marker. Closing that needs the kernel's state behind a boundary the user cannot
+cross, such as a system service the hook asks. Also unverified: whether `claude
+--bare` skips managed hooks. The docs do not say.
+
+## D83 — Instruction and memory files are durable memory: classified on the canonical path
+
+**Date:** 2026-10-23. Adds `path_classes` to the world manifest
+(`harness-types`, `compiler`, `harness-preview::gate`) and to every host world.
+Issue AI2-64 / #137, gap G1 of the *Designing AI Agents* review.
+
+**Context.** Claude Code loads some files as instructions into every later session:
+`CLAUDE.md` / `AGENTS.md` at any level, `~/.claude/CLAUDE.md`, auto-memory under
+`~/.claude/projects/*/memory/`, and skills, agents and commands under `.claude/`.
+Antigravity has its own (`GEMINI.md`, `.agents/rules/**`, …). The worlds classified
+writing one as plain `FilesystemWrite`, outside the taint floor. With 0.7.0 a
+tainted `Write` to `CLAUDE.md` was ALLOW while a tainted `WebFetch` was DENY. A
+session that had read outside content could leave instructions for the next
+session, which loads them as trusted context: taint laundered across the session
+boundary.
+
+`command_classes` (D36) could not express the fix. It matches the raw
+`arguments[arg]` string, so it misses `./CLAUDE.md`, `docs/../CLAUDE.md`, an
+absolute path, `claude.md` and backslashes. The canonical path already travels
+separately, in `GateRequest.path`.
+
+**Decision.**
+
+- **A second classifier kind, `path_classes`.** Each lists `from` actions, each with
+  the argument that carries its path in this host's vocabulary (`file_path` for
+  `Write`/`Edit`/`MultiEdit`, `notebook_path` for `NotebookEdit`, `path` for
+  Antigravity after the alias step), and reclassifies to `to` when the path
+  matches a pattern. Patterns are case-insensitive `/`-globs (`*` within a segment,
+  `**` across segments).
+- **It matches the canonical path *or* the written argument.** The gate passes
+  `GateRequest.path`; the argument is normalized lexically (either separator, `.`,
+  `..`). Taking both fails closed whichever way a symlink points. Case is ignored
+  everywhere: on a case-insensitive filesystem `claude.md` *is* `CLAUDE.md`, and on
+  a case-sensitive one the extra match only errs toward caution. Pure string work in
+  `CompiledWorld::classify_call`, so native and WASM share it (D75).
+- **The target is `side_effect: Memory`**, under the hard taint floor. A tainted
+  write is `DENY taint_invariant`, the same rule as tainted egress. The issue text
+  expected `no_tainted_memory_write`; that manifest rule is shadowed by the hard
+  floor for every externally-effectful class, as `no_tainted_network` already is.
+- **A file write into memory ingests nothing.** The gate treated every allowed
+  `Memory` call as ingress and tainted the session. For a write that is wrong: it
+  returns an acknowledgement, not stored content. Without this, every clean edit of
+  `CLAUDE.md` or an auto-memory file would have tainted the rest of the session.
+  `action_type: Memory` calls (recall) still taint.
+- **Clean sessions: ALLOW in project worlds, ASK in machine-scope worlds.** A
+  project's own instructions are ordinary work there. The `--user` / `--managed`
+  worlds (D82) govern every project and `~/.claude` itself, so a clean write asks.
+  `init_machine::render_world` makes the swap and fails loudly if the starter loses
+  the line.
+- **One pattern list for every host**, pinned byte-identical by
+  `tests/one_kernel.rs`. A file one host writes is context another host loads.
+- **One classifier per action, of either kind.** The loader refuses an action in two
+  path classes, or under both a command and a path classifier (findings #17 / #20).
+  Within one class an action may be read under several keys: the host-neutral
+  conformance world names both `file_path` and the `path` that Antigravity's adapter
+  aliases into, because a `..` below a missing folder leaves no resolved path to
+  fall back on.
+
+**Alternatives.**
+
+- *World data only: a second `command_classes` entry per file tool.* Rejected. It
+  matches raw strings, so every spelling above slips past.
+- *`side_effect: PersistentWrite`.* Avoids the ingress-taint change, but these
+  files are memory in exactly the THESIS §2 sense, and the class should say so.
+- *Have the kernel read the filesystem to resolve case.* Rejected: the kernel stays
+  pure; the adapter already canonicalizes.
+
+**Consequence.** Tainted sessions can no longer write the next session's
+instructions through file tools, on Claude Code and Antigravity. Known residuals:
+shell writes (`echo >> CLAUDE.md`) are not file actions and stay with the shell
+classifier (`Bash_unclassified` → ASK, D57's residual); Antigravity's `move` is not
+classified, because its destination key has not been captured from a live
+session; the OpenCode and DeepSeek Harness worlds carry no path class yet. On
+Windows the backslash spellings are tested; the rest of Windows parity is AI2-57.
+
+## D84 — The host decision log joins each decision to its outcome; an ASK's answer is inferred, and says so
+
+**Date:** 2026-10-23. **Gap G2** of the "Designing AI Agents" review; AI2-65 / #138.
+Spec: `docs/host-decision-log.md`.
+
+**Context.** `cc-hook --log` (#116, D81) wrote one line per verdict: session, tool,
+action, decision, rule, answer, taint, manifest hash. It could not say which tool
+call a line was, which agent made it, what the person answered to an ASK, or
+whether the call ran. Without those, an ASK cannot be connected to an approval, and
+none of the metrics a world change should rest on (G3: ASK approval and override
+rates) can be computed.
+
+**Decision.**
+
+- **Identity on every decision line.** `tool_use_id`, `agent_id`, `agent_type` and
+  `cwd`, copied from the hook event when the host sends them, `null` when it does
+  not. Nothing is invented: Antigravity sends no tool-call id, so its lines carry
+  `step_idx` (the nearest key into its transcript) and a `null` id.
+- **One file, three kinds of line.** `kind: "decision"` (the gate), `"outcome"` (the
+  observer) and `"policy"` (the console). One append-only file keeps the order in
+  which things happened and gives a reader one thing to open; a missing `kind` is a
+  pre-D84 decision line, so old logs still read.
+- **The observer is the same command on another event.** `harness init` registers
+  the shim for `PostToolUse` and `PostToolUseFailure` beside `PreToolUse`; `cc-hook`
+  dispatches on `hook_event_name`. It is read-only (D77's rule): it prints nothing,
+  exits 0, never touches taint or budget, and does not compile the world. An outcome
+  line records `status` (`ok` / `error` / `interrupted`), the exit code parsed from
+  a failure's `Exit code N`, the error, `duration_ms`, and a result summary.
+- **Result summaries are redacted before they are cut.** The world's
+  `observability.redact` patterns and the D66 scanner run over the full value; then
+  a command keeps the tail of its output, any other long string becomes its size,
+  and the whole summary is cut to 240 characters. Cutting first could leave a token
+  fragment below a detector's length floor. The decision line's `call` now goes
+  through the D66 scanner as well; it did not before.
+- **An ASK's answer is inferred, not attested, and the line says so.** No Claude
+  Code hook observes a person denying a prompt (`PostToolUseFailure` does not fire
+  for permission denials; `PermissionDenied` fires only in auto mode). So an ASK
+  line carries `"human_answer": "inferred"`, and the join reads an outcome as
+  "approved" and its absence as "declined or abandoned". The join only infers in a
+  session with at least one outcome line; elsewhere the observer was not installed,
+  and it reports `unobserved` rather than counting every ASK as declined.
+- **`harness init` turns the log on** (`.claude/state/decisions.jsonl`; machine
+  scopes: their absolute state dir). An outcome line is useless without the decision
+  line it joins, and the state directory is already gitignored and per-machine.
+- **`replay-transcripts --decisions <log>`** joins the log to the transcripts by
+  `tool_use_id`, so a replay against a changed world shows which real verdicts would
+  move, and the report gives the inferred ASK answers.
+
+**Alternatives.**
+
+- *A separate outcomes file.* Rejected: two files written by concurrent hooks lose
+  their relative order, and every reader has to open both.
+- *Record the answer from `PermissionRequest`.* It fires before the prompt, carries
+  no `tool_use_id`, and says nothing about the answer.
+- *Infer the answer in the hook by reading the log back.* The observer would grow
+  with the log and become a reader of its own output; the join belongs to whoever
+  reads the log.
+- *A distinct `cc-observe` subcommand and a second shim.* Two more files to install,
+  keep in step and remove, for a dispatch that is one `match` on the event name.
+- *Wire the observer into this repository's dogfood hook now.* Not done: that hook
+  runs whatever `harness` is installed on the machine, and a pre-D84 binary would
+  treat a post-call event as a second gate call, charging budget counters twice.
+  `init` cannot hit this, because it writes the shim and the settings from the same
+  binary.
+- *OTLP export with the OpenTelemetry GenAI conventions, behind a flag on the hook.*
+  Rejected: the OpenTelemetry crates are not in the offline crate cache, they are
+  a heavy tree for a binary that runs on every tool call, and network I/O from the
+  hook adds latency to every call and egress from inside the governed session.
+  Export is a separate, offline step instead (addendum below).
+
+**Consequence.** A session's log now answers, per call: who proposed it, what the
+kernel decided, what the hook told the host, whether it ran, and how it ended; and
+for an ASK, whether the person (inferably) let it through. That is G3's input. The
+honest limits: the ASK answer is an inference with three named failure cases (no
+observer, a call still running, an outcome line that was not written), and
+Antigravity's ASKs are not joined at all until its post-call hook contract is
+verified.
+
+**Addendum (AI2-66 / #141): export is offline, and conservative about the
+conventions.** `harness export-otlp --log` converts a finished log to OTLP/JSON
+(`ExportTraceServiceRequest` per line, for a collector's `otlpjsonfile` receiver),
+written by hand with `serde_json`: OTLP/JSON is a small, stable shape, and the SDK
+would bring the dependency tree this decision rejected for the hook. The mapping
+choices, each closing an alternative:
+
+- *One trace per session, one span per decision.* Not one trace per call: a session
+  is the unit an incident is reconstructed in, and the book's requirement is one
+  trace id across proposal, approval and execution. Not separate spans for decision
+  and outcome: the convention says one span per tool call; the two moments are span
+  events.
+- *Only identifiers the host supplied.* `gen_ai.tool.call.id` is set only from a
+  real `tool_use_id`, as the convention requires; Claude Code's `agent_id` goes to
+  `ai2rules.agent_id`, because `gen_ai.agent.id` means a stable hosted-agent
+  resource and a subagent run is not one. `agent_type` is `gen_ai.agent.name`.
+- *Refusals are errors; declined prompts are not.* A DENY is status `ERROR` with
+  `error.type = ai2rules.denied`; an ASK the person did not let through is `UNSET`,
+  with `ai2rules.human_answer` still marked as inferred.
+- *Summaries stay opt-in and under `ai2rules.*`.* `--with-summaries` exports the
+  redacted call and result summaries as `ai2rules.call` / `ai2rules.result`, not as
+  `gen_ai.tool.call.arguments` / `.result`, which the conventions define as the
+  argument and result objects the log deliberately does not keep.
+- *Ids are derived, not random* (`md5`, already in the build): trace IDs use the
+  session; span IDs use a framed tuple of session, optional call ID and a per-call
+  occurrence index (`ai2rules.decision_index`). Re-exporting the same finished
+  log preserves IDs. Repeated hooks can log multiple decisions for one call;
+  coalescing them would discard distinct verdicts and ASK/DENY inferences, so
+  each remains a span, correlated by the unchanged host call ID and session.
+  These spans count decisions rather than distinct executions. Id-less records
+  have a separate per-session sequence. Inserting another call or a non-decision
+  record does not renumber this call; editing its decision sequence can. This
+  corrects the original call-only seed: span IDs change once across that fix.
+
+## D85 — Stop is a console position, and it says "stopped" only on the hook's evidence
+
+**Context.** The policy console (D81) changes what an agent may do at its next call, but
+had no single "stop this agent" control. A security reviewer asks for one first: a halt
+outside the agent's process (gap G7 of the *Designing AI Agents* review; AI2-63 / #136).
+The mechanism was already there. What was missing was the position, and an honest way to
+show that it holds.
+
+**Decision.**
+
+- **Stop is a profile (`stop`) behind its own button.** It hides every base action with
+  an effect other than `Read` or `None`, using the supplied manifest, not a name list, and
+  writes the world atomically like any other change, so it binds at the agent's next call.
+  A call already running finishes; killing one mid-call is E8.4.
+- **Custom and unplaced actions are covered.** Process, network, write, memory,
+  credential and external effects all go off regardless of their names. Read/None
+  actions keep their previous flags. The demo's `Bash` and `PowerShell` read-looking
+  classes declare `Process`, so even `ls` is stopped; there is no shell-name exemption.
+- **Effectful scoped capabilities make Stop unavailable.** D79 keeps them projected
+  even when their base is hidden, and there is no independent projection flag. The
+  console refuses the request without writes and shows which capabilities prevent
+  Stop; it never claims a partial Stop. Read-only capabilities remain supported.
+- **Restore puts back exactly what Stop replaced.** The Stop marker in the decision log
+  keeps every base action's exact projection/approval flags (`stop.before`), including
+  approval on hidden actions, so a custom or mixed policy comes back intact. Old string
+  position markers remain readable. Restore is offered only while the last policy change is that Stop. Any later
+  change ends it.
+- **"Stopped" needs evidence from the hook, never just the click.** Off is ABSENT, which
+  binds only under `cc-hook --enforce-absent`. The hook already logs what it told the host
+  (D81): `deny` for an ABSENT it enforced, `null` for one it let through to the host's
+  prompt. The page shows **Stopped** once a call after the Stop was refused that way, and
+  **Not stopped** as soon as the hook's latest ABSENT went through. Before any call, the
+  project's hook script is read as a hint: if the line that runs `cc-hook` lacks the flag,
+  the page warns before the button is pressed.
+
+**Alternatives.**
+
+- *Keep a fixed switch list or exempt shell names.* Rejected: supplied manifests can
+  expose effectful actions and capabilities under arbitrary names. Stop status checks
+  the same complete effect coverage as the write, so an old refusal cannot prove a
+  newly added action is stopped.
+- *Remove scoped capabilities and put their definitions in the restore log.* Rejected:
+  literal arguments can contain secrets, and policy markers must not copy those into
+  observability. Supporting these worlds needs an independent capability projection
+  mechanism; this console fix does not change the manifest/compiler ABI.
+- *Check the flag statically, as `doctor` inspects the hook.* Rejected as the answer. Hooks
+  can be wired from user, project, local or managed settings, and the shim can be edited.
+  A static check can be wrong in both directions. The log records what the hook did. The
+  static check stays only as an early warning.
+- *A sixth switch for reads, so Stop turns them off too.* Not done. An agent that cannot
+  even read cannot explain why it stopped, and reads are not effects. If wanted, it is a
+  separate switch with its own position in every profile.
+- *Restore to a fixed profile, or keep the previous state in the console's memory.*
+  Rejected. A fixed profile loses a custom mix of switches. Memory is lost when the console
+  restarts. The log marker survives both, and it is the record a reviewer reads anyway.
+- *Stop by killing the agent process, or by the shim's `gate-off` file.* Out of scope.
+  `gate-off` turns governance off, the opposite of a stop. Killing a running call is E8.4.
+
+**Consequence.** Stop is as strong as `--enforce-absent`, and the page says which it is.
+Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
+feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.
+
+
+## D89 — MCP approvals consume before effects and resume through the same kernel
+
+**Date:** 2026-10-24. **Task:** AI2-72 / PR #17, PLAN E13.4d.
+
+**Decision.** Opt-in `mcp-gateway --approvals --principal` uses D73/D78's existing
+atomic durable consume before the upstream RPC, then reevaluates through the
+same gate and scoped forwarding path. A missing reply or failed execution-record
+write leaves consent consumed. A new effect requires a new human approval.
+Consent binds the configured principal and upstream command, full request and
+effective call, policy/schema epochs and provenance. Expiry is five minutes from
+minting. Wire-supplied approval tokens still carry no authority.
+
+**Alternatives.** Marking Executed after success permits duplicate mutations when
+a reply is lost. Direct forwarding after approval bypasses budget and scoped
+lowering. A new claim primitive duplicates the existing locked store operation.
+Unbounded expiry or a shared implicit principal lets stale or cross-session
+consent authorize effects the operator did not review. All are rejected.
+
+**Consequence.** Consent can be spent without an effect if later validation fails.
+Operators reconcile unknown upstream outcomes before approving another request.
+Metadata changes require fresh consent too. This provides at-most-once forwarding
+per grant; external transactions/idempotency are outside the protocol. The trusted
+native resume helper shares implementation with the unchanged pure gate ABI.
+See [the operator workflow](docs/approval-capable-hosts.md).

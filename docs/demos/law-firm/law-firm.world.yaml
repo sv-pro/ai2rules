@@ -1,0 +1,85 @@
+# The world behind `harness demo --story law-firm`: an AI legal assistant at a
+# fictional firm, Cohen & Levi. Compiled into the binary (include_str!), so the
+# story runs with no checkout and no `harness init`. Runbook: README.md here.
+#
+# What the world says, in the firm's words:
+#   - the assistant may open case files, save drafts, and read the inbox;
+#   - it may email and upload, but a session that has read text from outside
+#     the firm may send nothing out. That rule is not written here: it is the
+#     kernel's hard taint invariant (invariant 7), which no manifest can relax;
+#   - deleting case files always needs a partner's approval, and with no partner
+#     present (a background run) it is refused;
+#   - the trust account does not exist in this world at all.
+world_id: cohen-levi-legal-assistant
+
+actors:
+  - { name: partner, kind: User }
+  - { name: assistant, kind: Model }
+
+channels:
+  # What a partner or associate types to the assistant.
+  - { name: user_prompt, trust: Trusted, taint: false }
+
+capabilities:
+  - trust: Trusted
+    actions: [Read, Write, Mcp]
+
+base_actions:
+  - name: open_case_file
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string, description: "Case document inside the firm's matter store" }
+  - name: save_draft
+    action_type: Write
+    side_effect: FilesystemWrite
+    schema:
+      type: object
+      required: [path, content]
+      properties:
+        path: { type: string }
+        content: { type: string }
+  # Mail comes from outside the firm: whatever it says is untrusted, so reading
+  # it taints the session (an MCP-backed read always does, finding #13).
+  - name: read_client_email
+    action_type: Mcp
+    side_effect: Read
+    backing: !McpServer { server: firm_mail, tool: get_message }
+    schema:
+      type: object
+      required: [message_id]
+      properties:
+        message_id: { type: string }
+  - name: send_email
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: firm_mail, tool: send_message }
+    schema:
+      type: object
+      required: [to, subject]
+      properties:
+        to: { type: string }
+        subject: { type: string }
+        attachment: { type: string }
+  - name: upload_to_file_share
+    action_type: Mcp
+    side_effect: Network
+    backing: !McpServer { server: file_share, tool: upload }
+    schema:
+      type: object
+      required: [path, destination]
+      properties:
+        path: { type: string }
+        destination: { type: string }
+  - name: delete_case_files
+    action_type: Write
+    side_effect: FilesystemWrite
+    approval_required: true
+    schema:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }

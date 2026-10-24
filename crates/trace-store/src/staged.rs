@@ -5,10 +5,15 @@
 //! atomically consumes the bound authorization, and only then invokes a
 //! privileged actuator. A crash or timeout after reservation is ambiguous and
 //! never retried automatically.
+//!
+//! The commit log is chained and head-anchored like the approval log (D78):
+//! deleting an `AttemptStarted` / `AttemptFinished` line must not release an
+//! idempotency key.
 
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use compiler::sha256_hex;
 use harness_types::{
@@ -20,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::approval::{key_path, load_or_create_key, lock_path, private_append, StoreLock};
-use crate::integrity::{constant_time_eq, hmac_hex};
+use crate::chain::{self, LineFault, Tail};
 use crate::{effect_binding, ApprovalStore, AuthorizationRejection, ConsumeOutcome, EffectBinding};
 
 const STAGED_EFFECT_VERSION: u32 = 1;
@@ -126,6 +131,10 @@ enum CommitEvent {
 struct SignedCommitEvent {
     event: CommitEvent,
     mac: String,
+    #[serde(default)]
+    seq: Option<u64>,
+    #[serde(default)]
+    prev: Option<String>,
 }
 
 #[derive(Default)]
@@ -140,14 +149,33 @@ struct CommitState {
 pub struct StagedEffectStore {
     path: PathBuf,
     key: Vec<u8>,
+    /// Furthest chain point this instance has loaded or written (D78).
+    seen: Mutex<Tail>,
 }
 
 impl StagedEffectStore {
     pub fn open(path: impl Into<PathBuf>) -> io::Result<Self> {
         let path = path.into();
         let key = load_or_create_key(&key_path(&path))?;
-        let _ = load(&path, &key)?;
-        Ok(Self { path, key })
+        // As for the approval store: anchor a fresh or crash-ahead log under the
+        // lock; the common case loads without it.
+        let loaded = match load(&path, &key) {
+            Ok(loaded) if !loaded.ahead => loaded,
+            _ => {
+                let _lock = StoreLock::acquire(&lock_path(&path))?;
+                chain::ensure_head(&path, &key, "commit log")?;
+                let loaded = load(&path, &key)?;
+                if loaded.ahead {
+                    chain::write_head(&path, &key, &loaded.tail)?;
+                }
+                loaded
+            }
+        };
+        Ok(Self {
+            path,
+            key,
+            seen: Mutex::new(loaded.tail),
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -164,7 +192,9 @@ impl StagedEffectStore {
             ));
         }
         let _lock = StoreLock::acquire(&lock_path(&self.path))?;
-        let state = load(&self.path, &self.key)?;
+        let Loaded {
+            state, mut tail, ..
+        } = self.reload()?;
         if state.staged.contains_key(&staged.id) {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
@@ -182,7 +212,7 @@ impl StagedEffectStore {
             ));
         }
         let id = staged.id.clone();
-        self.append(&CommitEvent::Staged(Box::new(staged)))?;
+        self.append(&CommitEvent::Staged(Box::new(staged)), &mut tail)?;
         Ok(id)
     }
 
@@ -200,7 +230,11 @@ impl StagedEffectStore {
         now_unix_ms: u64,
     ) -> io::Result<ExecutionReceipt> {
         let _lock = StoreLock::acquire(&lock_path(&self.path))?;
-        let mut state = load(&self.path, &self.key)?;
+        let Loaded {
+            mut state,
+            mut tail,
+            ..
+        } = self.reload()?;
         let attempt = state
             .attempts
             .get(&presented.idempotency_key)
@@ -228,7 +262,10 @@ impl StagedEffectStore {
                 Some(original.id.clone()),
                 now_unix_ms,
             );
-            self.append(&CommitEvent::AttemptFinished(Box::new(receipt.clone())))?;
+            self.append(
+                &CommitEvent::AttemptFinished(Box::new(receipt.clone())),
+                &mut tail,
+            )?;
             return Ok(receipt);
         }
 
@@ -242,7 +279,10 @@ impl StagedEffectStore {
                 None,
                 now_unix_ms,
             );
-            self.append(&CommitEvent::AttemptFinished(Box::new(receipt.clone())))?;
+            self.append(
+                &CommitEvent::AttemptFinished(Box::new(receipt.clone())),
+                &mut tail,
+            )?;
             return Ok(receipt);
         }
 
@@ -257,7 +297,10 @@ impl StagedEffectStore {
                 None,
                 now_unix_ms,
             );
-            self.append(&CommitEvent::AttemptFinished(Box::new(receipt.clone())))?;
+            self.append(
+                &CommitEvent::AttemptFinished(Box::new(receipt.clone())),
+                &mut tail,
+            )?;
             return Ok(receipt);
         }
 
@@ -269,7 +312,7 @@ impl StagedEffectStore {
             attempt,
             recorded_at_unix_ms: now_unix_ms,
         };
-        self.append(&started)?;
+        self.append(&started, &mut tail)?;
         apply_event(&mut state, started);
 
         let binding = binding_from_staged(presented);
@@ -285,7 +328,10 @@ impl StagedEffectStore {
                     None,
                     now_unix_ms,
                 );
-                self.append(&CommitEvent::AttemptFinished(Box::new(receipt.clone())))?;
+                self.append(
+                    &CommitEvent::AttemptFinished(Box::new(receipt.clone())),
+                    &mut tail,
+                )?;
                 return Ok(receipt);
             }
         }
@@ -309,21 +355,48 @@ impl StagedEffectStore {
             None,
             now_unix_ms,
         );
-        self.append(&CommitEvent::AttemptFinished(Box::new(receipt.clone())))?;
+        self.append(
+            &CommitEvent::AttemptFinished(Box::new(receipt.clone())),
+            &mut tail,
+        )?;
         Ok(receipt)
     }
 
-    fn append(&self, event: &CommitEvent) -> io::Result<()> {
+    /// Load under the caller's lock, refusing a log shorter than this instance
+    /// has already seen (D78).
+    fn reload(&self) -> io::Result<Loaded> {
+        let loaded = load(&self.path, &self.key)?;
+        let seen = self
+            .seen
+            .lock()
+            .map_err(|_| io::Error::other("commit log high-water mark poisoned"))?
+            .clone();
+        chain::check_high_water(&self.path, &loaded.macs, &seen, "commit log")?;
+        Ok(loaded)
+    }
+
+    /// Append one chained line and move the head anchor (D78). The caller holds
+    /// the store lock and threads the tail from its `load`.
+    fn append(&self, event: &CommitEvent, tail: &mut Tail) -> io::Result<()> {
         let payload = serde_json::to_string(event).map_err(io::Error::other)?;
+        let mac = chain::line_mac(&self.key, tail.next_seq, &tail.last_mac, &payload);
         let signed = SignedCommitEvent {
             event: event.clone(),
-            mac: hmac_hex(&self.key, payload.as_bytes()),
+            mac: mac.clone(),
+            seq: Some(tail.next_seq),
+            prev: Some(tail.last_mac.clone()),
         };
         let line = serde_json::to_string(&signed).map_err(io::Error::other)?;
         let mut file = private_append(&self.path)?;
         writeln!(file, "{line}")?;
         file.flush()?;
-        file.sync_data()
+        file.sync_data()?;
+        tail.next_seq += 1;
+        tail.last_mac = mac;
+        if let Ok(mut seen) = self.seen.lock() {
+            *seen = tail.clone();
+        }
+        chain::write_head(&self.path, &self.key, tail)
     }
 }
 
@@ -530,13 +603,31 @@ fn value_hash(value: &Value) -> ContentHash {
     ContentHash::new(sha256_hex(&canonical))
 }
 
-fn load(path: &Path, key: &[u8]) -> io::Result<CommitState> {
+/// A verified commit log folded into state, plus what the chain needs.
+struct Loaded {
+    state: CommitState,
+    tail: Tail,
+    macs: Vec<String>,
+    ahead: bool,
+}
+
+fn load(path: &Path, key: &[u8]) -> io::Result<Loaded> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(CommitState::default()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            chain::verify_head(path, key, &[], "commit log")?;
+            return Ok(Loaded {
+                state: CommitState::default(),
+                tail: Tail::genesis(),
+                macs: Vec::new(),
+                ahead: false,
+            });
+        }
         Err(error) => return Err(error),
     };
     let mut state = CommitState::default();
+    let mut tail = Tail::genesis();
+    let mut macs = Vec::new();
     for (index, line) in BufReader::new(file).lines().enumerate() {
         let line = line?;
         if line.trim().is_empty() {
@@ -549,20 +640,40 @@ fn load(path: &Path, key: &[u8]) -> io::Result<CommitState> {
             )
         })?;
         let payload = serde_json::to_string(&signed.event).map_err(io::Error::other)?;
-        let expected = hmac_hex(key, payload.as_bytes());
-        if !constant_time_eq(&expected, &signed.mac) {
+        if let Err(fault) = chain::verify_line(
+            key,
+            &mut tail,
+            signed.seq,
+            signed.prev.as_deref(),
+            &signed.mac,
+            &payload,
+        ) {
+            let why = match fault {
+                LineFault::BadMac => "MAC does not verify",
+                LineFault::OutOfChain => {
+                    "signed, but out of chain — a line before it was removed, reordered, \
+                     or copied in from another log (D78)"
+                }
+                LineFault::Unchained => {
+                    "written before commit logs were chained (D78); delete the log, its \
+                     key and its head file"
+                }
+            };
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!(
-                    "commit log {} line {}: MAC does not verify",
-                    path.display(),
-                    index + 1
-                ),
+                format!("commit log {} line {}: {why}", path.display(), index + 1),
             ));
         }
+        macs.push(signed.mac);
         apply_event(&mut state, signed.event);
     }
-    Ok(state)
+    let ahead = chain::verify_head(path, key, &macs, "commit log")?;
+    Ok(Loaded {
+        state,
+        tail,
+        macs,
+        ahead,
+    })
 }
 
 fn apply_event(state: &mut CommitState, event: CommitEvent) {
@@ -1052,5 +1163,46 @@ mod tests {
             .unwrap();
         assert_eq!(receipt.outcome, ReceiptOutcome::Simulated);
         assert_eq!(actuator.effect_count(), 0);
+    }
+
+    /// D78: removing the reservation and receipt lines used to free the
+    /// idempotency key, so the same staged effect could be committed again.
+    #[test]
+    fn deleting_attempt_lines_does_not_release_the_idempotency_key() {
+        let mut fixture = Fixture::new(
+            EffectMode::Execute,
+            Consequence::irreversible(),
+            "fake",
+            2_000,
+            2_000,
+        );
+        let mut actuator = FakePrivilegedActuator::default();
+        let first = fixture
+            .stages
+            .commit(
+                &fixture.staged,
+                &fixture.world,
+                &mut fixture.authorizations,
+                &mut actuator,
+                NOW,
+            )
+            .unwrap();
+        assert_eq!(first.outcome, ReceiptOutcome::Committed);
+
+        let path = fixture.stages.path().to_path_buf();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let kept: Vec<&str> = text
+            .lines()
+            .filter(|l| !l.contains("\"AttemptStarted\"") && !l.contains("\"AttemptFinished\""))
+            .collect();
+        assert!(kept.len() < text.lines().count());
+        std::fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
+
+        let err = match StagedEffectStore::open(&path) {
+            Ok(_) => panic!("a commit log missing its attempts must not load"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("removed from the end"), "{err}");
+        assert_eq!(actuator.effect_count(), 1);
     }
 }
