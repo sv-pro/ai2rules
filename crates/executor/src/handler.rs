@@ -55,6 +55,16 @@ pub enum ExecError {
     Timeout { timeout_ms: u64 },
     /// The effect mode is not implemented in this epic (Proxy/Sanitize/Defer).
     UnsupportedEffectMode(EffectMode),
+    /// A command was asked to `Execute` but no OS sandbox is active to enforce
+    /// its network/filesystem policy and the caller did not accept unconfined
+    /// execution — fail closed rather than run a subprocess unconstrained
+    /// (finding #10 / D47). `Simulate` is unaffected.
+    SandboxRequired { action: ActionName },
+    /// A web fetch was refused by the spec's `NetworkPolicy` — the policy was
+    /// `Disabled`, the host was not on the allowlist, or the URL resolved to a
+    /// loopback/link-local/private target (finding #12). The web handler owns its
+    /// own egress, so unlike a subprocess it can enforce this itself.
+    NetworkBlocked { url: String, reason: String },
     /// The operation payload did not match what the handler expected.
     BadOperation(String),
     /// An underlying I/O failure.
@@ -84,9 +94,18 @@ impl std::fmt::Display for ExecError {
             ExecError::Timeout { timeout_ms } => {
                 write!(f, "command exceeded timeout of {timeout_ms} ms")
             }
+            ExecError::NetworkBlocked { url, reason } => {
+                write!(f, "network policy blocked {url}: {reason}")
+            }
             ExecError::UnsupportedEffectMode(mode) => {
                 write!(f, "effect mode {mode:?} is not supported yet")
             }
+            ExecError::SandboxRequired { action } => write!(
+                f,
+                "refusing to Execute command {action} unconfined: no OS sandbox \
+                 enforces its network/filesystem policy (see D47; use an \
+                 unconfined-acknowledged handler or Simulate)"
+            ),
             ExecError::BadOperation(detail) => write!(f, "bad operation: {detail}"),
             ExecError::Io(detail) => write!(f, "io error: {detail}"),
         }

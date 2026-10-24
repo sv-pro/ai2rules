@@ -12,12 +12,19 @@
 
 mod approval;
 mod bundle;
+mod chain;
+pub mod integrity;
 mod record;
 mod redact;
 mod replay;
+pub mod secrets;
+mod staged;
 mod store;
 
-pub use approval::{params_hash, ApprovalEvent, ApprovalStore};
+pub use approval::{
+    effect_binding, effect_resource, params_hash, ApprovalEvent, ApprovalStore,
+    AuthorizationRejection, ConsumeOutcome, EffectBinding,
+};
 pub use bundle::{export_bundle, import_bundle, replay_bundle, Bundle};
 pub use record::{
     ContextSnapshot, DecisionRecord, ExecSummary, ExecutionRecord, OutcomeKind, OutcomeSummary,
@@ -25,6 +32,10 @@ pub use record::{
 };
 pub use redact::redact;
 pub use replay::{drift_report, replay, Mismatch, ReplayReport};
+pub use staged::{
+    stage_effect, staged_effect_hash, ActuatorResult, FakeActuatorMode, FakePrivilegedActuator,
+    PrivilegedActuator, StagedEffectStore,
+};
 pub use store::TraceStore;
 
 use harness_types::{CompiledWorld, Provenance, ToolCall, TraceId};

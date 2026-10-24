@@ -1,0 +1,10 @@
+# Keep the root-context Docker build (docker/Dockerfile) sane. That build only needs
+# Cargo.*/rustfmt.toml/crates for the Rust stage; everything listed here is multi-GB
+# and irrelevant to it. Honored by both the classic and BuildKit builders.
+# (Sub-context builds — docker/egress-proxy, context-engine, blog — are unaffected;
+# their build context is their own directory, not the repo root.)
+.git
+target
+repos
+**/node_modules
+blog/dist

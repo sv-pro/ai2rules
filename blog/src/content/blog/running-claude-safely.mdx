@@ -37,7 +37,7 @@ base_actions:
     action_type: Patch
     side_effect: FilesystemWrite
     approval_required: true            # human-in-the-loop before any write
-    schema: { type: object, properties: { patch: { type: string } } }
+    schema: { type: object, required: [path, contents], properties: { path: { type: string }, contents: { type: string } } }
 
 # The narrowed capabilities the agent actually gets (arguments come from the actor).
 scoped_capabilities:
@@ -46,7 +46,7 @@ scoped_capabilities:
     args: { path: ActorInput }
   - name: apply_workspace_patch
     base_action: apply_patch
-    args: { patch: ActorInput }
+    args: { path: ActorInput, contents: ActorInput }
 
 # Hard floor: tainted input can never drive an effectful boundary.
 transition_policies:

@@ -11,9 +11,12 @@
 //!   (d) OpenCode-shaped GateRequests — the exact wire shape the plugin sends
 //!   (e) `harness mcp-gateway` over `harness mock-jira` for the jira cases
 //!       (tools/list shaping + isError decision labels)
+//!   (f) `harness agy-hook` — the Antigravity CLI PreToolUse contract, fed the
+//!       host's real payload shape (camelCase envelope + PascalCase argument
+//!       keys), so the adapter's shape translation is inside the parity claim
 //!
 //! Plus the classifier-consistency test pinning the D36 `command_classes`
-//! pattern lists byte-identical across the three host manifests.
+//! pattern lists byte-identical across every shipped host manifest.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -114,6 +117,67 @@ fn hook_decision(out: &str) -> Option<(String, String)> {
             .to_string(),
         v["hookSpecificOutput"]["permissionDecisionReason"]
             .as_str()
+            .unwrap_or("")
+            .to_string(),
+    ))
+}
+
+/// (f) `harness agy-hook`: an Antigravity PreToolUse payload on stdin; stdout.
+fn agy_hook(state: &Path, event: &Value, mode: &str, enforce_absent: bool) -> String {
+    let bin = env!("CARGO_BIN_EXE_harness");
+    let mut args = vec![
+        "agy-hook".to_string(),
+        "--world".to_string(),
+        demo_world().to_str().unwrap().to_string(),
+        "--state".to_string(),
+        state.to_str().unwrap().to_string(),
+        "--mode".to_string(),
+        mode.to_string(),
+    ];
+    if enforce_absent {
+        args.push("--enforce-absent".to_string());
+    }
+    let mut child = Command::new(bin)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn agy-hook");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(event.to_string().as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().expect("wait agy-hook");
+    assert!(out.status.success(), "agy-hook must exit 0 (fail-open)");
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// Spell a case's neutral arguments the way Antigravity actually sends them
+/// (PascalCase), so the conformance run exercises the adapter's alias step
+/// rather than bypassing it. The kernel must still reach the same verdict.
+fn agy_args(arguments: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for (k, v) in arguments.as_object().cloned().unwrap_or_default() {
+        let host_key = match k.as_str() {
+            "command" => "CommandLine",
+            "file_path" | "path" | "notebook_path" => "AbsolutePath",
+            other => other,
+        };
+        out.insert(host_key.to_string(), v);
+    }
+    Value::Object(out)
+}
+
+/// The Antigravity decision channel: `{}` (no `decision`) is the passthrough.
+fn agy_decision(out: &str) -> Option<(String, String)> {
+    let v: Value = serde_json::from_str(out.trim()).ok()?;
+    Some((
+        v.get("decision")?.as_str()?.to_string(),
+        v.get("reason")
+            .and_then(|r| r.as_str())
             .unwrap_or("")
             .to_string(),
     ))
@@ -221,9 +285,10 @@ fn every_entry_point_agrees_with_the_in_process_kernel() {
             "context": {
                 "session_id": name,
                 "mode": case_field(&case, &["request", "context", "mode"]),
-                "taint": if taint == "tainted" { json!("tainted") } else { Value::Null },
-                "source_channel": Value::Null,
+                "taint": if taint == "tainted" { json!("tainted") } else { json!("clean") },
+                "source_channel": "user_prompt",
                 "approval_token": Value::Null,
+                "usage": {},
             },
         });
         let (code, stdout) = gate_cli(&oc_req.to_string());
@@ -239,6 +304,77 @@ fn every_entry_point_agrees_with_the_in_process_kernel() {
             a["context"]["taint"], d["context"]["taint"],
             "{name}: taint parity"
         );
+    }
+}
+
+#[test]
+fn harness_gate_does_not_trust_request_supplied_approval_tokens() {
+    let request = json!({
+        "v": 1,
+        "tool": "bash",
+        "arguments": { "command": "rm -rf /tmp/x" },
+        "context": {
+            "session_id": "forged-token-session",
+            "mode": "interactive",
+            "taint": "clean",
+            "source_channel": "user_prompt",
+            "approval_token": "forged-token",
+            "usage": {}
+        }
+    });
+
+    let (code, stdout) = gate_cli(&request.to_string());
+    assert_eq!(code, 0, "gate CLI evaluates forged approval token request");
+    let response: Value = serde_json::from_str(&stdout).expect("gate CLI response json");
+    assert_eq!(response["action"], "bash_destructive");
+    assert_eq!(response["decision"], "ASK");
+    assert_eq!(response["rule"], "approval_required");
+    assert_eq!(response["approval"]["required"], true);
+}
+
+#[test]
+fn harness_gate_fails_closed_on_missing_or_malformed_context() {
+    for (name, context, rule) in [
+        (
+            "missing_taint",
+            json!({"session_id": "bad-context", "mode": "interactive", "source_channel": "user_prompt", "usage": {}}),
+            "missing_taint",
+        ),
+        (
+            "invalid_taint",
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean-ish", "source_channel": "user_prompt", "usage": {}}),
+            "invalid_taint",
+        ),
+        (
+            "missing_source",
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean", "usage": {}}),
+            "missing_source_channel",
+        ),
+        (
+            "invalid_source",
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean", "source_channel": "probably_user", "usage": {}}),
+            "invalid_source_channel",
+        ),
+        // Finding #16: demo-world.yaml counts calls, so a caller that omits its
+        // budget counters is refused rather than handed an unlimited session.
+        (
+            "missing_usage",
+            json!({"session_id": "bad-context", "mode": "interactive", "taint": "clean", "source_channel": "user_prompt"}),
+            "missing_usage",
+        ),
+    ] {
+        let request = json!({
+            "v": 1,
+            "tool": "jira_add_comment",
+            "arguments": { "issue_key": "DEMO-1", "body": name },
+            "context": context
+        });
+
+        let (code, stdout) = gate_cli(&request.to_string());
+        assert_eq!(code, 0, "{name}: gate CLI evaluates");
+        let response: Value = serde_json::from_str(&stdout).expect("gate CLI response json");
+        assert_eq!(response["decision"], "DENY", "{name}");
+        assert_eq!(response["rule"], rule, "{name}");
     }
 }
 
@@ -288,6 +424,78 @@ fn cc_hook_contract_matches_the_case_set() {
             }
             "ABSENT" => {
                 let (d, reason) = hook_decision(&out).expect("--enforce-absent emits a deny");
+                assert_eq!(d, "deny", "{name}");
+                assert!(
+                    reason.starts_with("ABSENT: "),
+                    "{name}: ABSENT stays distinguishable from DENY, got {reason:?}"
+                );
+            }
+            other => panic!("{name}: unexpected expected decision {other}"),
+        }
+
+        // Post-call taint: the sidecar must exist iff the kernel says tainted.
+        let expect_tainted = expect["taint"] == "tainted";
+        assert_eq!(
+            dir.path().join(format!("taint-{sid}")).exists(),
+            expect_tainted,
+            "{name}: sidecar tracks the kernel's post-call taint"
+        );
+    }
+}
+
+/// (f) The agy-hook PreToolUse contract: the same case set, sent in
+/// Antigravity's real payload shape, must produce the same kernel verdict —
+/// mapped onto Antigravity's decision vocabulary (`force_ask` for ASK, because
+/// its plain `ask` respects cached "Always Allow" grants) — and the same
+/// post-call taint. This puts the adapter's envelope + PascalCase translation
+/// inside the one-kernel parity claim (D48).
+#[test]
+fn agy_hook_contract_matches_the_case_set() {
+    for case in cases() {
+        let name = case["name"].as_str().unwrap();
+        let request = &case["request"];
+        let expect = &case["expect"];
+        let decision = expect["decision"].as_str().unwrap();
+        let mode = case_field(&case, &["request", "context", "mode"])
+            .as_str()
+            .unwrap_or("interactive");
+        let inbound_tainted = case_field(&case, &["request", "context", "taint"]) == "tainted";
+
+        let dir = tempfile::tempdir().unwrap();
+        let sid = name; // one conversation per case
+        if inbound_tainted {
+            std::fs::write(dir.path().join(format!("taint-{sid}")), "seed\n").unwrap();
+        }
+        let arguments = request.get("arguments").cloned().unwrap_or(json!({}));
+        let event = json!({
+            "conversationId": sid,
+            "stepIdx": 1,
+            "workspacePaths": [],
+            "toolCall": { "name": request["tool"], "args": agy_args(&arguments) },
+        });
+        // --enforce-absent for the ABSENT cases: the deny channel is the only
+        // way a PreToolUse hook can surface "does not exist".
+        let out = agy_hook(dir.path(), &event, mode, decision == "ABSENT");
+
+        match decision {
+            "ALLOW" => {
+                let v: Value = serde_json::from_str(out.trim())
+                    .unwrap_or_else(|e| panic!("{name}: agy expects JSON, got {out:?} ({e})"));
+                assert!(
+                    v.get("decision").is_none(),
+                    "{name}: ALLOW passes through as the no-decision no-op, got {out:?}"
+                );
+            }
+            "ASK" => {
+                let (d, _) = agy_decision(&out).expect("ASK emits a decision");
+                assert_eq!(d, "force_ask", "{name}: ASK uses the strict channel");
+            }
+            "DENY" => {
+                let (d, _) = agy_decision(&out).expect("DENY emits a decision");
+                assert_eq!(d, "deny", "{name}");
+            }
+            "ABSENT" => {
+                let (d, reason) = agy_decision(&out).expect("--enforce-absent emits a deny");
                 assert_eq!(d, "deny", "{name}");
                 assert!(
                     reason.starts_with("ABSENT: "),
@@ -426,7 +634,7 @@ fn malformed_gate_request_is_a_process_error_not_a_deny() {
 }
 
 /// D36 classifier consistency: the `command_classes` pattern lists are
-/// byte-identical across the three host manifests (the class targets differ
+/// byte-identical across the host manifests (the class/default targets differ
 /// only in the hosts' action-name casing).
 #[test]
 fn command_class_patterns_are_identical_across_host_manifests() {
@@ -434,8 +642,12 @@ fn command_class_patterns_are_identical_across_host_manifests() {
         "docs/demos/one-kernel/demo-world.yaml",
         ".claude/cc-world.yaml",
         "docs/demos/opencode/opencode-world.yaml",
+        "scripts/starter-world.yaml",
+        ".agents/agy-world.yaml",
+        "docs/demos/deepseek-harness/deepseek-world.yaml",
     ];
     let mut pattern_sets: Vec<Vec<Vec<String>>> = Vec::new();
+    let mut default_targets: Vec<String> = Vec::new();
     for rel in manifests {
         let text = std::fs::read_to_string(repo_path(rel)).expect("read manifest");
         let manifest = compiler::loader::load_yaml(&text).expect("parse manifest");
@@ -446,6 +658,18 @@ fn command_class_patterns_are_identical_across_host_manifests() {
         );
         let def = &manifest.command_classes[0];
         assert_eq!(def.arg, "command", "{rel}: classifies the `command` arg");
+        let default_to = def
+            .default_to
+            .as_ref()
+            .expect("shell classifier default_to");
+        assert!(
+            default_to
+                .as_str()
+                .to_ascii_lowercase()
+                .ends_with("_unclassified"),
+            "{rel}: default_to must be an unclassified shell fallback"
+        );
+        default_targets.push(default_to.as_str().to_ascii_lowercase());
         pattern_sets.push(
             def.classes
                 .iter()
@@ -461,4 +685,453 @@ fn command_class_patterns_are_identical_across_host_manifests() {
         pattern_sets[0], pattern_sets[2],
         "demo-world vs opencode-world pattern drift"
     );
+    assert_eq!(
+        pattern_sets[0], pattern_sets[3],
+        "demo-world vs starter-world pattern drift"
+    );
+    assert_eq!(
+        pattern_sets[0], pattern_sets[4],
+        "demo-world vs agy-world pattern drift"
+    );
+    assert_eq!(
+        pattern_sets[0], pattern_sets[5],
+        "demo-world vs deepseek-world pattern drift"
+    );
+    assert!(
+        default_targets.iter().all(|d| d.ends_with("_unclassified")),
+        "all shell classifiers fail closed to an unclassified fallback"
+    );
+}
+
+/// D83 classifier consistency: every host manifest that declares instruction
+/// files declares the SAME list, routed to a durable-memory action. A file one
+/// host writes is context another host loads, so the lists must not drift.
+#[test]
+fn path_class_patterns_are_identical_across_host_manifests() {
+    let manifests = [
+        "docs/demos/one-kernel/demo-world.yaml",
+        ".claude/cc-world.yaml",
+        "scripts/starter-world.yaml",
+        ".agents/agy-world.yaml",
+    ];
+    let mut pattern_sets: Vec<Vec<String>> = Vec::new();
+    for rel in manifests {
+        let text = std::fs::read_to_string(repo_path(rel)).expect("read manifest");
+        let manifest = compiler::loader::load_yaml(&text).expect("parse manifest");
+        assert_eq!(
+            manifest.path_classes.len(),
+            1,
+            "{rel}: exactly one path classifier"
+        );
+        let class = &manifest.path_classes[0];
+        let target = manifest
+            .base_actions
+            .iter()
+            .find(|a| a.name == class.to)
+            .unwrap_or_else(|| panic!("{rel}: {} is declared", class.to));
+        assert_eq!(
+            target.side_effect,
+            harness_types::SideEffectClass::Memory,
+            "{rel}: an instruction-file write is a durable-memory write"
+        );
+        pattern_sets.push(class.patterns.clone());
+    }
+    for (rel, set) in manifests.iter().zip(&pattern_sets).skip(1) {
+        assert_eq!(
+            &pattern_sets[0], set,
+            "demo-world vs {rel} path-class drift"
+        );
+    }
+}
+
+/// D83 on the real host manifests: Claude Code (`.claude/cc-world.yaml`, keys
+/// `file_path` / `notebook_path`) and Antigravity (`.agents/agy-world.yaml`,
+/// PascalCase keys aliased to `path`). In a tainted session every spelling of
+/// every instruction-file target is refused; an ordinary source file is not.
+#[test]
+fn tainted_instruction_file_writes_are_denied_on_every_host() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = std::fs::canonicalize(tmp.path()).unwrap();
+    let abs = |rel: &str| project.join(rel).to_str().unwrap().to_string();
+    let mut targets: Vec<String> = [
+        "CLAUDE.md",
+        "./CLAUDE.md",
+        "docs/../CLAUDE.md",
+        "claude.md",
+        "AGENTS.md",
+        ".claude/skills/x/SKILL.md",
+        ".claude/agents/reviewer.md",
+        "~/.claude/CLAUDE.md",
+        "~/.claude/projects/-home-dev-proj/memory/MEMORY.md",
+        "GEMINI.md",
+        ".agents/rules/style.md",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    targets.push(abs("CLAUDE.md"));
+    targets.push(abs(".claude/skills/x/SKILL.md"));
+    if cfg!(windows) {
+        // Either separator (AI2-57 tracks the rest of Windows parity).
+        targets.push(r"docs\..\CLAUDE.md".to_string());
+        targets.push(abs(r".claude\skills\x\SKILL.md"));
+    }
+
+    let cc_world = repo_path(".claude/cc-world.yaml");
+    let agy_world = repo_path(".agents/agy-world.yaml");
+    let cc_event = |sid: &str, tool: &str, key: &str, target: &str| json!({ "tool_name": tool, "tool_input": { key: target }, "session_id": sid });
+    let agy_event = |sid: &str, tool: &str, target: &str| {
+        json!({
+            "conversationId": sid,
+            "stepIdx": 1,
+            "workspacePaths": [project.to_str().unwrap()],
+            "toolCall": { "name": tool, "args": { "TargetFile": target } },
+        })
+    };
+    let tainted_state = |sid: &str| {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(format!("taint-{sid}")), "seed\n").unwrap();
+        dir
+    };
+
+    for (i, target) in targets.iter().enumerate() {
+        let sid = format!("s{i}");
+        for (tool, key) in [
+            ("Write", "file_path"),
+            ("Edit", "file_path"),
+            ("MultiEdit", "file_path"),
+            ("NotebookEdit", "notebook_path"),
+        ] {
+            let state = tainted_state(&sid);
+            let event = cc_event(&sid, tool, key, target);
+            let out = hook_with_world(
+                "cc-hook",
+                &cc_world,
+                state.path(),
+                &project,
+                &event,
+                "interactive",
+            );
+            let (d, reason) = hook_decision(&out)
+                .unwrap_or_else(|| panic!("cc {tool} {target}: expected a deny, got {out:?}"));
+            assert_eq!(d, "deny", "cc {tool} {target}: {reason}");
+        }
+        for tool in ["write_to_file", "propose_code", "edit_notebook"] {
+            let state = tainted_state(&sid);
+            let event = agy_event(&sid, tool, target);
+            let out = hook_with_world(
+                "agy-hook",
+                &agy_world,
+                state.path(),
+                &project,
+                &event,
+                "interactive",
+            );
+            let (d, reason) = agy_decision(&out)
+                .unwrap_or_else(|| panic!("agy {tool} {target}: expected a deny, got {out:?}"));
+            assert_eq!(d, "deny", "agy {tool} {target}: {reason}");
+        }
+    }
+
+    // An ordinary source file is unchanged: a tainted write still passes through.
+    for target in [
+        "src/main.rs".to_string(),
+        abs("src/main.rs"),
+        "docs/CLAUDE.md.bak".to_string(),
+    ] {
+        let state = tainted_state("src");
+        let event = cc_event("src", "Write", "file_path", &target);
+        let out = hook_with_world(
+            "cc-hook",
+            &cc_world,
+            state.path(),
+            &project,
+            &event,
+            "interactive",
+        );
+        assert!(
+            out.trim().is_empty(),
+            "cc {target}: ordinary write passes, got {out:?}"
+        );
+        let event = agy_event("src", "write_to_file", &target);
+        let out = hook_with_world(
+            "agy-hook",
+            &agy_world,
+            state.path(),
+            &project,
+            &event,
+            "interactive",
+        );
+        assert!(
+            agy_decision(&out).is_none(),
+            "agy {target}: ordinary write passes, got {out:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Path-scope parity (spatial confinement, D46) — docs/demos/one-kernel/roots-*.yaml
+// ---------------------------------------------------------------------------
+//
+// Finding #15 shipped because the section above had no path cases: the suite
+// that compares adapters against each other never exercised the one feature
+// where they had silently diverged. cc-hook canonicalized manifest roots and
+// agy-hook did not, so the same world denied a write on one host and granted it
+// on the other. These tests close that gap for every entry point that can carry
+// a resolved path.
+
+/// A real project tree for path-scope, with the layout `roots-world.yaml`
+/// describes. Returns the CANONICALIZED root, because every path comparison
+/// downstream happens after canonicalization and the fixture must not be the
+/// one thing that is lexical.
+#[cfg(unix)]
+fn roots_project() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    for sub in ["src", "inbox", "vendor", "private", "untracked"] {
+        std::fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    std::fs::write(root.join("src/lib.rs"), "// code\n").unwrap();
+    std::fs::write(root.join("inbox/message.txt"), "untrusted\n").unwrap();
+    std::fs::write(root.join("vendor/dep.js"), "// dep\n").unwrap();
+    std::fs::write(root.join("vendor/.env"), "SECRET=1\n").unwrap();
+    std::fs::write(root.join("private/id_rsa"), "KEY\n").unwrap();
+    // The non-canonical root rule: {project}/link resolves to {project}/private.
+    std::os::unix::fs::symlink(root.join("private"), root.join("link")).unwrap();
+    (dir, root)
+}
+
+#[cfg(unix)]
+fn subst(text: &str, project: &Path) -> String {
+    text.replace("{project}", project.to_str().unwrap())
+}
+
+/// Render `roots-world.yaml` against a real project into a temp file.
+#[cfg(unix)]
+fn roots_world_file(project: &Path, out_dir: &Path) -> PathBuf {
+    let src = std::fs::read_to_string(repo_path("docs/demos/one-kernel/roots-world.yaml"))
+        .expect("read roots-world.yaml");
+    let path = out_dir.join("roots-world.yaml");
+    std::fs::write(&path, subst(&src, project)).unwrap();
+    path
+}
+
+#[cfg(unix)]
+fn roots_cases(project: &Path) -> Vec<Value> {
+    let src = std::fs::read_to_string(repo_path("docs/demos/one-kernel/roots-cases.yaml"))
+        .expect("read roots-cases.yaml");
+    let doc: Value = serde_yaml::from_str(&subst(&src, project)).expect("parse roots-cases.yaml");
+    doc["cases"].as_array().expect("cases list").clone()
+}
+
+/// Compile the roots world the way an adapter does: canonicalize the rule paths
+/// through the filesystem before the pure compile. This mirrors
+/// `hostkit::canonicalize_root_paths`, which lives in the binary and so cannot be
+/// imported here; the whole point of the test is that every real entry point
+/// performs this step, so the in-process leg has to perform it too.
+#[cfg(unix)]
+fn compile_roots_world(world_path: &Path) -> harness_types::CompiledWorld {
+    let text = std::fs::read_to_string(world_path).expect("read roots world");
+    let mut manifest = compiler::loader::load_yaml(&text).expect("parse roots world");
+    if let Some(roots) = &manifest.roots {
+        let mut resolved = roots.clone();
+        for rule in &mut resolved.rules {
+            if let Ok(c) = std::fs::canonicalize(&rule.path) {
+                rule.path = c.to_string_lossy().into_owned();
+            }
+        }
+        manifest.roots = Some(resolved);
+    }
+    compiler::compile(&manifest).expect("compile roots world")
+}
+
+/// Run one `GateRequest` through the `harness gate` CLI against an explicit world.
+fn gate_cli_with_world(world: &Path, stdin_payload: &str) -> (i32, String) {
+    let bin = env!("CARGO_BIN_EXE_harness");
+    let mut child = Command::new(bin)
+        .args(["gate", "--world", world.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn harness gate");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin_payload.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().expect("wait harness gate");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8(out.stdout).unwrap(),
+    )
+}
+
+/// Run a host adapter subprocess against an explicit world, with `HOME` pinned
+/// so `~` expansion cannot reach the developer's real home directory.
+fn hook_with_world(
+    subcommand: &str,
+    world: &Path,
+    state: &Path,
+    home: &Path,
+    event: &Value,
+    mode: &str,
+) -> String {
+    let bin = env!("CARGO_BIN_EXE_harness");
+    let mut child = Command::new(bin)
+        .args([
+            subcommand,
+            "--world",
+            world.to_str().unwrap(),
+            "--state",
+            state.to_str().unwrap(),
+            "--mode",
+            mode,
+        ])
+        .env("HOME", home)
+        .env("CLAUDE_PROJECT_DIR", home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn hook");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(event.to_string().as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().expect("wait hook");
+    assert!(out.status.success(), "{subcommand} must exit 0 (fail-open)");
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// The path-scope parity beat: (a) in-process and (b) the wire ABI must agree,
+/// case by case, on decision / rule / post-call taint.
+#[cfg(unix)]
+#[test]
+fn every_entry_point_agrees_on_path_scope() {
+    let (_tmp, project) = roots_project();
+    let out = tempfile::tempdir().unwrap();
+    let world_path = roots_world_file(&project, out.path());
+    let world = compile_roots_world(&world_path);
+
+    for case in roots_cases(&project) {
+        let name = case["name"].as_str().unwrap();
+        let request = &case["request"];
+        let expect = &case["expect"];
+
+        // (a) in-process — the pinned expectation is the kernel's own answer.
+        let a = gate_in_process(&world, request);
+        assert_eq!(a["decision"], expect["decision"], "{name}: decision");
+        assert_eq!(a["rule"], expect["rule"], "{name}: rule");
+        assert_eq!(a["context"]["taint"], expect["taint"], "{name}: taint");
+
+        // (b) the wire ABI: full-response parity with (a). This is what catches a
+        // `harness gate` that compiles the world without resolving its roots
+        // (finding #26) — the rule paths would stay lexical and the symlinked
+        // Deny would fall through to `default`.
+        let (code, stdout) = gate_cli_with_world(&world_path, &request.to_string());
+        assert_eq!(code, 0, "{name}: gate CLI evaluates");
+        let b: Value = serde_json::from_str(&stdout).expect("gate CLI response json");
+        assert_eq!(a, b, "{name}: CLI response must equal in-process response");
+    }
+}
+
+/// The same case set through both host adapters, in each host's real payload
+/// shape, with the path spelled the way the host actually sends it — so the
+/// adapters' own path resolution is inside the parity claim. This is the test
+/// that fails if either adapter stops canonicalizing manifest roots.
+#[cfg(unix)]
+#[test]
+fn both_host_adapters_agree_on_path_scope() {
+    let (_tmp, project) = roots_project();
+    let out = tempfile::tempdir().unwrap();
+    let world_path = roots_world_file(&project, out.path());
+
+    for case in roots_cases(&project) {
+        let name = case["name"].as_str().unwrap();
+        let request = &case["request"];
+        let expect = &case["expect"];
+        let decision = expect["decision"].as_str().unwrap();
+        let mode = case_field(&case, &["request", "context", "mode"])
+            .as_str()
+            .unwrap_or("interactive");
+        // The RAW host spelling — pre-canonicalization. For the symlink case this
+        // is {project}/link/id_rsa, which only reaches the Deny rule if the
+        // adapter resolves both the target and the root through the filesystem.
+        let arguments = request.get("arguments").cloned().unwrap_or(json!({}));
+
+        let cc_state = tempfile::tempdir().unwrap();
+        let cc = hook_with_world(
+            "cc-hook",
+            &world_path,
+            cc_state.path(),
+            &project,
+            &json!({
+                "tool_name": request["tool"],
+                "tool_input": arguments,
+                "session_id": name,
+            }),
+            mode,
+        );
+
+        let agy_state = tempfile::tempdir().unwrap();
+        let agy = hook_with_world(
+            "agy-hook",
+            &world_path,
+            agy_state.path(),
+            &project,
+            &json!({
+                "conversationId": name,
+                "stepIdx": 1,
+                "workspacePaths": [project.to_str().unwrap()],
+                "toolCall": { "name": request["tool"], "args": agy_args(&arguments) },
+            }),
+            mode,
+        );
+
+        match decision {
+            "ALLOW" => {
+                assert!(
+                    cc.trim().is_empty(),
+                    "{name}: cc-hook ALLOW is silent, got {cc:?}"
+                );
+                let v: Value = serde_json::from_str(agy.trim())
+                    .unwrap_or_else(|e| panic!("{name}: agy expects JSON, got {agy:?} ({e})"));
+                assert!(
+                    v.get("decision").is_none(),
+                    "{name}: agy ALLOW is the no-decision no-op, got {agy:?}"
+                );
+            }
+            "ASK" => {
+                let (d, _) = hook_decision(&cc).expect("cc-hook ASK emits a decision");
+                assert_eq!(d, "ask", "{name}: cc-hook");
+                let (d, _) = agy_decision(&agy).expect("agy-hook ASK emits a decision");
+                assert_eq!(d, "force_ask", "{name}: agy-hook uses the strict channel");
+            }
+            "DENY" => {
+                let (d, reason) = hook_decision(&cc).expect("cc-hook DENY emits a decision");
+                assert_eq!(d, "deny", "{name}: cc-hook — {reason}");
+                let (d, reason) = agy_decision(&agy).expect("agy-hook DENY emits a decision");
+                assert_eq!(d, "deny", "{name}: agy-hook — {reason}");
+            }
+            other => panic!("{name}: unexpected expected decision {other}"),
+        }
+
+        // Post-call taint: the sidecar exists iff the kernel escalated. This is
+        // what pins `taint_source` roots across both hosts.
+        let expect_tainted = expect["taint"] == "tainted";
+        assert_eq!(
+            cc_state.path().join(format!("taint-{name}")).exists(),
+            expect_tainted,
+            "{name}: cc-hook sidecar tracks post-call taint"
+        );
+        assert_eq!(
+            agy_state.path().join(format!("taint-{name}")).exists(),
+            expect_tainted,
+            "{name}: agy-hook sidecar tracks post-call taint"
+        );
+    }
 }

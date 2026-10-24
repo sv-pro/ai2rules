@@ -1,0 +1,13 @@
+{
+  "assets_dir": "blog/src/assets",
+  "dims": [1376, 768],
+  "format": "jpg",
+  "jpeg_quality": 90,
+  "generation_directive": "Use your image-generation capability to generate a single cinematic, photorealistic piece of digital concept art. Do NOT draw it programmatically with code, and do NOT make a diagram or chart — call an actual image-generation model.",
+  "style": "Dark neon / cyberpunk, cinematic. Cyan is the primary colour and reads as clean / trusted / ALLOW; magenta and red read as tainted / DENY; orange is a secondary accent. Motifs: circuit boards, glass-containment chambers, domes, and gate / boundary structures. Deep near-black background, volumetric light, shallow depth of field. Precise and architectural, like a security boundary — not chaotic.",
+  "reference_heroes": [
+    "taint-subagent-boundary-16x9.jpg",
+    "running-claude-safely.jpg",
+    "false-positive-argument-taint.jpg"
+  ]
+}

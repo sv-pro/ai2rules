@@ -1,0 +1,18 @@
+# The reference gateway's POLICY — deliberately the same intent the ai2rules
+# world declares, so the comparison is about enforcement and not about who
+# thought of more rules.
+#
+# The gateway implements this policy correctly. Its three defects are in *where*
+# it applies it: see `crates/govbench/src/targets/weak.rs`.
+
+# Never exposed on any surface, to anyone.
+never_expose: [admin_purge_all]
+
+# Channels allowed to see and use privileged tools.
+privileged_channels: [user_cli]
+
+# Tools only privileged channels may see or use.
+privileged_tools: [ticket_comment, ledger_transfer, credentials_rotate]
+
+# Tools that need a human "yes" before they run.
+approval_required: [ledger_transfer, credentials_rotate]

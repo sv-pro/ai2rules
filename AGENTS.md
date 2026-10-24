@@ -16,20 +16,23 @@ design), and `PLAN.md` (epic-level execution plan; the task source of truth).
 
 ```
 ai2rules/
-├── crates/                   # 10 Rust crates (the harness implementation)
+├── crates/                   # 11 Rust crates (the harness implementation + the benchmark runner)
 ├── docs/                     # 17 architecture/design markdown files
 ├── blog/                     # Astro website (Node sub-project, separate from Rust workspace)
 ├── docker/                   # Containerisation: Dockerfile, compose, egress proxy
 ├── .claude/                  # Claude Code integration (hooks, agents, commands, config)
+├── .uh/                      # Workspace manifest (project.yaml, hand-edited) and the brief generated from it (brief.md)
+├── .mcp.json                 # Project MCP servers for Claude Code (Linear); entries added by universal-harness
 ├── _tasks/                   # Task tracking
 ├── repos/                    # Reference external projects — NOT workspace members, never add
 │   ├── agent-hypervisor/
 │   ├── safe-mcp-proxy/
 │   └── mcp-tool-projection/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
-├── DECISIONS.md              # ADR-lite decision log (D1–D32+)
+├── DECISIONS.md              # ADR-lite decision log (D1–D85)
 ├── README.md                 # Project overview, milestone status, build instructions
-└── rustfmt.toml              # max_width 100, edition 2021
+├── rustfmt.toml              # max_width 100, edition 2021
+└── rust-toolchain.toml       # the pinned compiler — same one locally and in CI
 ```
 
 ---
@@ -52,26 +55,31 @@ harness-types (foundation — language-neutral contracts, pure data)
     ├─ harness-preview   pure preview: manifest → surface + decision matrix
     │       └─ shared by both harness-wasm and cli-harness serve
     ├─ harness-wasm      cdylib/rlib compiled to WebAssembly (wasm-bindgen)
-    └─ cli-harness       binary `harness` — REPL, serve, gate subcommands
+    ├─ cli-harness       binary `harness` — REPL, serve, gate, project, host adapters
+    │                    (cc-hook / agy-hook), shared shape helpers in `hostkit`
+    └─ govbench          binary `govbench` — the MCP governance benchmark runner
+                         (E18). Not part of the product; `publish = false`.
 ```
 
 | Crate | Primary public API |
 |---|---|
-| **harness-types** | `Taint`, `TaintedValue<T>`, `Perception`, `ToolCall`, `CompiledWorld`, `WorldManifest`, `Decision`, `ExecutionSpec`, `BuildError`, `ApprovalToken` |
+| **harness-types** | `Taint`, `TaintedValue<T>`, `Perception`, `ToolCall`, `CompiledWorld`, `WorldManifest`, `Decision`, `ExecutionSpec`, `BuildError`, `AuthorizationInstance`, `StagedEffect`, `ExecutionReceipt` |
 | **world-kernel** | `IRBuilder::build`, `disposition::evaluate`, `decide`, `build_execution_spec` |
 | **compiler** | `compile`, `compile_default`, `load_yaml`, `load_json`, `validate`, `hash_manifest` |
 | **executor** | `Executor::builder()`, `ExecutorBuilder::register`, `Executor::run` |
 | **provider-adapters** | `anthropic::parse_tool_use`, `parse_tool_definitions`, `format_tool_result` |
-| **trace-store** | `TraceStore`, `record_decision`, `replay`, `drift_report`, `export_bundle`, `ApprovalStore` |
+| **trace-store** | `TraceStore`, `record_decision`, `replay`, `drift_report`, `export_bundle`, `ApprovalStore`, `StagedEffectStore::stage/commit` |
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
 | **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
-| **cli-harness** | `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate` |
+| **cli-harness** | `harness init [--user \| --managed]`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author`, `harness console`, `harness replay-transcripts`, `harness export-otlp` |
+| **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all passing, native):**
-harness-types 5 · world-kernel 32 · compiler 15 · executor 12 · trace-store 13 ·
-provider-adapters 5 · agent-core 9 · harness-preview 26 · cli-harness 19 ·
-**total 136** (plus the harness-wasm Node smoke tests, run via wasm-pack)
+harness-types 9 · world-kernel 61 · compiler 29 · executor 28 · trace-store 63 ·
+provider-adapters 5 · agent-core 18 · harness-preview 65 · cli-harness 211 ·
+harness-wasm 0 · govbench 9 · **total 498** (plus the harness-wasm Node smoke
+tests, run via wasm-pack)
 
 ---
 
@@ -83,7 +91,9 @@ provider-adapters 5 · agent-core 9 · harness-preview 26 · cli-harness 19 ·
 - Only `ExecutionSpec` crosses the kernel→executor boundary.
 - The `executor` never imports `world-kernel` — decisions and execution are separate.
 - `harness-preview` and `harness-wasm` expose the same logic: no drift between
-  native and WASM gate/preview functions.
+  native and WASM gate/preview/project functions. Discovery projection lives in
+  `harness-preview` beside `gate` (D75); `cli-harness/src/project.rs` is the wire
+  skin only.
 
 The five conceptual layers (bottom to top): **substrate** → **capability** →
 **knowledge** → **intent** → **action**. The harness sits at the intent/action
@@ -99,7 +109,7 @@ the executor.
 | **M1 — Deterministic Core** | E0–E4 | Complete ✅ |
 | **M2 — Live Agent** | E5–E6 | Complete ✅ |
 | **M3 — Full Tool Surface** | E7, E9 | Complete ✅ |
-| **M4 — Isolation & Hardening** | E8, E10–E13 | In progress 🚧 |
+| **M4 — Isolation & Hardening** | E8, E10–E13, E18 | In progress 🚧 (E18 governance-benchmark seed done ✅) |
 | **M5 — Interactive Advocacy** | E14–E15 | E14 (WASM) done; E15 visualization planned |
 
 **Immediate priority:** E16 — internal JIRA MCP demo on GitHub Copilot + Claude
@@ -111,6 +121,32 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
 
 ## Conventions
 
+- **Linear plans the work; GitHub holds the code.** The maintainer
+  (sergeyvlasov.pro@gmail.com) splits task tracking by audience rather than
+  copying every item into both systems (changed 2026-10-22; before that, every
+  task was duplicated by hand and the two drifted):
+  - **Linear (team `AI2`) is where work is planned and its live state is kept.**
+    Initiatives are business or product goals; Projects are epics, one per
+    `PLAN.md` epic worth tracking; Issues are the work itself, code included.
+    New work starts as a Linear issue.
+  - **Private work lives only in Linear.** This repository and its issues are
+    public. Partners, prospects, deals, outreach and anything naming a person
+    outside the project never go into GitHub issues, PRs, commits or files.
+  - **A GitHub issue exists only when people outside the project should see the
+    work**: a bug or question from a user, a public roadmap item, a research
+    note meant for the community. Link it to its Linear issue both ways (the
+    Linear issue carries the GitHub URL as a link; the GitHub issue title starts
+    with `[AI2-<n>]`).
+  - **PRs link to Linear by key.** Put `AI2-<n>` in the branch name and the PR
+    title (`[AI2-<n> / #<n>]` when a GitHub issue exists too). Linear's GitHub
+    integration then attaches the PR and moves the issue as the PR opens and
+    merges, so nobody updates statuses by hand.
+  - `PLAN.md` stays the source of truth for epic *scope* (design, acceptance
+    invariants); Linear holds the *state*. Keep the epic checkboxes in step when
+    an epic's items land.
+
+  Items created before the split (for example AI2-44…51 / #116…#123) stay
+  linked on both sides; close both when they are done.
 - **Keep `README.md` current on every commit.** If a change affects project
   status, capabilities, crate layout, build/run instructions, or test counts,
   update the README's Status / layout / Build & test sections in the *same*
@@ -121,22 +157,33 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
   harness paths explicitly.
 - **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
   a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
-  can be revisited later. Currently D1–D32.
+  can be revisited later. Currently D1–D85.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
-  contains 8 base actions + 4 scoped capabilities. Changes to it affect
+  contains 11 base actions + 7 scoped capabilities. Changes to it affect
   `compile_default()` and the embedded WASM artifact.
 - **WASM artifact** is committed to `blog/public/vendor/harness-wasm/` as a
-  release build (480 KB optimised). Rebuild with `wasm-pack build --target web
+  release build (576 KB optimised). Rebuild with `wasm-pack build --target web
   --release` inside `crates/harness-wasm/` after any change to `harness-preview`
-  or `compiler`.
+  or `compiler`, then copy `pkg/harness_wasm{_bg.wasm,.js}` over the committed
+  pair. **This is enforced now** (finding #18): the `wasm` CI job rebuilds the
+  engine and runs `scripts/check-wasm-freshness.mjs`, which fails if the
+  committed artifact answers differently from the current kernel. It went seven
+  weeks and nine preview-affecting commits stale — missing all of `roots` and D36
+  classification, advertising version `0.0.1` — with CI green throughout.
 
 ---
 
 ## Build & test
 
 The local crate cache supports offline builds; prefer `--offline`.
+
+**The toolchain is pinned** in `rust-toolchain.toml`, so `cargo` uses the same
+compiler here as CI does — rustup installs it automatically on first use. Before
+the pin, this machine's `stable` was fifteen months behind CI's and a clippy error
+reached `main` because the local check could not see it. Bump the pin
+deliberately, fixing whatever the newer lints find in the same commit.
 
 ```bash
 cargo build --workspace --offline
@@ -145,8 +192,45 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --offline -- -D warnings
 ```
 
+After touching `harness-preview` or `compiler`, also refresh the committed WASM
+engine — CI fails otherwise (D60):
+
+```bash
+(cd crates/harness-wasm && wasm-pack build --target web --release)
+cp crates/harness-wasm/pkg/harness_wasm{_bg.wasm,.js} blog/public/vendor/harness-wasm/
+node scripts/check-wasm-freshness.mjs
+```
+
 CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
-(`.github/workflows/ci.yml`).
+(`.github/workflows/ci.yml`), plus the demo guard, the WASM freshness check, the
+npm/blog guards (`check:heroes`, `check:drafts`, `check:spacing`), a
+cross-compile, and **`release-dry-run`** — which rehearses the whole publish path
+short of publishing (D70). The last one exists because everything after the
+compile in `release.yml` is tag-gated, so it used to run for the first time in the
+job that publishes to npm, where a version cannot be republished.
+
+**If you change the packaging, change `scripts/assemble-npm-packages.sh`** — both
+`release.yml` and the dry-run call it, deliberately, so the rehearsal cannot drift
+from the performance. Rehearse locally with:
+
+```bash
+cargo build --release --locked -p cli-harness      # any target; packaging is what is under test
+# …stage dist/harness-<target>.{tar.gz,zip} as the release matrix would, then:
+bash scripts/assemble-npm-packages.sh
+node npm/verify-packages.js && node scripts/check-npm-pack.mjs
+```
+
+**When you change the kernel, the gate ABI, the projection, or the approval
+store, re-run the governance benchmark** — its `results/` directory is a build
+output committed to git, and CI (`governance-bench`) fails on drift:
+
+```bash
+bash scripts/run-governance-bench.sh   # regenerates results/{results.json,REPORT.md}
+```
+
+It also fails when the *weak baseline stops failing* (D76): a benchmark whose
+baseline goes green has stopped measuring anything, so fixing the reference
+gateway is a deliberate act with a scenario change beside it.
 
 **Demo binaries** (run via `cargo run --example <name> --offline`):
 - `kernel_demo` — taint + disposition walkthrough
@@ -155,6 +239,19 @@ CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
 - `agent_loop` — full model loop with ScriptedModel
 - `approvals_demo`, `tools_demo`, `poisoned_knowledge_demo`
 
+**When you change the kernel, run `bash scripts/check-demos.sh`.** It runs every
+example and demo script and asserts the verdict lines each one claims to show
+(CI job `demos`). This exists because the test suite stayed green twice while a
+hardening change silently hollowed out a demo — a demo that stops teaching does
+not fail, it just gets shorter. If a marker legitimately changes, update the
+marker in the same commit as the kernel change.
+
+The same script checks that the published story page,
+`blog/public/demo/law-firm.html` (ai2rules.dev/demo/law-firm.html), is what the
+current binary writes. It embeds the version, so **a release bump or a story change
+needs it regenerated**: `cargo run -q -p cli-harness -- demo --story law-firm --html
+blog/public/demo/law-firm.html`.
+
 ---
 
 ## Key reference files
@@ -162,19 +259,34 @@ CI runs fmt-check, `clippy -D warnings`, build, and test on every push/PR
 | File | What it contains |
 |---|---|
 | `README.md` | Project overview, milestone table, build/run instructions |
+| `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D32+; consult before choosing alternatives |
+| `DECISIONS.md` | ADR-lite log D1–D85; consult before choosing alternatives |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |
 | `docs/harness-gate-abi.md` | Gate ABI schema (D24) |
+| `docs/host-decision-log.md` | The host decision log (`cc-hook --log`): decision, outcome and policy lines, the read-only `PostToolUse` observer, how a decision joins its outcome and why an ASK's answer is inferred, not attested (D84); `harness export-otlp`, the offline OTLP/JSON export (AI2-66) |
 | `docs/trust-pins.md` | Trust pins design (D29) |
+| `docs/machine-wide-governance.md` | Governing every Claude Code session on a machine: `init --user` (user settings) vs `init --managed` (admin-only managed settings, no user-side kill-switch), the verified Claude Code hook semantics behind the difference, and an example policy (D82) |
 | `docs/demos/jira-copilot/` | E16 JIRA MCP demo runbook |
 | `.claude/cc-world.yaml` | Live `WorldManifest` governing Claude Code (dogfood), incl. D36 `command_classes` |
 | `.claude/hooks/world-gate.sh` | PreToolUse bootstrap shim → `harness cc-hook` (the real kernel; D37) |
-| `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37) |
-| `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source) |
+| `.agents/agy-world.yaml` | Live `WorldManifest` governing Antigravity CLI (`agy`) (dogfood; D48) |
+| `.agents/hooks.json` + `.agents/hooks/world-gate.sh` | Antigravity PreToolUse wiring → `harness agy-hook` (D48) |
+| `docs/demos/antigravity/` | Antigravity host runbook + the verified hook contract |
+| `docs/demos/law-firm/` | `harness demo --story law-firm`: the embedded law-firm world, the runbook and talking points for a non-engineering audience |
+| `docs/demos/policy-console/` | `harness console` demo (D81): world with switchable action groups, `setup.sh` (hook with `--enforce-absent --log`), preflight, runbook and scenario |
+| `docs/one-kernel-many-hosts.md` | Cross-host parity design note (D36/D37/D48) |
+| `docs/benchmarks/mcp-governance/` | Public MCP Governance Benchmark seed (issue #64 / AI2-5, E18): three scenarios, an intentionally weak reference gateway, ai2rules over both transports, and the generated per-scenario report. Runner: `crates/govbench` |
+| `scripts/run-governance-bench.sh` | The one command for the benchmark. Builds, runs both targets over both transports, regenerates `docs/benchmarks/mcp-governance/results/`, and fails if either half of the contrast stops holding (CI job `governance-bench`) |
+| `docs/benchmarks/deepseek-harness/` | Governor-integrity benchmark of DeepSeek Harness (issue #54): where final authority lives, monotonic-guard integrity, approval integrity, execution-seam matrix, ai2rules comparison — with reproducible probes |
+| `docs/demos/deepseek-harness/` | DeepSeek Harness discovery + invocation adapter (issue #55): `system-prompt/assemble` → `harness project`, `tools/pre-execute` → `harness gate`. Fail-closed when engaged (D71/D72); revocation and stale-call tests against real dsh services |
+| `.github/workflows/deepseek-integration.yml` | Path-filtered 13-case adapter test against immutable DeepSeek Harness commit `141eb6fef83422698aef7a981029e843e8161534` |
+| `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source). Path-scope lives in the `roots-world.yaml` / `roots-cases.yaml` pair — a second world because enabling `roots` changes every pathless file action's verdict (D61) |
 | `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
+| `scripts/assemble-npm-packages.sh` | Fills the four platform packages from `dist/`. Shared by `release.yml` and CI's `release-dry-run` so they cannot diverge (D70) |
+| `scripts/check-npm-pack.mjs` | Asserts the tarballs npm *would* publish contain their binary and licenses — `verify-packages.js` reads manifests, this reads the packed output |
 
 ---
 
@@ -207,6 +319,32 @@ contract tests) before committing.
 
 ---
 
+## Antigravity CLI (`agy`) integration (dogfooding)
+
+The `.agents/` directory does for Antigravity what `.claude/` does for Claude
+Code — same kernel, same case set, a different host envelope (D48):
+
+- **`agy-world.yaml`** — the `WorldManifest` governing `agy` sessions here. Its
+  `command_classes` patterns are byte-identical to every other host manifest
+  (pinned by `tests/one_kernel.rs`).
+- **`hooks.json`** — the `PreToolUse` wiring (`matcher: ""` = all tools) calling
+  the shim. Antigravity discovers this by walking cwd → repo root, so it applies
+  to the whole repository.
+- **`hooks/world-gate.sh`** — the bootstrap shim: locates the `harness` binary
+  and `exec`s `harness agy-hook`. Fail-open, and note it must **print `{}`** on
+  the fail-open path — Antigravity parses stdout, so silence is not a
+  passthrough (unlike Claude Code). No governance logic lives in the shim.
+
+Two host quirks worth knowing before debugging a "hook never fired":
+
+- Hook commands run with the **working directory set to `.agents/`** (the
+  directory containing `hooks.json`), not the project root.
+- In print mode (`agy -p`), the workspace is a scratch directory unless you pass
+  `--add-dir <repo>`, so project-local `.agents/` is never discovered. The log
+  line `loaded 0 named hooks from 0 hooks.json file(s)` is the tell.
+
+---
+
 ## Per-assistant setup
 
 These instructions are shared by reference, not by copy — keep the content here
@@ -215,8 +353,57 @@ and let each tool point at it:
 - **Codex** and **Google Antigravity** read this `AGENTS.md` at the repo root
   natively; no extra file is needed. (Antigravity also supports workspace rules
   under `.agents/rules/` and global rules at `~/.gemini/GEMINI.md` if you want
-  machine- or user-scoped additions.)
+  machine- or user-scoped additions.) Antigravity is additionally **governed**
+  here, not merely documented for — see the `.agents/` section above (D48).
 - **Claude Code** reads `CLAUDE.md`, which imports this file via `@AGENTS.md`.
 
 When updating project conventions, edit **this file**; the per-assistant pointers
 should not accumulate their own copies.
+
+The `<!-- uh:begin … -->` blocks at the end of this file and of `CLAUDE.md`, and
+`.uh/brief.md`, are generated by the maintainer's workspace tool,
+[universal-harness](https://github.com/sv-pro/universal-harness), from this repo's
+workspace manifest, `.uh/project.yaml`: resources, flows, roles, handoff records.
+They are not a second copy of the conventions above. Don't edit them by hand: the tool
+refuses to overwrite a hand-edited block. Change `.uh/project.yaml` and run
+`uh provision --write`.
+
+<!-- uh:begin workspace sha=e71ceb21f58d -->
+## Workspace and handoff (generated)
+
+Generated by universal-harness from this repo's workspace manifest, `.uh/project.yaml`. Edit that file and re-run `uh provision`; hand edits to this block are refused.
+
+**Taking over work another agent started?** Find out where it stands before changing anything:
+
+- Run `uh pickup [ref]` (ref: an issue key, PR number, branch or task slug; none = the current branch). It only reads: it changes nothing in the repo, on GitHub or in Linear, and runs `git fetch` unless you pass `--no-fetch`. `uh --help` lists every command with what it reads and writes. In Windows PowerShell, if running scripts is disabled, call `uh.cmd`.
+- If `uh` is not found on this machine (cloud sessions, other machines), read instead: HANDOFF.md on the working branch; the item's _tasks file (appended summary); PR description and comments.
+
+**Keep the handoff current as you work.** You can be cut off at any moment (usage limit, crash), and so could the agent before you:
+
+- HANDOFF.md on the working branch: after every meaningful step, not only at the end of a session. Local only: cloud agents cannot see it, so also leave the essentials where they can (pushed branch, PR).
+- the item's _tasks file (appended summary): on each flywheel transition.
+- PR description and comments: when the PR is opened, and on each push (Grok Bot).
+
+**Name things so the next agent can find them:**
+
+- Cite the item in PR titles and commit subjects as `[{linear} / {github}]`, e.g. `[AI2-25 / #87]`.
+- Branch: `{agent}/{slug}`.
+
+**State kept by hand:** a state change is not done until every place below shows it.
+
+- flywheel (finding): _tasks/<phase>/<slug>.md, then Linear issue status, GitHub issue state
+- change (issue): Linear issue status, then GitHub issue state, PLAN.md epic checkboxes
+- release (release): CHANGELOG.md (Unreleased → version), then git tag v*
+
+**Stop and ask the maintainer** for anything that needs registrar (namecheap), search-console (google-search-console), social (hacker-news, reddit, x); do not work around it.
+
+**Roles** (first choice → fallbacks):
+
+- radar: Codex → Claude Code
+- engine: Claude Code → Codex → Grok Bot
+- megaphone: Claude Code → Codex → Antigravity / Gemini CLI
+- illustrator: Antigravity / Gemini CLI
+- critic: Codex → Claude Code
+
+Full brief (resources, flows, gates, procedures): [`.uh/brief.md`](.uh/brief.md).
+<!-- uh:end workspace -->

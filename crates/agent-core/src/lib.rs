@@ -98,7 +98,16 @@ fn register_local(builder: ExecutorBuilder, world: &CompiledWorld) -> ExecutorBu
         "git_diff",
         "git_commit",
     ] {
-        b = b.register(ActionName::new(cmd), hash(cmd), Box::new(CommandHandler));
+        // Explicit unconfined acknowledgment (D47): no OS sandbox (E8) exists yet
+        // to enforce a subprocess's network/filesystem policy, so command Execute
+        // runs with host authority. Fail-closed is the handler default; this is
+        // the one place that opts in, and it should become operator-configurable
+        // (and retire once E8 provides a real sandbox posture).
+        b = b.register(
+            ActionName::new(cmd),
+            hash(cmd),
+            Box::new(CommandHandler::unconfined()),
+        );
     }
     b
 }
@@ -110,7 +119,7 @@ mod tests {
     use executor::{MockMcpTransport, MockWebFetcher};
     use harness_types::{Decision, EffectMode, ExecutionMode, Taint};
     use provider_adapters::anthropic::tool_use_block;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use trace_store::{ApprovalStore, TraceStore};
     use world_kernel::ExecEnv;
 
@@ -132,6 +141,77 @@ mod tests {
             ModelTurn::ToolUse(tool_use_block("t4", "start_pty", json!({}))),
             ModelTurn::Final("done".to_string()),
         ])
+    }
+
+    struct FeedbackAssertingModel {
+        phase: u8,
+    }
+
+    impl FeedbackAssertingModel {
+        fn new() -> Self {
+            Self { phase: 0 }
+        }
+    }
+
+    impl ModelClient for FeedbackAssertingModel {
+        fn next(&mut self, ctx: &TurnContext) -> ModelTurn {
+            let turn = match self.phase {
+                0 => {
+                    assert!(ctx.last_tool_result.is_none());
+                    ModelTurn::ToolUse(tool_use_block(
+                        "feedback-allow",
+                        "read_workspace",
+                        json!({ "path": "src/lib.rs" }),
+                    ))
+                }
+                1 => {
+                    assert_feedback(ctx, "feedback-allow", "ALLOW", false);
+                    ModelTurn::ToolUse(tool_use_block(
+                        "feedback-deny",
+                        "fetch_web",
+                        json!({ "url": "https://x" }),
+                    ))
+                }
+                2 => {
+                    assert_feedback(ctx, "feedback-deny", "DENY", true);
+                    ModelTurn::ToolUse(tool_use_block("feedback-absent", "send_email", json!({})))
+                }
+                3 => {
+                    assert_feedback(ctx, "feedback-absent", "ABSENT", true);
+                    ModelTurn::ToolUse(tool_use_block("feedback-ask", "start_pty", json!({})))
+                }
+                4 => {
+                    assert_feedback(ctx, "feedback-ask", "ASK", true);
+                    ModelTurn::Final("feedback complete".to_string())
+                }
+                _ => panic!("unexpected model turn"),
+            };
+            self.phase = self.phase.saturating_add(1);
+            turn
+        }
+    }
+
+    fn assert_feedback(
+        ctx: &TurnContext,
+        expected_call_id: &str,
+        expected_decision: &str,
+        expected_error: bool,
+    ) {
+        let block = ctx
+            .last_tool_result
+            .as_ref()
+            .expect("previous tool result must reach the next model turn");
+        assert_eq!(block["type"], "tool_result");
+        assert_eq!(block["tool_use_id"], expected_call_id);
+        assert_eq!(block["is_error"], expected_error);
+        let feedback: Value = serde_json::from_str(
+            block["content"]
+                .as_str()
+                .expect("tool result content must be structured JSON"),
+        )
+        .expect("tool result content must parse");
+        assert_eq!(feedback["decision"], expected_decision);
+        assert!(feedback["rule"].is_string());
     }
 
     fn run_session() -> SessionOutcome {
@@ -194,6 +274,30 @@ mod tests {
             outcome.transcript[3].rule.as_deref(),
             Some("approval_required")
         );
+    }
+
+    #[test]
+    fn governance_outcomes_reach_the_next_model_turn_without_an_observer() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = compile_default();
+        let executor = default_executor(&world);
+        let trace = TraceStore::open(dir.path().join("trace.jsonl"));
+        let mut store = ApprovalStore::open(dir.path().join("approvals.jsonl")).unwrap();
+        let mut model = FeedbackAssertingModel::new();
+
+        let outcome = run(
+            &world,
+            &ExecEnv::default(),
+            &executor,
+            &trace,
+            &mut store,
+            &mut model,
+            &SessionConfig::default(),
+            None,
+        );
+
+        assert_eq!(outcome.final_text.as_deref(), Some("feedback complete"));
+        assert_eq!(outcome.records, 4);
     }
 
     #[test]
@@ -266,6 +370,39 @@ mod tests {
     }
 
     #[test]
+    fn authorization_binds_the_kernel_effective_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = compile_default();
+        let executor = default_executor(&world);
+        let trace = TraceStore::open(dir.path().join("t.jsonl"));
+        let approval_path = dir.path().join("a.jsonl");
+        let mut store = ApprovalStore::open(&approval_path).unwrap();
+        let mut model = ScriptedModel::new([ModelTurn::ToolUse(tool_use_block(
+            "t1",
+            "run_command",
+            json!({"command": "rm -rf ./generated"}),
+        ))]);
+        let config = SessionConfig {
+            approval: ApprovalPolicy::AutoApprove,
+            ..SessionConfig::default()
+        };
+
+        let outcome = run(
+            &world,
+            &ExecEnv::default(),
+            &executor,
+            &trace,
+            &mut store,
+            &mut model,
+            &config,
+            None,
+        );
+        assert_eq!(outcome.transcript[0].verdict, "ASK → APPROVED → ALLOW");
+        let evidence = std::fs::read_to_string(approval_path).unwrap();
+        assert!(evidence.contains("\"action\":\"run_command_destructive\""));
+    }
+
+    #[test]
     fn background_denies_pty() {
         // Invariant 10: no human in BACKGROUND → fail closed, no token minted.
         let config = SessionConfig {
@@ -334,6 +471,14 @@ mod tests {
         // (verbatim in the trusted request → provably clean-origin) is recovered,
         // while a fetch to a model-supplied URL is still denied by ambient taint.
         const GUIDE: &str = "https://docs.example/guide";
+        // `ExecEnv.network` is caller-supplied and defaults to `Disabled`; since
+        // finding #12 the web handler actually enforces it, so a test that means to
+        // exercise a real fetch has to grant the egress it expects to happen. That
+        // the default is closed is the point — before the fix it made no difference.
+        let env = ExecEnv {
+            network: harness_types::NetworkPolicy::AllowHosts(vec!["docs.example".into()]),
+            ..ExecEnv::default()
+        };
         let world = compile_default();
         let dir = tempfile::tempdir().unwrap();
         let trace = TraceStore::open(dir.path().join("t.jsonl"));
@@ -364,14 +509,7 @@ mod tests {
             ..SessionConfig::default()
         };
         let outcome = run(
-            &world,
-            &ExecEnv::default(),
-            &executor,
-            &trace,
-            &mut store,
-            &mut model,
-            &config,
-            None,
+            &world, &env, &executor, &trace, &mut store, &mut model, &config, None,
         );
 
         assert_eq!(outcome.transcript[0].verdict, "ALLOW"); // retrieval

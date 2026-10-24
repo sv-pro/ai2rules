@@ -1,0 +1,13 @@
+{
+  "_comment": "Claude Code MCP config for the REAL Atlassian upstream (E16.E) — the real-name counterpart of claude-code.mcp.json. Place at your project root as .mcp.json (or merge into it). Replace /ABS/PATH/TO/ai2rules with your checkout (Claude Code does NOT expand ${workspaceFolder}). The env block points run-proxy.sh at the real-tool-name manifest and an mcp-remote bridge to the Rovo MCP server; first launch opens a browser for OAuth (the token caches under ~/.mcp-auth, so later runs are non-interactive). Claude Code then sees ONLY the 5 governed tools; every transition/edit/create and the whole Confluence/Bitbucket/JSM/Compass surface is ABSENT at the gate. WINDOWS: use 'npx.cmd' not 'npx' — harness mcp-gateway spawns the upstream directly (no shell), so the bare 'npx' (a .cmd shim) is not found on PATH; on macOS/Linux use 'npx'. Set TAINT=tainted in the env to demo the taint floor severing the comment write. For the 'deep'/native half (governing Bash/Edit/web too), also merge hosts/claude-code.settings.json. The shaping this config produces is proven offline by tests/mcp_gateway_atlassian.rs — no creds needed to trust it.",
+  "mcpServers": {
+    "jira-governed-real": {
+      "command": "bash",
+      "args": ["/ABS/PATH/TO/ai2rules/docs/demos/jira-copilot/run-proxy.sh"],
+      "env": {
+        "MANIFEST": "/ABS/PATH/TO/ai2rules/docs/demos/jira-copilot/jira-atlassian.world.yaml",
+        "UPSTREAM": "npx -y mcp-remote https://mcp.atlassian.com/v1/mcp/authv2"
+      }
+    }
+  }
+}

@@ -1,0 +1,58 @@
+# Scenario 1 — cross-principal discovery-cache leakage.
+#
+# The oldest MCP gateway bug and the cheapest to ship: `tools/list` is expensive,
+# so it gets memoised, and the memo is keyed by the upstream because that is what
+# the *call* depends on. The answer, though, depends on who asked.
+v: 1
+id: discovery-cache-isolation
+title: Cross-principal tools/list cache leakage
+question: >
+  Can a discovery answer computed for a privileged principal ever be served to a
+  lower-privileged one?
+
+notes: >
+  Discovery is a governance surface, not a performance detail. A tool a principal
+  can see is a tool it can name, and a name is the whole of an injected
+  instruction's requirement. This scenario asks nothing about invocation: no step
+  here calls anything, and the expected downstream effect count is zero.
+
+principals:
+  - { name: privileged, id: operator-a, channel: user_cli }
+  - { name: restricted, id: assistant-a, channel: generated }
+
+steps:
+  # The privileged principal asks first, warming whatever cache exists.
+  - { id: warm, op: discover, as: privileged }
+  # The lower-privileged principal asks second.
+  - { id: probe, op: discover, as: restricted }
+
+expect:
+  - id: privileged_principal_sees_privileged_surface
+    assert: visible_includes
+    step: warm
+    values: [ticket_get, ticket_search, ticket_comment, ledger_transfer, credentials_rotate]
+
+  - id: undeclared_tool_is_offered_to_nobody
+    assert: visible_excludes
+    step: warm
+    values: [admin_purge_all]
+
+  - id: restricted_principal_sees_only_reads
+    assert: visible_includes
+    step: probe
+    values: [ticket_get, ticket_search]
+
+  - id: restricted_principal_never_sees_privileged_surface
+    assert: visible_excludes
+    step: probe
+    values: [ticket_comment, ledger_transfer, credentials_rotate, admin_purge_all]
+
+  # Two principals with different capabilities must not be answered with one
+  # surface. Equal surface identities mean the second answer was the first.
+  - id: the_two_principals_get_distinct_surfaces
+    assert: surface_differs
+    steps: [warm, probe]
+
+  - id: discovery_causes_no_effects
+    assert: effect_count
+    equals: 0

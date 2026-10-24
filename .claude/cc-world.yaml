@@ -8,10 +8,11 @@
 # The host adapter (`harness cc-hook`, D37) maps Claude Code's native tools onto
 # these action names 1:1 and holds no governance logic. `Bash` is classified by
 # the KERNEL from the `command_classes` block below (D25 → D36): plain `Bash`
-# (Process), `Bash_network` (egress: curl/wget/nc/ssh/…), or `Bash_destructive`
-# (rm -rf/sudo/mkfs/… → approval). Classification is world data, so every host
-# shares byte-identical classification; the *policy* for each action is declared
-# in `base_actions` / `transition_policies`.
+# (Process), `Bash_network` (egress: curl/wget/nc/ssh/…), `Bash_destructive`
+# (rm -rf/sudo/mkfs/… → approval), or `Bash_unclassified` (unmatched shell →
+# ask/taint-floor). Classification is world data, so every host shares
+# byte-identical classification; the *policy* for each action is declared in
+# `base_actions` / `transition_policies`.
 world_id: claude-code-default
 
 actors:
@@ -22,8 +23,8 @@ actors:
 
 data_classes: [Public, Workspace, Secret, Credential, Generated, External]
 
-# Channel trust is taken from the kernel's `SourceChannel` enum at gate time; this
-# section documents the intended provenance model for authoring/preview tools.
+# Channel trust is compiled into the runtime world and enforced by `harness gate`;
+# these rows are policy, not documentation.
 channels:
   - { name: user_cli, trust: Trusted, taint: false }
   - { name: workspace_files, trust: SemiTrusted, taint: true }
@@ -47,6 +48,8 @@ base_actions:
   - { name: Write, action_type: Write, side_effect: FilesystemWrite }
   - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
   - { name: NotebookEdit, action_type: Patch, side_effect: FilesystemWrite }
+  # --- instruction / memory files, reclassified by `path_classes` (D83) ---
+  - { name: Write_instructions, action_type: Write, side_effect: Memory }
   # --- network / egress (taint floor: tainted context → DENY no_tainted_network) ---
   - { name: WebFetch, action_type: Web, side_effect: Network }
   - { name: WebSearch, action_type: Web, side_effect: Network }
@@ -54,6 +57,7 @@ base_actions:
   - { name: Bash, action_type: Command, side_effect: Process }
   - { name: Bash_network, action_type: Command, side_effect: Network }
   - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: Bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
 
 # Kernel-side command classification (D36): the shared pattern lists — keep
 # byte-identical with docs/demos/opencode/opencode-world.yaml and
@@ -61,14 +65,44 @@ base_actions:
 command_classes:
   - action: Bash
     arg: command
+    default_to: Bash_unclassified
     classes:
       - to: Bash_network
         patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
       - to: Bash_destructive
         patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
 
+# Instruction and memory files (D83). A write to one of these is a write to
+# the context the NEXT session loads as trusted, so it is a durable-memory write
+# (`side_effect: Memory`) under the taint floor, not an ordinary FilesystemWrite.
+# Matched on the adapter-resolved canonical path, so `./CLAUDE.md`,
+# `docs/../CLAUDE.md`, an absolute path and `claude.md` are one target. The
+# pattern list is shared by every host manifest (pinned by tests/one_kernel.rs).
+# Shell writes (`echo >> CLAUDE.md`) are not file actions: they stay with the
+# shell classifier above (Bash_unclassified → ASK), D57's known residual.
+path_classes:
+  - to: Write_instructions
+    from:
+      - { action: Write, arg: file_path }
+      - { action: Edit, arg: file_path }
+      - { action: MultiEdit, arg: file_path }
+      - { action: NotebookEdit, arg: notebook_path }
+    patterns:
+      - "**/CLAUDE.md"
+      - "**/CLAUDE.local.md"
+      - "**/AGENTS.md"
+      - "**/GEMINI.md"
+      - "**/.claude/agents/**"
+      - "**/.claude/commands/**"
+      - "**/.claude/rules/**"
+      - "**/.claude/skills/**"
+      - "**/.claude/projects/*/memory/**"
+      - "**/.agents/rules/**"
+      - "**/.agents/skills/**"
+      - "**/.agents/workflows/**"
+
 # Tainted data cannot reach externally-effectful surfaces (the taint floor,
-# invariant 7). Tainted WebFetch/WebSearch/Bash_network all DENY here.
+# invariant 7). Tainted WebFetch/WebSearch/Bash_network/Bash_unclassified all DENY here.
 transition_policies:
   - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
   - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }

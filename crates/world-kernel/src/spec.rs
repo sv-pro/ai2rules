@@ -9,7 +9,7 @@
 //! It stays pure: everything environmental arrives in [`ExecEnv`]; nothing here
 //! reads the filesystem, the process environment, or the clock.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use harness_types::{
@@ -87,24 +87,27 @@ pub fn build_execution_spec(
     trace_id: TraceId,
 ) -> Result<ExecutionSpec, SpecError> {
     let action = intent.action().clone();
-    let backing = world
+    let descriptor = world
         .descriptor(&action)
-        .map(|d| d.backing.clone())
         .ok_or_else(|| SpecError::BadArgument {
             detail: format!("no descriptor for {action}"),
         })?;
+    let backing = descriptor.backing.clone();
 
     // Scoped capabilities narrow the actor's args: strip anything not declared
     // actor-input, inject literals, resolve context refs (invariant 12). A base
-    // action passes its params through unchanged.
-    let params = effective_params(world, &action, intent.params(), env)?;
+    // action keeps its params, but local-handler lowering may only read fields
+    // explicitly declared by the sealed descriptor.
+    let params = effective_params(world, intent, descriptor, env)?;
 
     let operation = match &backing {
-        BackingIdentity::LocalHandler(handler) => operation_for(&action, handler, &params)?,
+        BackingIdentity::LocalHandler(handler) => {
+            operation_for(&action, handler, &params.value, &params.contract)?
+        }
         BackingIdentity::McpServer { server, tool } => Operation::Structured(json!({
             "server": server,
             "tool": tool,
-            "input": params,
+            "input": params.value,
         })),
     };
 
@@ -143,18 +146,19 @@ fn operation_for(
     action: &ActionName,
     handler: &str,
     params: &Value,
+    contract: &ParamContract,
 ) -> Result<Operation, SpecError> {
     match handler {
         "read_workspace" => Ok(Operation::Structured(
-            serde_json::json!({ "path": str_param(params, "path")? }),
+            serde_json::json!({ "path": str_param(params, contract, "path")? }),
         )),
         "apply_patch" => Ok(Operation::Structured(serde_json::json!({
-            "path": str_param(params, "path")?,
-            "contents": str_param(params, "contents")?,
+            "path": str_param(params, contract, "path")?,
+            "contents": str_param(params, contract, "contents")?,
         }))),
-        "run_command" => Ok(Operation::Argv(argv_from(params)?)),
+        "run_command" => Ok(Operation::Argv(argv_from(params, contract)?)),
         "fetch_web" => Ok(Operation::Structured(
-            serde_json::json!({ "url": str_param(params, "url")? }),
+            serde_json::json!({ "url": str_param(params, contract, "url")? }),
         )),
         other => Err(SpecError::UnsupportedBacking {
             action: action.clone(),
@@ -163,48 +167,170 @@ fn operation_for(
     }
 }
 
-/// Resolve the effective params a scoped capability runs with: keep only
-/// declared actor-input args (stripping locked/unknown ones), inject literals,
-/// and resolve context refs. A non-scoped action passes its params through.
-fn effective_params(
-    world: &CompiledWorld,
-    action: &ActionName,
-    actor_params: &Value,
-    env: &ExecEnv,
-) -> Result<Value, SpecError> {
-    let cap = match world.scoped_capability(action) {
-        None => return Ok(actor_params.clone()),
-        Some(cap) => cap,
+struct EffectiveParams {
+    value: Value,
+    contract: ParamContract,
+}
+
+struct ParamContract {
+    declared: BTreeSet<String>,
+}
+
+impl ParamContract {
+    fn for_descriptor(descriptor: &harness_types::Descriptor) -> Self {
+        Self {
+            declared: crate::schema::declared_arg_names(
+                &descriptor.schema,
+                &descriptor.arg_constraints,
+            ),
+        }
+    }
+
+    fn for_scoped_args(args: &BTreeMap<String, ArgSource>) -> Self {
+        Self {
+            declared: args.keys().cloned().collect(),
+        }
+    }
+
+    fn require(&self, key: &str) -> Result<(), SpecError> {
+        if self.declared.contains(key) {
+            Ok(())
+        } else {
+            Err(SpecError::BadArgument {
+                detail: format!("handler requested undeclared argument `{key}`"),
+            })
+        }
+    }
+}
+
+/// The call a host must actually make for an admitted intent (D80).
+///
+/// The kernel decides on the *proposed* call, but a scoped capability runs with
+/// different arguments: locked and unknown actor arguments are stripped, renamed
+/// ones mapped back to the base action's names (D79), literals injected, context
+/// refs resolved (invariant 12). A host that executes the proposal instead of
+/// this — the wire gate is decision-only, so every out-of-process host does —
+/// silently drops the scoping: the model's `repo` reaches the upstream in place
+/// of the manifest's literal.
+///
+/// Pure in `(world, intent)`. Context refs cannot be resolved here (they are
+/// runtime values); they are left out of `arguments` and listed in
+/// `context_refs` for the host to fill from its own trusted context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveCall {
+    /// The base action the call lowers to (itself, for a base action).
+    pub base_action: ActionName,
+    /// What executes it: a local handler or an MCP server's tool.
+    pub backing: BackingIdentity,
+    /// Arguments to execute with, under the base action's names: actor input
+    /// that survived scoping, plus literals.
+    pub arguments: Value,
+    /// Argument name → context key, for `ContextRef` arguments.
+    pub context_refs: BTreeMap<String, String>,
+    /// Names the actor sent that the scoping dropped. Empty for a clean call;
+    /// non-empty means something tried to set what the world fixes, or reached
+    /// for a renamed argument under its base name — worth recording as a
+    /// signal, not just discarding.
+    pub stripped: Vec<String>,
+}
+
+/// Lower an admitted intent to the call the host must execute (D80). See
+/// [`EffectiveCall`]. `None` only if the world has no descriptor for the
+/// intent's action, which a sealed intent rules out.
+pub fn effective_call(world: &CompiledWorld, intent: &IntentIR) -> Option<EffectiveCall> {
+    let action = intent.action();
+    let descriptor = world.descriptor(action)?;
+    let actor_params = intent.params();
+    let Some(cap) = world.scoped_capability(action) else {
+        return Some(EffectiveCall {
+            base_action: action.clone(),
+            backing: descriptor.backing.clone(),
+            arguments: actor_params.clone(),
+            context_refs: BTreeMap::new(),
+            stripped: Vec::new(),
+        });
     };
     let actor = actor_params.as_object();
-    let mut out = Map::new();
+    let mut arguments = Map::new();
+    let mut context_refs = BTreeMap::new();
+    let mut supplied = BTreeSet::new();
     for (name, source) in &cap.args {
         match source {
             // Copy only what the actor is allowed to set; anything else they
-            // sent is never read here, so it is stripped.
-            ArgSource::ActorInput => {
-                if let Some(value) = actor.and_then(|o| o.get(name)) {
-                    out.insert(name.clone(), value.clone());
+            // sent is never read here, so it is stripped. Read under the name
+            // the actor sees (D79); the call carries the base action's name,
+            // which is what the backing understands.
+            ArgSource::ActorInput | ArgSource::Input(_) => {
+                let actor_name = source.actor_name(name).unwrap_or(name);
+                supplied.insert(actor_name);
+                if let Some(value) = actor.and_then(|o| o.get(actor_name)) {
+                    arguments.insert(name.clone(), value.clone());
                 }
             }
             ArgSource::Literal(value) => {
-                out.insert(name.clone(), Value::String(value.clone()));
+                arguments.insert(name.clone(), value.clone());
             }
             ArgSource::ContextRef(key) => {
-                let value = env
-                    .context
-                    .get(key)
-                    .ok_or_else(|| SpecError::MissingArgument {
-                        argument: format!("context:{key}"),
-                    })?;
-                out.insert(name.clone(), Value::String(value.clone()));
+                context_refs.insert(name.clone(), key.clone());
             }
         }
     }
-    Ok(Value::Object(out))
+    let stripped = actor
+        .map(|o| {
+            o.keys()
+                .filter(|k| !supplied.contains(k.as_str()))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(EffectiveCall {
+        base_action: cap.base_action.clone(),
+        backing: descriptor.backing.clone(),
+        arguments: Value::Object(arguments),
+        context_refs,
+        stripped,
+    })
 }
 
-fn str_param(params: &Value, key: &str) -> Result<String, SpecError> {
+/// Resolve the effective params an intent runs with: the [`effective_call`]
+/// lowering, with context refs resolved from `env`. A non-scoped action passes
+/// its params through.
+fn effective_params(
+    world: &CompiledWorld,
+    intent: &IntentIR,
+    descriptor: &harness_types::Descriptor,
+    env: &ExecEnv,
+) -> Result<EffectiveParams, SpecError> {
+    let action = intent.action();
+    let lowered = effective_call(world, intent).ok_or_else(|| SpecError::BadArgument {
+        detail: format!("no descriptor for {action}"),
+    })?;
+    let Some(cap) = world.scoped_capability(action) else {
+        return Ok(EffectiveParams {
+            value: lowered.arguments,
+            contract: ParamContract::for_descriptor(descriptor),
+        });
+    };
+    let mut value = lowered.arguments;
+    for (name, key) in &lowered.context_refs {
+        let resolved = env
+            .context
+            .get(key)
+            .ok_or_else(|| SpecError::MissingArgument {
+                argument: format!("context:{key}"),
+            })?;
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert(name.clone(), Value::String(resolved.clone()));
+        }
+    }
+    Ok(EffectiveParams {
+        value,
+        contract: ParamContract::for_scoped_args(&cap.args),
+    })
+}
+
+fn str_param(params: &Value, contract: &ParamContract, key: &str) -> Result<String, SpecError> {
+    contract.require(key)?;
     params
         .get(key)
         .and_then(Value::as_str)
@@ -216,8 +342,12 @@ fn str_param(params: &Value, key: &str) -> Result<String, SpecError> {
 
 /// Accept either a pre-split `argv` array or a `command` string (split with
 /// shell-words) plus optional `args`.
-fn argv_from(params: &Value) -> Result<Vec<String>, SpecError> {
-    if let Some(array) = params.get("argv").and_then(Value::as_array) {
+fn argv_from(params: &Value, contract: &ParamContract) -> Result<Vec<String>, SpecError> {
+    if let Some(value) = params.get("argv") {
+        contract.require("argv")?;
+        let array = value.as_array().ok_or_else(|| SpecError::BadArgument {
+            detail: "argument `argv` must be array".to_string(),
+        })?;
         let argv = string_array(array);
         if argv.is_empty() {
             return Err(SpecError::BadArgument {
@@ -227,11 +357,15 @@ fn argv_from(params: &Value) -> Result<Vec<String>, SpecError> {
         return Ok(argv);
     }
 
-    let command = str_param(params, "command")?;
+    let command = str_param(params, contract, "command")?;
     let mut argv = shell_words::split(&command).map_err(|e| SpecError::BadArgument {
         detail: e.to_string(),
     })?;
-    if let Some(args) = params.get("args").and_then(Value::as_array) {
+    if let Some(value) = params.get("args") {
+        contract.require("args")?;
+        let args = value.as_array().ok_or_else(|| SpecError::BadArgument {
+            detail: "argument `args` must be array".to_string(),
+        })?;
         argv.extend(string_array(args));
     }
     if argv.is_empty() {
@@ -255,12 +389,16 @@ mod tests {
     use crate::IRBuilder;
     use compiler::compile_default;
     use harness_types::{
-        CallId, ContentHash, Provenance, Provider, SessionId, SourceChannel, TaintContext, ToolCall,
+        BuildError, CallId, ContentHash, Provenance, Provider, SessionId, SourceChannel,
+        TaintContext, ToolCall,
     };
     use serde_json::json;
 
-    fn spec(action: &str, args: Value) -> ExecutionSpec {
-        let world = compile_default();
+    fn build_ir_with_world(
+        world: CompiledWorld,
+        action: &str,
+        args: Value,
+    ) -> Result<(CompiledWorld, IntentIR), BuildError> {
         let call = ToolCall {
             action_name: ActionName::new(action),
             arguments: args,
@@ -274,9 +412,16 @@ mod tests {
             SessionId::new("s"),
             ContentHash::new("h"),
         );
-        let ir = IRBuilder::new(&world)
-            .build(&call, prov, &TaintContext::clean())
-            .expect("intent builds");
+        let ir = IRBuilder::new(&world).build(&call, prov, &TaintContext::clean())?;
+        Ok((world, ir))
+    }
+
+    fn try_spec_with_world(
+        world: CompiledWorld,
+        action: &str,
+        args: Value,
+    ) -> Result<ExecutionSpec, BuildError> {
+        let (world, ir) = build_ir_with_world(world, action, args)?;
         build_execution_spec(
             &world,
             &ir,
@@ -284,7 +429,18 @@ mod tests {
             &ExecEnv::default(),
             TraceId::new("t"),
         )
-        .expect("spec assembles")
+        .map_err(|e| BuildError::InvariantViolation {
+            law: "spec_lowering".to_string(),
+            detail: e.to_string(),
+        })
+    }
+
+    fn try_spec(action: &str, args: Value) -> Result<ExecutionSpec, BuildError> {
+        try_spec_with_world(compile_default(), action, args)
+    }
+
+    fn spec(action: &str, args: Value) -> ExecutionSpec {
+        try_spec(action, args).expect("spec assembles")
     }
 
     #[test]
@@ -314,9 +470,190 @@ mod tests {
     }
 
     #[test]
-    fn base_action_params_pass_through() {
-        let s = spec("read_workspace", json!({ "path": "a", "extra": 1 }));
-        // Not a scoped cap → params pass through to the read op as-is.
+    fn base_action_declared_params_lower_to_operation() {
+        let s = spec("read_workspace", json!({ "path": "a" }));
         assert!(matches!(s.operation(), Operation::Structured(_)));
+    }
+
+    #[test]
+    fn run_command_hidden_argv_is_rejected_by_descriptor() {
+        let err = try_spec(
+            "run_command",
+            json!({ "command": "echo safe", "argv": ["sh", "-c", "echo pwned"] }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, BuildError::SchemaViolation { .. }));
+    }
+
+    #[test]
+    fn apply_patch_hidden_execution_fields_are_rejected_by_descriptor() {
+        let err = try_spec(
+            "apply_patch",
+            json!({
+                "patch": "benign modeled patch",
+                "path": "target.txt",
+                "contents": "hidden write"
+            }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, BuildError::SchemaViolation { .. }));
+    }
+
+    #[test]
+    fn local_handler_cannot_consume_additional_properties() {
+        let yaml = r#"
+world_id: spec-contract
+capabilities:
+  - { trust: Trusted, actions: [Patch] }
+base_actions:
+  - name: apply_patch
+    action_type: Patch
+    side_effect: FilesystemWrite
+    schema:
+      type: object
+      additionalProperties: true
+      properties:
+        patch: { type: string }
+"#;
+        let manifest = compiler::load_yaml(yaml).expect("manifest parses");
+        let world = compiler::compile(&manifest).expect("manifest compiles");
+        let err = try_spec_with_world(
+            world,
+            "apply_patch",
+            json!({
+                "patch": "modeled",
+                "path": "target.txt",
+                "contents": "hidden write"
+            }),
+        )
+        .unwrap_err();
+        assert!(matches!(err, BuildError::InvariantViolation { .. }));
+    }
+
+    // ---- D80: the lowered call a decision-only host must execute ----
+
+    #[test]
+    fn effective_call_strips_injects_and_reports() {
+        let (world, ir) = build_ir_with_world(
+            compile_default(),
+            "run_tests",
+            json!({ "command": "rm -rf /", "path": "x" }),
+        )
+        .unwrap();
+        let call = effective_call(&world, &ir).unwrap();
+        assert_eq!(call.base_action, ActionName::new("run_command"));
+        assert_eq!(call.arguments, json!({ "command": "pytest" }));
+        assert_eq!(
+            call.stripped,
+            vec!["command".to_string(), "path".to_string()]
+        );
+        assert!(call.context_refs.is_empty());
+    }
+
+    #[test]
+    fn effective_call_of_a_base_action_is_the_call_itself() {
+        let args = json!({ "path": "src/lib.rs" });
+        let (world, ir) =
+            build_ir_with_world(compile_default(), "read_workspace", args.clone()).unwrap();
+        let call = effective_call(&world, &ir).unwrap();
+        assert_eq!(call.base_action, ActionName::new("read_workspace"));
+        assert_eq!(call.arguments, args);
+        assert!(call.stripped.is_empty());
+    }
+
+    #[test]
+    fn effective_call_carries_the_mcp_backing_and_lists_context_refs() {
+        let world = compiler::compile(
+            &compiler::load_yaml(
+                r#"
+world_id: w
+capabilities:
+  - { trust: Trusted, actions: [Mcp] }
+base_actions:
+  - name: create_pull_request
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer { server: codehost, tool: create_pull_request }
+    schema:
+      type: object
+      properties: { repo: { type: string }, base: { type: string }, title: { type: string } }
+scoped_capabilities:
+  - name: open_change_pr
+    base_action: create_pull_request
+    args: { repo: !Literal "acme/svc", base: !ContextRef change.base, title: ActorInput }
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let (world, ir) = build_ir_with_world(
+            world,
+            "open_change_pr",
+            json!({ "title": "t", "repo": "attacker/fork" }),
+        )
+        .unwrap();
+        let call = effective_call(&world, &ir).unwrap();
+        assert_eq!(
+            call.backing,
+            BackingIdentity::McpServer {
+                server: "codehost".to_string(),
+                tool: "create_pull_request".to_string()
+            }
+        );
+        assert_eq!(call.arguments, json!({ "repo": "acme/svc", "title": "t" }));
+        assert_eq!(
+            call.context_refs.get("base").map(String::as_str),
+            Some("change.base")
+        );
+        assert_eq!(call.stripped, vec!["repo".to_string()]);
+    }
+
+    #[test]
+    fn effective_call_maps_renamed_arguments_back_and_reports_base_names() {
+        // D79: the actor supplies `issue`; the call carries `issueIdOrKey`. A
+        // value sent under the base name is never read, and it is reported.
+        let world = compiler::compile(
+            &compiler::load_yaml(
+                r#"
+world_id: w
+capabilities:
+  - { trust: Trusted, actions: [Mcp] }
+base_actions:
+  - name: getJiraIssue
+    action_type: Mcp
+    side_effect: Read
+    projected: false
+    backing: !McpServer { server: atlassian, tool: getJiraIssue }
+    schema:
+      type: object
+      required: [cloudId, issueIdOrKey]
+      properties: { cloudId: { type: string }, issueIdOrKey: { type: string } }
+scoped_capabilities:
+  - name: get_platform_issue
+    base_action: getJiraIssue
+    args:
+      cloudId: !Literal abc-123
+      issueIdOrKey: !Input { as: issue, prefix: "PLAT-" }
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let (world, ir) = build_ir_with_world(
+            world,
+            "get_platform_issue",
+            json!({ "issue": "PLAT-7", "issueIdOrKey": "SEC-1", "cloudId": "evil" }),
+        )
+        .unwrap();
+        let call = effective_call(&world, &ir).unwrap();
+        assert_eq!(call.base_action, ActionName::new("getJiraIssue"));
+        assert_eq!(
+            call.arguments,
+            json!({ "cloudId": "abc-123", "issueIdOrKey": "PLAT-7" })
+        );
+        assert_eq!(
+            call.stripped,
+            vec!["cloudId".to_string(), "issueIdOrKey".to_string()]
+        );
     }
 }

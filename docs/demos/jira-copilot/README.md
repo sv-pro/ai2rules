@@ -66,8 +66,33 @@ cargo test -p cli-harness --test cc_hook     --offline   # native seam (Claude C
 | Copilot sees the full JIRA MCP surface incl. `jira_delete_issue`, `jira_bulk_create_issues`, transitions | Copilot sees only reads + `jira_add_comment`; destructive tools **do not appear** |
 | "Clean up old issues" can delete | "delete this issue" → the tool doesn't exist (ABSENT) |
 | A tainted/untrusted context can still drive a write | Tainted session → `jira_add_comment` **DENIED** (taint floor) |
+| Data read from the MCP server is treated as trustworthy once it's in the session | The read itself taints: `jira_get_issue` ALLOWs, and the `jira_add_comment` after it is **DENIED** — remote ingress is untrusted whatever the tool is named |
 | On Claude Code, a tainted session can still `curl` out / `rm -rf` | `cc-hook` **denies** tainted egress, **asks** before destructive Bash |
 | No record | Append-only audit log of every ALLOW/DENY/ABSENT |
+
+## If you point this at a modern MCP server
+
+The gateway declares protocol version **`2024-11-05`** on purpose — claiming a version you have
+not implemented is worse than an honest old pin. Two behaviours will look like bugs if you front
+a server speaking **`2026-07-28`** and don't know to expect them:
+
+- **An `input_required` result comes back as an error, not a prompt.** That revision replaces
+  server-initiated requests with **MRTR**: instead of answering `tools/call`, a server may *demand*
+  that the client gather input — an elicitation, or an LLM completion — and resend. That is
+  untrusted, server-authored instruction arriving *after* the kernel already said ALLOW, and the
+  kernel has no verdict shape for a demand. So the gateway refuses to relay one:
+
+  ```
+  REFUSED (gateway, interim): the upstream answered with an MCP `input_required` result …
+  ```
+
+  This is deliberate and temporary — **D49**, `sv-pro/ai2rules#40`. The real fix is a post-call
+  verdict in the kernel (taint the retry, check `inputRequests` against the ontology, bind
+  `requestState` without inspecting it). Reproduce it offline with
+  `harness mock-jira --input-required`.
+- **`server/discover` returns "method not found"**, and results carry no `resultType`. The spec's
+  own backward-compatibility rules make an honest legacy server legal; a modern client should fall
+  back to `initialize`, which the gateway does answer.
 
 ## Files here
 

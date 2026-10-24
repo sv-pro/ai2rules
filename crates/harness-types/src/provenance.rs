@@ -26,6 +26,31 @@ pub enum SourceChannel {
 }
 
 impl SourceChannel {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "user_prompt" | "user_cli" | "cli" => Some(SourceChannel::UserPrompt),
+            "workspace_file" | "workspace_files" => Some(SourceChannel::WorkspaceFile),
+            "shell_output" => Some(SourceChannel::ShellOutput),
+            "mcp_output" => Some(SourceChannel::McpOutput),
+            "web" | "web_fetch" => Some(SourceChannel::Web),
+            "memory" => Some(SourceChannel::Memory),
+            "generated" => Some(SourceChannel::Generated),
+            _ => None,
+        }
+    }
+
+    pub fn all() -> &'static [SourceChannel] {
+        &[
+            SourceChannel::UserPrompt,
+            SourceChannel::WorkspaceFile,
+            SourceChannel::ShellOutput,
+            SourceChannel::McpOutput,
+            SourceChannel::Web,
+            SourceChannel::Memory,
+            SourceChannel::Generated,
+        ]
+    }
+
     /// Default channel trust (architecture §7 "Default channel trust").
     pub fn default_trust(self) -> TrustLevel {
         match self {
@@ -90,9 +115,19 @@ impl Provenance {
         session_id: SessionId,
         content_hash: ContentHash,
     ) -> Self {
+        Self::from_channel_with_trust(channel, channel.default_trust(), session_id, content_hash)
+    }
+
+    /// Build provenance using a trust level supplied by the compiled world.
+    pub fn from_channel_with_trust(
+        channel: SourceChannel,
+        trust_level: TrustLevel,
+        session_id: SessionId,
+        content_hash: ContentHash,
+    ) -> Self {
         Self {
             source_channel: channel,
-            trust_level: channel.default_trust(),
+            trust_level,
             parent_sources: Vec::new(),
             session_id,
             content_hash,

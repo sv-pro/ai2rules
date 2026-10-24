@@ -11,14 +11,19 @@
 
 use executor::{ExecOutput, Executor};
 use harness_types::{
-    ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision, EffectMode,
-    ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, Provenance,
-    RedactionPolicy, SessionId, SourceChannel, Taint, TaintContext, TraceId, TrustLevel,
+    ActionName, ActionType, ApprovalToken, ApprovalTokenId, CompiledWorld, ContentHash, Decision,
+    EffectMode, ExecutionMode, PayloadRef, Perception, PerceptionId, PerceptionKind, PrincipalId,
+    Provenance, RedactionPolicy, SessionId, SideEffectClass, SourceChannel, Taint, TaintContext,
+    TraceId, TrustLevel,
 };
 use provider_adapters::{anthropic, ToolOutcome};
-use trace_store::{params_hash, record_decision, ApprovalStore, TraceStore};
+use serde_json::json;
+use trace_store::{
+    effect_binding, effect_resource, record_decision, ApprovalStore, ConsumeOutcome, TraceStore,
+};
 use world_kernel::{
-    build_execution_spec, decide, BudgetUsage, EvalContext, ExecEnv, IntentIR, KernelOutcome,
+    build_execution_spec, charge, decide, BudgetUsage, EvalContext, ExecEnv, IntentIR,
+    KernelOutcome,
 };
 
 use crate::arg_provenance;
@@ -60,12 +65,18 @@ pub struct TranscriptEntry {
 
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
+    /// Principal authenticated by the trusted host, never inferred from model data.
+    pub principal: PrincipalId,
+    /// Host-assigned session identity, also bound through provenance.
+    pub session_id: SessionId,
     /// Effect mode for allowed actions — `Simulate` for safe demos.
     pub effect_mode: EffectMode,
     /// Whether a human is available to approve (`ASK` fails closed in background).
     pub mode: ExecutionMode,
     /// How an interactive `ASK` is resolved.
     pub approval: ApprovalPolicy,
+    /// Lifetime of one exact, single-use authorization instance.
+    pub approval_ttl_ms: u64,
     pub max_steps: u64,
     /// The trusted user request seeding the clean provenance corpus (PACT L2).
     /// A value that appears verbatim here is provably clean-origin, so an
@@ -78,9 +89,12 @@ pub struct SessionConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
+            principal: PrincipalId::new("user:local"),
+            session_id: SessionId::new("agent-session"),
             effect_mode: EffectMode::Simulate,
             mode: ExecutionMode::Interactive,
             approval: ApprovalPolicy::Manual,
+            approval_ttl_ms: 5 * 60 * 1_000,
             max_steps: 16,
             user_request: None,
         }
@@ -109,7 +123,7 @@ pub fn run(
     config: &SessionConfig,
     mut observer: Option<&mut dyn FnMut(&TranscriptEntry)>,
 ) -> SessionOutcome {
-    let session = SessionId::new("agent-session");
+    let session = config.session_id.clone();
     // The agent proposes with the developer's (trusted) authority; containment
     // comes from taint, which accumulates from perceived results.
     let provenance = Provenance::from_channel(
@@ -121,14 +135,25 @@ pub fn run(
     let mut transcript = Vec::new();
     let mut perceptions: Vec<Perception> = Vec::new();
     let mut taint = Taint::Clean;
+    // Budget counters for the session (finding #16). The orchestrator owns a live
+    // session, so unlike the pure gate it can hold these directly — but it was
+    // passing a zeroed `BudgetUsage` into every decision, so no manifest limit was
+    // ever reachable. Charged only on an allowed call, via the kernel's `charge`
+    // so the cost and the limit cannot drift apart.
+    let mut usage = BudgetUsage::default();
     let mut records = 0usize;
+    // A `ModelClient` is stateful and the current model contract permits one
+    // tool call per turn, so the provider feedback path is a single consumed
+    // result slot rather than a second conversation history.
+    let mut pending_outcome: Option<ToolOutcome> = None;
     // The trusted user request seeds the clean provenance corpus for the L2
     // producer. It is the one source we can assert is clean-origin by construction
     // (a Trusted, untainted channel — the developer's own words).
     let clean_sources: Vec<String> = config.user_request.iter().cloned().collect();
 
     for _ in 0..config.max_steps {
-        let ctx = context::pack(world, perceptions.clone());
+        let previous_outcome = pending_outcome.take();
+        let ctx = context::pack(world, perceptions.clone(), previous_outcome.as_ref());
         let block = match model.next(&ctx) {
             ModelTurn::Final(text) => {
                 return SessionOutcome {
@@ -140,7 +165,7 @@ pub fn run(
             ModelTurn::ToolUse(block) => block,
         };
 
-        let call = match anthropic::tool_use_to_call(&block, session.clone()) {
+        let mut call = match anthropic::tool_use_to_call(&block, session.clone()) {
             Ok(call) => call,
             Err(e) => {
                 transcript.push(TranscriptEntry {
@@ -156,6 +181,14 @@ pub fn run(
             }
         };
 
+        // Normalize shell-shaped actions through the compiled world's classifier
+        // before both decision and authorization. This is the same kernel-owned
+        // classification used by the Gate ABI; the provider adapter stays free of
+        // policy and a destructive command cannot retain the base action's identity.
+        // Path classes (D83) see the argument as written; this loop has no
+        // adapter-resolved path to offer.
+        call.action_name = world.classify_call(&call.action_name, &call.arguments, None);
+
         let action = call.action_name.as_str().to_string();
         // PACT L2 producer: derive per-argument taint from the actual data flow —
         // which tainted output (or clean source) each argument's value came from —
@@ -169,7 +202,7 @@ pub fn run(
         let base = EvalContext {
             taint: TaintContext::from_taint(taint).with_arg_taint(arg_taint),
             mode: config.mode,
-            usage: BudgetUsage::default(),
+            usage,
             approval_granted: false,
         };
         let outcome = decide(world, &call, provenance.clone(), &base);
@@ -197,6 +230,7 @@ pub fn run(
                 action,
                 &mut perceptions,
                 &mut taint,
+                &mut usage,
                 &session,
                 "ALLOW",
                 Decision::Allow,
@@ -204,36 +238,32 @@ pub fn run(
             ),
 
             // Needs approval (interactive) → mint, resolve, maybe resume.
-            KernelOutcome::Evaluated { disposition, .. }
-                if disposition.decision == Decision::Ask =>
-            {
-                resolve_approval(
-                    world,
-                    env,
-                    executor,
-                    trace,
-                    store,
-                    config,
-                    &call,
-                    &provenance,
-                    base,
-                    action,
-                    &mut perceptions,
-                    &mut taint,
-                    &session,
-                    &mut records,
-                )
-            }
+            KernelOutcome::Evaluated {
+                intent,
+                disposition,
+            } if disposition.decision == Decision::Ask => resolve_approval(
+                world,
+                env,
+                executor,
+                trace,
+                store,
+                config,
+                &call,
+                intent.action(),
+                &provenance,
+                base,
+                action,
+                &mut perceptions,
+                &mut taint,
+                &mut usage,
+                &session,
+                &mut records,
+            ),
 
             // Everything else is feedback the model would receive as an error.
             other => {
                 let verdict = verdict_label(&other);
                 let (decision, rule, effect_mode) = verdict_metadata(&other);
-                let _feedback = anthropic::format_tool_result(&ToolOutcome {
-                    call_id: call.call_id.clone(),
-                    content: verdict.clone(),
-                    is_error: true,
-                });
                 TranscriptEntry {
                     action,
                     verdict,
@@ -245,6 +275,11 @@ pub fn run(
                 }
             }
         };
+        pending_outcome = Some(ToolOutcome {
+            call_id: call.call_id.clone(),
+            content: model_feedback(&entry),
+            is_error: entry.decision != Some(Decision::Allow) || entry.result == "(not executed)",
+        });
         if let Some(ref mut obs) = observer {
             obs(&entry);
         }
@@ -267,26 +302,49 @@ fn resolve_approval(
     store: &mut ApprovalStore,
     config: &SessionConfig,
     call: &harness_types::ToolCall,
+    effective_action: &ActionName,
     provenance: &Provenance,
     base: EvalContext,
     action: String,
     perceptions: &mut Vec<Perception>,
     taint: &mut Taint,
+    usage: &mut BudgetUsage,
     session: &SessionId,
     records: &mut usize,
 ) -> TranscriptEntry {
     let descriptor_hash = world
-        .descriptor_hash(&call.action_name)
+        .descriptor_hash(effective_action)
         .cloned()
         .unwrap_or_default();
-    let token = ApprovalToken::pending(
-        ApprovalTokenId::new(format!("appr-{records}")),
-        call.action_name.clone(),
-        params_hash(&call.arguments),
+    let binding = effect_binding(
+        config.principal.clone(),
+        effective_action.clone(),
+        &call.arguments,
+        effect_resource(&call.arguments),
         world.world_id().clone(),
-        descriptor_hash.clone(),
+        world.manifest_hash().clone(),
+        descriptor_hash,
         provenance.clone(),
         config.effect_mode,
+    );
+    let now = now_unix_ms();
+    let token = ApprovalToken::pending(
+        ApprovalTokenId::new(format!(
+            "auth-{now}-{}-{}",
+            *records,
+            &binding.canonical_effect_hash.as_str()[..12]
+        )),
+        binding.principal.clone(),
+        binding.action.clone(),
+        binding.params_hash.clone(),
+        binding.canonical_effect_hash.clone(),
+        binding.resource.clone(),
+        binding.world_id.clone(),
+        binding.manifest_hash.clone(),
+        binding.descriptor_hash.clone(),
+        binding.provenance.clone(),
+        binding.effect_mode,
+        now.saturating_add(config.approval_ttl_ms.max(1)),
     );
     let id = match store.mint(token) {
         Ok(id) => id,
@@ -336,16 +394,39 @@ fn resolve_approval(
                 );
             }
 
-            let _ = store.approve(&id);
-            let granted = store.is_granted(
-                &call.action_name,
-                &call.arguments,
-                world.world_id(),
-                &descriptor_hash,
-                provenance,
-                config.effect_mode,
-            );
-            let resumed_ctx = base.with_approval(granted);
+            if let Err(e) = store.approve(&id) {
+                return entry_with(
+                    action,
+                    format!("ASK (approval store error: {e})"),
+                    Decision::Ask,
+                    "authorization_store_error",
+                    None,
+                );
+            }
+            // Claim before the external effect. A crash after this point burns the
+            // grant (at-most-once/fail-closed) rather than permitting replay.
+            let consumed = match store.consume(&id, &binding, now_unix_ms()) {
+                Ok(ConsumeOutcome::Consumed(_)) => true,
+                Ok(ConsumeOutcome::Rejected(reason)) => {
+                    return entry_with(
+                        action,
+                        format!("ASK (authorization rejected: {reason:?})"),
+                        Decision::Ask,
+                        "authorization_rejected",
+                        None,
+                    );
+                }
+                Err(e) => {
+                    return entry_with(
+                        action,
+                        format!("ASK (authorization store error: {e})"),
+                        Decision::Ask,
+                        "authorization_store_error",
+                        None,
+                    );
+                }
+            };
+            let resumed_ctx = base.with_approval(consumed);
             let resumed = decide(world, call, provenance.clone(), &resumed_ctx);
             append(
                 trace,
@@ -371,12 +452,15 @@ fn resolve_approval(
                         action,
                         perceptions,
                         taint,
+                        usage,
                         session,
                         "ASK → APPROVED → ALLOW",
                         Decision::Allow,
                         disposition.rule,
                     );
-                    let _ = store.mark_executed(&id);
+                    if e.result != "(not executed)" {
+                        let _ = store.mark_executed(&id);
+                    }
                     e.verdict = "ASK → APPROVED → ALLOW".to_string();
                     e
                 }
@@ -393,6 +477,16 @@ fn resolve_approval(
             }
         }
     }
+}
+
+fn now_unix_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 /// The payloads of every tainted perception so far — the tainted corpus the L2
@@ -437,6 +531,7 @@ fn run_allowed(
     action: String,
     perceptions: &mut Vec<Perception>,
     taint: &mut Taint,
+    usage: &mut BudgetUsage,
     session: &SessionId,
     verdict: &str,
     decision: Decision,
@@ -447,6 +542,17 @@ fn run_allowed(
             Ok(tv) => {
                 let content = describe_output(&tv.value);
                 *taint = taint.join(tv.taint);
+                // Charge the budget for a call that actually ran, beside the taint
+                // join for the same reason: this is where session state advances.
+                *usage = charge(
+                    usage,
+                    world
+                        .action_type(intent.action())
+                        .unwrap_or(ActionType::Read),
+                    world
+                        .side_effect(intent.action())
+                        .unwrap_or(SideEffectClass::Read),
+                );
                 perceptions.push(result_perception(&action, &content, tv.taint, session));
                 TranscriptEntry {
                     action,
@@ -491,6 +597,36 @@ fn entry_with(
         effect_mode,
         result: "(not executed)".to_string(),
         taint: Taint::Clean,
+    }
+}
+
+/// Produce stable, structured model feedback while keeping the provider adapter
+/// free of kernel types and policy. The outer provider block preserves the call
+/// identity; this content preserves the canonical decision and its evidence.
+fn model_feedback(entry: &TranscriptEntry) -> String {
+    let result = if entry.result == "(not executed)" {
+        "not_executed"
+    } else {
+        entry.result.as_str()
+    };
+    json!({
+        "action": entry.action.as_str(),
+        "decision": entry.decision.map(decision_name),
+        "rule": entry.rule.as_deref(),
+        "effect_mode": entry.effect_mode,
+        "verdict": entry.verdict.as_str(),
+        "result": result,
+    })
+    .to_string()
+}
+
+fn decision_name(decision: Decision) -> &'static str {
+    match decision {
+        Decision::Absent => "ABSENT",
+        Decision::Allow => "ALLOW",
+        Decision::Deny => "DENY",
+        Decision::Ask => "ASK",
+        Decision::Replan => "REPLAN",
     }
 }
 

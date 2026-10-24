@@ -9,7 +9,10 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "check:heroes": "bash scripts/check-heroes.sh",
+    "astro": "astro",
+    "check:drafts": "bash scripts/check-drafts.sh",
+    "check:spacing": "node scripts/check-spacing.mjs"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.0",

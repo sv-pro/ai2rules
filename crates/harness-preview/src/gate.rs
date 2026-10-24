@@ -10,15 +10,27 @@
 //! backs the `harness gate` subcommand and the WASM engine, the way [`preview`]
 //! does for the authoring tool. Wire schema: `docs/harness-gate-abi.md`.
 //!
+//! Because it is decision-only, the response also says **what to run**: on
+//! `ALLOW` / `ASK` the [`GateEffective`] carries the lowered call — backing tool,
+//! arguments after a scoped capability's stripping, renaming and literal
+//! injection, and the names it stripped (D80). A host that executes the
+//! *proposed* call instead drops the scoping on the floor. An in-process host
+//! that executes can take the `ExecutionSpec` itself from [`gate_and_lower`].
+//!
 //! [`preview`]: crate::preview
 
 use harness_types::{
-    ActionName, CallId, CompiledWorld, ContentHash, Decision, ExecutionMode, Provenance, Provider,
-    SessionId, SideEffectClass, SourceChannel, Taint, TaintContext, ToolCall,
+    ActionName, ActionType, BackingIdentity, CallId, ChannelPolicy, CompiledWorld, ContentHash,
+    Decision, EffectMode, ExecutionMode, ExecutionSpec, Provenance, Provider, RootAccess,
+    SessionId, SideEffectClass, Taint, TaintContext, ToolCall, TraceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use world_kernel::{decide, BudgetUsage, EvalContext, KernelOutcome};
+use std::collections::BTreeMap;
+use world_kernel::{
+    build_execution_spec, charge, decide, effective_call, BudgetUsage, EvalContext, ExecEnv,
+    IntentIR, KernelOutcome,
+};
 
 /// The current ABI version. Bumped only on a breaking wire change (§8).
 pub const ABI_VERSION: u32 = 1;
@@ -35,6 +47,13 @@ pub struct GateRequest {
     /// The proposed call's arguments. Maps to `ToolCall.arguments`.
     #[serde(default)]
     pub arguments: Value,
+    /// The action's resolved **absolute** target path, for path-scoped (`roots`)
+    /// governance. The *adapter* extracts it from the file-action arguments and does
+    /// the I/O of absolutizing it, keeping the gate pure. When roots are enabled,
+    /// path-scoped file actions fail closed if this is absent. Bash/etc. do not
+    /// carry a single resolvable path and stay OS-sandbox territory.
+    #[serde(default)]
+    pub path: Option<String>,
     /// Carried, host-owned context (taint, mode, session).
     #[serde(default)]
     pub context: GateContext,
@@ -50,16 +69,61 @@ pub struct GateContext {
     /// `interactive` (default) | `background`. Drives ASK→DENY fail-closed.
     #[serde(default)]
     pub mode: Option<String>,
-    /// Monotonic carried taint: `clean` (default) | `tainted`.
+    /// Monotonic carried taint: `clean` | `tainted`.
     #[serde(default)]
     pub taint: Option<String>,
-    /// Provenance of this call's trigger (the proposing actor's trust). Defaults
-    /// to `user_prompt`. The inbound taint *floor* is driven by `taint`, not this.
+    /// Provenance of this call's trigger (the proposing actor's trust). The
+    /// inbound taint *floor* is driven by `taint`, not this.
     #[serde(default)]
     pub source_channel: Option<String>,
-    /// A granted approval token, when re-submitting a previously `ASK`ed call.
+    /// Optional host correlation id from a prior `ASK`. The pure gate cannot
+    /// verify approval stores, so this field is never treated as a grant.
     #[serde(default)]
     pub approval_token: Option<String>,
+    /// Budget counters consumed so far this session (finding #16). The kernel is
+    /// pure and each call is a separate process, so — exactly like `taint` — the
+    /// host adapter carries this across calls and persists what comes back.
+    /// Required when the world declares a counted budget; see `missing_usage`.
+    #[serde(default)]
+    pub usage: Option<GateUsage>,
+}
+
+/// Session budget counters on the wire (§3/§4). Absent counters are zero, so a
+/// caller may send only what it tracks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateUsage {
+    #[serde(default)]
+    pub commands_run: u64,
+    #[serde(default)]
+    pub network_calls: u64,
+    #[serde(default)]
+    pub file_writes: u64,
+    /// Only a caller that has seen a model response can count these; the gate
+    /// carries the value through without ever charging it.
+    #[serde(default)]
+    pub tokens_used: u64,
+}
+
+impl From<GateUsage> for BudgetUsage {
+    fn from(u: GateUsage) -> Self {
+        BudgetUsage {
+            commands_run: u.commands_run,
+            tokens_used: u.tokens_used,
+            file_writes: u.file_writes,
+            network_calls: u.network_calls,
+        }
+    }
+}
+
+impl From<BudgetUsage> for GateUsage {
+    fn from(u: BudgetUsage) -> Self {
+        GateUsage {
+            commands_run: u.commands_run,
+            network_calls: u.network_calls,
+            file_writes: u.file_writes,
+            tokens_used: u.tokens_used,
+        }
+    }
 }
 
 /// The kernel's verdict for one call (§4).
@@ -82,6 +146,56 @@ pub struct GateResponse {
     pub approval: Option<GateApproval>,
     /// First 12 hex of the compiled manifest hash, for drift/trace correlation.
     pub manifest_hash: String,
+    /// The call to execute, present on `ALLOW` and `ASK` (D80). A backward-
+    /// compatible v1 addition: hosts that ignore it keep today's behaviour —
+    /// which, for a scoped capability, is the bug this field exists to fix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective: Option<GateEffective>,
+}
+
+/// The lowered call a host must execute instead of the proposal (D80). Mirrors
+/// [`world_kernel::EffectiveCall`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateEffective {
+    /// The base action the call lowers to (the action itself if not scoped).
+    pub base_action: String,
+    pub backing: GateBacking,
+    /// Arguments to execute with, under the base action's names: surviving
+    /// actor input plus literals.
+    pub arguments: Value,
+    /// Argument → context key for `ContextRef` arguments; the host fills these
+    /// from its own trusted context, never from the model.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub context_refs: BTreeMap<String, String>,
+    /// Names the actor sent that the scoping dropped. Non-empty means the
+    /// proposal tried to set something the world fixes — a signal worth recording.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stripped: Vec<String>,
+}
+
+/// What executes an effective call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GateBacking {
+    /// A host-local handler (for a native host: its own tool of this name).
+    Local { handler: String },
+    /// A tool on an MCP server.
+    Mcp { server: String, tool: String },
+}
+
+impl GateEffective {
+    fn from_kernel(call: world_kernel::EffectiveCall) -> Self {
+        Self {
+            base_action: call.base_action.as_str().to_string(),
+            backing: match call.backing {
+                BackingIdentity::LocalHandler(handler) => GateBacking::Local { handler },
+                BackingIdentity::McpServer { server, tool } => GateBacking::Mcp { server, tool },
+            },
+            arguments: call.arguments,
+            context_refs: call.context_refs,
+            stripped: call.stripped,
+        }
+    }
 }
 
 /// Post-call state the adapter must persist for the next call (§4).
@@ -89,10 +203,15 @@ pub struct GateResponse {
 pub struct GateResponseContext {
     /// Monotonic post-call taint to persist: `clean` | `tainted`.
     pub taint: String,
+    /// Post-call budget counters to persist for the next call (finding #16).
+    /// Charged only on an ALLOW that will actually run — a blocked call consumes
+    /// nothing.
+    pub usage: GateUsage,
 }
 
-/// Approval handshake returned on `ASK` (§4). The token is a correlation id;
-/// durable binding/validation is the host adapter's `ApprovalStore` (deferred).
+/// Approval handshake returned on `ASK` (§4). The token is a correlation id,
+/// not a bearer credential; durable binding/validation belongs to a trusted
+/// host adapter approval store outside this pure ABI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateApproval {
     pub token: String,
@@ -102,11 +221,81 @@ pub struct GateApproval {
 /// Govern one proposed call against a compiled world. Pure and deterministic in
 /// `(world, req)` — the runtime half of the kernel, exposed as a value function.
 pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
-    // The effective action: the world's own command classifiers run first
-    // (D36), so classification is kernel data, identical for every host.
-    let action = world.classify_command(&ActionName::new(&req.tool), &req.arguments);
-    let inbound = parse_taint(req.context.taint.as_deref());
-    let channel = parse_channel(req.context.source_channel.as_deref());
+    gate_inner(world, req).0
+}
+
+/// [`gate`], plus — for an `ALLOW` — the `ExecutionSpec` the kernel lowers the
+/// call to (D79). A scoped capability's renamed arguments, injected literals and
+/// stripped extras are applied there, so an adapter that executes forwards the
+/// spec rather than the call it was proposed as: only an `ExecutionSpec` crosses
+/// into execution. `None` for any other verdict; `Some(Err)` when an allowed call
+/// cannot be lowered, which the adapter must treat as a refusal.
+///
+/// Native-only. The verdict is exactly [`gate`]'s, so the WASM build, which has
+/// nothing to execute, needs no counterpart.
+pub fn gate_and_lower(
+    world: &CompiledWorld,
+    req: &GateRequest,
+) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
+    let (response, allowed) = gate_inner(world, req);
+    let spec = allowed.map(|(intent, effect_mode)| {
+        build_execution_spec(
+            world,
+            &intent,
+            effect_mode,
+            &ExecEnv::default(),
+            TraceId::new(&req.context.session_id),
+        )
+        .map_err(|e| e.to_string())
+    });
+    (response, spec)
+}
+
+/// The verdict, plus the sealed intent and its effect mode when the final
+/// decision is `ALLOW` (after path scope has had its chance to tighten it).
+fn gate_inner(
+    world: &CompiledWorld,
+    req: &GateRequest,
+) -> (GateResponse, Option<(IntentIR, EffectMode)>) {
+    // The effective action: the world's own command classifiers (D36) and path
+    // classifiers (D83) run first, so classification is kernel data, identical
+    // for every host. Path classes read the adapter-resolved `path` as well as the
+    // argument, so every spelling of `CLAUDE.md` lands in the same class.
+    let action = world.classify_call(
+        &ActionName::new(&req.tool),
+        &req.arguments,
+        req.path.as_deref(),
+    );
+    let carried = req.context.usage.unwrap_or_default();
+    let inbound = match parse_taint(req.context.taint.as_deref()) {
+        Ok(t) => t,
+        Err(rule) => {
+            return (
+                denied_response(world, &action, rule, Taint::Tainted, carried),
+                None,
+            )
+        }
+    };
+    let channel = match parse_channel(world, req.context.source_channel.as_deref()) {
+        Ok(c) => c,
+        Err(rule) => {
+            return (
+                denied_response(world, &action, rule, inbound, carried),
+                None,
+            )
+        }
+    };
+    // Budget counters are session state the pure kernel cannot hold, so the adapter
+    // carries them (finding #16). A world that counts calls therefore requires them:
+    // otherwise a thin adapter silently disables every limit by omission, which is
+    // the same failure `missing_path` closes for roots.
+    if world.budget().counts_calls() && req.context.usage.is_none() {
+        return (
+            denied_response(world, &action, "missing_usage", inbound, carried),
+            None,
+        );
+    }
+    let inbound = inbound.join(channel.taint);
     let session = SessionId::new(&req.context.session_id);
 
     let call = ToolCall {
@@ -117,21 +306,79 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         source_perceptions: vec![],
         session_id: session.clone(),
     };
-    let provenance = Provenance::from_channel(channel, session, ContentHash::new("gate"));
+    let provenance = Provenance::from_channel_with_trust(
+        channel.channel,
+        channel.trust,
+        session,
+        ContentHash::new("gate"),
+    );
+    let mode = parse_mode(req.context.mode.as_deref());
     let ctx = EvalContext {
         taint: TaintContext::from_taint(inbound),
-        mode: parse_mode(req.context.mode.as_deref()),
-        usage: BudgetUsage::default(),
-        approval_granted: req.context.approval_token.is_some(),
+        mode,
+        usage: BudgetUsage::from(carried),
+        // The gate ABI is intentionally pure and has no verifier callback or
+        // store access. A request-supplied token is untrusted input, so it must
+        // never grant approval at this boundary.
+        approval_granted: false,
     };
 
-    let (decision, rule) = match decide(world, &call, provenance, &ctx) {
+    let mut sealed = None;
+    let mut effect_mode = None;
+    let (mut decision, mut rule) = match decide(world, &call, provenance, &ctx) {
         KernelOutcome::UnknownToOntology { .. } => {
             (Decision::Absent, "unknown_to_ontology".to_string())
         }
         KernelOutcome::NotRepresentable { decision, rule, .. } => (decision, rule),
-        KernelOutcome::Evaluated { disposition, .. } => (disposition.decision, disposition.rule),
+        KernelOutcome::Evaluated {
+            intent,
+            disposition,
+        } => {
+            sealed = Some(intent);
+            effect_mode = disposition.effect_mode;
+            (disposition.decision, disposition.rule)
+        }
     };
+
+    // Spatial scope (roots): when the world declares roots, path-scoped file
+    // actions must include the adapter-resolved target `path`; otherwise a thin
+    // adapter could bypass roots by omission. Path-scope can only TIGHTEN a kernel
+    // ALLOW (deny / ask / read-only) — never loosen a block. Bash and other non-file
+    // tools without a single resolvable path carry no `path`, so they are exempt.
+    if decision == Decision::Allow {
+        if let Some(at) = world.action_type(&action) {
+            let path_scoped_file_action = requires_resolved_path(world, &action, at);
+            if world.has_roots() && path_scoped_file_action && req.path.is_none() {
+                decision = Decision::Deny;
+                rule = "missing_path".to_string();
+            } else if let Some(path) = req.path.as_deref() {
+                if let Some(access) = world.classify_path(path) {
+                    let is_write = matches!(at, ActionType::Write | ActionType::Patch);
+                    match access {
+                        RootAccess::Deny => {
+                            decision = Decision::Deny;
+                            rule = "path_scope_denied".to_string();
+                        }
+                        RootAccess::Read if is_write => {
+                            decision = Decision::Deny;
+                            rule = "path_scope_readonly".to_string();
+                        }
+                        RootAccess::Ask => {
+                            // Fail closed in background (mirrors invariant 10 for approvals).
+                            if matches!(mode, ExecutionMode::Background) {
+                                decision = Decision::Deny;
+                                rule = "path_scope_ask_background".to_string();
+                            } else {
+                                decision = Decision::Ask;
+                                rule = "path_scope_ask".to_string();
+                            }
+                        }
+                        RootAccess::Read | RootAccess::ReadWrite => {}
+                    }
+                }
+            }
+        }
+    }
 
     // Post-call taint escalation: monotonic join of the carried taint with the
     // taint this action's *output* introduces. Only an executed (ALLOW) call
@@ -139,16 +386,56 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
     let mut out_taint = inbound;
     if decision == Decision::Allow {
         if let Some(se) = world.side_effect(&action) {
-            out_taint = out_taint.join(side_effect_taint(se));
+            out_taint = out_taint.join(side_effect_taint(se, world.action_type(&action)));
+        }
+        // Remote ingress (finding #13). An action served by an MCP server returns
+        // bytes from another process we do not trust — whatever side effect the
+        // world declared for it. Keying this on the *backing* rather than the
+        // side-effect class means a manifest cannot describe a remote fetch as a
+        // clean local read, by accident or otherwise; the three jira demo worlds
+        // all did exactly that, and the session stayed clean across a read.
+        if matches!(
+            world.descriptor(&action).map(|d| &d.backing),
+            Some(BackingIdentity::McpServer { .. })
+        ) {
+            out_taint = out_taint.join(Taint::Tainted);
+        }
+        // Path-aware read-taint: reading under a `taint_source` root taints the
+        // session (restores the D25/D37-deferred read-taint, now declared per path).
+        if let Some(path) = req.path.as_deref() {
+            if world.path_taints(path) {
+                out_taint = out_taint.join(Taint::Tainted);
+            }
         }
     }
+
+    // Charge the budget for a call that will actually run. `charge` lives beside
+    // `budget_exceeded` in the kernel so a limit and its cost cannot drift apart.
+    let out_usage = if decision == Decision::Allow {
+        match (world.action_type(&action), world.side_effect(&action)) {
+            (Some(at), Some(se)) => charge(&BudgetUsage::from(carried), at, se).into(),
+            _ => carried,
+        }
+    } else {
+        carried
+    };
+
+    // What the host must run (D80): only for a call that may run.
+    let effective = if matches!(decision, Decision::Allow | Decision::Ask) {
+        sealed
+            .as_ref()
+            .and_then(|intent| effective_call(world, intent))
+            .map(GateEffective::from_kernel)
+    } else {
+        None
+    };
 
     let approval = (decision == Decision::Ask).then(|| GateApproval {
         token: format!("{}:{}", req.context.session_id, action.as_str()),
         required: true,
     });
 
-    GateResponse {
+    let response = GateResponse {
         v: ABI_VERSION,
         decision: decision_str(decision).to_string(),
         action: action.as_str().to_string(),
@@ -157,20 +444,51 @@ pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
         reason: reason_for(decision, &rule).to_string(),
         context: GateResponseContext {
             taint: taint_str(out_taint).to_string(),
+            usage: out_usage,
         },
         approval,
         manifest_hash: short_hash(world),
-    }
+        effective,
+    };
+    let allowed = sealed
+        .zip(effect_mode)
+        .filter(|_| decision == Decision::Allow);
+    (response, allowed)
 }
 
 fn default_version() -> u32 {
     ABI_VERSION
 }
 
-fn parse_taint(s: Option<&str>) -> Taint {
+fn denied_response(
+    world: &CompiledWorld,
+    action: &ActionName,
+    rule: &'static str,
+    out_taint: Taint,
+    usage: GateUsage,
+) -> GateResponse {
+    GateResponse {
+        v: ABI_VERSION,
+        decision: decision_str(Decision::Deny).to_string(),
+        action: action.as_str().to_string(),
+        rule: Some(rule.to_string()),
+        reason: reason_for(Decision::Deny, rule).to_string(),
+        context: GateResponseContext {
+            taint: taint_str(out_taint).to_string(),
+            usage,
+        },
+        approval: None,
+        manifest_hash: short_hash(world),
+        effective: None,
+    }
+}
+
+fn parse_taint(s: Option<&str>) -> Result<Taint, &'static str> {
     match s {
-        Some("tainted") => Taint::Tainted,
-        _ => Taint::Clean,
+        Some("clean") => Ok(Taint::Clean),
+        Some("tainted") => Ok(Taint::Tainted),
+        Some(_) => Err("invalid_taint"),
+        None => Err("missing_taint"),
     }
 }
 
@@ -181,27 +499,51 @@ fn parse_mode(s: Option<&str>) -> ExecutionMode {
     }
 }
 
-/// Map the wire `source_channel` to a kernel channel. An absent or unrecognized
-/// value defaults to `UserPrompt` (the proposing actor); the security-critical
-/// inbound floor is carried by `taint`, not this field.
-fn parse_channel(s: Option<&str>) -> SourceChannel {
-    match s {
-        Some("workspace_file") => SourceChannel::WorkspaceFile,
-        Some("shell_output") => SourceChannel::ShellOutput,
-        Some("mcp_output") => SourceChannel::McpOutput,
-        Some("web") => SourceChannel::Web,
-        Some("memory") => SourceChannel::Memory,
-        Some("generated") => SourceChannel::Generated,
-        _ => SourceChannel::UserPrompt,
-    }
+fn requires_resolved_path(world: &CompiledWorld, action: &ActionName, at: ActionType) -> bool {
+    matches!(at, ActionType::Write | ActionType::Patch)
+        || (matches!(at, ActionType::Read) && descriptor_has_path_arg(world, action))
+}
+
+fn descriptor_has_path_arg(world: &CompiledWorld, action: &ActionName) -> bool {
+    let Some(descriptor) = world.descriptor(action) else {
+        return false;
+    };
+    let Some(properties) = descriptor
+        .schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+    else {
+        return false;
+    };
+    ["path", "file_path", "notebook_path"]
+        .iter()
+        .any(|key| properties.contains_key(*key))
+}
+
+/// Resolve the wire `source_channel` through the compiled world's manifest
+/// channel table. The field is explicit so thin adapters cannot accidentally
+/// upgrade an unknown proposer to trusted.
+fn parse_channel(world: &CompiledWorld, s: Option<&str>) -> Result<ChannelPolicy, &'static str> {
+    let Some(name) = s else {
+        return Err("missing_source_channel");
+    };
+    world.channel_policy(name).ok_or("invalid_source_channel")
 }
 
 /// The taint an action's *output* introduces, by side-effect class. v1 policy:
 /// network/external/memory ingress brings in untrusted data; pure effects and
 /// local reads do not. The finer, path-sensitive taint-source policy is the
 /// deferred manifest-schema item (`docs/harness-gate-abi.md` §7).
-fn side_effect_taint(se: SideEffectClass) -> Taint {
+///
+/// A **file write** into memory brings nothing back (D83): writing `CLAUDE.md`
+/// returns an acknowledgement, not stored content, so it leaves the session's
+/// taint as it was. Memory reached any other way (`action_type: Memory`, a
+/// recall) is still ingress.
+fn side_effect_taint(se: SideEffectClass, at: Option<ActionType>) -> Taint {
     match se {
+        SideEffectClass::Memory if matches!(at, Some(ActionType::Write | ActionType::Patch)) => {
+            Taint::Clean
+        }
         SideEffectClass::Network | SideEffectClass::External | SideEffectClass::Memory => {
             Taint::Tainted
         }
@@ -236,6 +578,25 @@ fn reason_for(d: Decision, rule: &str) -> &'static str {
         }
         (Decision::Deny, "schema_violation") => "arguments violate the action's schema",
         (Decision::Deny, "descriptor_drift") => "the action descriptor changed since projection",
+        (Decision::Deny, "path_scope_denied") => "the target path is outside the allowed roots",
+        (Decision::Deny, "path_scope_readonly") => {
+            "the target path is read-only under the roots policy"
+        }
+        (Decision::Deny, "path_scope_ask_background") => {
+            "the target path needs approval, unavailable in background"
+        }
+        (Decision::Deny, "missing_path") => {
+            "path-scoped file action is missing its resolved target path"
+        }
+        (Decision::Deny, "missing_usage") => {
+            "gate request is missing the budget counters this world's limits are counted against"
+        }
+        (Decision::Deny, "missing_taint") => "gate request is missing required taint context",
+        (Decision::Deny, "invalid_taint") => "gate request has invalid taint context",
+        (Decision::Deny, "missing_source_channel") => {
+            "gate request is missing required source channel"
+        }
+        (Decision::Deny, "invalid_source_channel") => "gate request has invalid source channel",
         (Decision::Deny, _) => "policy blocked a visible action",
         (Decision::Ask, _) => "human approval is required before this action",
         (Decision::Replan, _) => "over budget or too broad; propose a smaller step",
@@ -254,19 +615,34 @@ mod tests {
     use compiler::compile_default;
 
     /// Build a request for `tool` with the given carried taint, interactive,
-    /// user-prompt provenance, empty args.
+    /// user-prompt provenance, and valid default args for the bundled world.
     fn req(tool: &str, taint: &str) -> GateRequest {
         GateRequest {
             v: ABI_VERSION,
             tool: tool.to_string(),
-            arguments: serde_json::json!({}),
+            arguments: default_arguments(tool),
+            path: None,
             context: GateContext {
                 session_id: "s1".to_string(),
                 mode: None,
                 taint: Some(taint.to_string()),
-                source_channel: None,
+                source_channel: Some("user_prompt".to_string()),
                 approval_token: None,
+                usage: Some(GateUsage::default()),
             },
+        }
+    }
+
+    fn default_arguments(tool: &str) -> serde_json::Value {
+        match tool {
+            "read_workspace" => serde_json::json!({ "path": "Cargo.toml" }),
+            "write_workspace" => serde_json::json!({ "path": "out.txt", "content": "x" }),
+            "apply_patch" => serde_json::json!({ "path": "out.txt", "contents": "x" }),
+            "run_command" => serde_json::json!({ "command": "echo ok" }),
+            "fetch_web" => serde_json::json!({ "url": "https://docs.example/guide" }),
+            "call_mcp_tool" => serde_json::json!({ "query": "guide" }),
+            "update_memory" => serde_json::json!({ "key": "k", "value": "v" }),
+            _ => serde_json::json!({}),
         }
     }
 
@@ -330,12 +706,14 @@ mod tests {
     }
 
     #[test]
-    fn granted_approval_token_allows() {
+    fn request_supplied_approval_token_does_not_grant_access() {
         let world = compile_default();
         let mut r = req("start_pty", "clean");
         r.context.approval_token = Some("s1:start_pty".to_string());
         let res = gate(&world, &r);
-        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.decision, "ASK");
+        assert_eq!(res.rule.as_deref(), Some("approval_required"));
+        assert!(res.approval.is_some());
     }
 
     #[test]
@@ -350,7 +728,81 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_from_wire_json_with_defaults() {
+    fn manifest_channel_policy_controls_trust_and_taint() {
+        // The default manifest declares workspace_files as Untrusted + tainting.
+        // It must not inherit the legacy enum's SemiTrusted workspace default.
+        let world = compile_default();
+        let mut r = req("run_command", "clean");
+        r.context.source_channel = Some("workspace_files".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "ABSENT");
+        assert_eq!(res.rule.as_deref(), Some("capability"));
+        assert_eq!(res.context.taint, "tainted");
+    }
+
+    #[test]
+    fn missing_taint_fails_closed() {
+        let world = compile_default();
+        let mut r = req("fetch_web", "clean");
+        r.context.taint = None;
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_taint"));
+        assert_eq!(res.context.taint, "tainted");
+    }
+
+    /// Finding #13: an MCP-backed action returns bytes from a process we do not
+    /// trust, so an ALLOW hands back a tainted session — keyed on the *backing*,
+    /// not the declared side-effect class, so a manifest cannot describe a remote
+    /// fetch as a clean local read. `call_mcp_tool` in the default world is
+    /// `side_effect: External` (already tainting); this pins the backing rule
+    /// itself, which is what covers a world that declares `side_effect: Read`.
+    #[test]
+    fn mcp_backed_action_taints_the_session_on_allow() {
+        let world = compile_default();
+        let res = gate(&world, &req("call_mcp_tool", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "tainted");
+
+        // A locally-backed read of the same declared side-effect class does not.
+        let res = gate(&world, &req("read_workspace", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "clean");
+    }
+
+    #[test]
+    fn malformed_taint_fails_closed() {
+        let world = compile_default();
+        let mut r = req("fetch_web", "clean");
+        r.context.taint = Some("definitely-clean".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("invalid_taint"));
+        assert_eq!(res.context.taint, "tainted");
+    }
+
+    #[test]
+    fn missing_source_channel_fails_closed() {
+        let world = compile_default();
+        let mut r = req("write_workspace", "clean");
+        r.context.source_channel = None;
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_source_channel"));
+    }
+
+    #[test]
+    fn malformed_source_channel_fails_closed() {
+        let world = compile_default();
+        let mut r = req("write_workspace", "clean");
+        r.context.source_channel = Some("probably_user".to_string());
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("invalid_source_channel"));
+    }
+
+    #[test]
+    fn deserializes_from_wire_json_but_missing_context_fails_closed() {
         // Minimal request: only `tool`. Everything else defaults.
         let r: GateRequest = serde_json::from_str(r#"{"tool":"read_workspace"}"#).unwrap();
         assert_eq!(r.v, ABI_VERSION);
@@ -359,7 +811,8 @@ mod tests {
 
         let world = compile_default();
         let res = gate(&world, &r);
-        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_taint"));
     }
 
     #[test]
@@ -392,9 +845,11 @@ base_actions:
   - { name: bash, action_type: Command, side_effect: Process }
   - { name: bash_network, action_type: Command, side_effect: Network }
   - { name: bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
 command_classes:
   - action: bash
     arg: command
+    default_to: bash_unclassified
     classes:
       - { to: bash_network, patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "] }
       - { to: bash_destructive, patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"] }
@@ -415,6 +870,8 @@ transition_policies:
         let world = classified_world();
         for cmd in [
             "curl http://x",
+            "curl\thttp://x",
+            "curl\nhttp://x",
             "wget http://x",
             "nc -l 9000",
             "ncat host 1",
@@ -434,10 +891,13 @@ transition_policies:
         let world = classified_world();
         for cmd in [
             "rm -rf build",
+            "rm\t-rf build",
             "rm -fr build",
             "sudo systemctl restart x",
+            "sudo\tid",
             "mkfs.ext4 /dev/sda",
             "dd if=/dev/zero of=/dev/sda",
+            "dd\tif=/dev/zero of=/dev/sda",
             ":(){ :|:& };:",
         ] {
             let res = gate(&world, &bash_req(cmd, "clean"));
@@ -447,20 +907,22 @@ transition_policies:
     }
 
     #[test]
-    fn ordinary_commands_classify_as_plain_bash() {
+    fn ordinary_commands_fall_back_to_unclassified_approval() {
         let world = classified_world();
         for cmd in ["ls -la", "git status", "echo hi", "cargo test"] {
             let res = gate(&world, &bash_req(cmd, "clean"));
-            assert_eq!(res.action, "bash", "{cmd}");
-            assert_eq!(res.decision, "ALLOW", "{cmd}");
+            assert_eq!(res.action, "bash_unclassified", "{cmd}");
+            assert_eq!(res.decision, "ASK", "{cmd}");
+            assert_eq!(res.rule.as_deref(), Some("approval_required"), "{cmd}");
         }
     }
 
     #[test]
-    fn substrings_of_larger_words_do_not_false_match() {
+    fn substrings_of_larger_words_fall_back_without_false_match() {
         // The regression this guards: naive substring matching flagged these as
         // egress ("nc " inside "jsonc "/"sync ") or destructive ("rm -rf" inside
-        // "warm -rf").
+        // "warm -rf"). They should fall to the unclassified shell fallback, not
+        // to a specific egress/destructive class.
         let world = classified_world();
         for cmd in [
             "cat app.jsonc 2>/dev/null",
@@ -470,8 +932,94 @@ transition_policies:
             "echo unscp",
         ] {
             let res = gate(&world, &bash_req(cmd, "clean"));
-            assert_eq!(res.action, "bash", "{cmd}");
+            assert_eq!(res.action, "bash_unclassified", "{cmd}");
+            assert_eq!(res.decision, "ASK", "{cmd}");
         }
+    }
+
+    /// Finding #17: declaration order must not decide a verdict. A world that lists
+    /// a permissive class before a restrictive one used to classify
+    /// `ls && curl http://exfil` by its `ls` prefix, so a tainted session was
+    /// allowed to run egress. Every class is now evaluated and a command claimed by
+    /// two of them falls to the classifier's fail-closed bucket.
+    fn permissive_first_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: permissive-first
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_safe, action_type: Command, side_effect: Read }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+command_classes:
+  - action: bash
+    arg: command
+    default_to: bash_unclassified
+    classes:
+      - { to: bash_safe, patterns: ["ls ", "git ", "echo "] }
+      - { to: bash_network, patterns: ["curl ", "wget "] }
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_command_claimed_by_two_classes_falls_to_the_fail_closed_bucket() {
+        let world = permissive_first_world();
+        for cmd in [
+            "ls && curl http://exfil",
+            "echo hi; curl http://exfil",
+            "git log | wget http://exfil",
+        ] {
+            let res = gate(&world, &bash_req(cmd, "tainted"));
+            assert_eq!(res.action, "bash_unclassified", "{cmd}");
+            assert_eq!(res.decision, "DENY", "{cmd}");
+            assert_eq!(res.rule.as_deref(), Some("taint_invariant"), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn an_unambiguous_command_still_classifies_normally() {
+        // The fix must not collapse everything into the fallback: a command matching
+        // exactly one class still gets that class, whichever order it was declared in.
+        let world = permissive_first_world();
+        for (cmd, expected) in [
+            ("ls -la", "bash_safe"),
+            ("git status", "bash_safe"),
+            ("curl http://x", "bash_network"),
+            ("wget http://x", "bash_network"),
+            ("python3 -c 'pass'", "bash_unclassified"),
+        ] {
+            let res = gate(&world, &bash_req(cmd, "clean"));
+            assert_eq!(res.action, expected, "{cmd}");
+        }
+    }
+
+    #[test]
+    fn several_classes_pointing_at_one_target_are_not_ambiguous() {
+        // Two entries with the same `to` are one answer, not a conflict — otherwise
+        // splitting a long pattern list for readability would silently fail closed.
+        let yaml = r#"
+world_id: same-target-twice
+capabilities:
+  - { trust: Trusted, actions: [Command] }
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+command_classes:
+  - action: bash
+    arg: command
+    default_to: bash_unclassified
+    classes:
+      - { to: bash_network, patterns: ["curl "] }
+      - { to: bash_network, patterns: ["ssh "] }
+"#;
+        let world = compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap();
+        let res = gate(&world, &bash_req("curl http://x | ssh host", "clean"));
+        assert_eq!(res.action, "bash_network");
     }
 
     #[test]
@@ -479,6 +1027,18 @@ transition_policies:
         let world = classified_world();
         let res = gate(&world, &bash_req("ls && curl http://exfil", "tainted"));
         assert_eq!(res.action, "bash_network");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+    }
+
+    #[test]
+    fn tainted_unclassified_shell_is_denied_by_the_taint_floor() {
+        let world = classified_world();
+        let res = gate(
+            &world,
+            &bash_req("python3 -c 'import socket; print(1)'", "tainted"),
+        );
+        assert_eq!(res.action, "bash_unclassified");
         assert_eq!(res.decision, "DENY");
         assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
     }
@@ -494,12 +1054,201 @@ transition_policies:
     #[test]
     fn unclassified_worlds_pass_the_raw_action_through() {
         // The default world declares no command_classes: the response's
-        // effective action is the raw tool, for every tool.
-        let world = compile_default();
+        // effective action is the raw tool, for tools without a classifier.
+        let yaml = r#"
+world_id: unclassified-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Web] }
+base_actions:
+  - { name: read_workspace, action_type: Read, side_effect: Read }
+  - { name: fetch_web, action_type: Web, side_effect: Network }
+"#;
+        let world = compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap();
         for tool in ["read_workspace", "fetch_web", "no_such_tool"] {
             let res = gate(&world, &req(tool, "clean"));
             assert_eq!(res.action, tool);
         }
+    }
+
+    #[test]
+    fn default_world_run_command_fails_closed_on_shell_bypasses() {
+        let world = compile_default();
+
+        let mut tabbed_curl = req("run_command", "tainted");
+        tabbed_curl.arguments = serde_json::json!({ "command": "curl\thttps://exfil.example" });
+        let res = gate(&world, &tabbed_curl);
+        assert_eq!(res.action, "run_command_network");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+
+        let mut unlisted = req("run_command", "tainted");
+        unlisted.arguments = serde_json::json!({ "command": "python3 -c 'import socket'" });
+        let res = gate(&world, &unlisted);
+        assert_eq!(res.action, "run_command_unclassified");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+    }
+
+    // ---- budgets (finding #16) ----
+
+    /// A world whose limits are small enough to reach in a test.
+    fn budgeted_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: budget-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Command, Web] }
+base_actions:
+  - { name: read_file,  action_type: Read,    side_effect: Read }
+  - { name: run_cmd,    action_type: Command, side_effect: Process }
+  - { name: fetch,      action_type: Web,     side_effect: Network }
+budget:
+  max_commands_per_task: 2
+  max_network_calls: 1
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    fn with_usage(tool: &str, usage: GateUsage) -> GateRequest {
+        let mut r = req(tool, "clean");
+        r.context.usage = Some(usage);
+        r
+    }
+
+    #[test]
+    fn an_allowed_call_charges_the_budget_it_consumes() {
+        let world = budgeted_world();
+
+        // A command charges commands_run and nothing else.
+        let res = gate(&world, &with_usage("run_cmd", GateUsage::default()));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.usage.commands_run, 1);
+        assert_eq!(res.context.usage.network_calls, 0);
+
+        // A web call charges network_calls.
+        let res = gate(&world, &with_usage("fetch", GateUsage::default()));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.usage.network_calls, 1);
+
+        // A read charges nothing counted.
+        let res = gate(&world, &with_usage("read_file", GateUsage::default()));
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.usage, GateUsage::default());
+    }
+
+    #[test]
+    fn carried_usage_at_the_limit_denies() {
+        // The whole finding: counters carried across calls actually bind. Before
+        // the fix every call arrived with a zeroed usage, so no limit was reachable.
+        let world = budgeted_world();
+        let at_limit = GateUsage {
+            commands_run: 2,
+            ..GateUsage::default()
+        };
+        let res = gate(&world, &with_usage("run_cmd", at_limit));
+        assert_eq!(res.decision, "REPLAN");
+        assert_eq!(res.rule.as_deref(), Some("max_commands_per_task"));
+
+        let at_limit = GateUsage {
+            network_calls: 1,
+            ..GateUsage::default()
+        };
+        let res = gate(&world, &with_usage("fetch", at_limit));
+        assert_eq!(res.decision, "REPLAN");
+        assert_eq!(res.rule.as_deref(), Some("max_network_calls"));
+    }
+
+    #[test]
+    fn a_blocked_call_charges_nothing() {
+        // Only an executed call consumes budget; a refusal must not push the
+        // session toward its limit.
+        let world = budgeted_world();
+        let carried = GateUsage {
+            commands_run: 2,
+            ..GateUsage::default()
+        };
+        let res = gate(&world, &with_usage("run_cmd", carried));
+        assert_eq!(res.decision, "REPLAN");
+        assert_eq!(res.context.usage, carried, "a denied call is not charged");
+    }
+
+    #[test]
+    fn a_budgeted_world_refuses_a_request_with_no_counters() {
+        // Omission is how a limit gets bypassed, so it fails closed — the same
+        // shape as `missing_path` for roots.
+        let world = budgeted_world();
+        let mut r = req("run_cmd", "clean");
+        r.context.usage = None;
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_usage"));
+    }
+
+    #[test]
+    fn only_a_counted_limit_obliges_a_caller_to_carry_counters() {
+        // `command_timeout_ms` bounds one execution and is enforced by the executor,
+        // not by counting calls — so it must not force every caller to carry usage.
+        // A world with no counted limit accepts a request without counters.
+        let yaml = r#"
+world_id: timeout-only
+capabilities:
+  - { trust: Trusted, actions: [Command] }
+base_actions:
+  - { name: run_cmd, action_type: Command, side_effect: Process }
+budget:
+  command_timeout_ms: 5000
+"#;
+        let world = compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap();
+        let mut r = req("run_cmd", "clean");
+        r.context.usage = None;
+        assert_eq!(gate(&world, &r).decision, "ALLOW");
+
+        // Add one counted limit and the same request is refused.
+        let counted = compiler::compile(
+            &compiler::loader::load_yaml(&yaml.replace(
+                "  command_timeout_ms: 5000",
+                "  command_timeout_ms: 5000\n  max_commands_per_task: 10",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let res = gate(&counted, &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_usage"));
+    }
+
+    #[test]
+    fn gate_and_lower_returns_gates_verdict_and_a_spec_only_for_allow() {
+        let world = compile_default();
+        for tool in [
+            "read_workspace",
+            "fetch_web",
+            "start_pty",
+            "send_email",
+            "run_tests",
+        ] {
+            for taint in ["clean", "tainted"] {
+                let r = req(tool, taint);
+                let (res, spec) = gate_and_lower(&world, &r);
+                assert_eq!(
+                    serde_json::to_value(&res).unwrap(),
+                    serde_json::to_value(gate(&world, &r)).unwrap(),
+                    "the verdict must be gate's for {tool}/{taint}"
+                );
+                assert_eq!(
+                    spec.is_some(),
+                    res.decision == "ALLOW",
+                    "a spec exactly when allowed, for {tool}/{taint}"
+                );
+            }
+        }
+        // The spec is the kernel's lowering: a scoped capability's literal is in it.
+        let (res, spec) = gate_and_lower(&world, &req("run_tests", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+        let spec = spec.unwrap().expect("lowers");
+        assert_eq!(
+            spec.operation(),
+            &harness_types::Operation::Argv(vec!["pytest".to_string()])
+        );
     }
 
     #[test]
@@ -513,5 +1262,323 @@ transition_policies:
                 assert_eq!(a, b, "gate must be deterministic for {tool}/{taint}");
             }
         }
+    }
+
+    // ---- roots / path-scope (spatial confinement) ----
+
+    /// A world with `roots` (absolute paths, so no env resolution is needed).
+    fn roots_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: roots-test
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Web] }
+base_actions:
+  - name: read_file
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      properties:
+        path: { type: string }
+  - { name: write_file, action_type: Write, side_effect: FilesystemWrite }
+  - { name: bash,       action_type: Command, side_effect: Process }
+roots:
+  default: Ask
+  rules:
+    - { path: "/work",        access: ReadWrite }
+    - { path: "/work/inbox",  access: Read, taint_source: true }
+    - { path: "/etc",         access: Read }
+    - { path: "/etc/shadow",  access: Deny, class: Secret }
+    - { path: "/home/u/.ssh", access: Deny, class: Credential }
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    fn path_req(tool: &str, path: &str, taint: &str) -> GateRequest {
+        let mut r = req(tool, taint);
+        r.path = Some(path.to_string());
+        r
+    }
+
+    #[test]
+    fn in_root_write_is_allowed() {
+        let res = gate(
+            &roots_world(),
+            &path_req("write_file", "/work/src/x.rs", "clean"),
+        );
+        assert_eq!(res.decision, "ALLOW");
+    }
+
+    #[test]
+    fn out_of_root_defaults_to_ask() {
+        let res = gate(&roots_world(), &path_req("write_file", "/tmp/x", "clean"));
+        assert_eq!(res.decision, "ASK");
+        assert_eq!(res.rule.as_deref(), Some("path_scope_ask"));
+    }
+
+    #[test]
+    fn read_only_root_allows_read_denies_write() {
+        let w = roots_world();
+        assert_eq!(
+            gate(&w, &path_req("read_file", "/etc/passwd", "clean")).decision,
+            "ALLOW"
+        );
+        let write = gate(&w, &path_req("write_file", "/etc/passwd", "clean"));
+        assert_eq!(write.decision, "DENY");
+        assert_eq!(write.rule.as_deref(), Some("path_scope_readonly"));
+    }
+
+    #[test]
+    fn deny_rule_shadows_a_broader_allow_the_etc_shadow_probe() {
+        // The discovery's probe: /etc is Read, but /etc/shadow is a longer Deny rule.
+        let res = gate(
+            &roots_world(),
+            &path_req("read_file", "/etc/shadow", "clean"),
+        );
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("path_scope_denied"));
+    }
+
+    #[test]
+    fn write_to_ssh_is_denied_the_grant_mode_blast_radius_fix() {
+        let res = gate(
+            &roots_world(),
+            &path_req("write_file", "/home/u/.ssh/authorized_keys", "clean"),
+        );
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("path_scope_denied"));
+    }
+
+    #[test]
+    fn taint_source_root_taints_a_read() {
+        let res = gate(
+            &roots_world(),
+            &path_req("read_file", "/work/inbox/msg.txt", "clean"),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "tainted"); // read-taint restored, declared per path
+    }
+
+    #[test]
+    fn ordinary_in_root_read_does_not_taint() {
+        // /work is ReadWrite but not a taint_source, so a read stays clean.
+        let res = gate(
+            &roots_world(),
+            &path_req("read_file", "/work/src/x.rs", "clean"),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "clean");
+    }
+
+    #[test]
+    fn path_scope_ask_fails_closed_in_background() {
+        let mut r = path_req("write_file", "/tmp/x", "clean");
+        r.context.mode = Some("background".to_string());
+        let res = gate(&roots_world(), &r);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("path_scope_ask_background"));
+    }
+
+    #[test]
+    fn missing_path_for_file_action_fails_closed_when_roots_are_enabled() {
+        let res = gate(&roots_world(), &req("read_file", "clean"));
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("missing_path"));
+    }
+
+    #[test]
+    fn no_resolved_path_is_exempt_for_non_file_actions() {
+        // Bash carries no single resolvable path, so roots cannot path-scope it.
+        let res = gate(&roots_world(), &req("bash", "clean"));
+        assert_eq!(res.decision, "ALLOW");
+    }
+
+    #[test]
+    fn roots_absent_means_no_path_scope() {
+        // The default world declares no roots: a resolved path never changes a verdict.
+        let res = gate(
+            &compile_default(),
+            &path_req("read_workspace", "/etc/shadow", "clean"),
+        );
+        assert_eq!(res.decision, "ALLOW"); // classify_path returns None -> unaffected
+    }
+
+    // ---- D80: the effective call on the wire ----
+
+    const SCOPED_PR_WORLD: &str = r#"
+world_id: scoped-pr
+channels:
+  - { name: user_prompt, trust: Trusted, taint: false }
+capabilities:
+  - { trust: Trusted, actions: [Mcp] }
+base_actions:
+  - name: create_pull_request
+    action_type: Mcp
+    side_effect: External
+    projected: false
+    backing: !McpServer { server: codehost, tool: create_pull_request }
+    schema:
+      type: object
+      properties: { repo: { type: string }, title: { type: string } }
+    arg_roles: { repo: Target, title: Content }
+scoped_capabilities:
+  - name: open_change_pr
+    base_action: create_pull_request
+    args: { repo: !Literal "acme/svc", title: !Input { as: summary } }
+"#;
+
+    fn scoped_pr_world() -> CompiledWorld {
+        compiler::compile(&compiler::load_yaml(SCOPED_PR_WORLD).unwrap()).unwrap()
+    }
+
+    fn call(tool: &str, arguments: serde_json::Value) -> GateRequest {
+        GateRequest {
+            arguments,
+            ..req(tool, "clean")
+        }
+    }
+
+    #[test]
+    fn a_hidden_backing_action_is_absent_and_carries_no_effective_call() {
+        let world = scoped_pr_world();
+        let res = gate(
+            &world,
+            &call(
+                "create_pull_request",
+                serde_json::json!({ "repo": "attacker/fork", "title": "t" }),
+            ),
+        );
+        assert_eq!(res.decision, "ABSENT");
+        assert!(res.effective.is_none());
+    }
+
+    #[test]
+    fn a_scoped_verb_returns_its_lowering_with_what_it_stripped() {
+        let world = scoped_pr_world();
+        let res = gate(
+            &world,
+            &call(
+                "open_change_pr",
+                serde_json::json!({ "summary": "Fix", "repo": "attacker/fork", "title": "x" }),
+            ),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        let effective = res.effective.expect("ALLOW carries the effective call");
+        assert_eq!(effective.base_action, "create_pull_request");
+        assert_eq!(
+            effective.backing,
+            GateBacking::Mcp {
+                server: "codehost".to_string(),
+                tool: "create_pull_request".to_string()
+            }
+        );
+        // The renamed argument is mapped back; the literal wins; both names the
+        // world fixes or renamed away are reported.
+        assert_eq!(
+            effective.arguments,
+            serde_json::json!({ "repo": "acme/svc", "title": "Fix" })
+        );
+        assert_eq!(
+            effective.stripped,
+            vec!["repo".to_string(), "title".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_ask_carries_the_effective_call_for_the_approval_prompt() {
+        let res = gate(&compile_default(), &req("start_pty", "clean"));
+        assert_eq!(res.decision, "ASK");
+        let effective = res.effective.expect("ASK carries the effective call");
+        assert_eq!(effective.base_action, "start_pty");
+    }
+
+    #[test]
+    fn a_blocked_call_carries_no_effective_call() {
+        let res = gate(&compile_default(), &req("fetch_web", "tainted"));
+        assert_eq!(res.decision, "DENY");
+        assert!(res.effective.is_none());
+    }
+
+    #[test]
+    fn the_effective_call_is_on_the_wire_only_when_present() {
+        let world = compile_default();
+        let allowed = serde_json::to_value(gate(
+            &world,
+            &call("run_tests", serde_json::json!({ "command": "rm -rf /" })),
+        ))
+        .unwrap();
+        assert_eq!(
+            allowed["effective"],
+            serde_json::json!({
+                "base_action": "run_command",
+                "backing": { "kind": "local", "handler": "run_command" },
+                "arguments": { "command": "pytest" },
+                "stripped": ["command"]
+            })
+        );
+        let denied = serde_json::to_value(gate(&world, &req("fetch_web", "tainted"))).unwrap();
+        assert!(denied.get("effective").is_none());
+    }
+
+    #[test]
+    fn gate_and_lower_agrees_with_the_effective_call() {
+        // One lowering: the spec an in-process host forwards carries exactly the
+        // arguments the wire field tells an out-of-process host to send.
+        let world = scoped_pr_world();
+        let (res, spec) = gate_and_lower(
+            &world,
+            &call(
+                "open_change_pr",
+                serde_json::json!({ "summary": "Fix", "repo": "attacker/fork" }),
+            ),
+        );
+        let effective = res.effective.expect("effective");
+        let spec = spec.expect("ALLOW lowers").expect("lowering succeeds");
+        match spec.operation() {
+            harness_types::Operation::Structured(op) => {
+                assert_eq!(op["input"], effective.arguments);
+                assert_eq!(op["tool"], serde_json::json!("create_pull_request"));
+            }
+            other => panic!("expected an MCP operation, got {other:?}"),
+        }
+    }
+
+    /// D83: a path class reads the adapter-resolved `path` as well as the
+    /// argument, so a file whose name hides that it is `CLAUDE.md` (a symlink the
+    /// adapter resolved) is still an instruction file; and a clean file write into
+    /// memory brings nothing back, so the session stays clean.
+    fn instruction_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: instructions
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+base_actions:
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: write_instructions, action_type: Write, side_effect: Memory }
+path_classes:
+  - to: write_instructions
+    from: [ { action: write, arg: file_path } ]
+    patterns: ["**/CLAUDE.md"]
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_path_class_matches_the_resolved_path_and_a_write_ingests_nothing() {
+        let world = instruction_world();
+        let mut r = req("write", "tainted");
+        r.arguments = serde_json::json!({ "file_path": "notes.md" });
+        r.path = Some("/proj/CLAUDE.md".into());
+        let res = gate(&world, &r);
+        assert_eq!(res.action, "write_instructions");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+
+        let mut r = req("write", "clean");
+        r.arguments = serde_json::json!({ "file_path": "CLAUDE.md" });
+        let res = gate(&world, &r);
+        assert_eq!(res.action, "write_instructions");
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "clean", "a file write ingests nothing");
     }
 }

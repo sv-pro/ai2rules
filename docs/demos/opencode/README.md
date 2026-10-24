@@ -22,8 +22,9 @@ first slice), the seam is open and extensible — not a vendor gate you must wai
 `.opencode/plugin/ai2rules-gate.ts` hooks `tool.execute.before` on every OpenCode tool call:
 
 1. Sends the **raw** OpenCode tool name — since **D36** the *kernel* classifies `bash`
-   by command shape into `bash` / `bash_network` / `bash_destructive` from the world's
-   `command_classes` block (no pattern lists live in the plugin); everything else maps 1:1.
+   by command shape into `bash_network` / `bash_destructive` / `bash_unclassified`
+   from the world's `command_classes` block (no pattern lists live in the plugin);
+   everything else maps 1:1.
 2. Builds a `GateRequest` and shells to `harness gate --world opencode-world.yaml` (the wire
    ABI — D34: non-Rust hosts use the subprocess). `AI2RULES_MODE=background` threads
    `context.mode` so the kernel collapses ASK→DENY unattended.
@@ -46,6 +47,7 @@ action names the plugin sends:
   edit               tainted  -> ALLOW                        ← workspace writes aren't egress
   bash_destructive   clean    -> ASK    approval_required     ← rm -rf / sudo / mkfs …
   bash_network       tainted  -> DENY   taint_invariant       ← curl / wget / ssh … after taint
+  bash_unclassified  clean    -> ASK    approval_required     ← unmatched shell fails closed
   task               clean    -> ALLOW
   <unknown tool>     clean    -> ABSENT unknown_to_ontology   ← not in this world
 ```
@@ -80,8 +82,9 @@ Disable temporarily with `AI2RULES_DISABLE=1 opencode`. Point at a different man
 > `opencode.jsonc`: `{ "plugin": ["./.opencode/plugin/ai2rules-gate.ts"] }`.
 
 **To govern another repo:** copy `.opencode/plugin/ai2rules-gate.ts` and an
-`opencode-world.yaml` into it (set `AI2RULES_WORLD` if the path differs), and make `harness`
-reachable (on `PATH` or via `AI2RULES_HARNESS`).
+`opencode-world.yaml` into it (set `AI2RULES_WORLD` if the path differs), and install `harness`
+at `~/.local/bin/harness`, `/usr/local/bin/harness`, `/opt/ai2rules/bin/harness`, or set
+`AI2RULES_HARNESS` to an explicit absolute executable path.
 
 ## Defense-in-depth: OpenCode `permission` rules (E17.4)
 

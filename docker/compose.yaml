@@ -1,11 +1,15 @@
 # Live-but-contained governed Claude Code (PLAN.md E13 / E8) — the real egress floor.
+# Refreshed for the Rust hook (D37: harness cc-hook).
 #
-# The agent sits on an `internal` network with NO route to the internet. Its only
+# The agent sits on an `internal` network with NO route to the internet; its only
 # way out is the `proxy`, which allowlists the model API (anthropic.com) and denies
-# everything else. So even a fully compromised agent can reach the model but cannot
+# everything else. Even a fully compromised agent reaches the model but cannot
 # exfiltrate — the OS enforcing what the in-agent taint floor merely decides.
 #
-#   ANTHROPIC_API_KEY=sk-... docker compose -f docker/compose.yaml run --rm agent claude
+#   Dogfood governance:
+#     ANTHROPIC_API_KEY=sk-... docker compose -f docker/compose.yaml run --rm agent claude
+#   Replace-mode experiment (empty settings.json; manifest is the allowlist):
+#     ANTHROPIC_API_KEY=sk-... docker compose -f docker/compose.yaml run --rm agent-replace claude
 #
 # Verify the floor:
 #   docker compose -f docker/compose.yaml run --rm agent python3 -c \
@@ -24,7 +28,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
 
-  agent:
+  agent: &agent
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -37,13 +41,22 @@ services:
       HTTPS_PROXY: http://proxy:8888
       NO_PROXY: localhost,127.0.0.1
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      CC_WORLD_CONFIG: ${CC_WORLD_CONFIG:-}
     volumes:
       - ../:/workspace
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     stdin_open: true
     tty: true
+
+  # Same container, but the manifest replaces the permission pile: empty native
+  # permissions, governed by `harness cc-hook --grant --enforce-absent`. The
+  # dedicated settings.json is overlaid container-only; the host repo is untouched.
+  # Disposable by design — lock the agent out and just `docker rm`.
+  agent-replace:
+    <<: *agent
+    volumes:
+      - ../:/workspace
+      - ./sut/settings.replace.json:/workspace/.claude/settings.json:ro
 
 networks:
   internal:

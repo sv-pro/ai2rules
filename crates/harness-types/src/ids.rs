@@ -73,8 +73,22 @@ id_newtype!(
     PerceptionId
 );
 id_newtype!(
-    /// Identifier of an `ApprovalToken`.
-    ApprovalTokenId
+    /// Identifier of a durable `AuthorizationInstance`.
+    AuthorizationInstanceId
+);
+/// Backward-compatible name retained for the v1 approval API.
+pub type ApprovalTokenId = AuthorizationInstanceId;
+id_newtype!(
+    /// Principal whose exact effect a durable authorization may admit.
+    PrincipalId
+);
+id_newtype!(
+    /// Identifier of a non-effective staged external operation.
+    StagedEffectId
+);
+id_newtype!(
+    /// Identifier of one causal commit-attempt receipt.
+    ExecutionReceiptId
 );
 id_newtype!(
     /// Name of an action in the world ontology.

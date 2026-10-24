@@ -123,6 +123,35 @@ pub fn evaluate(world: &CompiledWorld, intent: &IntentIR, ctx: &EvalContext) -> 
     Disposition::allow(effect_mode, "default_allow")
 }
 
+/// The budget cost of one **executed** action — the counterpart to
+/// [`budget_exceeded`], deliberately adjacent to it because they must agree about
+/// what counts as a command, a network call, or a write. A limit whose charge
+/// lands in a different bucket is a limit that never binds.
+///
+/// Pure: takes the usage before, returns the usage after. Callers charge only on
+/// an ALLOW that will actually run — a blocked call consumes nothing. Tokens are
+/// not charged here; only a caller that has seen a model response knows them.
+pub fn charge(
+    usage: &BudgetUsage,
+    action_type: ActionType,
+    side_effect: SideEffectClass,
+) -> BudgetUsage {
+    let mut next = *usage;
+    if matches!(action_type, ActionType::Command | ActionType::Pty) {
+        next.commands_run = next.commands_run.saturating_add(1);
+    }
+    if matches!(action_type, ActionType::Web) || matches!(side_effect, SideEffectClass::Network) {
+        next.network_calls = next.network_calls.saturating_add(1);
+    }
+    if matches!(
+        side_effect,
+        SideEffectClass::FilesystemWrite | SideEffectClass::PersistentWrite
+    ) {
+        next.file_writes = next.file_writes.saturating_add(1);
+    }
+    next
+}
+
 /// Returns the name of the first exceeded budget for this intent, if any.
 /// "At or over" the limit counts as exceeded.
 fn budget_exceeded(

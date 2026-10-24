@@ -8,9 +8,9 @@ use std::collections::BTreeMap;
 
 use harness_types::{
     ActionName, ActionType, ArgRole, ArgSource, BuildError, CompiledWorld, DescriptorHash,
-    Provenance, SideEffectClass, Taint, TaintContext, ToolCall,
+    Provenance, ScopedCapabilityDef, SideEffectClass, Taint, TaintContext, ToolCall,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{invariants, schema};
 
@@ -117,11 +117,17 @@ impl<'w> IRBuilder<'w> {
             });
         }
 
-        // 4. Schema — validate arguments against the frozen descriptor.
+        // 4. Schema — validate arguments against the frozen descriptor. A scoped
+        //    capability's input rules (D79) are checked first, on the values the
+        //    actor actually supplied, before they are mapped to base names.
+        if let Some(cap) = self.world.scoped_capability(&action) {
+            check_input_rules(&action, cap, &call.arguments)?;
+        }
         if let Some(descriptor) = self.world.descriptor(&action) {
+            let schema_args = schema_args_for(self.world, &action, &call.arguments);
             schema::validate(
                 &action,
-                &call.arguments,
+                &schema_args,
                 &descriptor.schema,
                 &descriptor.arg_constraints,
             )?;
@@ -177,4 +183,55 @@ impl<'w> IRBuilder<'w> {
             expected_descriptor_hash,
         })
     }
+}
+
+fn schema_args_for(world: &CompiledWorld, action: &ActionName, actor_args: &Value) -> Value {
+    let Some(cap) = world.scoped_capability(action) else {
+        return actor_args.clone();
+    };
+    let actor = actor_args.as_object();
+    let mut out = Map::new();
+    for (name, source) in &cap.args {
+        match source {
+            // Read under the name the actor sees; validate under the base name.
+            ArgSource::ActorInput | ArgSource::Input(_) => {
+                let actor_name = source.actor_name(name).unwrap_or(name);
+                if let Some(value) = actor.and_then(|o| o.get(actor_name)) {
+                    out.insert(name.clone(), value.clone());
+                }
+            }
+            ArgSource::Literal(value) => {
+                out.insert(name.clone(), value.clone());
+            }
+            ArgSource::ContextRef(_) => {
+                out.insert(name.clone(), Value::String("<context>".to_string()));
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+/// Refuse an actor-supplied value an input rule does not admit (D79). An absent
+/// argument is left to the base schema's `required` list.
+fn check_input_rules(
+    action: &ActionName,
+    cap: &ScopedCapabilityDef,
+    actor_args: &Value,
+) -> Result<(), BuildError> {
+    for (name, source) in &cap.args {
+        let ArgSource::Input(rule) = source else {
+            continue;
+        };
+        let actor_name = source.actor_name(name).unwrap_or(name);
+        let Some(value) = actor_args.get(actor_name) else {
+            continue;
+        };
+        if !rule.admits(value) {
+            return Err(BuildError::SchemaViolation {
+                action: action.clone(),
+                detail: format!("argument `{actor_name}` is not an allowed value"),
+            });
+        }
+    }
+    Ok(())
 }

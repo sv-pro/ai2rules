@@ -6,7 +6,7 @@ heroImage: '../../assets/false-positive-argument-taint.jpg'
 ---
 
 Most security papers hand you a system to measure yourself against. This one handed
-us a proof — and the proof was about our own code.
+us a proof, and the proof was about our own code.
 
 The paper is [*The Granularity Mismatch in Agent Security*](https://arxiv.org/abs/2605.11039)
 (Fan et al., 2026). Its claim, once you sit with it, is hard to shake: a prompt
@@ -22,7 +22,7 @@ We run a guard built exactly that way. So we pointed the proof at it.
 
 Our safety floor runs on *taint*, and it helps to know the idea isn't new. Its most
 familiar home is the Linux kernel: load a proprietary driver and the kernel marks
-itself **tainted** — and it stays tainted even after you unload the driver, because
+itself **tainted**, and it stays tainted even after you unload the driver, because
 the point was never the driver, it's that the kernel's trustworthiness is already
 spent ([kernel docs](https://docs.kernel.org/admin-guide/tainted-kernels.html)). Perl
 shipped the same reflex as *taint mode* back in 1989. We aim it at agent tool calls:
@@ -34,8 +34,8 @@ the [ZombieAgent post](/blog/the-zombieagent-threat/) and the
 
 ## One label for the whole call
 
-Here's the catch, and it's the whole story. Our floor tracks taint as a **single
-label for the entire session**. Any tainted value anywhere, and the next tool call is
+The catch is the whole story. Our floor tracks taint as a **single label for
+the entire session**. Any tainted value anywhere, and the next tool call is
 treated as tainted, full stop. In the kernel it's essentially one line: *if this call
 can reach outside and the session is tainted, block it.*
 
@@ -43,7 +43,7 @@ The paper has a name for exactly this shape — a **flat tool-level monitor**, o
 label per call — and it proves that any monitor built this way must, in a session that
 mixes trusted and untrusted data, make one of two mistakes: let something dangerous
 out, *or* block something harmless. We don't let dangerous things out; the floor is
-conservative to a fault. So the other mistake had to be hiding in there somewhere — a
+conservative to a fault. So the other mistake had to be hiding in there somewhere: a
 harmless call we wrongly block. The proof said it existed. It didn't say where.
 
 ## We found it in our own demo
@@ -51,9 +51,9 @@ harmless call we wrongly block. The proof said it existed. It didn't say where.
 It was in the flagship. `poisoned_knowledge_demo` reads a poisoned document, then
 makes three web requests. Two of them matter:
 
-- One goes to `attacker.evil/collect?k=SECRET` — an address lifted straight out of the
+- One goes to `attacker.evil/collect?k=SECRET`, an address lifted straight out of the
   injected instruction. **Blocked.** Exactly right.
-- One goes to `docs.example/guide` — a fixed address hard-coded into the demo, the same
+- One goes to `docs.example/guide`, a fixed address hard-coded into the demo, the same
   harmless request it made *before* it ever saw the poison. **Also blocked.**
 
 We had shipped that second block as a *feature*: "same call, opposite verdict — the
@@ -76,8 +76,8 @@ Row 3 is the proof made concrete, sitting in our own repository.
 
 ## Adopt the proof, refuse the classifier
 
-The paper has two parts, and we treat them very differently — this is the part worth
-reading closely.
+The paper has two parts and we treat them very differently. This next bit is
+the one to read closely.
 
 The **enforcement** part is a fixed set of rules: compare a few labels, check a few
 sets, decide. No model anywhere in it. We can take that as-is; it's the same kind of
@@ -85,20 +85,20 @@ machinery our kernel already is.
 
 The **inference** part is how the paper *fills in* those labels while the agent runs,
 and it leans on a language model to classify the ambiguous arguments. That's a model
-deciding what's allowed — the one thing [we never do](/blog/why-deny-is-dangerous/).
+deciding what's allowed, the one thing [we never do](/blog/why-deny-is-dangerous/).
 And it shows: on real tools, their inference is right about **77% of the time**. A gate
 that's right three times in four isn't a gate.
 
 So we keep the rules and drop the classifier. Our argument labels aren't guessed at
-runtime — they're written down ahead of time, by a human, in the tool manifest. The
+runtime: they're written down ahead of time, by a human, in the tool manifest. The
 paper's weak spot is a step we simply don't have.
 
-## The fix — the floor never moved
+## The fix: the floor never moved
 
 The floor rule itself didn't change. Three things around it did:
 
 1. **Each argument can carry a role.** In the tool manifest an argument is tagged as
-   an address, a command, a credential, and so on — the roles that carry authority.
+   an address, a command, a credential, and so on: the roles that carry authority.
    `fetch_web` opts in with a single line. It's hand-written data, not code and not a
    model.
 2. **Taint is tracked per argument, not just per session.** The old single label stays
@@ -109,7 +109,7 @@ The floor rule itself didn't change. Three things around it did:
    declares nothing, it behaves exactly as before.
 
 Then the piece that makes it real: a step that fills in each argument's taint from
-where its data *actually came from* — no model, just following the data. It's
+where its data *actually came from*. No model, just following the data. It's
 deliberately paranoid. An argument counts as clean only if we can show its value came
 straight from the user's request; tainted only if we can show it came from poisoned
 output; and when it can't tell, it says nothing and the call falls back to the old
@@ -121,7 +121,7 @@ Run it back through the kernel:
 
 - The harmless request in a tainted session (row 3) is now **allowed**. The utility we
   were throwing away is back.
-- The exfil (row 2) is still **blocked** — its address was built from the poison, so it
+- The exfil (row 2) is still **blocked**: its address was built from the poison, so it
   never looked clean.
 
 **152 tests pass**, and the false positive in our own demo is now something we assert
@@ -130,7 +130,7 @@ exactly as it did yesterday.
 
 ## The honest caveat
 
-The floor was never *wrong* — just blunt. It over-blocked because it couldn't prove the
+The floor was never *wrong*, just blunt. It over-blocked because it couldn't prove the
 address was clean, so it assumed the worst. We didn't loosen a safety rule; we gave it
 better information.
 

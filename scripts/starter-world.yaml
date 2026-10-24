@@ -1,0 +1,131 @@
+# Starter WorldManifest for install-governance.sh — a generic, safe default that
+# governs Claude Code's native tools AND confines file actions to declared roots.
+# Copy into a project's .claude/cc-world.yaml and tune. This is NOT the ai2rules
+# dogfood manifest (.claude/cc-world.yaml) — it's the portable template new projects get.
+#
+# With `harness cc-hook --grant`, in-root file ops are granted silently while
+# out-of-root ones ask (soft jail) and sensitive paths are denied outright — so
+# "governed" finally also means "confined to this project".
+world_id: claude-code-starter
+
+actors:
+  - { name: developer, kind: User }
+  - { name: claude, kind: Model }
+  - { name: subagent, kind: Subagent }
+  - { name: shell, kind: ShellWorker }
+
+data_classes: [Public, Workspace, Secret, Credential, Generated, External]
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+  - { trust: SemiTrusted, actions: [Read, Write, Patch, Command] }
+  - { trust: Untrusted, actions: [Read] }
+  - { trust: Derived, actions: [Read] }
+
+base_actions:
+  # read-only (no taint escalation)
+  - { name: Read, action_type: Read, side_effect: Read }
+  - { name: Glob, action_type: Read, side_effect: Read }
+  - { name: Grep, action_type: Read, side_effect: Read }
+  # workspace writes
+  - { name: Edit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: MultiEdit, action_type: Patch, side_effect: FilesystemWrite }
+  - { name: NotebookEdit, action_type: Patch, side_effect: FilesystemWrite }
+  # instruction / memory files (D83), reclassified by `path_classes` below
+  - { name: Write_instructions, action_type: Write, side_effect: Memory }
+  # network / egress (taint floor applies)
+  - { name: WebFetch, action_type: Web, side_effect: Network }
+  - { name: WebSearch, action_type: Web, side_effect: Network }
+  # shell, classified by the kernel (D36)
+  - { name: Bash, action_type: Command, side_effect: Process }
+  - { name: Bash_network, action_type: Command, side_effect: Network }
+  - { name: Bash_destructive, action_type: Command, side_effect: Process, approval_required: true }
+  - { name: Bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+
+command_classes:
+  - action: Bash
+    arg: command
+    default_to: Bash_unclassified
+    classes:
+      - to: Bash_network
+        patterns: ["curl ", "wget ", "nc ", "ncat ", "telnet ", "ssh ", "scp ", "sftp "]
+      - to: Bash_destructive
+        patterns: ["rm -rf", "rm -fr", "sudo ", "mkfs", "dd if=", ":(){"]
+
+# Instruction and memory files (D83): a write to one is a write to what the next
+# session loads as trusted context, so it is a durable-memory write under the
+# taint floor. Matched on the resolved canonical path; the pattern list is shared
+# by every host manifest (tests/one_kernel.rs). A tainted session cannot write
+# them; a clean one can in this project world. `harness init --user/--managed`
+# makes a clean write ASK. Shell writes (`echo >> CLAUDE.md`) stay with
+# Bash_unclassified (ASK), D57's known residual.
+path_classes:
+  - to: Write_instructions
+    from:
+      - { action: Write, arg: file_path }
+      - { action: Edit, arg: file_path }
+      - { action: MultiEdit, arg: file_path }
+      - { action: NotebookEdit, arg: notebook_path }
+    patterns:
+      - "**/CLAUDE.md"
+      - "**/CLAUDE.local.md"
+      - "**/AGENTS.md"
+      - "**/GEMINI.md"
+      - "**/.claude/agents/**"
+      - "**/.claude/commands/**"
+      - "**/.claude/rules/**"
+      - "**/.claude/skills/**"
+      - "**/.claude/projects/*/memory/**"
+      - "**/.agents/rules/**"
+      - "**/.agents/skills/**"
+      - "**/.agents/workflows/**"
+
+# Path-scoped capabilities (spatial confinement). Longest-prefix match wins; a
+# longer Deny shadows a broader allow. `.` = the project dir, `~` = $HOME (both
+# resolved by the adapter at load time). `default: Ask` is a soft jail — file ops
+# outside every rule prompt rather than silently proceed; set `Deny` for a hard jail.
+roots:
+  default: Ask
+  rules:
+    - { path: ".", access: ReadWrite }                     # the project — read + write
+    - { path: "/tmp", access: ReadWrite }                  # scratch
+    - { path: "/usr", access: Read }                       # tools / libs, read-only
+    - { path: "/etc", access: Read }                       # system config, read-only
+    # THE CONTROL PLANE — readable, never writable.
+    # `.claude/` holds the manifest that governs this session, the shim the host
+    # invokes, and the hook registration. All three sat inside the project's own
+    # writable root until 2026-08-11, which meant the agent could rewrite the policy
+    # binding it: flipping one rule here took effect on the very NEXT tool call,
+    # because the shim runs a fresh `cc-hook` per call and recompiles each time.
+    # Read stays allowed on purpose — an agent should be able to see the rules it is
+    # under, and it needs to in order to propose a change to them.
+    - { path: "./.claude", access: Read }
+    # sensitive paths — out of bounds even inside an allowed parent
+    - { path: "/etc/shadow", access: Deny, class: Secret }
+    - { path: "~/.ssh", access: Deny, class: Credential }
+    - { path: "~/.aws", access: Deny, class: Credential }
+    - { path: "~/.gnupg", access: Deny, class: Credential }
+    - { path: "~/.config/gcloud", access: Deny, class: Credential }
+    # untrusted inbound (uncomment + point at your ingest dir): reads here taint the session
+    # - { path: "./inbox", access: Read, taint_source: true }
+
+# The taint floor (invariant 7): tainted context cannot reach an effectful surface.
+# Tainted WebFetch/WebSearch/Bash_network/Bash_unclassified all DENY here.
+transition_policies:
+  - { from_taint: Tainted, side_effect: Network, decision: Deny, rule: no_tainted_network }
+  - { from_taint: Tainted, side_effect: External, decision: Deny, rule: no_tainted_external }
+  - { from_taint: Tainted, side_effect: Credential, decision: Deny, rule: no_tainted_credential }
+  - { from_taint: Tainted, side_effect: Memory, decision: Deny, rule: no_tainted_memory_write }
+  - { from_taint: Tainted, side_effect: PersistentWrite, decision: Deny, rule: no_tainted_persistent_write }
+
+budget:
+  max_tokens_per_session: 1000000
+  max_commands_per_task: 200
+  command_timeout_ms: 120000
+
+observability:
+  redact:
+    - "env.*_TOKEN"
+    - "env.*_KEY"
+    - "**/.env"

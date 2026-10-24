@@ -1,42 +1,54 @@
 #!/usr/bin/env bash
-# Run the governed Claude Code SUT container (PLAN.md E13 / E8).
+# Run the governed Claude Code SUT container (PLAN.md E13 / E8), refreshed for the
+# Rust hook (D37: `harness cc-hook`).
 #
-#   ./docker/run.sh                         # offline shell (NET=none)
-#   NET=bridge ./docker/run.sh claude       # live, hook-governed agent
+#   ./docker/run.sh                                   # offline shell (NET=none)
+#   NET=bridge ./docker/run.sh claude                 # live agent, dogfood governance
+#   MODE=replace NET=bridge ./docker/run.sh claude    # REPLACE-mode experiment
 #
-# Network policy IS the OS-level egress floor (E8). Choose with NET=:
-#   none    (default) hard-block ALL network. Claude Code can't reach the model
-#                     API, so use this for OFFLINE hook/replay testing only
-#                     (inside: bash .claude/hooks/test-gate.sh).
-#   bridge            full network; egress is governed ONLY by the in-agent hook
-#                     (no OS floor). For a LIVE-but-contained agent you want an
-#                     egress ALLOWLIST (model API only) — see docker/README.md.
+# The container is the safe place to try governance that could lock the agent out of
+# its own tools: a bricked SUT is just Ctrl-C + a fresh `docker run`.
+#
+# NET= is the OS-level egress floor (E8):
+#   none    (default) hard-block ALL network — offline hook/replay testing only
+#                     (model API unreachable). Inside: bash docs/demos/replace-permissions/demo.sh
+#   bridge            full network; egress governed ONLY by the in-agent hook.
+#   For a LIVE-but-contained agent (model API only) use docker/compose.yaml.
+#
+# MODE= chooses which settings.json governs the SUT — the point of the sandbox:
+#   dogfood (default) the repo's own .claude/settings.json (additive governance).
+#   replace           overlay docker/sut/settings.replace.json — empty native
+#                     permissions, governed entirely by `harness cc-hook --grant
+#                     --enforce-absent` against .claude/cc-world.yaml. The
+#                     "empty settings.json, govern by the manifest" experiment.
 set -euo pipefail
 
 IMAGE="${IMAGE:-governed-claude}"
 NET="${NET:-none}"
+MODE="${MODE:-dogfood}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "$NET" != "none" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "warning: ANTHROPIC_API_KEY is unset — a live Claude Code session won't authenticate." >&2
 fi
 
-# Notes on the flags:
-#   --cap-drop ALL / --security-opt no-new-privileges : minimal privileges.
-#   -v REPO:/workspace : the code + .claude/ config. Its .claude/state IS the
-#       shared taint store — containers mounting the same repo share taint (the
-#       cross-instance fix for the local sidecar's locality limit). For instances
-#       that DON'T share a workspace, add `-v <vol>:/workspace/.claude/state`
-#       (chown the volume to uid 1000 first).
-#   -e CC_WORLD_CONFIG : point the gate at a stricter SUT world without touching
-#       the host's .claude/cc-world.json.
-# Optional hardening: add `--read-only --tmpfs /home/node` for an immutable root,
-# and `:ro` on the workspace mount for a look-but-don't-touch demo.
+MOUNTS=(-v "$REPO:/workspace")
+case "$MODE" in
+  dogfood) ;;
+  replace)
+    # Overlay a dedicated settings.json over the project's — container-only, so the
+    # host repo file is untouched. This is "separate settings under dev vs runtime".
+    MOUNTS+=(-v "$REPO/docker/sut/settings.replace.json:/workspace/.claude/settings.json:ro")
+    echo "[run] MODE=replace — native permissions emptied; manifest is the allowlist (--grant --enforce-absent)." >&2
+    ;;
+  *) echo "unknown MODE=$MODE (use dogfood|replace)" >&2; exit 2 ;;
+esac
+
+# --cap-drop ALL / no-new-privileges: minimal privileges. --rm: ephemeral.
 exec docker run --rm -it \
   --network "$NET" \
   --cap-drop ALL \
   --security-opt no-new-privileges \
-  -v "$REPO:/workspace" \
+  "${MOUNTS[@]}" \
   -e ANTHROPIC_API_KEY \
-  -e CC_WORLD_CONFIG \
   "$IMAGE" "${@:-bash}"

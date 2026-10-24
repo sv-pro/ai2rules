@@ -14,7 +14,9 @@ pub mod error;
 pub mod hashing;
 pub mod loader;
 
-pub use compile::{compile, compile_default, default_cli_world, default_world_yaml};
+pub use compile::{
+    compile, compile_default, default_cli_world, default_world_yaml, resolve_root_paths,
+};
 pub use error::CompileError;
 pub use hashing::{hash_descriptor, hash_manifest, sha256_hex};
 pub use loader::{load_json, load_yaml, validate};
@@ -39,6 +41,9 @@ mod tests {
             "write_workspace",
             "apply_patch",
             "run_command",
+            "run_command_network",
+            "run_command_destructive",
+            "run_command_unclassified",
             "start_pty",
             "call_mcp_tool",
             "fetch_web",
@@ -165,8 +170,177 @@ base_actions:
                 "command_classes:\n  - { action: bash, classes: [ { to: bash_network, patterns: [\"\"] } ] }\n",
                 "empty pattern",
             ),
+            (
+                "command_classes:\n  - { action: bash, default_to: ghost, classes: [ { to: bash_network, patterns: [\"curl \"] } ] }\n",
+                "unknown default action",
+            ),
         ] {
             let manifest = load_yaml(&format!("{base}{fragment}")).expect("parses");
+            assert!(
+                matches!(compile(&manifest), Err(CompileError::Invalid(_))),
+                "{what} must be rejected"
+            );
+        }
+    }
+
+    /// Finding #19: a classifier without a catch-all is not a safe classifier.
+    /// Pattern matching over shell strings is always evadable; `default_to` is the
+    /// fail-closed bucket an evasion lands in. Without one it lands on the raw
+    /// action instead — typically ambient `Process`, outside the taint floor.
+    #[test]
+    fn validate_requires_a_default_to_on_every_command_classifier() {
+        let yaml = r#"
+world_id: w
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+command_classes:
+  - action: bash
+    classes:
+      - { to: bash_network, patterns: ["curl "] }
+"#;
+        let manifest = load_yaml(yaml).expect("parses");
+        let err = compile(&manifest).expect_err("a classifier with no default_to must be rejected");
+        assert!(
+            matches!(&err, CompileError::Invalid(m) if m.contains("default_to")),
+            "the error must name the missing field, got {err:?}"
+        );
+
+        // The same manifest with a catch-all compiles.
+        let fixed = load_yaml(&yaml.replace(
+            "  - action: bash
+    classes:",
+            "  - action: bash
+    default_to: bash_network
+    classes:",
+        ))
+        .expect("parses");
+        assert!(
+            compile(&fixed).is_ok(),
+            "a classifier with default_to is valid"
+        );
+    }
+
+    /// Finding #20: `classify_command` resolves a classifier with `.find()`, so a
+    /// second entry for the same action silently never runs. Channels and base
+    /// actions were already duplicate-checked; classifiers were the gap.
+    #[test]
+    fn validate_rejects_duplicate_command_classifiers_for_one_action() {
+        let yaml = r#"
+world_id: w
+base_actions:
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_network, action_type: Command, side_effect: Network }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+command_classes:
+  - action: bash
+    default_to: bash_unclassified
+    classes:
+      - { to: bash_network, patterns: ["curl "] }
+  - action: bash
+    default_to: bash_unclassified
+    classes:
+      - { to: bash_network, patterns: ["wget "] }
+"#;
+        let manifest = load_yaml(yaml).expect("parses");
+        let err = compile(&manifest).expect_err("two classifiers for one action must be rejected");
+        assert!(
+            matches!(&err, CompileError::Invalid(m) if m.contains("duplicate command classifier")),
+            "got {err:?}"
+        );
+    }
+
+    /// D83: path classifiers get the same checks as command classifiers, and an
+    /// action may sit under only one classifier of either kind.
+    #[test]
+    fn validate_rejects_malformed_or_overlapping_path_classifiers() {
+        let base = r#"
+world_id: w
+base_actions:
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: write_instructions, action_type: Write, side_effect: Memory }
+  - { name: bash, action_type: Command, side_effect: Process }
+  - { name: bash_unclassified, action_type: Command, side_effect: Network, approval_required: true }
+"#;
+        let ok = "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n";
+        let manifest = load_yaml(&format!("{base}{ok}")).expect("parses");
+        assert!(
+            compile(&manifest).is_ok(),
+            "the well-formed classifier compiles"
+        );
+        // One action read under two keys, in one class, is how a host-neutral
+        // world names both spellings.
+        let two_keys = "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path }, { action: write, arg: path } ], patterns: [\"**/CLAUDE.md\"] }\n";
+        let manifest = load_yaml(&format!("{base}{two_keys}")).expect("parses");
+        assert!(
+            compile(&manifest).is_ok(),
+            "two keys for one action compile"
+        );
+        for (fragment, what) in [
+            (
+                "path_classes:\n  - { to: ghost, from: [ { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "unknown `to` action",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: ghost, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "unknown `from` action",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path } ], patterns: [\"\"] }\n",
+                "empty pattern",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path } ], patterns: [] }\n",
+                "no patterns",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: \"\" } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "unnamed path argument",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path }, { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "one key listed twice",
+            ),
+            (
+                "path_classes:\n  - { to: write_instructions, from: [ { action: write, arg: file_path } ], patterns: [\"**/CLAUDE.md\"] }\n  - { to: write_instructions, from: [ { action: write, arg: path } ], patterns: [\"**/AGENTS.md\"] }\n",
+                "one action in two classes",
+            ),
+            (
+                "command_classes:\n  - { action: bash, default_to: bash_unclassified, classes: [] }\npath_classes:\n  - { to: write_instructions, from: [ { action: bash, arg: command } ], patterns: [\"**/CLAUDE.md\"] }\n",
+                "an action under both kinds of classifier",
+            ),
+        ] {
+            let manifest = load_yaml(&format!("{base}{fragment}")).expect("parses");
+            assert!(
+                matches!(compile(&manifest), Err(CompileError::Invalid(_))),
+                "{what} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_unknown_or_duplicate_channel_names() {
+        for (yaml, what) in [
+            (
+                r#"
+world_id: w
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: unreviewed_pdf, trust: Untrusted, taint: true }
+"#,
+                "unknown channel name",
+            ),
+            (
+                r#"
+world_id: w
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+  - { name: user_prompt, trust: Trusted, taint: false }
+"#,
+                "duplicate canonical channel",
+            ),
+        ] {
+            let manifest = load_yaml(yaml).expect("parses");
             assert!(
                 matches!(compile(&manifest), Err(CompileError::Invalid(_))),
                 "{what} must be rejected"
@@ -187,5 +361,109 @@ base_actions:
             compile(&manifest),
             Err(CompileError::DuplicateAction(_))
         ));
+    }
+
+    // --- Scoped MCP surfaces (D79) ---
+
+    const SURFACE: &str = r#"
+world_id: w
+mcp_surface: { name: My_Jira, upstream: atlassian }
+base_actions:
+  - name: getJiraIssue
+    action_type: Read
+    side_effect: Read
+    projected: false
+    backing: !McpServer { server: atlassian, tool: getJiraIssue }
+    schema:
+      type: object
+      properties:
+        issueIdOrKey: { type: string }
+        maxResults: { type: integer }
+scoped_capabilities:
+  - name: get_issue
+    base_action: getJiraIssue
+    args:
+      issueIdOrKey: !Input { as: issue, one_of: [PLAT-1], prefix: "PLAT-" }
+      maxResults: !Literal 20
+"#;
+
+    fn invalid(yaml: &str) -> String {
+        match compile(&load_yaml(yaml).expect("parses")) {
+            Err(CompileError::Invalid(detail)) => detail,
+            other => panic!("expected an Invalid error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scoped_surface_compiles_and_hides_its_backing() {
+        let world = compile(&load_yaml(SURFACE).expect("parses")).expect("compiles");
+        assert!(!world.is_projected(&ActionName::new("getJiraIssue")));
+        assert!(world.is_projected(&ActionName::new("get_issue")));
+        assert_eq!(
+            world.mcp_surface().map(|s| s.name.as_str()),
+            Some("My_Jira")
+        );
+    }
+
+    #[test]
+    fn new_fields_leave_existing_manifests_hash_stable() {
+        // Defaults are skipped when serializing, and a string literal serializes
+        // exactly as it did when literals were strings only, so no manifest that
+        // predates D79 changes its hash.
+        let canonical = serde_json::to_string(&default_cli_world()).unwrap();
+        assert!(!canonical.contains("\"projected\""));
+        assert!(!canonical.contains("\"mcp_surface\""));
+        assert!(canonical.contains(r#"{"Literal":"pytest"}"#));
+    }
+
+    #[test]
+    fn validate_rejects_two_args_under_one_actor_name() {
+        let yaml = SURFACE.replace(
+            "maxResults: !Literal 20",
+            "maxResults: !Input { as: issue }",
+        );
+        assert!(invalid(&yaml).contains("same name issue"));
+    }
+
+    #[test]
+    fn validate_rejects_a_rename_onto_another_args_own_name() {
+        let yaml = SURFACE
+            .replace(
+                "maxResults: !Literal 20",
+                "maxResults: !Input { as: issueIdOrKey }",
+            )
+            .replace("as: issue,", "");
+        assert!(invalid(&yaml).contains("same name issueIdOrKey"));
+    }
+
+    #[test]
+    fn validate_rejects_a_listed_value_the_prefix_excludes() {
+        let yaml = SURFACE.replace("one_of: [PLAT-1]", "one_of: [PLAT-1, SEC-1]");
+        assert!(invalid(&yaml).contains("SEC-1"));
+    }
+
+    #[test]
+    fn validate_rejects_a_prefix_on_a_non_string_argument() {
+        let yaml = SURFACE.replace(
+            "maxResults: !Literal 20",
+            r#"maxResults: !Input { prefix: "1" }"#,
+        );
+        assert!(invalid(&yaml).contains("types it as integer"));
+    }
+
+    #[test]
+    fn validate_rejects_an_empty_prefix_or_name() {
+        let yaml = SURFACE
+            .replace(r#"prefix: "PLAT-""#, r#"prefix: """#)
+            .replace("one_of: [PLAT-1], ", "");
+        assert!(invalid(&yaml).contains("empty prefix"));
+        let yaml = SURFACE.replace("as: issue", r#"as: " ""#);
+        assert!(invalid(&yaml).contains("empty name"));
+    }
+
+    #[test]
+    fn validate_rejects_a_surface_for_an_unknown_upstream() {
+        let yaml = SURFACE.replace("upstream: atlassian", "upstream: github");
+        assert!(invalid(&yaml).contains("no base action is backed by that server"));
     }
 }

@@ -13,6 +13,11 @@ const blog = defineCollection({
 			// Transform string to Date object
 			pubDate: z.coerce.date(),
 			updatedDate: z.coerce.date().optional(),
+			// Unpublished: excluded from the listing, the feed, the sitemap and
+			// getStaticPaths, so no page is generated at all. Still visible in
+			// `astro dev` so a draft can be previewed. Default false, so existing
+			// posts are unaffected.
+			draft: z.boolean().default(false),
 			heroImage: z.optional(image()),
 		}),
 });

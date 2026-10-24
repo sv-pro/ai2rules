@@ -93,7 +93,7 @@ JetBrains) **and Claude Code**, via the Safe MCP Proxy. This brings the MCP-prox
 | **M1 — Deterministic Core** | Kernel works in simulation | E0, E1, E2, E3, E4 | Vertical slice: `read_file` → kernel → sim executor → trace → replay, all deterministic |
 | **M2 — Live Agent** | A real model drives the loop | E5, E6 | One provider proposes through the projected surface; interactive approvals work; background fails closed |
 | **M3 — Full Tool Surface** | Real-world capabilities | E7, E9 | MCP + web + scoped capabilities behind one gate; usable interactive CLI/TUI |
-| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11, E12, E13 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design; establish industry authority via tech blog; dogfood the governance onto the Claude Code host |
+| **M4 — Isolation & Hardening** | Production posture | E8, E10, E11, E12, E13, E18 | OS-level sandbox backstop; all acceptance invariants + security scenarios + benchmarks green; visual World Authoring UI for manifest design; establish industry authority via tech blog; dogfood the governance onto the Claude Code host |
 | **M5 — Interactive Advocacy** | The product, in the reader's browser | E14, E15 | The real kernel compiled to WASM powers a same-origin, TensorFlow-Playground-class visualization suite — led by the Taint-Flow Simulator — that lets anyone drive the governance live, with CI proving the in-browser verdicts match the native kernel |
 
 ### Dependency sketch
@@ -275,6 +275,16 @@ E2, E3. **Completes M1. Status:** done.
   → JSON; `replay_bundle` recompiles the world and replays offline.
 - [ ] **E4.6** (Optional) cross-implementation parity harness (e.g. Rego mirror)
   — deferred.
+- [x] **E4.7** Host decision log joined to outcomes (gap G2, AI2-65 / #138,
+  DECISIONS **D84**, `docs/host-decision-log.md`): decision lines carry
+  `tool_use_id` / `agent_id` / `agent_type` / `cwd`; a read-only
+  `PostToolUse` / `PostToolUseFailure` observer appends an outcome line per
+  executed call with a D66-redacted result summary; `harness init` wires it;
+  `replay-transcripts --decisions` joins the log to transcripts and infers ASK
+  answers (stated as inferred). OTLP: not from the hook (no offline dependency,
+  no egress per call); `harness export-otlp` converts a finished log to OTLP/JSON
+  GenAI `execute_tool` spans, one trace per session (AI2-66 / #141). Repeated
+  decisions for one call retain distinct span IDs and per-decision ASK/DENY inferences.
 
 **Exit:** replay reproduces decisions; redaction holds; the M1 vertical slice
 (`read_file` → kernel → sim executor → trace → replay) passes end to end.
@@ -301,7 +311,10 @@ record → redact → replay → drift. **Milestone M1 complete (E0–E4).**
   actions are exposed.
 - [x] **E5.5** Model loop (`orchestrator.rs`): propose → adapt → `decide` →
   record (E4) → on ALLOW build spec + execute (SIMULATE) → perceive tainted
-  result → feed back; a `ModelClient` trait + deterministic `ScriptedModel`
+  result → feed back; the previous neutral `ToolOutcome` is correlated by call
+  ID and formatted into the next `TurnContext` as the provider `tool_result`, so
+  non-executed `DENY`/`ABSENT`/`ASK` decisions re-enter the model loop without an
+  observer side channel. A `ModelClient` trait + deterministic `ScriptedModel`
   stand in for an LLM.
 - [ ] **E5.6** Additional adapters (OpenAI, Gemini) — deferred. A real Anthropic
   HTTP client is also deferred (feature-gated, out of the offline core).
@@ -322,20 +335,32 @@ end.
 - [x] **E6.1** `ExecutionMode` threaded into `evaluate` (`EvalContext.mode`); an
   approval-required action branches on it.
 - [x] **E6.2** Durable `ApprovalStore` (`trace-store/approval.rs`): append-only
-  JSONL of lifecycle transitions folded on load; `pending → approved/rejected →
-  executed`. Persisted, not in-memory.
-- [x] **E6.3** `ASK` lifecycle in the orchestrator: mint a pending token →
-  resolve via `ApprovalPolicy` → on approve, re-decide with the grant → `ALLOW`
-  → execute → `mark_executed`; reject path surfaces a refusal.
-- [x] **E6.4** Binding: `is_granted` matches an Approved token on action +
-  params hash + world id + descriptor hash + provenance + effect mode; any drift
-  voids reuse.
+  signed JSONL of lifecycle transitions folded on load; `pending →
+  approved/rejected → consumed → executed`. Persisted, not in-memory.
+- [x] **E6.3** `ASK` lifecycle in the orchestrator: mint a pending
+  `AuthorizationInstance` → resolve via `ApprovalPolicy` → atomically consume
+  before the external effect → re-decide with the grant → `ALLOW` → execute →
+  `mark_executed`; rejection/store failures surface and fail closed.
+- [x] **E6.4** Binding: `consume` matches one explicit Approved instance on
+  trusted principal + normalized action/arguments/resource + world and schema
+  epochs + provenance + effect mode + expiry + remaining-use budget. Every
+  mismatch is signed evidence; any drift voids reuse.
 - [x] **E6.5** `BACKGROUND` fails closed — an approval-required action collapses
   `ASK → DENY` ("background_denies_ask"); no token minted.
+- [x] **E6.6** Staged external finality prototype: seal and durably persist a
+  non-effective `StagedEffect`; independently revalidate exact artifact,
+  world/schema epochs, consequence and actuator metadata at commit; reserve the
+  idempotency key, consume its `AuthorizationInstance`, invoke a fake privileged
+  actuator, and persist a causal `ExecutionReceipt`. Ambiguous finality never
+  auto-retries; SIMULATE produces a receipt and no external effect (D74).
 
-**Exit:** interactive approvals resume execution; background denies; tokens
-invalidated by drift. Satisfies invariants **9, 10**. **Met** — kernel mode tests
-+ 4 store tests (mint/approve/drift/reopen) + orchestrator resume/deny tests;
+**Exit:** interactive approvals resume execution; background denies;
+authorizations are effect-bound, single-use, and invalidated by drift. Satisfies
+invariants **9, 10**. **Met** — kernel mode tests + store tests covering
+substitution, replay, principal/resource, expiry, epoch drift, concurrency,
+tamper evidence, restart, staged mutation, authorization expiry/revocation,
+epoch drift, duplicate commit, malformed evidence, ambiguous timeout,
+consequence metadata, and simulation + orchestrator resume/deny tests;
 full workspace at 82, `clippy -D warnings` + fmt clean offline; `approvals_demo`
 shows both paths. **Milestone M2 complete (E5–E6).** Decisions logged in
 `DECISIONS.md`.
@@ -435,7 +460,7 @@ regression gates enforced.
   - `GET /api/world/default`: the bundled default manifest YAML (seeds the editor).
   - `POST /api/preview {yaml}`: compiles a draft manifest and returns a parse/compile error, or the projected tool surface (name, base/scoped kind, action/side-effect type, scoped-cap args) plus a per-action decision matrix.
 - [x] **E11.3** Live preview UI: renders the projected tool surface and a color-coded clean-vs-tainted decision matrix (ALLOW/ASK/DENY/ABSENT/REPLAN/UNKNOWN + the deciding rule) that updates as the manifest changes. (Collision flags / simulated-execution previews deferred.)
-- [ ] **E11.4** Manifest Exporter: Support local download/save of validated YAML manifest files (updating the workspace `.agents/default_world.yaml` if configured).
+- [ ] **E11.4** Manifest Exporter: Support local download/save of validated YAML manifest files (updating the workspace `.agents/default_world.yaml` if configured). *Partial:* `harness mcp-author` saves validated manifests for MCP surfaces (E13.4c); `harness serve` still has no export.
 - [ ] **E11.5** Integration with E10.5: Embed manifest-drafting LLM assistant and trace-failure explainer in the UI (e.g., loading an audit trace file to visually trace a denied action and suggest manifest edits to resolve it).
 
 **Exit:** Developer can start `cli-harness serve`, edit the manifest YAML side-by-side with live compilation and tool-surface preview, and download/commit the result.
@@ -471,13 +496,20 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 - [x] **E13.1** Scaffold the Flywheel "Correcting Reviewer" as a real subagent (`.claude/agents/correcting-reviewer.md`) + `/review-blog` command (`.claude/commands/review-blog.md`). *[step (a) — commit + push to both remotes]*
 - [ ] **E13.2** First slice: a manifest-driven `PreToolUse` hook + taint sidecar that ports the kernel's three signature behaviors onto Claude Code — (1) **ABSENT-for-native** (deny native tools not in the projected set), (2) **taint floor** (once a tainted file/web result is read, deny network/egress), (3) **ASK** on writes / destructive commands. Wire into `settings.json` via the `update-config` skill. *[step (b)]*
 - [x] **E13.3** Design `harness compile --target claude-code`: emit `.claude/settings.json` hooks, `.mcp.json` (→ shim), and subagent allowlists from one `WorldManifest` — design + manifest→host mapping recorded in `DECISIONS.md` **D19**. (Emitter implementation is future work; E13.4/E13.5 build it out.) *[step (c)]*
-- [ ] **E13.4** *(later)* MCP projection shim for scoped-capability arg-locking, reusing `safe-mcp-proxy` / `mcp-tool-projection`.
+- [x] **E13.4** MCP projection shim for scoped-capability arg-locking, reusing `safe-mcp-proxy` / `mcp-tool-projection`. Three phases:
+    - [x] **E13.4a** Manifest + kernel (D79): `ArgSource::Input { as, one_of, prefix }`, JSON literals, `projected: false` base actions, `mcp_surface`, and `model_facing_schema`.
+    - [x] **E13.4b** `harness mcp-gateway` serves scoped capabilities: lists them under their own names with the world-derived schema, forwards the kernel's lowered `{server, tool, input}` rather than the raw call, and announces `mcp_surface.name` (D79 amendment). Opt-in: worlds without `mcp_surface` are listed exactly as before; a scoped capability in one is forwarded to its base action's tool with the lowered input (D79 amendment, 2026-10-21). The wire gate returns the same lowering as `GateResponse.effective` (D80).
+    - [x] **E13.4c** Authoring page (`harness mcp-author --world W -- <upstream>`): pick tools, rename, limit arguments, try calls through the real gate, save the manifest (D79 amendment).
 - [x] **E13.5** Demo: the first-slice hook neutralizing a prompt-injection → egress attempt (feeds the "Running Claude Code Safely" article + a VHS recording). **Done**: `.claude/hooks/demo-injection-egress.sh` is a self-contained, side-effect-free walk of the classic chain — read an untrusted ticket carrying an injection (in an HTML comment) → session tainted → `WebFetch`/`curl`/`wget` exfil all denied by the taint floor, with a clean-session baseline proving it's the taint, not a URL blocklist. The "Running Claude Code Safely" article gains a *Dogfooding* section with the verified transcript; `.claude/hooks/demo-injection-egress.tape` renders the recording to `blog/src/assets/demo-injection-egress.gif` once `vhs` is installed.
 - [x] **E13.6** Cross-agent taint propagation: make taint follow the subagent↔parent information-flow edge (a tainted subagent taints its parent; a tainted parent seeds its child). The E13.2 POC keys taint by `session_id`, and subagents get their own — so a subagent can launder untrusted data back to the parent (the ZombieAgent pattern, intra-run): a **fail-open** gap. Empirically confirm subagent session/linkage semantics, implement propagation via `SubagentStop` (and/or PreToolUse parent linkage), ship a runnable demo, and write a case-study article. **Done** (see DECISIONS **D20**): the experiment showed Claude Code shares one in-process `session_id` across the agent tree, so taint already propagates parent↔subagent via the shared sidecar; added `taint-notify.py` (SubagentStop: observability + distinct-session union), `demo-cross-agent.sh`, and the article `subagent-taint-experiment.md`. Isolated/background/remote agents (distinct session + `.claude/state`) remain a documented limitation.
 
 - [x] **E13.7** Containerized **governed Claude Code** SUT (`docker/`): a throwaway Claude Code instance running the repo's PreToolUse governance under OS-level isolation — separates the agent-under-test from the host dev session, and provides the **E8** enforcement floor (network egress policy, non-root, dropped caps, write confinement) the hooks' decisions need. A shared named-volume taint store is the cross-instance fix for the local sidecar's locality limit (D20). Image + `run.sh` + README shipped; the live **egress-allowlist proxy** (the full E8 network floor) is shipped + verified in `docker/compose.yaml` + `docker/egress-proxy/` — the agent runs on an internal no-gateway network whose only egress is a tinyproxy allowlisting `anthropic.com`. See DECISIONS **D21**. *(advances E8)*
 
 - [x] **E13.8** Host-neutral **gate ABI** — the integration port that makes the kernel host-independent (see DECISIONS **D24**, `docs/harness-gate-abi.md`). A `harness gate --world <manifest>` subcommand reads a `GateRequest` JSON on stdin and writes the kernel's verdict (`ABSENT/ALLOW/DENY/ASK/REPLAN` + rule + post-call taint) on stdout, so every host (Claude Code, a Hermes agent, Codex CLI, an MCP proxy) integrates through a **thin adapter calling the real kernel** — not a per-host reimplementation. **Done**: (1) the pure `harness_preview::gate()` (12 tests) + the `harness gate` subcommand honoring the ABI exit-code contract (verdict on stdout, exit 0 even for DENY/ASK; bad input/manifest → 2), verified end-to-end; (2) migrated the Claude Code world to a real `WorldManifest` (`.claude/cc-world.yaml`), with `Bash` adapter-classified into `Bash`/`Bash_network`/`Bash_destructive` (DECISIONS **D25**) — verified the taint floor, ASK, and ABSENT verdicts come from the real kernel; (3) built the host adapter shim (`.claude/hooks/world-gate-adapter.py`, DECISIONS **D26**) — pure plumbing calling `harness gate` (no decision logic), validated in isolation by `test-gate-adapter.sh` (taint floor incl. classified Bash-curl, ASK on `rm -rf`, escalation) with the live host hook left untouched. **Done (2026-07-12, the one-kernel-many-hosts increment — D36/D37, `docs/one-kernel-many-hosts.md`)**: (4) **live-hook cutover** — `settings.json` → `.claude/hooks/world-gate.sh` bootstrap shim → `harness cc-hook` (in-process `gate()`, D34); `world-gate.py` replaced **in place** with the same shim (hook configs snapshot at session start); the Python engine + `cc-world.json` archived under `.claude/hooks/superseded/`; (5) **kernel-side command classification** (D36) — `command_classes` is manifest data compiled into `CompiledWorld`; `gate()` returns the effective `action`; the Rust/TS/Python pattern copies are deleted; (6) the shared `host_outcome()` layer (ABSENT ≠ DENY on every host, unknown verdicts fail closed) consumed by `cc-hook` + `mcp-gateway`; (7) the **conformance suite** `tests/one_kernel.rs` over `docs/demos/one-kernel/{demo-world.yaml,cases.yaml}` pinning decision/rule/taint/manifest_hash equal across in-process gate, the gate CLI, the cc-hook contract, OpenCode-shaped requests, and the mcp-gateway; plus `scripts/demo-one-kernel-many-hosts.sh` (offline, <5 min). **Pending**: wire the adapter into the E13.7 container SUT (ship the `harness` binary in the image) + run the in-container injection→egress dogfood; the native↔wasm gate golden-vector conformance guard (E14.4); path-based read-taint (deferred design item, D25); and the typed `trust_pins` manifest field (dropped at cutover, D29/D37). Separately, **trust pins** (DECISIONS **D29**, `docs/trust-pins.md`) landed in the live hook: operator attestations pinned to content identity that re-classify a vouched read source as Trusted (drift re-taints), turning the taint sidecar into a recomputed cause-ledger (shared logic in `.claude/hooks/_gatelib.py`, validated by `test-gate.sh` §4) — the canonical `trust_pins` field on the compiled `WorldManifest` + pure `gate()` follows with the host cutover, and it resolves D25's deferred read-taint (a pin is the Trusted-channel exception to an untrusted read).
+
+- [x] **E13.9** Machine-wide governance (DECISIONS **D82**, `docs/machine-wide-governance.md`): `harness init --user` merges the hook into `~/.claude/settings.json` with an absolute state dir and a world that protects the files able to disable it; `harness init --managed` installs into Claude Code's managed settings (admin-only; no user-side kill-switch, no `HARNESS_BIN`, kernel copied into the policy dir). Both take `--remove`. **Pending**: per-user taint state is still writable by that user (the hook runs as them) — closing it needs a privileged state service; `--bare` vs managed hooks unverified; `harness doctor` does not report user/managed installs yet.
+
+- [x] **E13.10** Instruction and memory files count as durable memory (DECISIONS **D83**, AI2-64 / #137, gap G1 of the *Designing AI Agents* review): a `path_classes` world section reclassifies `Write`/`Edit`/`MultiEdit`/`NotebookEdit` (and Antigravity's `write_to_file`/`propose_code`/`edit_notebook`) to a `side_effect: Memory` action when the canonical path or the normalized argument matches `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/{agents,commands,rules,skills}/**`, auto-memory or `.agents/{rules,skills,workflows}/**`. Tainted → `DENY taint_invariant`; clean → ALLOW in project worlds, ASK in `--user`/`--managed` worlds. One pattern list, pinned across host manifests. **Pending**: shell writes (`echo >> CLAUDE.md`, D57 residual), Antigravity `move` (destination key not captured), path classes for the OpenCode and DeepSeek Harness worlds.
 
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
 
@@ -504,6 +536,7 @@ Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × s
 - [ ] **E15.3** **Decision-Matrix Playground** — manifest editor ↔ a live action × {clean, tainted} ALLOW/ASK/DENY/ABSENT grid; the public, polished evolution of the E11 authoring tool (candidate to *unify* with E11 once E14.5 lands).
 - [ ] **E15.4** **Attack Sandbox (with / without physics)** — an editable prompt-injection payload run side-by-side: ungoverned (secrets exfiltrate) vs governed (egress severed at the taint floor); the persuasion piece, paired with "Why Deny is Dangerous" / "AI Aikido".
 - [ ] **E15.5** **Provenance Flow Graph** — an animated information-flow DAG (data + tool-call nodes) coloured by provenance / taint; untrusted reads spread "red" through the session and break proposed network edges. Shares its scenario model with E15.2.
+- [ ] **E15.7** **Policy console — the playground, connected to a live agent** (AI2-44 / #123). `harness console --project <dir>` serves a local page whose profiles and Allow / Ask / Off switches rewrite the project's world file atomically; `harness cc-hook` already re-reads that file on every call, so a real Claude Code session changes behaviour on its next tool call with no restart, and a decision log the hook appends feeds the page's live verdict stream. The page authors the world and shows verdicts; the kernel still decides. The taint floor is shown locked: no switch can open it. Skeleton: decision log (#116), console server (#117), page (#118), demo wiring (#119). Polish: WASM matrix with predicted-vs-enforced verdicts (#120), prompt counter and evidence export (#121), decision record and talk track (#122). **Skeleton done (2026-10-22, DECISIONS D81):** `cc-hook --log`, `harness console` with profiles, switches, the locked floor and the live feed, and `docs/demos/policy-console/` (world, setup with `--enforce-absent --log`, preflight, runbook); verified against a real Claude Code session on Opus 4.8, where switching "Edit project files" off turned the next Edit and Write ABSENT. Polish pending. **Stop position done (2026-10-23, AI2-63 / #136, DECISIONS D85):** a Stop button hides every effectful base action from the supplied manifest at the next call, including custom names and shell processes. Read/None actions stay as configured; worlds with effectful scoped capabilities explicitly refuse Stop. Restore returns exact projection/approval flags, and the page says "Stopped" only after the hook has refused a call.
 - [ ] **E15.6** **`/playground` hub + embeds** — a gallery page on `ai2rules.dev` indexing the visualizations, each cross-linked from the post it illustrates (a destination plus an internal-link / SEO surface).
 
 **Exit:** `ai2rules.dev/playground` hosts several real-kernel-backed interactive visualizations — led by the Taint-Flow Simulator embedded in the sandbox guide — each running entirely in the reader's browser and each provably faithful via the E14 fidelity guard.
@@ -521,9 +554,12 @@ destructive JIRA tool **ABSENT** (doesn't exist for the agent). The line it sell
 gate; MCP is where it *is* governable, and it's host-agnostic — one proxy, three hosts).
 **Status:** 🚧 in progress — **PIVOTED to Rust-only, one binary (DECISIONS D33).** The Python
 compose glue (safe-mcp-proxy `feat/mcp-gateway`) was the prototype that proved the shape; the
-demo is now Rust around the **governability gap** (CC deep vs Copilot MCP-only). **E16.A–D
-built and tested** (mock-jira + mcp-gateway + cc-hook + scorecard/host configs, 7 e2e tests
-green). Remaining: E16.E (real Atlassian skin) and an optional recorded walkthrough.
+demo is now Rust around the **governability gap** (CC deep vs Copilot MCP-only). **E16.A–E
+built and tested** (mock-jira + mcp-gateway + cc-hook + scorecard/host configs + the real
+Atlassian skin, **10 e2e tests green**). The E16.E skin is built, **verified offline** (the
+real-name manifest is exercised against a Rovo-named stand-in) **and live-validated
+2026-07-19** against a real Atlassian Cloud site — so E16's exit criterion (a repeatable live
+demo) is met; only an optional recorded walkthrough remains.
 New task list:
 
 - [x] **E16.A** `harness mock-jira` — self-contained Rust MCP stdio upstream (7 jira_* tools
@@ -543,8 +579,20 @@ New task list:
 - [x] **E16.D** **Governability scorecard** (`docs/demos/jira-copilot/SCORECARD.md`) + runbook;
   `run-proxy.sh` now launches `harness mcp-gateway` over `harness mock-jira` (Rust, offline);
   CC native governance wired via `hosts/claude-code.settings.json` (`harness cc-hook`).
-- [ ] **E16.E** *(later)* real Atlassian upstream **skin** (`mcp-remote` bridge or a Rust SSE
-  MCP client) — swap the `mock-jira` upstream for the real Atlassian Remote MCP Server.
+- [x] **E16.E** real Atlassian upstream **skin** — swap the `mock-jira` upstream for the real
+  Atlassian Rovo MCP Server via an `mcp-remote` OAuth bridge. **No kernel/gateway change:** the
+  gateway already parameterizes its upstream (`run-proxy.sh` `UPSTREAM` env), so the skin is a
+  real-tool-name manifest (`jira-atlassian.world.yaml`) + host configs
+  (`hosts/{vscode,claude-code}-atlassian.mcp.json`) + the runbook (`REAL-ATLASSIAN.md`). Proven
+  **offline** by `tests/mcp_gateway_atlassian.rs` (3 e2e): `harness mock-jira --rovo` advertises
+  the genuine Rovo names, and the gateway shapes the manifest's exact 5-tool surface, ABSENTs
+  every write/transition/create + Confluence, and severs the comment write under taint.
+  **Live-validated 2026-07-19** against a real Atlassian Cloud site (project `KAN`): the Rovo
+  server advertised **40** tools, the gateway exposed **5** (35 ABSENT); `getJiraIssue` /
+  `searchJiraIssuesUsingJql` / `getVisibleJiraProjects` reads forwarded and returned real data;
+  `addCommentToJiraIssue` **ALLOW** in a clean session (comment posted) and **DENY** in a tainted
+  session — same call, gate-side, before reaching Atlassian. Only an optional recorded
+  walkthrough remains.
 
 *(The original Python-path tasks below are superseded by D33; kept for history.)*
 
@@ -655,6 +703,90 @@ the adapter writes trace records).
 
 ---
 
+### E18 — Public MCP Governance Benchmark (executable seed)
+**Goal:** Turn the Public MCP Governance Benchmark plan into its smallest *executable*
+evidence pack inside this repository, before building a separate broad framework. Compare an
+intentionally weak reference gateway against ai2rules under one deterministic oracle, with no
+LLM anywhere in the loop. **Issue:** [#64](https://github.com/sv-pro/ai2rules/issues/64) /
+Linear AI2-5. **Depends on:** D24 (gate ABI), D72 (discovery projection), D73 (effect-bound
+authorization instance). **Status:** ✅ seed delivered — three scenarios, both targets, both
+transports, CI-gated.
+
+**Design — the three questions a permission list cannot answer:**
+
+1. *Discovery-cache isolation* — a privileged `tools/list` is cached; a lower-privilege
+   principal asks next; privileged capabilities must not leak.
+2. *Approval substitution and replay* — one normalized effect is approved; an
+   authority-bearing argument is mutated and retried; the exact approval is submitted twice.
+   Expected: the mutation refused and exactly one downstream effect.
+3. *Cross-principal handle reuse* — principal A holds an authorization handle; principal B,
+   equally privileged, presents it. Expected: an ownership violation and no effect.
+
+**Rules the pack is built to (issue #64):** adapters translate only, never scenario-specific
+pass logic; PASS requires an observed decision *and* an observed downstream effect count *and*
+evidence; `ABSENT`/`DENY`/`ASK`/`ERROR_CLOSED`/`ERROR_OPEN`/`UNKNOWN` stay distinct; results
+are published per scenario with no reassuring aggregate score.
+
+- [x] **E18.1** Three versioned YAML scenarios —
+  `docs/benchmarks/mcp-governance/pack/scenarios/*.yaml`, schema v1, walked by a generic
+  runner that enumerates nothing.
+- [x] **E18.2** Deterministic scripted client + oracle — `crates/govbench` (`run.rs`,
+  `oracle.rs`). The oracle has no target identity; targets have no scenario identity.
+- [x] **E18.3** Minimal mock MCP upstream + external-effect counter — `upstream.rs`, owned by
+  the runner, so `effect_applied` is observed rather than reported.
+- [x] **E18.4** Intentionally weak reference gateway with documented expected failures —
+  `targets/weak.rs` + `pack/weak-gateway.yaml`: same policy intent, three enforcement defects
+  (cache keyed on the upstream, bearer grant naming a tool, grant bound to no principal and
+  never consumed). Asserted non-strawman: its policy is applied correctly wherever the cache
+  and the bearer grant are not in the way.
+- [x] **E18.5** ai2rules adapter — `harness project` (D72) + `harness gate` (D24) +
+  `trace_store::ApprovalStore` (D73), run over **both** the linked and the wire transport
+  with a step-for-step parity check. Named `ai2rules-reference-host`, and its
+  `metadata.composition` states what is shipped by ai2rules and what the benchmark supplies,
+  so a PASS is never read as a claim about a shipped command.
+- [x] **E18.6a** The evidence contract is mechanical, not prose: `evidence_invariants` checks
+  every step of every run (a refusal names a rule; a grant says what it covers; a presented
+  handle says what identity was checked and, on refusal, why; the ledger's record matches the
+  call the target was handed), and `binding_distinguishes` compares the identities a target
+  says it checked. A target that decides correctly and shows nothing fails —
+  `a_correct_verdict_without_evidence_is_not_a_pass` proves it.
+- [x] **E18.6** JSON result + evidence schema v1 (`result.rs`) and generated Markdown report
+  (`report.rs`); `results/` regenerated by the runner, never hand-edited.
+- [x] **E18.7** One command, offline, no LLM — `scripts/run-governance-bench.sh`; CI job
+  `governance-bench` runs it over the wire transport and fails if the committed report has
+  drifted (the finding-#18 shape).
+- [x] **E18.8** Two-directional acceptance — `--assert-contrast` first requires exactly one
+  result for every `scenario × {weak, ai2rules}` cell (otherwise it is an assertion about a
+  comparison, passed without the comparison), then fails both when ai2rules fails a scenario
+  and when the reference gateway *passes* one, because a baseline that stops failing has
+  stopped measuring anything. It lives in `accept.rs`, outside the oracle.
+- [ ] **E18.9** Exercise `ERROR_CLOSED` / `ERROR_OPEN`: the vocabulary is in the schema and
+  the adapters, but no scenario yet breaks a governor to prove the direction it fails in.
+- [ ] **E18.10** Ship the trusted authorization boundary as a command. The pack's honest
+  finding: `harness gate` deliberately has no verifier or store access, so consuming one exact
+  authorization before an effect is ~40 lines every host writes itself. A host that omits it
+  gets the weak gateway's defect 3 from a correct kernel.
+- [ ] **E18.11** Second-wave scenarios: D74 staged-commit finality (crash ambiguity,
+  idempotency reservation), schema/world epoch drift mid-approval, expiry, and a stdio
+  upstream over `harness mcp-gateway`.
+- [ ] **E18.12** External reproduction (AI2-9): one engineer outside this repository runs the
+  pack from `docs/benchmarks/mcp-governance/README.md` alone and reports what was unclear.
+- [ ] **E18.13** OpenClaw 2.0 external target ([#77](https://github.com/sv-pro/ai2rules/issues/77)
+  / [Linear AI2-21](https://linear.app/ai2rules/issue/AI2-21/benchmark-evaluate-openclaw-20-default-vs-hardened-execution)): pin `v2026.8.1` and run identical probes against documented
+  `default-personal` and `hardened-team` profiles. Measure capability shaping, execution
+  placement, approval binding/replay, protected-secret egress, shared-session role limits,
+  and failure direction with runner-owned effect counts. The registered target profile is
+  [`docs/benchmarks/openclaw-2/README.md`](docs/benchmarks/openclaw-2/README.md); it remains
+  outside generated results until the executable evidence contract is met.
+
+**Exit:** the runner detects every intentional weak-baseline failure, ai2rules produces
+evidence-backed expected outcomes without an LLM, and an external engineer can reproduce the
+run from the documentation.
+
+Relates to acceptance invariants 2 (ABSENT-over-DENY), 9/10 (approval, fail-closed) and 14/15
+(audit/evidence).
+
+---
 
 ## Acceptance invariant coverage
 

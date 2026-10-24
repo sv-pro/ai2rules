@@ -1,0 +1,22 @@
+{
+  "_comment": "REPLACE-MODE SUT settings for the containerized Claude experiment (docker/run.sh MODE=replace, or compose service `agent-replace`). Native permissions are EMPTY on purpose — the WorldManifest (.claude/cc-world.yaml) is the whole policy, enforced by the PreToolUse hook `harness cc-hook --grant --enforce-absent`: ALLOW verdicts are GRANTED (no prompt), anything the manifest does not declare is ABSENT->deny, and the taint floor still severs tainted egress. --enforce-absent WILL lock the agent out of undeclared tools — that is the experiment, and it is safe here because the container is disposable. NEVER copy this onto a host session.",
+  "permissions": {
+    "allow": [],
+    "deny": [],
+    "ask": []
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "harness cc-hook --grant --enforce-absent --world \"$CLAUDE_PROJECT_DIR/.claude/cc-world.yaml\" --state \"$CLAUDE_PROJECT_DIR/.claude/state\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

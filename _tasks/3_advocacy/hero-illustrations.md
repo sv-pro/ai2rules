@@ -1,7 +1,8 @@
 # Task: blog hero illustrations — Antigravity + Gemini
 
 **Owner:** Google Antigravity (Gemini) — it generated the existing house-style heroes,
-so it should generate the new ones. **Status:** fix #1 done; images #2/#3 done.
+so it should generate the new ones. **Status:** fix #1 done; images #2/#3 done. **#4 requested
+(below)** — hero for the forthcoming *"Your Permission List Can't See Taint"* post.
 
 ## Problem
 
@@ -52,6 +53,27 @@ call. Optionally contrast the fading old linear chain (`reason → call → resu
 orchestrated program. House neon palette; the code block can carry a green/cyan glow.
 
 Then set `heroImage: '../../assets/programmatic-tool-calling.jpg'` in that post.
+
+## #4 — `permission-taint-gate.jpg`  *(requested 2026-07-21)*
+
+For the forthcoming post *"Your Permission List Can't See Taint"* — replacing Claude's
+`settings.json` permission pile with a governed manifest; the manifest sees **taint**, the flat
+pile can't. Draft is written (parked, not yet in `blog/`), so this hero can be generated in parallel.
+
+**Concept: same call, opposite verdict — decided by provenance, not by the call.** Two
+**identical** glowing tool-call tokens approach a gate/boundary side by side. Each trails a fine
+**data-lineage thread** back to its origin. The left token's thread is clean **cyan**, running
+straight back to a trusted source (a keyboard / calm human-origin node) → the gate passes it
+(**ALLOW**). The right token's thread passes through a **corrupted, poisoned document node** partway
+back and turns **magenta/red** from there on (tainted) → the gate stops it (**DENY**). The two tokens
+are visually identical; only the *thread colour* differs — that's the whole point. Optional: off to
+one side, a dim redundant stack of `settings.json` rule-cards (the "pile") the gate has bypassed.
+House neon: cyan = clean/allow, magenta/red = tainted/deny; circuit + gate motif. Keep it **distinct
+from #2** — #2 splits *one* call by argument; this splits *two identical* calls by *history*. Short
+ALLOW / DENY labels are fine; no body text.
+
+Then, once the post lands in `blog/src/content/blog/`, set
+`heroImage: '../../assets/permission-taint-gate.jpg'`.
 
 ## Verify
 

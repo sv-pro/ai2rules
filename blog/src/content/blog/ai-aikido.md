@@ -2,7 +2,7 @@
 title: 'AI Aikido: Neutralizing Prompt Injection with Determinism'
 description: "How to use an attacker's own momentum against them by replacing LLM filters with deterministic tables."
 pubDate: 'Jun 18 2026'
-heroImage: '../../assets/blog-placeholder-2.jpg'
+heroImage: '../../assets/ai-aikido.jpg'
 ---
 
 Prompt injection is the defining vulnerability of the LLM era. The traditional defense mechanism adopted by most enterprises is to place another LLM in front of the execution layer to ask: *"Is this prompt malicious?"*

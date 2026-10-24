@@ -7,14 +7,17 @@
 //! - an empty / `Null` schema (the default world's base actions) → always valid;
 //! - object schemas with `required` (keys must be present) and `properties`
 //!   carrying a `type` keyword (declared args must match that JSON type);
+//! - closed object schemas by default: when an object schema declares
+//!   properties/required keys, any undeclared input key is rejected unless
+//!   `additionalProperties: true` is explicitly present;
 //! - `arg_constraints` entries with `enum` / `const` (value must be a member /
 //!   equal).
 //!
 //! Anything outside that subset passes — full Draft validation is later
 //! hardening, not something the current ontology exercises.
 
-use harness_types::{ActionName, BuildError};
-use serde_json::Value;
+use harness_types::{ActionName, ArgSource, BuildError, CompiledWorld};
+use serde_json::{Map, Value};
 
 /// Validate `args` against an action's model-facing `schema` and
 /// `arg_constraints`. Returns `SchemaViolation` on the first failure.
@@ -25,6 +28,7 @@ pub fn validate(
     constraints: &Value,
 ) -> Result<(), BuildError> {
     validate_schema(action, args, schema)?;
+    validate_declared_properties(action, args, schema, constraints)?;
     validate_constraints(action, args, constraints)?;
     Ok(())
 }
@@ -76,6 +80,42 @@ fn validate_schema(action: &ActionName, args: &Value, schema: &Value) -> Result<
     Ok(())
 }
 
+fn validate_declared_properties(
+    action: &ActionName,
+    args: &Value,
+    schema: &Value,
+    constraints: &Value,
+) -> Result<(), BuildError> {
+    let Some(args_obj) = args.as_object() else {
+        return Ok(());
+    };
+    let Some(schema_obj) = schema.as_object() else {
+        return Ok(());
+    };
+    if schema_obj.is_empty()
+        || matches!(
+            schema_obj.get("additionalProperties"),
+            Some(Value::Bool(true))
+        )
+    {
+        return Ok(());
+    }
+
+    let declared = declared_arg_names(schema, constraints);
+    if declared.is_empty() {
+        return Ok(());
+    }
+    for key in args_obj.keys() {
+        if !declared.contains(key) {
+            return Err(violation(
+                action,
+                format!("undeclared argument `{key}` is not allowed"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_constraints(
     action: &ActionName,
     args: &Value,
@@ -122,6 +162,108 @@ fn type_matches(expected: &str, value: &Value) -> bool {
     }
 }
 
+pub(crate) fn declared_arg_names(
+    schema: &Value,
+    constraints: &Value,
+) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    if let Some(props) = schema.get("properties").and_then(Value::as_object) {
+        out.extend(props.keys().cloned());
+    }
+    if let Some(required) = schema.get("required").and_then(Value::as_array) {
+        out.extend(
+            required
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string),
+        );
+    }
+    if let Some(constraints) = constraints.as_object() {
+        out.extend(constraints.keys().cloned());
+    }
+    out
+}
+
+/// The argument schema the model is shown for `action` (D79), or `None` when the
+/// world does not describe it.
+///
+/// A base action shows its descriptor schema unchanged. A scoped capability shows
+/// only what the actor supplies: locked and context arguments are left out, each
+/// argument appears under the name the actor uses, and an input rule's limits are
+/// stated as `enum` (a list) and `pattern` (a prefix) so the model can see them
+/// before it calls. The kernel enforces the same rules at the gate; this is the
+/// advertisement, not the check.
+pub fn model_facing_schema(world: &CompiledWorld, action: &ActionName) -> Option<Value> {
+    let descriptor = world.descriptor(action)?;
+    let Some(cap) = world.scoped_capability(action) else {
+        return Some(descriptor.schema.clone());
+    };
+    let base_props = descriptor
+        .schema
+        .get("properties")
+        .and_then(Value::as_object);
+    let base_required: Vec<&str> = descriptor
+        .schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|r| r.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+
+    let mut properties = Map::new();
+    let mut required = Vec::new();
+    for (name, source) in &cap.args {
+        let Some(actor_name) = source.actor_name(name) else {
+            continue;
+        };
+        let mut spec = base_props
+            .and_then(|p| p.get(name))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if let ArgSource::Input(rule) = source {
+            if !rule.one_of.is_empty() {
+                spec.insert("enum".to_string(), Value::Array(rule.one_of.clone()));
+            }
+            if let Some(prefix) = &rule.prefix {
+                spec.insert("type".to_string(), Value::from("string"));
+                spec.insert(
+                    "pattern".to_string(),
+                    Value::from(format!("^{}", escape_regex(prefix))),
+                );
+            }
+        }
+        properties.insert(actor_name.to_string(), Value::Object(spec));
+        if base_required.contains(&name.as_str()) {
+            required.push(Value::from(actor_name));
+        }
+    }
+
+    let mut schema = Map::new();
+    schema.insert("type".to_string(), Value::from("object"));
+    schema.insert("properties".to_string(), Value::Object(properties));
+    if !required.is_empty() {
+        schema.insert("required".to_string(), Value::Array(required));
+    }
+    // Anything else the actor sends is stripped before execution (invariant 12),
+    // so the honest advertisement is a closed object.
+    schema.insert("additionalProperties".to_string(), Value::Bool(false));
+    Some(Value::Object(schema))
+}
+
+/// Escape `text` so it matches literally inside an ECMA/JSON-Schema regex. Only
+/// the syntax characters: `\-` and `\/` are invalid escapes in Unicode mode, which
+/// JSON Schema validators commonly use, and a Jira key like `PLAT-` has a `-`.
+fn escape_regex(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\^$.|?*+()[]{}".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +303,34 @@ mod tests {
         let schema = json!({"properties": {"path": {"type": "string"}}});
         let err = validate(&act(), &json!({"path": 7}), &schema, &Value::Null).unwrap_err();
         assert!(matches!(err, BuildError::SchemaViolation { .. }));
+    }
+
+    #[test]
+    fn undeclared_properties_are_rejected_by_default() {
+        let schema = json!({"properties": {"command": {"type": "string"}}});
+        let err = validate(
+            &act(),
+            &json!({"command": "echo safe", "argv": ["sh", "-c", "echo pwned"]}),
+            &schema,
+            &Value::Null,
+        )
+        .unwrap_err();
+        assert!(matches!(err, BuildError::SchemaViolation { .. }));
+    }
+
+    #[test]
+    fn additional_properties_can_be_explicitly_allowed() {
+        let schema = json!({
+            "properties": {"command": {"type": "string"}},
+            "additionalProperties": true
+        });
+        assert!(validate(
+            &act(),
+            &json!({"command": "echo safe", "argv": ["echo", "ok"]}),
+            &schema,
+            &Value::Null,
+        )
+        .is_ok());
     }
 
     #[test]

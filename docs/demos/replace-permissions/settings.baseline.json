@@ -1,0 +1,21 @@
+{
+  "_comment": "Replace-mode baseline for the 'govern Claude with a manifest, not a JSON pile' case study. The WorldManifest (.claude/cc-world.yaml) is the source of truth — this file is deliberately MINIMAL. permissions.deny/ask are EMPTY on purpose: native deny/ask rules still fire even when the hook grants, so a non-empty pile here would override the manifest. The PreToolUse hook runs `harness cc-hook --grant --enforce-absent`: ALLOW verdicts are GRANTED (no Allow/Deny prompt), ABSENT/denied are blocked, and the taint floor still severs tainted egress. Caveats (DYOR): a hook `allow` cannot override an org-set connector 'ask' or an MCP tool marked requiresUserInteraction, and it governs tool *calls*, not the tool *surface* (it cannot make a tool ABSENT from Claude's view). Replace /ABS/PATH and ensure `harness` is on PATH.",
+  "permissions": {
+    "allow": [],
+    "deny": [],
+    "ask": []
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "harness cc-hook --grant --enforce-absent --world /ABS/PATH/TO/ai2rules/.claude/cc-world.yaml --state /ABS/PATH/TO/ai2rules/.claude/state"
+          }
+        ]
+      }
+    ]
+  }
+}

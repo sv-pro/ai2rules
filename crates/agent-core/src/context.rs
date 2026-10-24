@@ -5,15 +5,20 @@
 //! payloads never enter context; the model sees typed [`Perception`]s.
 
 use harness_types::{ActionName, CompiledWorld, Descriptor, Perception};
-use provider_adapters::anthropic;
+use provider_adapters::{anthropic, ToolOutcome};
 use serde_json::Value;
 
-/// What the model sees this turn: prior perceptions and the tool surface.
+/// What the model sees this turn: prior perceptions, the tool surface, and the
+/// provider-formatted result of its immediately preceding tool call.
 #[derive(Debug, Clone)]
 pub struct TurnContext {
     pub perceptions: Vec<Perception>,
     /// Anthropic-format tool definitions for exactly the projected actions.
     pub tools: Value,
+    /// Anthropic `tool_result` for the immediately preceding `tool_use`, if any.
+    /// `ModelClient` is stateful, so this is a one-turn input rather than a
+    /// duplicate conversation history.
+    pub last_tool_result: Option<Value>,
 }
 
 /// The projected tool surface: each projected action paired with its descriptor.
@@ -25,11 +30,21 @@ pub fn tool_surface(world: &CompiledWorld) -> Vec<(ActionName, &Descriptor)> {
         .collect()
 }
 
-/// Pack typed perceptions plus the projected surface into a turn context.
-pub fn pack(world: &CompiledWorld, perceptions: Vec<Perception>) -> TurnContext {
+/// Pack typed perceptions, the projected surface, and the previous neutral tool
+/// outcome into a provider-facing turn context.
+pub fn pack(
+    world: &CompiledWorld,
+    perceptions: Vec<Perception>,
+    last_outcome: Option<&ToolOutcome>,
+) -> TurnContext {
     let surface = tool_surface(world);
     let tools = anthropic::tool_definitions(&surface);
-    TurnContext { perceptions, tools }
+    let last_tool_result = last_outcome.map(anthropic::format_tool_result);
+    TurnContext {
+        perceptions,
+        tools,
+        last_tool_result,
+    }
 }
 
 #[cfg(test)]
@@ -51,7 +66,7 @@ mod tests {
     #[test]
     fn pack_exposes_tools_as_anthropic_defs() {
         let world = compile_default();
-        let ctx = pack(&world, Vec::new());
+        let ctx = pack(&world, Vec::new(), None);
         let tools = ctx.tools.as_array().expect("tools is an array");
         assert_eq!(tools.len(), tool_surface(&world).len());
         assert!(tools

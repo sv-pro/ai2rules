@@ -60,17 +60,77 @@ pub struct BaseActionDef {
     pub backing: Option<BackingIdentity>,
     #[serde(default)]
     pub approval_required: bool,
+    /// Whether the action is projected onto the model-facing surface (DECISIONS D79). `false`
+    /// keeps it in the ontology as the backing of scoped capabilities while the
+    /// model sees it as ABSENT. Skipped when `true` so existing manifests keep
+    /// their hash.
+    #[serde(default = "projected_default", skip_serializing_if = "is_projected")]
+    pub projected: bool,
+}
+
+fn projected_default() -> bool {
+    true
+}
+
+fn is_projected(projected: &bool) -> bool {
+    *projected
 }
 
 /// Where a scoped-capability argument's value comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArgSource {
-    /// Fixed value baked in; invisible to the actor, injected at execution.
-    Literal(String),
-    /// Supplied by the actor at call time.
+    /// Fixed value baked in; invisible to the actor, injected at execution. Any
+    /// JSON value: `!Literal pytest`, `!Literal 50`, `!Literal true`.
+    Literal(Value),
+    /// Supplied by the actor at call time, under the argument's own name.
     ActorInput,
+    /// Supplied by the actor at call time, optionally renamed and limited to
+    /// allowed values (DECISIONS D79).
+    Input(InputRule),
     /// Resolved from a named runtime context key.
     ContextRef(String),
+}
+
+impl ArgSource {
+    /// The name the actor supplies this argument under, or `None` when the actor
+    /// does not supply it at all (a literal or a context ref). `arg` is the
+    /// argument's name in the base action.
+    pub fn actor_name<'a>(&'a self, arg: &'a str) -> Option<&'a str> {
+        match self {
+            ArgSource::ActorInput => Some(arg),
+            ArgSource::Input(rule) => Some(rule.exposed_as.as_deref().unwrap_or(arg)),
+            ArgSource::Literal(_) | ArgSource::ContextRef(_) => None,
+        }
+    }
+}
+
+/// How the actor may supply one scoped-capability argument (DECISIONS D79).
+/// Both limits apply when both are set.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputRule {
+    /// The name the actor sees and supplies; the kernel maps it back to the base
+    /// action's argument name. `None` keeps the base name.
+    #[serde(default, rename = "as", skip_serializing_if = "Option::is_none")]
+    pub exposed_as: Option<String>,
+    /// The only values the actor may supply. Empty means no list limit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub one_of: Vec<Value>,
+    /// A string the supplied value must start with. Only strings can match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+}
+
+impl InputRule {
+    /// Does `value` satisfy every limit this rule sets?
+    pub fn admits(&self, value: &Value) -> bool {
+        if !self.one_of.is_empty() && !self.one_of.contains(value) {
+            return false;
+        }
+        match &self.prefix {
+            Some(prefix) => value.as_str().is_some_and(|s| s.starts_with(prefix)),
+            None => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +139,22 @@ pub struct ScopedCapabilityDef {
     pub base_action: ActionName,
     #[serde(default)]
     pub args: BTreeMap<String, ArgSource>,
+    /// What the model is told the tool does (D79). A gateway shows this instead of
+    /// the upstream's description, which names the base action's arguments and is
+    /// untrusted text besides (D51). Skipped when absent so existing manifests keep
+    /// their hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// The MCP server a gateway presents in place of its upstream (DECISIONS D79):
+/// the name it announces, and which `McpServer` backing it fronts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpSurfaceDef {
+    /// The server name announced to hosts, e.g. `My_Jira`.
+    pub name: String,
+    /// The `server` of the `McpServer` backings this surface fronts.
+    pub upstream: String,
 }
 
 /// One class of a host-syntactic command classifier (DECISIONS D36): if any
@@ -94,20 +170,99 @@ pub struct CommandClassRule {
 
 /// A manifest-declared command classifier (DECISIONS D36): for calls proposed
 /// as `action`, inspect the string argument named `arg` (default `command`) and
-/// reclassify to the first matching class's `to` action. Classification is world
-/// *data* compiled into `CompiledWorld` — never adapter code — so every host
-/// shares byte-identical classification.
+/// reclassify to the first matching class's `to` action. `default_to` is the
+/// optional fail-closed fallback when no pattern matches or the command argument
+/// is missing/malformed. Classification is world *data* compiled into
+/// `CompiledWorld` — never adapter code — so every host shares byte-identical
+/// classification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandClassDef {
     pub action: ActionName,
     #[serde(default = "default_command_arg")]
     pub arg: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_to: Option<ActionName>,
     #[serde(default)]
     pub classes: Vec<CommandClassRule>,
 }
 
 fn default_command_arg() -> String {
     "command".to_string()
+}
+
+/// One file action a path classifier inspects, and the argument that carries its
+/// target path in this host's vocabulary (`file_path` for Claude Code's
+/// `Write`/`Edit`/`MultiEdit`, `notebook_path` for `NotebookEdit`, `path` for
+/// Antigravity after the adapter's alias step).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathClassSource {
+    pub action: ActionName,
+    pub arg: String,
+}
+
+/// A manifest-declared **path classifier** (DECISIONS D83): a call proposed as
+/// one of the `from` actions is reclassified to `to` when its target path matches
+/// any of `patterns`. Where `command_classes` (D36) reads a raw command string,
+/// this reads a *path*: the adapter-resolved canonical path (`GateRequest.path`)
+/// and the lexically normalized argument, so `./CLAUDE.md`, `docs/../CLAUDE.md`,
+/// an absolute path and `claude.md` all reach the same class. Patterns are
+/// case-insensitive `/`-separated globs: `*` within one segment, `**` across any
+/// number of them (including none).
+///
+/// It exists for instruction and memory files: a write to `CLAUDE.md` is a write
+/// to the next session's trusted context, so it belongs under the taint floor
+/// (`side_effect: Memory`), not beside ordinary `FilesystemWrite`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathClassDef {
+    pub to: ActionName,
+    #[serde(default)]
+    pub from: Vec<PathClassSource>,
+    #[serde(default)]
+    pub patterns: Vec<String>,
+}
+
+/// How a filesystem path may be accessed under a root rule (spatial scope).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RootAccess {
+    /// Reads allowed; writes/patches denied.
+    Read,
+    /// Reads and writes allowed.
+    ReadWrite,
+    /// Any access requires human approval.
+    Ask,
+    /// No access — the path is out of bounds.
+    Deny,
+}
+
+/// One path-scope rule (spatial confinement). Longest matching prefix wins, so a
+/// longer `Deny` shadows a broader `ReadWrite`. `class` tags the matched path's
+/// data class; `taint_source` makes reads under this path taint the session —
+/// the D25/D37-deferred read-taint, now *declared* per path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootRule {
+    pub path: String,
+    pub access: RootAccess,
+    #[serde(default)]
+    pub class: Option<DataClass>,
+    #[serde(default)]
+    pub taint_source: bool,
+}
+
+fn default_root_default() -> RootAccess {
+    RootAccess::Ask
+}
+
+/// Path-scoped capabilities (`roots`) — the spatial axis the kernel was blind to.
+/// Absent ⇒ no path scope (legacy behavior). Present ⇒ file actions are decided by
+/// *where* they land, closed-world: a path outside every rule gets `default`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootsDef {
+    /// Access for a path matching no rule (the closed-world floor). `Ask` = soft
+    /// jail (prompt), `Deny` = hard jail.
+    #[serde(default = "default_root_default")]
+    pub default: RootAccess,
+    #[serde(default)]
+    pub rules: Vec<RootRule>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +286,22 @@ pub struct Budget {
     pub max_network_calls: Option<u64>,
     #[serde(default)]
     pub max_file_writes: Option<u64>,
+}
+
+impl Budget {
+    /// Does this world declare any budget a *decision* can exceed?
+    ///
+    /// `command_timeout_ms` is deliberately excluded: it bounds one execution and is
+    /// enforced by the executor, not by counting calls, so it does not oblige a
+    /// caller to carry usage. The counted limits do — see the gate ABI's
+    /// `missing_usage`, which mirrors `missing_path` for roots: a limit a thin
+    /// adapter can skip by omitting its counters is not a limit.
+    pub fn counts_calls(&self) -> bool {
+        self.max_tokens_per_session.is_some()
+            || self.max_commands_per_task.is_some()
+            || self.max_network_calls.is_some()
+            || self.max_file_writes.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,8 +330,21 @@ pub struct WorldManifest {
     /// pre-D36 manifests keep their manifest hash.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub command_classes: Vec<CommandClassDef>,
+    /// Path classifiers for instruction and memory files (DECISIONS D83). Skipped
+    /// when empty so earlier manifests keep their manifest hash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_classes: Vec<PathClassDef>,
     #[serde(default)]
     pub transition_policies: Vec<TransitionPolicy>,
+    /// Path-scoped capabilities (spatial confinement). Absent ⇒ no path scope, so
+    /// pre-roots manifests keep their hash and their behavior unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roots: Option<RootsDef>,
+    /// The MCP server a gateway presents for this world (DECISIONS D79). Absent ⇒
+    /// the gateway keeps its default name; skipped so existing manifests keep
+    /// their hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_surface: Option<McpSurfaceDef>,
     #[serde(default)]
     pub budget: Budget,
     #[serde(default)]
