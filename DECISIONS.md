@@ -3318,6 +3318,81 @@ marker. Closing that needs the kernel's state behind a boundary the user cannot
 cross, such as a system service the hook asks. Also unverified: whether `claude
 --bare` skips managed hooks. The docs do not say.
 
+## D83 — Instruction and memory files are durable memory: classified on the canonical path
+
+**Date:** 2026-10-23. Adds `path_classes` to the world manifest
+(`harness-types`, `compiler`, `harness-preview::gate`) and to every host world.
+Issue AI2-64 / #137, gap G1 of the *Designing AI Agents* review.
+
+**Context.** Claude Code loads some files as instructions into every later session:
+`CLAUDE.md` / `AGENTS.md` at any level, `~/.claude/CLAUDE.md`, auto-memory under
+`~/.claude/projects/*/memory/`, and skills, agents and commands under `.claude/`.
+Antigravity has its own (`GEMINI.md`, `.agents/rules/**`, …). The worlds classified
+writing one as plain `FilesystemWrite`, outside the taint floor. With 0.7.0 a
+tainted `Write` to `CLAUDE.md` was ALLOW while a tainted `WebFetch` was DENY. A
+session that had read outside content could leave instructions for the next
+session, which loads them as trusted context: taint laundered across the session
+boundary.
+
+`command_classes` (D36) could not express the fix. It matches the raw
+`arguments[arg]` string, so it misses `./CLAUDE.md`, `docs/../CLAUDE.md`, an
+absolute path, `claude.md` and backslashes. The canonical path already travels
+separately, in `GateRequest.path`.
+
+**Decision.**
+
+- **A second classifier kind, `path_classes`.** Each lists `from` actions, each with
+  the argument that carries its path in this host's vocabulary (`file_path` for
+  `Write`/`Edit`/`MultiEdit`, `notebook_path` for `NotebookEdit`, `path` for
+  Antigravity after the alias step), and reclassifies to `to` when the path
+  matches a pattern. Patterns are case-insensitive `/`-globs (`*` within a segment,
+  `**` across segments).
+- **It matches the canonical path *or* the written argument.** The gate passes
+  `GateRequest.path`; the argument is normalized lexically (either separator, `.`,
+  `..`). Taking both fails closed whichever way a symlink points. Case is ignored
+  everywhere: on a case-insensitive filesystem `claude.md` *is* `CLAUDE.md`, and on
+  a case-sensitive one the extra match only errs toward caution. Pure string work in
+  `CompiledWorld::classify_call`, so native and WASM share it (D75).
+- **The target is `side_effect: Memory`**, under the hard taint floor. A tainted
+  write is `DENY taint_invariant`, the same rule as tainted egress. The issue text
+  expected `no_tainted_memory_write`; that manifest rule is shadowed by the hard
+  floor for every externally-effectful class, as `no_tainted_network` already is.
+- **A file write into memory ingests nothing.** The gate treated every allowed
+  `Memory` call as ingress and tainted the session. For a write that is wrong: it
+  returns an acknowledgement, not stored content. Without this, every clean edit of
+  `CLAUDE.md` or an auto-memory file would have tainted the rest of the session.
+  `action_type: Memory` calls (recall) still taint.
+- **Clean sessions: ALLOW in project worlds, ASK in machine-scope worlds.** A
+  project's own instructions are ordinary work there. The `--user` / `--managed`
+  worlds (D82) govern every project and `~/.claude` itself, so a clean write asks.
+  `init_machine::render_world` makes the swap and fails loudly if the starter loses
+  the line.
+- **One pattern list for every host**, pinned byte-identical by
+  `tests/one_kernel.rs`. A file one host writes is context another host loads.
+- **One classifier per action, of either kind.** The loader refuses an action in two
+  path classes, or under both a command and a path classifier (findings #17 / #20).
+  Within one class an action may be read under several keys: the host-neutral
+  conformance world names both `file_path` and the `path` that Antigravity's adapter
+  aliases into, because a `..` below a missing folder leaves no resolved path to
+  fall back on.
+
+**Alternatives.**
+
+- *World data only: a second `command_classes` entry per file tool.* Rejected. It
+  matches raw strings, so every spelling above slips past.
+- *`side_effect: PersistentWrite`.* Avoids the ingress-taint change, but these
+  files are memory in exactly the THESIS §2 sense, and the class should say so.
+- *Have the kernel read the filesystem to resolve case.* Rejected: the kernel stays
+  pure; the adapter already canonicalizes.
+
+**Consequence.** Tainted sessions can no longer write the next session's
+instructions through file tools, on Claude Code and Antigravity. Known residuals:
+shell writes (`echo >> CLAUDE.md`) are not file actions and stay with the shell
+classifier (`Bash_unclassified` → ASK, D57's residual); Antigravity's `move` is not
+classified, because its destination key has not been captured from a live
+session; the OpenCode and DeepSeek Harness worlds carry no path class yet. On
+Windows the backslash spellings are tested; the rest of Windows parity is AI2-57.
+
 ## D87 — A broken world follows a declared mode (closed / open / last-good), and says so
 
 **Date:** 2026-10-23. AI2-56 / #128. Adds `--on-broken-world` to `harness cc-hook`

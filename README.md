@@ -278,7 +278,11 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   as typed manifest fields. Cross-agent taint still follows the shared session
   sidecar (E13.6, D20), and the containerized governed SUT with an
   egress-allowlist proxy supplies the E8 enforcement floor (E13.7, D21).
-  See `DECISIONS.md` D19–D21, D29, D36, D37.
+  Instruction and memory files (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`,
+  auto-memory, Antigravity's equivalents) are classified by `path_classes` on the
+  canonical path as durable-memory writes, so a tainted session cannot leave
+  instructions for the next one (E13.10, D83).
+  See `DECISIONS.md` D19–D21, D29, D36, D37, D83.
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the
@@ -390,7 +394,7 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **466 tests** green.
+Builds clean offline with `clippy -D warnings`; **475 tests** green.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

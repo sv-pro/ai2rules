@@ -76,9 +76,9 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all passing, native):**
-harness-types 5 · world-kernel 61 · compiler 28 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 64 · cli-harness 185 ·
-harness-wasm 0 · govbench 9 · **total 466** (plus the harness-wasm Node smoke
+harness-types 9 · world-kernel 61 · compiler 29 · executor 28 · trace-store 63 ·
+provider-adapters 5 · agent-core 18 · harness-preview 65 · cli-harness 188 ·
+harness-wasm 0 · govbench 9 · **total 475** (plus the harness-wasm Node smoke
 tests, run via wasm-pack)
 
 ---
