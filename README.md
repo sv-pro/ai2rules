@@ -662,6 +662,12 @@ MCP **proxy sidecar**, the `world-kernel` **library**) and who each is for — i
 an app* (governance you plug into a host you already run; the standalone-agent path is
 cut) — see `DECISIONS.md` **D31**.
 
+For reviewers who ask which obligation a control is evidence for, and what it leaves
+behind to inspect, **[`docs/compliance-evidence-map.md`](docs/compliance-evidence-map.md)**
+maps each control to its artifact (a file, a test, a decision) and to the EU AI Act,
+NIST AI RMF, ISO/IEC 42001 and OWASP Agentic Top 10 clauses it can support, with the
+host limits of the default configuration beside each row. It is not a compliance claim.
+
 Speculative, research-grade directions that aren't committed work (e.g. a cross-host
 "super-harness" governance plane) are parked in the idea pool at
 **[`docs/RESEARCH-BACKLOG.md`](docs/RESEARCH-BACKLOG.md)**.
