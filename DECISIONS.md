@@ -3457,12 +3457,11 @@ rates) can be computed.
   treat a post-call event as a second gate call, charging budget counters twice.
   `init` cannot hit this, because it writes the shim and the settings from the same
   binary.
-- *OTLP export with the OpenTelemetry GenAI conventions, behind a flag.* Left out:
-  the OpenTelemetry crates are not in the offline crate cache, they are a heavy
-  tree for a binary that runs on every tool call, and network I/O from the hook
-  adds latency to every call and egress from inside the governed session. The
-  follow-up is a separate converter from a finished log to OTLP/JSON for a
-  collector's file receiver, which needs no new dependency.
+- *OTLP export with the OpenTelemetry GenAI conventions, behind a flag on the hook.*
+  Rejected: the OpenTelemetry crates are not in the offline crate cache, they are
+  a heavy tree for a binary that runs on every tool call, and network I/O from the
+  hook adds latency to every call and egress from inside the governed session.
+  Export is a separate, offline step instead (addendum below).
 
 **Consequence.** A session's log now answers, per call: who proposed it, what the
 kernel decided, what the hook told the host, whether it ran, and how it ended; and
@@ -3471,3 +3470,37 @@ honest limits: the ASK answer is an inference with three named failure cases (no
 observer, a call still running, an outcome line that was not written), and
 Antigravity's ASKs are not joined at all until its post-call hook contract is
 verified.
+
+**Addendum (AI2-66 / #141): export is offline, and conservative about the
+conventions.** `harness export-otlp --log` converts a finished log to OTLP/JSON
+(`ExportTraceServiceRequest` per line, for a collector's `otlpjsonfile` receiver),
+written by hand with `serde_json`: OTLP/JSON is a small, stable shape, and the SDK
+would bring the dependency tree this decision rejected for the hook. The mapping
+choices, each closing an alternative:
+
+- *One trace per session, one span per decision.* Not one trace per call: a session
+  is the unit an incident is reconstructed in, and the book's requirement is one
+  trace id across proposal, approval and execution. Not separate spans for decision
+  and outcome: the convention says one span per tool call; the two moments are span
+  events.
+- *Only identifiers the host supplied.* `gen_ai.tool.call.id` is set only from a
+  real `tool_use_id`, as the convention requires; Claude Code's `agent_id` goes to
+  `ai2rules.agent_id`, because `gen_ai.agent.id` means a stable hosted-agent
+  resource and a subagent run is not one. `agent_type` is `gen_ai.agent.name`.
+- *Refusals are errors; declined prompts are not.* A DENY is status `ERROR` with
+  `error.type = ai2rules.denied`; an ASK the person did not let through is `UNSET`,
+  with `ai2rules.human_answer` still marked as inferred.
+- *Summaries stay opt-in and under `ai2rules.*`.* `--with-summaries` exports the
+  redacted call and result summaries as `ai2rules.call` / `ai2rules.result`, not as
+  `gen_ai.tool.call.arguments` / `.result`, which the conventions define as the
+  argument and result objects the log deliberately does not keep.
+- *Ids are derived, not random* (`md5`, already in the build): trace IDs use the
+  session; span IDs use a framed tuple of session, optional call ID and a per-call
+  occurrence index (`ai2rules.decision_index`). Re-exporting the same finished
+  log preserves IDs. Repeated hooks can log multiple decisions for one call;
+  coalescing them would discard distinct verdicts and ASK/DENY inferences, so
+  each remains a span, correlated by the unchanged host call ID and session.
+  These spans count decisions rather than distinct executions. Id-less records
+  have a separate per-session sequence. Inserting another call or a non-decision
+  record does not renumber this call; editing its decision sequence can. This
+  corrects the original call-only seed: span IDs change once across that fix.

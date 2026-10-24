@@ -342,7 +342,11 @@ the kernel decided. The same log joins each decision to its outcome (D84): every
 carries the host's `tool_use_id` and agent, and a read-only `PostToolUse` observer,
 which `harness init` wires in, records how each call that ran ended. That is enough
 to tell an approved ASK from a declined one, inferred from whether the call ran
-([`docs/host-decision-log.md`](docs/host-decision-log.md)). Call summaries mask
+([`docs/host-decision-log.md`](docs/host-decision-log.md)). `harness export-otlp`
+turns a finished log into OpenTelemetry traces (OTLP/JSON, GenAI `execute_tool`
+spans, one trace per session) for an existing collector, offline. Repeated hook
+decisions retain distinct, stable span IDs and their original call ID for correlation.
+Call summaries mask
 recognized secrets before whitespace normalization and truncation, so shortening
 cannot expose a credential fragment. Off takes the action out of the agent's world (ABSENT, with
 `--enforce-absent`); the taint floor has no switch. Runbook and scenario:
@@ -398,7 +402,9 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **482 tests** green.
+Builds clean offline with `clippy -D warnings`; **491 tests** green. Unix machine-hook
+tests feed prepared events through stdin so a disabled hook's early exit cannot
+race the fixture writer.
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.

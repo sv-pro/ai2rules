@@ -148,20 +148,57 @@ same binary, which rules this out. The repository's own dogfood hook
 (`.claude/settings.json`) runs whatever `harness` is installed on the machine, so
 it is left without the observer until that install is updated.
 
-## Not done: OpenTelemetry export
+## OpenTelemetry export: `harness export-otlp`
 
-The gap review proposed an optional OTLP export of these lines, using the
-OpenTelemetry GenAI semantic conventions (`gen_ai.operation.name =
-"execute_tool"`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.agent.id`,
-`gen_ai.conversation.id`). It is left out:
+The hook itself never sends telemetry (D84): the OpenTelemetry crates are not in
+the offline crate set, and a connection on every tool call would add latency and
+egress from inside the governed session. A **finished** log is converted instead,
+offline (AI2-66):
 
-- The OpenTelemetry crates (`opentelemetry`, `opentelemetry-otlp` and their gRPC or
-  HTTP transport) are not in the offline crate cache, and they are a heavy
-  dependency tree for a hook binary that runs on every tool call.
-- A hook that opens a network connection on every call adds latency to every call,
-  and is egress from inside the governed session, which this project otherwise
-  treats with suspicion.
+```bash
+harness export-otlp --log .claude/state/decisions.jsonl --out traces.jsonl
+```
 
-The follow-up that avoids both: a separate `harness export-otlp --log
-decisions.jsonl` that converts a finished log into OTLP/JSON, with no new
-dependency, for a collector's file receiver to ingest. The hook stays offline.
+The output is OTLP/JSON, one `ExportTraceServiceRequest` per line, which is what a
+collector's `otlpjsonfile` receiver reads. It parses as a valid protobuf
+`ExportTraceServiceRequest` once its hex ids are read as OTLP/JSON specifies.
+
+The mapping follows the *execute tool* span of the GenAI semantic conventions
+(`open-telemetry/semantic-conventions-genai`, status Development):
+
+| OTLP | from the log |
+|---|---|
+| trace | one per `session`: proposal, approval and execution of every call in a session share a trace id |
+| span | one per decision line, named `execute_tool {tool}`, kind `INTERNAL`, from the decision's `ts_ms` to the outcome's (or zero-length when the call did not run) |
+| `gen_ai.operation.name` | `execute_tool` |
+| `gen_ai.tool.name` | `tool` |
+| `gen_ai.tool.call.id` | `tool_use_id`, **only** when the host supplied one, as the convention requires |
+| `gen_ai.conversation.id` | `session` |
+| `gen_ai.agent.name` | `agent_type` (`Explore`, …). `agent_id` names one subagent run, not the stable hosted-agent resource `gen_ai.agent.id` means, so it goes to `ai2rules.agent_id` |
+| `error.type` + status `ERROR` | `ai2rules.denied` when the gate refused the call (status message: the reason); `tool_error` / `interrupted` when it ran and failed |
+| status `OK` | the call ran and succeeded |
+| status `UNSET` | the call did not run for another reason (a declined prompt, the host's own flow), or the log has no observer |
+| `ai2rules.*` | `decision`, `action`, `rule`, `answer`, `human_answer` (still **inferred**), `ran`, `status`, `exit_code`, `duration_ms`, `taint`, `manifest_hash`, `host`, `step_idx`, `ran_despite_deny` |
+| span events | `ai2rules.decision` at the verdict and `ai2rules.outcome` at the result |
+
+**Summaries are opt-in.** The conventions make tool arguments and results opt-in
+because they may be sensitive. The log only holds redacted summaries, but they are
+still exported only with `--with-summaries`, as `ai2rules.call` and
+`ai2rules.result`: `gen_ai.tool.call.arguments` is defined as the argument object,
+which the log deliberately does not keep.
+
+Trace IDs are derived from the session. Span IDs hash a framed tuple of session,
+optional `tool_use_id` and a zero-based occurrence index for that session/call.
+The index is exported as `ai2rules.decision_index`. Repeated hook invocations
+(including identical decision lines) therefore retain separate spans, correlated
+by `gen_ai.conversation.id` and the unchanged `gen_ai.tool.call.id`. Each span
+keeps its own decision and ASK/DENY inference, joined to the call's shared outcome.
+These spans count decisions, not distinct tool executions.
+
+Re-exporting the same finished log yields the same IDs. Interleaving other calls,
+outcomes or policy markers does not renumber a call's decisions; removing or
+reordering decisions within that call can change their IDs. A pre-D84 line (no
+`kind`, no id) still exports without `gen_ai.tool.call.id`; id-less decisions use
+their own per-session occurrence sequence. The occurrence scheme changes span IDs
+from the original exporter, so re-exporting a previously ingested log across this
+change may duplicate those historical spans in a collector.

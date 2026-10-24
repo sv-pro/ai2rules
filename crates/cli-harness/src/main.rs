@@ -26,6 +26,7 @@ mod local_page;
 mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
+mod otlp;
 mod outcome;
 mod project;
 mod replay_transcripts;
@@ -149,6 +150,23 @@ enum Command {
         /// the live verdict and its outcome by `tool_use_id` (D84).
         #[arg(long)]
         decisions: Option<PathBuf>,
+    },
+    /// Convert a finished host decision log (`cc-hook --log`) to OpenTelemetry
+    /// traces as OTLP/JSON, for a collector's `otlpjsonfile` receiver (AI2-66).
+    /// One trace per session, one GenAI `execute_tool` span per decision, from
+    /// the verdict to the call's outcome. Offline: nothing is sent anywhere.
+    ExportOtlp {
+        /// The decision log to convert.
+        #[arg(long)]
+        log: PathBuf,
+        /// Write here instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Also export the call and result summaries (already redacted, D66).
+        /// Off by default: the GenAI conventions make tool arguments and
+        /// results opt-in, as they may be sensitive.
+        #[arg(long)]
+        with_summaries: bool,
     },
     /// Launch the World Authoring Tool: a local browser editor for world
     /// manifests, backed by the real compiler + kernel (E11).
@@ -501,6 +519,19 @@ fn main() {
             examples: *examples,
             json: *json,
             decisions: decisions.as_deref(),
+        }));
+    }
+
+    if let Some(Command::ExportOtlp {
+        log,
+        out,
+        with_summaries,
+    }) = &cli.command
+    {
+        std::process::exit(otlp::run(&otlp::Options {
+            log,
+            out: out.as_deref(),
+            with_summaries: *with_summaries,
         }));
     }
 

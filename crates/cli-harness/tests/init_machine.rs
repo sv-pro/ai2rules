@@ -444,7 +444,7 @@ fn managed_remove_restores_the_policy() {
 #[cfg(unix)]
 mod shim {
     use super::*;
-    use std::io::Write as _;
+    use std::io::{Seek as _, Write as _};
     use std::process::Stdio;
 
     /// Feed one PreToolUse event to a shim, as Claude Code would from a session in
@@ -456,26 +456,27 @@ mod shim {
         payload: Value,
         env: &[(&str, &str)],
     ) -> String {
+        // A disabled shim exits before reading stdin. Prepare the event before
+        // spawning it so that this valid early exit cannot race write_all on a
+        // pipe and fail the test with BrokenPipe.
+        let mut input = tempfile::tempfile().expect("event file");
+        input.write_all(payload.to_string().as_bytes()).unwrap();
+        input.rewind().unwrap();
         let mut cmd = Command::new("bash");
         cmd.arg(shim)
             .current_dir(project)
             .env("HOME", home)
             .env("CLAUDE_PROJECT_DIR", project)
             .env_remove("HARNESS_BIN")
-            .stdin(Stdio::piped())
+            .stdin(Stdio::from(input))
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         for (k, v) in env {
             cmd.env(k, v);
         }
-        let mut child = cmd.spawn().expect("spawn shim");
-        child
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(payload.to_string().as_bytes())
-            .unwrap();
+        let child = cmd.spawn().expect("spawn shim");
         let out = child.wait_with_output().expect("shim output");
+        assert!(out.status.success(), "shim failed: {}", out.status);
         String::from_utf8_lossy(&out.stdout).to_string()
     }
 
