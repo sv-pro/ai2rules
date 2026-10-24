@@ -33,3 +33,8 @@ Local validation: complete workspace tests and `clippy -D warnings` passed on
 WSL/Linux. Two existing shell fixtures needed temporary CRLF-to-LF conversion
 for Bash; their original bytes were restored. Governance benchmark passed over
 both transports and its committed reports are unchanged.
+
+CI follow-up: the first WASM job detected CRLF embedded from the Windows checkout
+while CI builds from LF. Rebuilt with the single embedded default_world.yaml
+normalized temporarily, checked freshness, then restored its exact original bytes.
+No compiler logic or manifest content changed.
