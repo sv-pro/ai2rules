@@ -595,6 +595,13 @@ New task list:
   session — same call, gate-side, before reaching Atlassian. Only an optional recorded
   walkthrough remains.
 
+- [x] **Confluence authoring skin** (AI2-71 / PR #16): create pinned to tenant/space,
+  update pinned to tenant/page with ASK. All remote reads have MCP backings and
+  taint the session, so subsequent external writes are refused. Five offline
+  regressions in `tests/confluence_world.rs` include the gateway read-to-create
+  sequence. The original live evidence predates these corrections; the corrected
+  manifest has not been rerun against live Atlassian.
+
 *(The original Python-path tasks below are superseded by D33; kept for history.)*
 
 - [~] **E16.1** Compose glue + validation. **Done:** built `safe_mcp_proxy.mcp_gateway`

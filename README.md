@@ -319,6 +319,12 @@ via an `mcp-remote` OAuth bridge with no kernel change — and its shaping is pr
 offline (no creds) by `harness mock-jira --rovo`, which advertises the genuine Rovo
 tool names (see [`docs/demos/jira-copilot/REAL-ATLASSIAN.md`](docs/demos/jira-copilot/REAL-ATLASSIAN.md)).
 
+The [Confluence authoring world](docs/demos/confluence-docs/) confines creation to
+one tenant/space and updates to one tenant/page (ASK, not forwarded by the gateway).
+All five remote reads taint the session, preventing subsequent external writes.
+Five offline regressions cover the pins, read-to-write taint and gateway sequence;
+the corrected manifest has not been revalidated against live Atlassian.
+
 **Author your own MCP surface (D79, E13.4):** `harness mcp-author` connects to an MCP
 server and opens a local page where you name the surface the gateway will present
 (say `My_Jira`), tick the tools that exist (everything else is ABSENT), rename them,
@@ -413,7 +419,7 @@ Consent is exact-bound, expires after five minutes, and is durably consumed befo
 forwarding; uncertain upstream outcomes require operator reconciliation. See the
 [approval workflow](docs/approval-capable-hosts.md).
 
-Builds clean offline with `clippy -D warnings`; **507 tests** green. Unix machine-hook
+Builds clean offline with `clippy -D warnings`; **512 tests** green. Unix machine-hook
 tests feed prepared events through stdin so a disabled hook's early exit cannot
 race the fixture writer.
 

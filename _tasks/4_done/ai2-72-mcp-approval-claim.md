@@ -1,6 +1,6 @@
 # MCP approvals: claim before upstream effects
 
-**Owner:** Codex. **Status:** fix prepared; PR remains open, no merge authorized.
+**Owner:** Codex. **Status:** fix complete; maintainer authorized merge after fresh CI.
 **Linear:** [AI2-72](https://linear.app/ai2rules/issue/AI2-72/mcp-approvals-durable-pre-effect-claim-and-safe-ambiguous-outcomes-pr).
 **GitHub:** [PR #17](https://github.com/sv-pro/ai2rules/pull/17).
 **Branch:** `codex/ai2-72-pr17-approval-claim` → PR branch `approval-capable-hosts`.
@@ -25,8 +25,9 @@ grant reusable. Main's D73/D78 already supplies durable atomic consumption.
   checked the boundary; candidate review found no actionable findings.
 - D89 / E13.4d replace the old PR's collisions with occupied D71 / E18 numbering.
 
-Await CI and maintainer review. Do not merge or update the demo binary as part of
-this task. Windows approval storage remains the separate deferred #129 task;
+The maintainer authorized merging #16, then #17 on 2026-10-24, after checking CI
+and conflicts before each merge. Keep the demo binary unchanged. Windows approval
+storage remains the separate deferred #129 task;
 the new store integration tests run on Unix with Python 3.
 
 Local validation: complete workspace tests and `clippy -D warnings` passed on
@@ -38,3 +39,7 @@ CI follow-up: the first WASM job detected CRLF embedded from the Windows checkou
 while CI builds from LF. Rebuilt with the single embedded default_world.yaml
 normalized temporarily, checked freshness, then restored its exact original bytes.
 No compiler logic or manifest content changed.
+
+#16 merged as `970bfa2`. Its integration into #17 only conflicted in the README
+and AGENTS test counts; both suites are retained (512 tests total). GitHub and
+Linear carry the final merge SHA and CI evidence.

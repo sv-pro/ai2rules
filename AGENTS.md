@@ -77,8 +77,8 @@ harness-types (foundation — language-neutral contracts, pure data)
 
 **Test counts (all passing, native):**
 harness-types 9 · world-kernel 61 · compiler 29 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 66 · cli-harness 219 ·
-harness-wasm 0 · govbench 9 · **total 507** (plus the harness-wasm Node smoke
+provider-adapters 5 · agent-core 18 · harness-preview 66 · cli-harness 224 ·
+harness-wasm 0 · govbench 9 · **total 512** (plus the harness-wasm Node smoke
 tests, run via wasm-pack)
 
 ---
