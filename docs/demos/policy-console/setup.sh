@@ -20,6 +20,14 @@ DEST="${1:-$HOME/northwind}"
 DESK="$DEST/vendor-desk"
 RECEIVED="${RECEIVED:-$HOME/northwind-inbox}"
 HARNESS="${HARNESS:-$(command -v harness || true)}"
+PORT="${PORT:-8787}"
+CONSOLE_PORT="${CONSOLE_PORT:-8790}"
+for port in "$PORT" "$CONSOLE_PORT"; do
+  if ! [[ "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
+    echo "setup: PORT and CONSOLE_PORT must be in 1..65535." >&2
+    exit 2
+  fi
+done
 
 if [ -z "$HARNESS" ] || [ ! -x "$HARNESS" ]; then
   echo "setup: no 'harness' binary found. Install it outside this project:" >&2
@@ -54,7 +62,9 @@ cp "$HERE/world.yaml" "$DESK/.claude/cc-world.yaml"
 # each switch the presenter flips. Only here, not in the shared project kit, so
 # the side-by-side demo's copies do not get it.
 mkdir -p "$DESK/.claude/skills/northwind-demo"
-cp "$HERE/skill/SKILL.md" "$DESK/.claude/skills/northwind-demo/SKILL.md"
+sed -e 's/:8787/:__NORTHWIND_RECEIVER__/g' -e 's/:8790/:__NORTHWIND_CONSOLE__/g' \
+  -e "s/__NORTHWIND_RECEIVER__/$PORT/g" -e "s/__NORTHWIND_CONSOLE__/$CONSOLE_PORT/g" \
+  "$HERE/skill/SKILL.md" > "$DESK/.claude/skills/northwind-demo/SKILL.md"
 
 # Two flags the starter shim does not set:
 #   --enforce-absent  an action switched Off is refused, not left to Claude Code's
@@ -74,11 +84,11 @@ PY=python3
 echo "Ready. Next, each in its own terminal, left running:"
 echo
 echo "  1) receiver (the outside sites, all on 127.0.0.1):"
-echo "       $PY $KIT/receiver.py --out $RECEIVED"
-echo "  2) the console, then open http://127.0.0.1:8790/ in a browser:"
-echo "       $HARNESS console --project $DESK"
+echo "       $PY $KIT/receiver.py --port $PORT --out $RECEIVED"
+echo "  2) the console, then open http://127.0.0.1:$CONSOLE_PORT/ in a browser:"
+echo "       $HARNESS console --project $DESK --port $CONSOLE_PORT"
 echo "  3) check the stand:"
-echo "       bash $HERE/preflight.sh $DEST"
+echo "       HARNESS='$HARNESS' PORT=$PORT CONSOLE_PORT=$CONSOLE_PORT bash $HERE/preflight.sh $DEST"
 echo "  4) Claude Code in the project:"
 echo "       cd $DESK && claude --model claude-opus-4-8 --permission-mode default"
 echo

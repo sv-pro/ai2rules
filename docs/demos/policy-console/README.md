@@ -140,7 +140,7 @@ Terminal: Alt+Shift+= splits side by side, Alt+Shift+- splits top and bottom):
    harness console --project ~/northwind/vendor-desk
    ```
 
-4. **Preflight**, until it says "Ready to present.":
+4. **Preflight**, until it says "Stand checks passed":
 
    ```bash
    bash docs/demos/policy-console/preflight.sh
@@ -169,10 +169,20 @@ asks you in a question box ("Set the profile to Contractor in the console."). Fl
 the switch, talk to it, then click **Done**. Permission questions still come to
 you: answer step 2's with **No**, as below. At the end Claude writes a table of
 what it was told at each step; the console's feed is the record. Say it out loud:
-"The prompts follow a script. Every verdict is live." The skill never touches the
-console: an agent that changed its own policy would be the very thing this demo
-says cannot happen. A good mix is to type step 1 yourself, then run the skill
-for the rest.
+"The prompts follow a script. Every verdict is live." The skill is instructed
+to leave the console and policy to the presenter; the project-local policy is
+not tamper-proof (see Honest limits). Start the skill in a fresh session after
+setup: it always starts at step 1 and has no resume mode. Do not first fetch the portal manually
+in that session; its persisted taint would change the repeated fetch's verdict.
+
+The pauses must be confirmed in this order: **Contractor → Developer → Delete
+files Off → Send data out Allow**. Deny the deletion permission in between;
+leave the archive intact. Wait for each policy change to appear in the console
+feed before selecting **Done**. A successful preflight only checks the stand;
+before presenting, rehearse `/northwind-demo` interactively on the chosen host
+and model, and check the actual tool calls and decision log. If the model refuses
+without calling a tool, there is no kernel verdict for that step. The previous
+Opus 4.8 rehearsal is an observation, not a promise about the next run.
 
 **By hand.** Click **Contractor** in the console. Then type each prompt into Claude Code.
 
@@ -249,8 +259,10 @@ console starts the feed over by itself when the log is reset.
   `curl.exe`, `wget`, `Invoke-WebRequest` or `irm` there reads the web; one that
   also carries an upload flag (`-F`, `-InFile`, `-Method Post`, …) is ambiguous and
   asks first, then is refused once the session has read from outside.
-- **The skill lives in the project**, so with **Edit project files** on, the agent
-  could edit its own script. The world declares no path rules (`roots`) because
+- **The skill, world and hook live in the project**, so with **Edit project files**
+  on, the agent could edit its script or governance files. The skill's instruction
+  not to do so is not an enforced file boundary. The world declares no path rules
+  (`roots`) because
   enabling them changes every pathless file action's verdict (D61). A model
   rewriting the demo script is not a risk worth that change before the demo, but
   it is not prevented.
@@ -261,3 +273,6 @@ console starts the feed over by itself when the log is reset.
   read again.
 - **The log is observability.** If it cannot be written, the verdicts are unchanged
   and the feed simply misses lines.
+
+Native stand checks and remaining live acceptance are recorded in
+[the 24 October readiness report](READINESS-2026-10-24.md).

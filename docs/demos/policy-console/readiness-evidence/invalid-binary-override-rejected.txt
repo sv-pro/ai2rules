@@ -1,0 +1,10 @@
+
+  ok    harness: /workspace/scratch/a0a491ef16d7/bin/harness-x86_64-unknown-linux-musl/harness (cli-harness 0.7.0)
+  ok    project: /tmp/northwind-readiness-lj75bl31/stand/vendor-desk (hook with ABSENT enforced and the decision log on)
+  FAIL  hook/skill configuration: the hook binary is not an absolute executable: relative-harness
+  ok    world compiles and projects Skill and AskUserQuestion
+  ok    portal.northwind.test -> 127.0.0.1, receiver answers
+  ok    files.northwind.test -> 127.0.0.1, receiver answers
+  ok    console answers on http://127.0.0.1:60485/ for this project
+
+  1 check(s) failed.
