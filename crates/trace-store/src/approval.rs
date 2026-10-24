@@ -654,22 +654,13 @@ fn nix_getuid() -> u32 {
         .unwrap_or_else(|_| u32::MAX)
 }
 
-/// 32 bytes from the OS CSPRNG.
+/// 32 bytes from the OS CSPRNG (`getrandom(2)` on Linux, `ProcessPrng` on
+/// Windows, …). A failure is an error, never a weaker key.
 fn random_key() -> io::Result<Vec<u8>> {
-    #[cfg(unix)]
-    {
-        use std::io::Read as _;
-        let mut buf = vec![0u8; 32];
-        File::open("/dev/urandom")?.read_exact(&mut buf)?;
-        Ok(buf)
-    }
-    #[cfg(not(unix))]
-    {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "no CSPRNG wired up for this platform; the approval store needs one",
-        ))
-    }
+    let mut buf = vec![0u8; 32];
+    getrandom::fill(&mut buf)
+        .map_err(|e| io::Error::other(format!("the OS CSPRNG failed: {e}")))?;
+    Ok(buf)
 }
 
 /// A verified log folded into state, with what the chain needs to append to it.

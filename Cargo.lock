@@ -778,6 +778,7 @@ name = "trace-store"
 version = "0.7.0"
 dependencies = [
  "compiler",
+ "getrandom",
  "harness-types",
  "serde",
  "serde_json",

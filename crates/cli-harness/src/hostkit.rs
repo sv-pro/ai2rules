@@ -139,9 +139,11 @@ pub fn resolve_action_path(args: &Value, base: &str, home: Option<&str>) -> Opti
     } else if raw == "~" {
         PathBuf::from(home?)
     } else if let Some(rest) = raw.strip_prefix("~/") {
-        PathBuf::from(home?).join(rest)
+        join_relative(Path::new(home?), rest)?
+    } else if Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
     } else {
-        Path::new(base).join(raw)
+        join_relative(Path::new(base), raw)?
     };
     canonicalize_action_path(&path).map(path_to_string)
 }
@@ -176,6 +178,9 @@ pub fn canonicalize_action_path(path: &Path) -> Option<PathBuf> {
     if let Ok(canonical) = std::fs::canonicalize(path) {
         return Some(canonical);
     }
+    if dotdot_after_missing(path) {
+        return None;
+    }
     let mut tail = Vec::new();
     let mut current = path;
     loop {
@@ -188,6 +193,47 @@ pub fn canonicalize_action_path(path: &Path) -> Option<PathBuf> {
             return Some(resolved);
         }
     }
+}
+
+/// Whether a `..` follows a component that does not exist. Unix refuses such a
+/// path by itself (the kernel cannot walk through a missing directory, so no
+/// ancestor of it canonicalizes), but Windows drops `..` lexically before it looks
+/// at the disk: `new\..\..\x` canonicalized to a real folder above the project,
+/// and the refusal promised above did not hold there.
+fn dotdot_after_missing(path: &Path) -> bool {
+    let mut prefix = PathBuf::new();
+    let mut missing = false;
+    for component in path.components() {
+        if missing && component == std::path::Component::ParentDir {
+            return true;
+        }
+        prefix.push(component);
+        missing = missing || std::fs::symlink_metadata(&prefix).is_err();
+    }
+    false
+}
+
+/// `base` joined with the agent's relative `rel`, one component at a time, or
+/// `None` when a `..` follows a component that does not exist (see
+/// [`dotdot_after_missing`]). Joined in one step, a verbatim base (`\\?\C:\…`,
+/// which `canonicalize` returns on Windows) resolves every `..` lexically inside
+/// `PathBuf::push`, before any check could see it. `..` is pushed, not popped, so
+/// on Unix a symlinked directory's `..` is still resolved by the filesystem.
+fn join_relative(base: &Path, rel: &str) -> Option<PathBuf> {
+    let separator = |c: char| c == '/' || (cfg!(windows) && c == '\\');
+    let mut out = base.to_path_buf();
+    let mut missing = false;
+    for part in rel.split(separator) {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if missing && part == ".." {
+            return None;
+        }
+        out.push(part);
+        missing = missing || std::fs::symlink_metadata(&out).is_err();
+    }
+    Some(out)
 }
 
 /// Canonicalize manifest roots at the same adapter boundary as action paths.

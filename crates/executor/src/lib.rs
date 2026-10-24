@@ -451,7 +451,7 @@ mod tests {
             .build();
         let s = spec(
             "run_command",
-            Operation::Argv(vec!["echo".into(), "hi".into()]),
+            Operation::Argv(echo_hi()),
             dir.path(),
             vec![],
             vec![],
@@ -482,7 +482,7 @@ mod tests {
             .build();
         let s = spec(
             "run_command",
-            Operation::Argv(vec!["sleep".into(), "5".into()]),
+            Operation::Argv(sleep_5s()),
             dir.path(),
             vec![],
             vec![],
@@ -491,6 +491,36 @@ mod tests {
             50,
         );
         assert!(matches!(exec.run(&s), Err(ExecError::Timeout { .. })));
+    }
+
+    // Programs for the command tests. `echo` and `sleep` are not executables on
+    // Windows (`echo` is a cmd builtin), so there the same behaviour comes from
+    // `cmd /C echo` and `ping`, which waits about a second per count. The
+    // environment is cleared before spawning, so both are named by full path.
+    fn echo_hi() -> Vec<String> {
+        if cfg!(windows) {
+            vec![system32("cmd.exe"), "/C".into(), "echo hi".into()]
+        } else {
+            vec!["echo".into(), "hi".into()]
+        }
+    }
+
+    fn sleep_5s() -> Vec<String> {
+        if cfg!(windows) {
+            vec![
+                system32("PING.EXE"),
+                "-n".into(),
+                "6".into(),
+                "127.0.0.1".into(),
+            ]
+        } else {
+            vec!["sleep".into(), "5".into()]
+        }
+    }
+
+    fn system32(exe: &str) -> String {
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        format!(r"{root}\System32\{exe}")
     }
 
     /// Finding #11: a timed-out command must take its descendants with it.
