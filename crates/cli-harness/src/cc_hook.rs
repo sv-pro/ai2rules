@@ -150,9 +150,11 @@ pub(crate) fn hook_answer(
 const CALL_SUMMARY_MAX: usize = 160;
 
 /// A one-line summary of what the call does, for the decision log: the command,
-/// path or URL it carries, whitespace collapsed and cut to [`CALL_SUMMARY_MAX`]
-/// characters. File contents (`content`, `new_string`) are deliberately not keys
-/// here: the log shows what was attempted, not the data.
+/// path or URL it carries, masked by the D66 scanner before whitespace is
+/// collapsed and the text is cut to [`CALL_SUMMARY_MAX`] characters. Cutting first
+/// could leave a token fragment below a detector's length floor or remove the end
+/// of a PEM block. File contents (`content`, `new_string`) are deliberately not
+/// keys here: the log shows what was attempted, not the data.
 pub(crate) fn call_summary(tool_input: &Value) -> String {
     let raw = [
         "command",
@@ -167,7 +169,8 @@ pub(crate) fn call_summary(tool_input: &Value) -> String {
     .iter()
     .find_map(|k| tool_input.get(*k).and_then(|v| v.as_str()))
     .unwrap_or("");
-    let flat = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let masked = mask_secrets(raw);
+    let flat = masked.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() <= CALL_SUMMARY_MAX {
         return flat;
     }
@@ -182,8 +185,7 @@ pub(crate) fn call_summary(tool_input: &Value) -> String {
 /// `ids` joins the line to the host's transcript and to the outcome line the
 /// observer writes after the call ran (D84). On an ASK the person's answer is not
 /// visible to the hook, so the line says it is `inferred` from that outcome.
-/// The call summary goes through the D66 secret scanner: a token in a command is
-/// masked here exactly as it is in a trace.
+/// `call` is already masked and shortened by [`call_summary`].
 pub(crate) fn decision_line(
     session: &str,
     tool: &str,
@@ -199,7 +201,7 @@ pub(crate) fn decision_line(
         "session": session,
         "tool": tool,
         "action": res.action,
-        "call": mask_secrets(call),
+        "call": call,
         "decision": res.decision,
         "rule": res.rule,
         "reason": reason,

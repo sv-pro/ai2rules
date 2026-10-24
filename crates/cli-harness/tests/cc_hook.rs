@@ -572,3 +572,60 @@ fn decision_lines_carry_host_ids_and_mask_secrets_in_the_call() {
     // A host that sends no ids gets nulls, not invented values.
     assert!(lines[1]["tool_use_id"].is_null() && lines[1]["agent_id"].is_null());
 }
+
+/// A summary must not turn a recognizable secret into an unrecognizable fragment.
+#[test]
+fn decision_and_outcome_calls_mask_secrets_before_shortening() {
+    let token = format!("ghp_{}", "A".repeat(40));
+    let padding = "x".repeat(140);
+    let unicode_padding = "я".repeat(140);
+    let pem = format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
+        "Q".repeat(80)
+    );
+    let cases = [
+        (
+            "Bash",
+            "command",
+            format!("echo {padding} {token}"),
+            format!("echo {padding} [REDACTED]"),
+        ),
+        (
+            "Bash",
+            "command",
+            format!("echo {unicode_padding} {token} tail that must be cut"),
+            format!("echo {unicode_padding} [REDACTED] ta…"),
+        ),
+        (
+            "Bash",
+            "command",
+            format!("echo {padding} {pem}"),
+            format!("echo {padding} [REDACTED]"),
+        ),
+        (
+            "WebFetch",
+            "url",
+            format!("https://user:{}@example.com", "p".repeat(170)),
+            "https://user:[REDACTED]@example.com".to_string(),
+        ),
+    ];
+    for (tool, key, value, expected) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("decisions.jsonl");
+        let events: Vec<Value> = ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
+            .into_iter()
+            .map(|event| {
+                json!({"hook_event_name": event, "session_id": "boundary",
+                    "tool_name": tool, "tool_input": {key: value},
+                    "tool_response": "ok", "error": "Exit code 1"})
+            })
+            .collect();
+        let lines = run_logged(dir.path(), &log, &events, &[]);
+        assert_eq!(lines.len(), 3);
+        for (line, kind) in lines.iter().zip(["decision", "outcome", "outcome"]) {
+            assert_eq!(line["kind"], kind);
+            assert_eq!(line["call"], expected, "{line}");
+            assert!(line["call"].as_str().unwrap().chars().count() <= 160);
+        }
+    }
+}
