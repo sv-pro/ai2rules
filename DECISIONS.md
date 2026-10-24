@@ -3566,3 +3566,29 @@ show that it holds.
 **Consequence.** Stop is as strong as `--enforce-absent`, and the page says which it is.
 Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
 feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.
+
+
+## D89 — MCP approvals consume before effects and resume through the same kernel
+
+**Date:** 2026-10-24. **Task:** AI2-72 / PR #17, PLAN E13.4d.
+
+**Decision.** Opt-in `mcp-gateway --approvals --principal` uses D73/D78's existing
+atomic durable consume before the upstream RPC, then reevaluates through the
+same gate and scoped forwarding path. A missing reply or failed execution-record
+write leaves consent consumed. A new effect requires a new human approval.
+Consent binds the configured principal and upstream command, full request and
+effective call, policy/schema epochs and provenance. Expiry is five minutes from
+minting. Wire-supplied approval tokens still carry no authority.
+
+**Alternatives.** Marking Executed after success permits duplicate mutations when
+a reply is lost. Direct forwarding after approval bypasses budget and scoped
+lowering. A new claim primitive duplicates the existing locked store operation.
+Unbounded expiry or a shared implicit principal lets stale or cross-session
+consent authorize effects the operator did not review. All are rejected.
+
+**Consequence.** Consent can be spent without an effect if later validation fails.
+Operators reconcile unknown upstream outcomes before approving another request.
+Metadata changes require fresh consent too. This provides at-most-once forwarding
+per grant; external transactions/idempotency are outside the protocol. The trusted
+native resume helper shares implementation with the unchanged pure gate ABI.
+See [the operator workflow](docs/approval-capable-hosts.md).

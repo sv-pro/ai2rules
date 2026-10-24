@@ -5,7 +5,9 @@ use agent_core::{
 use clap::Parser;
 use compiler::{compile, compile_default, loader::load_yaml};
 use harness_preview::{gate, GateRequest};
-use harness_types::{CompiledWorld, Decision, EffectMode, ExecutionMode, Provenance, ToolCall};
+use harness_types::{
+    ApprovalTokenId, CompiledWorld, Decision, EffectMode, ExecutionMode, Provenance, ToolCall,
+};
 use provider_adapters::anthropic::tool_use_block;
 use serde_json::Value;
 use std::io::Read;
@@ -23,6 +25,7 @@ mod hostkit;
 mod init;
 mod init_machine;
 mod local_page;
+mod mcp_approval;
 mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
@@ -347,9 +350,25 @@ enum Command {
         /// Optional append-only JSONL audit log path.
         #[arg(long)]
         audit: Option<PathBuf>,
+        /// Optional `ApprovalStore` (JSONL) enabling out-of-band approval of `ASK`
+        /// actions (D89): the gateway mints a pending token, a human runs
+        /// `harness approvals approve <id>`, and a matching retry may execute once after kernel reevaluation.
+        /// Without it, `ASK` stays a non-forwarded block. Point `harness approvals`
+        /// at the same path.
+        #[arg(long, requires = "principal")]
+        approvals: Option<PathBuf>,
+        /// Operator-configured identity for this gateway process (never request metadata).
+        #[arg(long, requires = "approvals")]
+        principal: Option<String>,
         /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
+    },
+    /// Review and act on out-of-band approvals recorded by `mcp-gateway
+    /// --approvals` (D89). Operates on the same JSONL `ApprovalStore`.
+    Approvals {
+        #[command(subcommand)]
+        action: ApprovalsAction,
     },
     /// The policy console (D81 / E15.7): a local page whose profiles and
     /// Allow / Ask / Off switches rewrite a project's world file, which
@@ -385,6 +404,30 @@ enum Command {
         /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira --rovo`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum ApprovalsAction {
+    /// List approvals, including consumed grants with no confirmed outcome.
+    List {
+        /// Path to the `ApprovalStore` JSONL (same as the gateway's `--approvals`).
+        #[arg(long, default_value = ".ai2rules/approvals.jsonl")]
+        store: PathBuf,
+    },
+    /// Approve a pending request by id; a retry must still pass the kernel.
+    Approve {
+        /// The approval token id (see `harness approvals list`).
+        id: String,
+        #[arg(long, default_value = ".ai2rules/approvals.jsonl")]
+        store: PathBuf,
+    },
+    /// Reject a pending request by id.
+    Reject {
+        /// The approval token id (see `harness approvals list`).
+        id: String,
+        #[arg(long, default_value = ".ai2rules/approvals.jsonl")]
+        store: PathBuf,
     },
 }
 
@@ -639,6 +682,8 @@ fn main() {
         taint,
         mode,
         audit,
+        approvals,
+        principal,
         upstream,
     }) = &cli.command
     {
@@ -650,7 +695,12 @@ fn main() {
             tainted,
             mode,
             audit.as_deref(),
+            approvals.as_deref().zip(principal.as_deref()),
         ));
+    }
+
+    if let Some(Command::Approvals { action }) = &cli.command {
+        std::process::exit(run_approvals(action));
     }
 
     let world = if let Some(path) = cli.world {
@@ -720,6 +770,80 @@ fn main() {
 /// malformed request or an unreadable/uncompilable manifest; `1` = internal
 /// error. The verdict is never encoded in the exit code (D24): mapping it to a
 /// host's decision shape is the adapter's job.
+fn run_approvals(action: &ApprovalsAction) -> i32 {
+    let open = |store: &PathBuf| ApprovalStore::open(store.clone());
+    match action {
+        ApprovalsAction::List { store } => {
+            let s = match open(store) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("approvals: cannot open store {}: {e}", store.display());
+                    return 2;
+                }
+            };
+            let mut any = false;
+            for t in s.all() {
+                any = true;
+                let ph = t.params_hash.as_str();
+                println!(
+                    "{:<18}  {:<9}  {:<26}  params={} principal={} resource={} expires_ms={}",
+                    t.id.as_str(),
+                    format!("{:?}", t.state),
+                    t.action.as_str(),
+                    ph,
+                    t.principal.as_str(),
+                    t.resource,
+                    t.valid_until_unix_ms,
+                );
+            }
+            if !any {
+                println!("(no approvals recorded in {})", store.display());
+            }
+            0
+        }
+        ApprovalsAction::Approve { id, store } => {
+            let mut s = match open(store) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("approvals: cannot open store {}: {e}", store.display());
+                    return 2;
+                }
+            };
+            match s.approve(&ApprovalTokenId::new(id.clone())) {
+                Ok(()) => {
+                    println!(
+                        "approved {id} — one exact-call claim; expiry and kernel policy still apply"
+                    );
+                    0
+                }
+                Err(e) => {
+                    eprintln!("approvals: cannot approve {id}: {e}");
+                    1
+                }
+            }
+        }
+        ApprovalsAction::Reject { id, store } => {
+            let mut s = match open(store) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("approvals: cannot open store {}: {e}", store.display());
+                    return 2;
+                }
+            };
+            match s.reject(&ApprovalTokenId::new(id.clone())) {
+                Ok(()) => {
+                    println!("rejected {id}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("approvals: cannot reject {id}: {e}");
+                    1
+                }
+            }
+        }
+    }
+}
+
 fn run_gate(world_path: &Path) -> i32 {
     let world = match hostkit::load_compiled_world(world_path) {
         Ok(world) => world,

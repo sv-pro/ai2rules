@@ -413,7 +413,13 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **503 tests** green. Unix machine-hook
+The MCP gateway supports out-of-band approvals with `--approvals <store>
+--principal <operator-assigned-id>` and `harness approvals list|approve|reject`.
+Consent is exact-bound, expires after five minutes, and is durably consumed before
+forwarding; uncertain upstream outcomes require operator reconciliation. See the
+[approval workflow](docs/approval-capable-hosts.md).
+
+Builds clean offline with `clippy -D warnings`; **512 tests** green. Unix machine-hook
 tests feed prepared events through stdin so a disabled hook's early exit cannot
 race the fixture writer.
 
