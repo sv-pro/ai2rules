@@ -22,8 +22,10 @@
 //! The write is atomic (temp file + rename) because cc-hook fails open on a world
 //! it cannot compile: a half-written file must never be visible to it.
 //!
-//! **Stop** (G7, D85) is the `stop` profile behind its own button: every switch
-//! Off, and the commands no switch covers too, at the agent's next call. Reads stay.
+//! **Stop** (G7, D85) is the `stop` profile behind its own button: every base
+//! action with a declared effect beyond Read/None is Off at the agent's next call.
+//! Effectful scoped capabilities have no projection flag, so those worlds are
+//! explicitly unsupported by Stop rather than left partly running.
 //! The log marker it writes keeps the positions it replaced, so `{restore: true}`
 //! puts them back. The page says "stopped" only once the log shows a call after
 //! the Stop that the hook really refused: an ABSENT line answered `deny`, which
@@ -44,7 +46,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
 use compiler::{compile, load_yaml};
-use harness_types::{BaseActionDef, WorldManifest};
+use harness_types::{BaseActionDef, SideEffectClass, WorldManifest};
 use serde_json::{json, Value};
 
 use crate::local_page::{guard, json_body, random_token, serve_one, write_atomically};
@@ -178,7 +180,8 @@ const PROFILES: &[Profile] = {
         Profile {
             id: STOP,
             label: "Stop",
-            blurb: "Every effectful action off at the agent's next call. Reads still allowed.",
+            blurb:
+                "Every effectful action off at the agent's next call. Read-only actions unchanged.",
             positions: [Off; 5],
             unplaced: Off,
         },
@@ -290,6 +293,41 @@ fn set_action(action: &mut BaseActionDef, at: Position) {
     action.approval_required = at == Position::Ask;
 }
 
+fn effectful(action: &BaseActionDef) -> bool {
+    !matches!(
+        action.side_effect,
+        SideEffectClass::None | SideEffectClass::Read
+    )
+}
+
+/// Scoped capabilities stay projected when their base is hidden (D79). Until
+/// they have their own projection flag, refuse Stop for these worlds. Removing
+/// definitions would require copying literal arguments (possibly secrets) into
+/// the restore log; the log must contain only projection/approval flags.
+fn stop_unsupported(manifest: &WorldManifest) -> Option<String> {
+    let names: Vec<&str> = manifest
+        .scoped_capabilities
+        .iter()
+        .filter(|cap| {
+            manifest
+                .base_actions
+                .iter()
+                .find(|a| a.name == cap.base_action)
+                .is_none_or(effectful)
+        })
+        .map(|cap| cap.name.as_str())
+        .collect();
+    (!names.is_empty()).then(|| format!(
+        "Stop is unavailable: scoped capabilities cannot be switched off independently: {}. The world has not been stopped.", names.join(", ")
+    ))
+}
+
+fn apply_stop(manifest: &mut WorldManifest) {
+    for action in manifest.base_actions.iter_mut().filter(|a| effectful(a)) {
+        action.projected = false;
+    }
+}
+
 /// Where a switch stands in `manifest`: `None` when the world declares none of
 /// its actions, `Some(None)` when its actions disagree ("mixed").
 fn position_of(manifest: &WorldManifest, switch: &Switch) -> Option<Option<Position>> {
@@ -319,6 +357,13 @@ fn set(manifest: &mut WorldManifest, switch: &Switch, at: Position) {
 /// Whether `manifest` stands where profile `p` puts it. A group the world does not
 /// offer does not count against it.
 fn profile_matches(manifest: &WorldManifest, p: &Profile) -> bool {
+    if p.id == STOP {
+        return stop_unsupported(manifest).is_none()
+            && manifest
+                .base_actions
+                .iter()
+                .all(|a| !effectful(a) || !a.projected);
+    }
     let mut wants = SWITCHES
         .iter()
         .zip(p.positions)
@@ -346,17 +391,17 @@ fn restored_label(manifest: &WorldManifest) -> String {
         .unwrap_or_else(|| "the policy before Stop".to_string())
 }
 
-/// Each grouped action's position, by name. A Stop marker keeps these, so that
-/// Restore puts back even a switch whose actions were mixed.
+/// Exact flags for every base action, including hidden actions whose approval
+/// setting must survive Restore. No argument values or capability bodies enter
+/// the log. Keeping all flags also handles mixed custom worlds.
 fn action_positions(manifest: &WorldManifest) -> serde_json::Map<String, Value> {
     manifest
         .base_actions
         .iter()
-        .filter(|a| groups().any(|s| s.actions.contains(&a.name.as_str())))
         .map(|a| {
             (
                 a.name.as_str().to_string(),
-                json!(action_position(a).as_str()),
+                json!({"projected": a.projected, "approval_required": a.approval_required}),
             )
         })
         .collect()
@@ -365,6 +410,17 @@ fn action_positions(manifest: &WorldManifest) -> serde_json::Map<String, Value> 
 /// Put back the positions a Stop marker kept.
 fn apply_kept(manifest: &mut WorldManifest, kept: &serde_json::Map<String, Value>) {
     for action in manifest.base_actions.iter_mut() {
+        if let Some(flags) = kept.get(action.name.as_str()).and_then(Value::as_object) {
+            if let (Some(projected), Some(approval)) = (
+                flags.get("projected").and_then(Value::as_bool),
+                flags.get("approval_required").and_then(Value::as_bool),
+            ) {
+                action.projected = projected;
+                action.approval_required = approval;
+            }
+            continue;
+        }
+        // Restore markers from the initial Stop implementation remain readable.
         if let Some(at) = kept
             .get(action.name.as_str())
             .and_then(Value::as_str)
@@ -464,6 +520,7 @@ fn stop_state(console: &Console, manifest: &WorldManifest) -> Value {
         "restore_to": restore_to,
         "enforced": enforced,
         "enforced_from": from,
+        "unsupported": stop_unsupported(manifest),
     })
 }
 
@@ -525,6 +582,7 @@ fn policy(console: &Console, body: &Value) -> Value {
         Err(e) => return json!({ "ok": false, "error": e }),
     };
     let before = positions(&manifest);
+    let original = manifest.clone();
     let mut headline = None;
     let mut mark = serde_json::Map::new();
     if body["restore"] == true {
@@ -539,14 +597,18 @@ fn policy(console: &Console, body: &Value) -> Value {
             return json!({ "ok": false, "error": format!("no profile {id:?}") });
         };
         let kept = action_positions(&manifest);
-        for (switch, at) in SWITCHES.iter().zip(p.positions) {
-            set(&mut manifest, switch, at);
-        }
-        set(&mut manifest, &UNPLACED, p.unplaced);
         if p.id == STOP {
+            if let Some(error) = stop_unsupported(&manifest) {
+                return json!({"ok": false, "error": error});
+            }
+            apply_stop(&mut manifest);
             headline = Some("Stopped: every effectful action off".to_string());
             mark.insert("stop".into(), json!({ "before": kept }));
         } else {
+            for (switch, at) in SWITCHES.iter().zip(p.positions) {
+                set(&mut manifest, switch, at);
+            }
+            set(&mut manifest, &UNPLACED, p.unplaced);
             headline = Some(format!("Profile: {}", p.label));
         }
     } else if let Some(map) = body["switches"].as_object() {
@@ -568,7 +630,7 @@ fn policy(console: &Console, body: &Value) -> Value {
     }
 
     let after = positions(&manifest);
-    let changes: Vec<String> = groups()
+    let mut changes: Vec<String> = groups()
         .filter_map(|s| {
             // A group this world does not offer has no position to report.
             let was = before.get(s.id).copied().flatten()?;
@@ -577,7 +639,19 @@ fn policy(console: &Console, body: &Value) -> Value {
             (was != now).then(|| format!("{}: {} → {}", s.label, word(was), word(now)))
         })
         .collect();
-    if changes.is_empty() {
+    for (was, now) in original.base_actions.iter().zip(&manifest.base_actions) {
+        if (was.projected, was.approval_required) != (now.projected, now.approval_required)
+            && !groups().any(|s| s.actions.contains(&now.name.as_str()))
+        {
+            changes.push(format!(
+                "{}: {} → {}",
+                now.name,
+                action_position(was).word(),
+                action_position(now).word()
+            ));
+        }
+    }
+    if manifest == original {
         // A Restore still ends the Stop, even when the world already stands where
         // it would put it back.
         if mark.contains_key("restore") {
@@ -705,10 +779,14 @@ mod tests {
     fn every_profile_compiles_and_reads_back_as_itself() {
         for p in PROFILES {
             let mut m = demo_world();
-            for (s, at) in SWITCHES.iter().zip(p.positions) {
-                set(&mut m, s, at);
+            if p.id == STOP {
+                apply_stop(&mut m);
+            } else {
+                for (s, at) in SWITCHES.iter().zip(p.positions) {
+                    set(&mut m, s, at);
+                }
+                set(&mut m, &UNPLACED, p.unplaced);
             }
-            set(&mut m, &UNPLACED, p.unplaced);
             compile(&m).unwrap_or_else(|e| panic!("{} does not compile: {e}", p.id));
             render(&m).unwrap_or_else(|e| panic!("{} does not render: {e}", p.id));
             let back = positions(&m);
@@ -730,20 +808,33 @@ mod tests {
     #[test]
     fn stop_leaves_only_reads_in_the_demo_world() {
         let mut m = demo_world();
-        let p = stop_profile();
-        for (s, at) in SWITCHES.iter().zip(p.positions) {
-            set(&mut m, s, at);
-        }
-        set(&mut m, &UNPLACED, p.unplaced);
+        apply_stop(&mut m);
         let left: Vec<&str> = m
             .base_actions
             .iter()
-            .filter(|a| a.projected && a.side_effect != harness_types::SideEffectClass::Read)
+            .filter(|a| a.projected && effectful(a))
             .map(|a| a.name.as_str())
             .collect();
-        // Plain `ls` / `cat` / `git status` and their PowerShell twins: the read
-        // half of the shell, kept on purpose ("reads still allowed").
-        assert_eq!(left, ["Bash", "PowerShell"]);
+        assert!(left.is_empty(), "effectful actions survived Stop: {left:?}");
+    }
+
+    #[test]
+    fn restore_accepts_legacy_position_markers() {
+        let mut m = demo_world();
+        apply_stop(&mut m);
+        let kept = json!({"Write": "ask", "Bash": "allow", "WebFetch": "off"});
+        apply_kept(&mut m, kept.as_object().unwrap());
+        let at = |name: &str| {
+            action_position(
+                m.base_actions
+                    .iter()
+                    .find(|a| a.name.as_str() == name)
+                    .unwrap(),
+            )
+        };
+        assert_eq!(at("Write"), Position::Ask);
+        assert_eq!(at("Bash"), Position::Allow);
+        assert_eq!(at("WebFetch"), Position::Off);
     }
 
     #[test]

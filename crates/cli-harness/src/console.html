@@ -266,7 +266,7 @@ function renderState(s) {
 
 // Stop says only what the server read in the decision log: "stopped" once the hook
 // has refused a call since the Stop, never on the button press alone.
-const STOP_SCOPE = "A call already running finishes. Reads still allowed.";
+const STOP_SCOPE = "A call already running finishes. Read-only actions stay as configured; shell processes are stopped too.";
 const NOT_ENFORCED = "This hook runs without --enforce-absent, so an action switched Off " +
   "goes to Claude Code's own prompt instead of being refused.";
 
@@ -275,7 +275,12 @@ function renderStop(st) {
   let head = "", sub = "", cls = "";
   btn.hidden = false;
   btn.classList.remove("restore");
-  if (st.status === "off") {
+  if (st.unsupported) {
+    btn.hidden = true;
+    cls = "warn";
+    head = "Stop unavailable for this world";
+    sub = st.unsupported;
+  } else if (st.status === "off") {
     btn.textContent = "■ Stop the agent";
     btn.onclick = () => send({ profile: "stop" }, btn);
     sub = "Every effectful action off at the agent's next call. " + STOP_SCOPE;

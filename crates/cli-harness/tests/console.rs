@@ -438,7 +438,8 @@ fn stop_takes_every_effectful_action_away_and_restore_gives_it_back() {
         effectful_verdicts(&dir, "stopped"),
         ["ABSENT", "ABSENT", "ABSENT", "ABSENT"]
     );
-    // Reads still allowed, in the tools and in the shell.
+    // Read actions remain available. Process actions, including the shell's
+    // read-looking commands, are stopped according to the manifest's effects.
     hook_with(
         &dir,
         "stopped",
@@ -448,7 +449,7 @@ fn stop_takes_every_effectful_action_away_and_restore_gives_it_back() {
     );
     assert_eq!(last_decision(&dir), "ALLOW");
     hook_with(&dir, "stopped", true, "Bash", json!({"command": "ls -la"}));
-    assert_eq!(last_decision(&dir), "ALLOW");
+    assert_eq!(last_decision(&dir), "ABSENT");
 
     let stop = console.get("/api/state")["stop"].clone();
     assert_eq!(stop["status"], "stopped", "{stop}");
@@ -482,8 +483,14 @@ fn stop_takes_every_effectful_action_away_and_restore_gives_it_back() {
         markers[0]["headline"],
         "Stopped: every effectful action off"
     );
-    assert_eq!(markers[0]["stop"]["before"]["Bash_destructive"], "ask");
-    assert_eq!(markers[0]["stop"]["before"]["Bash_unclassified"], "ask");
+    assert_eq!(
+        markers[0]["stop"]["before"]["Bash_destructive"]["approval_required"],
+        true
+    );
+    assert_eq!(
+        markers[0]["stop"]["before"]["Bash_unclassified"]["approval_required"],
+        true
+    );
     assert_eq!(markers[1]["headline"], "Restored: Developer");
     assert_eq!(markers[1]["restore"], true);
     assert!(markers[1]["ts_ms"].as_u64() >= markers[0]["ts_ms"].as_u64());
@@ -531,5 +538,218 @@ exec \"$BIN\" cc-hook --grant --world \"$PD/.claude/cc-world.yaml\" --state \"$P
     let stop = console.get("/api/state")["stop"].clone();
     assert_eq!(stop["status"], "not_binding", "{stop}");
     assert_eq!(stop["enforced_from"], "log");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn stop_covers_custom_effects_refuses_effectful_scopes_and_restores_exactly() {
+    use harness_types::{ActionName, SideEffectClass};
+    let dir = project("stop-custom");
+    let mut manifest = compiler::load_yaml(&std::fs::read_to_string(world(&dir)).unwrap()).unwrap();
+    let template = manifest
+        .base_actions
+        .iter()
+        .find(|a| a.name.as_str() == "Write")
+        .unwrap()
+        .clone();
+    for effect in [
+        SideEffectClass::FilesystemWrite,
+        SideEffectClass::PersistentWrite,
+        SideEffectClass::Process,
+        SideEffectClass::Network,
+        SideEffectClass::Credential,
+        SideEffectClass::Memory,
+        SideEffectClass::External,
+    ] {
+        let mut action = template.clone();
+        action.name = ActionName::new(format!("Custom{effect:?}"));
+        action.side_effect = effect;
+        manifest.base_actions.push(action);
+    }
+    let mut hidden = template;
+    hidden.name = ActionName::new("HiddenWrite");
+    hidden.projected = false;
+    hidden.approval_required = true;
+    manifest.base_actions.push(hidden);
+    let mut pure = manifest
+        .base_actions
+        .iter()
+        .find(|a| a.name.as_str() == "Read")
+        .unwrap()
+        .clone();
+    pure.name = ActionName::new("Pure");
+    pure.side_effect = SideEffectClass::None;
+    manifest.base_actions.push(pure);
+    for (name, base) in [("ScopedWrite", "HiddenWrite"), ("ScopedRead", "Read")] {
+        manifest.scoped_capabilities.push(
+            serde_json::from_value(json!({
+                "name": name, "base_action": base, "args": {}, "description": "keep me on Restore"
+            }))
+            .unwrap(),
+        );
+    }
+    compiler::compile(&manifest).unwrap();
+    std::fs::write(world(&dir), serde_yaml::to_string(&manifest).unwrap()).unwrap();
+    let console = start(&dir);
+    let original_text = std::fs::read_to_string(world(&dir)).unwrap();
+    let r = console.post("/api/policy", json!({"profile": "stop"}));
+    assert_eq!(
+        r["ok"], false,
+        "effectful scopes must never survive a successful Stop: {r}"
+    );
+    assert!(r["error"].as_str().unwrap().contains("ScopedWrite"));
+    assert_eq!(std::fs::read_to_string(world(&dir)).unwrap(), original_text);
+    assert!(!log(&dir).exists(), "refused Stop must not write a marker");
+    let state = console.get("/api/state");
+    assert_eq!(state["stop"]["status"], "off");
+    assert!(state["stop"]["unsupported"]
+        .as_str()
+        .unwrap()
+        .contains("ScopedWrite"));
+    // Read-only scopes are supported and stay unchanged, including definitions.
+    manifest
+        .scoped_capabilities
+        .retain(|c| c.name.as_str() != "ScopedWrite");
+    std::fs::write(world(&dir), serde_yaml::to_string(&manifest).unwrap()).unwrap();
+    let r = console.post("/api/policy", json!({"profile": "stop"}));
+    assert_eq!(r["ok"], true, "{r}");
+    let stopped = compiler::load_yaml(&std::fs::read_to_string(world(&dir)).unwrap()).unwrap();
+    let compiled = compiler::compile(&stopped).unwrap();
+    for a in &manifest.base_actions {
+        let safe = matches!(a.side_effect, SideEffectClass::None | SideEffectClass::Read);
+        assert_eq!(
+            compiled.is_projected(&a.name),
+            safe && a.projected,
+            "{} survives Stop",
+            a.name
+        );
+    }
+    assert!(!compiled.is_projected(&ActionName::new("ScopedWrite")));
+    assert!(compiled.is_projected(&ActionName::new("ScopedRead")));
+    for tool in ["CustomFilesystemWrite", "HiddenWrite"] {
+        hook_with(
+            &dir,
+            "custom",
+            true,
+            tool,
+            json!({"file_path": "notes.md", "content": "x"}),
+        );
+        assert_eq!(last_decision(&dir), "ABSENT", "{tool}");
+    }
+    assert_eq!(console.get("/api/state")["stop"]["status"], "stopped");
+    // A second Stop and a server restart must not overwrite the original snapshot.
+    assert_eq!(
+        console.post("/api/policy", json!({"profile": "stop"}))["ok"],
+        true
+    );
+    drop(console);
+    let console = start(&dir);
+    let r = console.post("/api/policy", json!({"restore": true}));
+    assert_eq!(r["ok"], true, "{r}");
+    let restored = compiler::load_yaml(&std::fs::read_to_string(world(&dir)).unwrap()).unwrap();
+    assert_eq!(
+        restored, manifest,
+        "Restore must preserve hidden approval flags and scoped definitions"
+    );
+    drop(console);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn stop_detects_and_writes_effects_outside_unchanged_switches() {
+    use harness_types::ActionName;
+    let dir = project("stop-uncovered");
+    let console = start(&dir);
+    assert_eq!(
+        console.post("/api/policy", json!({"profile": "stop"}))["ok"],
+        true
+    );
+    hook_with(
+        &dir,
+        "evidence",
+        true,
+        "Write",
+        json!({"file_path": "notes.md", "content": "x"}),
+    );
+    assert_eq!(console.get("/api/state")["stop"]["status"], "stopped");
+    let mut changed = compiler::load_yaml(&std::fs::read_to_string(world(&dir)).unwrap()).unwrap();
+    let mut custom = changed
+        .base_actions
+        .iter()
+        .find(|a| a.name.as_str() == "Write")
+        .unwrap()
+        .clone();
+    custom.name = ActionName::new("CustomWrite");
+    custom.projected = true;
+    changed.base_actions.push(custom);
+    std::fs::write(world(&dir), serde_yaml::to_string(&changed).unwrap()).unwrap();
+    let state = console.get("/api/state");
+    assert_eq!(
+        state["stop"]["status"], "off",
+        "old refusal cannot prove a modified world is stopped"
+    );
+    assert!(!state["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["id"] == "stop" && p["active"] == true));
+    let r = console.post("/api/policy", json!({"profile": "stop"}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(
+        r["state"]["stop"]["status"], "pending",
+        "the new Stop needs fresh evidence"
+    );
+    hook_with(
+        &dir,
+        "new-stop",
+        true,
+        "CustomWrite",
+        json!({"file_path": "notes.md", "content": "x"}),
+    );
+    assert_eq!(
+        last_decision(&dir),
+        "ABSENT",
+        "must write even when no fixed switch changes"
+    );
+    assert_eq!(
+        console.post("/api/policy", json!({"restore": true}))["ok"],
+        true
+    );
+    assert_eq!(
+        compiler::load_yaml(&std::fs::read_to_string(world(&dir)).unwrap()).unwrap(),
+        changed
+    );
+    // A capability over a hidden effectful base must also invalidate Stop.
+    assert_eq!(
+        console.post("/api/policy", json!({"profile": "stop"}))["ok"],
+        true
+    );
+    hook_with(
+        &dir,
+        "scope-evidence",
+        true,
+        "Write",
+        json!({"file_path": "notes.md", "content": "x"}),
+    );
+    let mut with_scope =
+        compiler::load_yaml(&std::fs::read_to_string(world(&dir)).unwrap()).unwrap();
+    with_scope.scoped_capabilities.push(
+        serde_json::from_value(json!({
+            "name": "ScopedWrite", "base_action": "CustomWrite", "args": {}
+        }))
+        .unwrap(),
+    );
+    std::fs::write(world(&dir), serde_yaml::to_string(&with_scope).unwrap()).unwrap();
+    let state = console.get("/api/state");
+    assert_eq!(state["stop"]["status"], "off");
+    assert!(state["stop"]["unsupported"]
+        .as_str()
+        .unwrap()
+        .contains("ScopedWrite"));
+    assert_eq!(
+        console.post("/api/policy", json!({"profile": "stop"}))["ok"],
+        false
+    );
+    drop(console);
     let _ = std::fs::remove_dir_all(dir);
 }

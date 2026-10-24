@@ -3403,19 +3403,22 @@ show that it holds.
 
 **Decision.**
 
-- **Stop is a profile (`stop`) behind its own button.** It sets all five switches Off and
+- **Stop is a profile (`stop`) behind its own button.** It hides every base action with
+  an effect other than `Read` or `None`, using the supplied manifest, not a name list, and
   writes the world atomically like any other change, so it binds at the agent's next call.
   A call already running finishes; killing one mid-call is E8.4.
-- **Stop also turns off the commands no switch covers.** Each `command_classes` entry's
-  `default_to` (`Bash_unclassified`, `PowerShell_unclassified`) asks under every other
-  profile. Left at Ask, Stop would leave `touch`, `mv` or `git push` one approval away from
-  running. Every profile now carries a position for that hidden group: Ask, or Off for
-  Stop.
-- **Reads stay.** They are not a switch today, and the plain-shell read classes (`ls`,
-  `cat`, `git status`) stay too. The page says "Reads still allowed".
+- **Custom and unplaced actions are covered.** Process, network, write, memory,
+  credential and external effects all go off regardless of their names. Read/None
+  actions keep their previous flags. The demo's `Bash` and `PowerShell` read-looking
+  classes declare `Process`, so even `ls` is stopped; there is no shell-name exemption.
+- **Effectful scoped capabilities make Stop unavailable.** D79 keeps them projected
+  even when their base is hidden, and there is no independent projection flag. The
+  console refuses the request without writes and shows which capabilities prevent
+  Stop; it never claims a partial Stop. Read-only capabilities remain supported.
 - **Restore puts back exactly what Stop replaced.** The Stop marker in the decision log
-  keeps every grouped action's position (`stop.before`), so a switch that was mixed comes
-  back mixed. Restore is offered only while the last policy change is that Stop. Any later
+  keeps every base action's exact projection/approval flags (`stop.before`), including
+  approval on hidden actions, so a custom or mixed policy comes back intact. Old string
+  position markers remain readable. Restore is offered only while the last policy change is that Stop. Any later
   change ends it.
 - **"Stopped" needs evidence from the hook, never just the click.** Off is ABSENT, which
   binds only under `cc-hook --enforce-absent`. The hook already logs what it told the host
@@ -3427,6 +3430,14 @@ show that it holds.
 
 **Alternatives.**
 
+- *Keep a fixed switch list or exempt shell names.* Rejected: supplied manifests can
+  expose effectful actions and capabilities under arbitrary names. Stop status checks
+  the same complete effect coverage as the write, so an old refusal cannot prove a
+  newly added action is stopped.
+- *Remove scoped capabilities and put their definitions in the restore log.* Rejected:
+  literal arguments can contain secrets, and policy markers must not copy those into
+  observability. Supporting these worlds needs an independent capability projection
+  mechanism; this console fix does not change the manifest/compiler ABI.
 - *Check the flag statically, as `doctor` inspects the hook.* Rejected as the answer. Hooks
   can be wired from user, project, local or managed settings, and the shim can be edited.
   A static check can be wrong in both directions. The log records what the hook did. The
