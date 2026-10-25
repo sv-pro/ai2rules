@@ -1,5 +1,28 @@
 # Northwind PR #150: main integration — 25 October 2026
 
+## Follow-up: after PR #129
+
+Reintegrated main `b190047d8250b6d31e7d0fc64e2af88bfc063267` after PR #129.
+The only conflict was HANDOFF.md; both records were retained. Claude Code's
+`7b59686` Windows changes are included: Python scripts passed with `-c`, and
+hook identity comparison handles verbatim prefixes and Windows case folding.
+The runtime has no additional changes relative to that main.
+
+Rebuilt the Linux runtime offline and repeated the complete isolated run:
+**76/76 assertions passed**. [New binary/source hashes and assertion list](readiness-evidence/after-pr129-summary.json).
+The initial local WSL attempt encountered CRLF shell files from Windows checkout;
+normalizing those working-copy line endings to LF allowed the run (no source
+logic change). GitHub's Linux checkout uses LF.
+
+Also ran setup in Git Bash against the native Windows runtime from PR #129 in a
+new temporary project, then executed the preflight wiring check: passed. Tested
+verbatim/case-equivalent hook identity and a distinct-file negative control.
+No presentation files, services, settings or hosts entries were modified.
+This is not an interactive Claude Code rehearsal; the presentation gate below
+remains distinct. The user now authorizes merge after fresh CI and conflict checks.
+
+---
+
 **Code checks passed; live presentation readiness is a separate gate.** The PR
 now targets `main`, integrating `810c1a6f0f00605f235ab527618c430809c79387`.
 No demo checkout, existing receiver/console, host settings or hosts file changed.

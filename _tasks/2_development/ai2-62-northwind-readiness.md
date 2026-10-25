@@ -16,3 +16,12 @@ The historical two-world results remain unchanged and are labeled historical.
 Next: fresh CI on pushed head and mark PR ready for review when green. No merge.
 Live presentation rehearsal is a separate host-specific gate; do not modify the
 presentation stand for this task. Deferred #129/#148/#149 untouched.
+
+## 2026-10-25 — rechecked after PR129
+
+Integrated mainb190047 and Claude Code Windows fixes7b59686. Only HANDOFF
+conflicted; retained both records. Rebuilt runtime, repeated all76 Linux probes,
+and checked Windows Git Bash setup/native preflight wiring in a temporary
+project. All pass; source matches main runtime exactly. New summary retained
+in readiness-evidence/after-pr129-summary.json. Merge authorized after fresh CI;
+live presentation rehearsal remains separate. Stand and deferred PRs untouched.

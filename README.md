@@ -29,7 +29,8 @@ replayable. See [Status](#status).
 > kernel deciding for four different hosts, to governing a project of your own.
 
 The [policy-console demo](docs/demos/policy-console/README.md) includes the
-`/northwind-demo` skill and read-only stand checks. Start a fresh session and
+`/northwind-demo` skill and read-only stand checks. Automated probes cover setup,
+preflight and launcher against the current runtime. Start a fresh session and
 rehearse interactively; passing preflight does not establish live-agent readiness.
 
 ---
@@ -501,10 +502,15 @@ echo '{"tool":"fetch_web","context":{"taint":"tainted"}}' \
 ```
 
 CI runs all four checks on every push and PR
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), plus a `demos` job that
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), clippy and the tests
+again on Windows, plus a `demos` job that
 runs `scripts/check-demos.sh` — every example and demo script, asserting the
 verdict lines each one claims to show. The unit tests cover the kernel; that
 script covers what a reader actually sees.
+
+Windows path-scope regressions check rooted and drive-prefixed targets, reject
+`..` after missing components before canonicalization, and verify actual hook
+verdicts. Linux tests preserve filesystem resolution of symlink/`..` paths (D88).
 
 The blog CI job also checks the homepage-to-playground journey in Chromium at
 390px and 1440px widths, including the real WASM taint/tool-toggle transitions.
