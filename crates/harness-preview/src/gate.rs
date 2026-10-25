@@ -1073,6 +1073,15 @@ command_classes:
             "# curl ",
             "curl \"http://x\"#; python3 evil.py", // `#` inside a word starts no comment
             "curl 'http://x'#\npython3 evil.py",
+            // An escaped byte is literal: `\ ` is not whitespace before `#`,
+            // and `\>` is not a redirection before `&` (PR #153 review).
+            "curl https://x \\ #; printf EXECUTED",
+            "curl https://x \\>& printf EXECUTED",
+            // A quote inside a heredoc body is data; the splitter does not model
+            // heredocs, so the whole line fails closed (PR #153 review).
+            "curl --config - <<EOF\ncurl '\nEOF\nprintf EXECUTED #'",
+            // ANSI-C quoting has its own escapes: `$'\''` is one quote char.
+            "curl https://x $'\\'' ; printf EXECUTED #'",
         ] {
             let res = gate(&world, &bash_req(cmd, "clean"));
             assert_eq!(res.action, "bash_unclassified", "{cmd}");
@@ -1092,6 +1101,7 @@ command_classes:
             ("curl \"http://x/?a=1&b=2|c;d\"", "bash_network"),
             ("curl 'http://x/#frag'", "bash_network"),
             ("curl http://x\\; echo", "bash_network"),
+            ("curl -d @- http://x <<<'a;b|c'", "bash_network"), // here-string, one command
             ("HTTPS_PROXY=http://p:3128 curl http://x", "bash_network"),
             ("curl http://x | ssh host", "bash_network"),
             ("rm -rf a && rm -rf b", "bash_destructive"),

@@ -427,19 +427,24 @@ fn path_under(path: &str, root: &str) -> bool {
 
 /// The simple commands of a shell line, as the text a command class must match
 /// in each of them (D90): the line split at `;`, `&`, `|` and newlines, quoted
-/// spans replaced by [`QUOTED`], `#` comments and backslash-newline continuations
-/// dropped, and blank segments skipped. `&` after `<`/`>` or before `>` is a redirection
-/// (`2>&1`, `&>log`), not a separator.
+/// spans and backslash-escaped bytes replaced by [`QUOTED`], `#` comments and
+/// backslash-newline continuations dropped, and blank segments skipped. `&`
+/// after `<`/`>` or before `>` is a redirection (`2>&1`, `&>log`), not a
+/// separator, and `<<<` is a here-string, whose word is quoted like any other.
 ///
 /// `None` when the line cannot be split without a shell: a command substitution
-/// (`$(…)`, backticks, `<(…)`, `>(…)`) runs a command this split cannot see, and
-/// an unterminated quote means the split is a guess. The caller fails closed on
+/// (`$(…)`, backticks, `<(…)`, `>(…)`) runs a command this split cannot see; a
+/// heredoc (`<<`) makes the following lines data up to a delimiter this split
+/// does not track, so a quote inside the body would mis-pair with one after it;
+/// ANSI-C quoting (`$'…'`) has escapes a plain single quote does not; and an
+/// unterminated quote means the split is a guess. The caller fails closed on
 /// `None`. This is a splitter, not a parser; it only has to be right about where
 /// a command could start, and every case it gives up on resolves to `default_to`.
 fn simple_commands(cmd: &str) -> Option<Vec<String>> {
-    // A quoted span is part of the word it sits in, so its stand-in must not be
-    // whitespace: `"x"#; python3 evil.py` starts no comment in a shell, and must
-    // not start one here either.
+    // A quoted span or an escaped byte is part of the word it sits in, so its
+    // stand-in must be neither whitespace nor an operator byte: `"x"#; cmd` and
+    // `x \ #; cmd` start no comment in a shell, and `\>&` is no redirection.
+    // Every one of these was a way past the check (PR #153 review).
     let mut parts = Vec::new();
     let mut cur = String::new();
     let mut chars = cmd.chars().peekable();
@@ -455,7 +460,7 @@ fn simple_commands(cmd: &str) -> Option<Vec<String>> {
         match c {
             '\\' => match chars.next() {
                 Some('\n') | None => {}
-                Some(escaped) => cur.push(escaped),
+                Some(_) => cur.push(QUOTED),
             },
             '\'' => {
                 loop {
@@ -484,6 +489,13 @@ fn simple_commands(cmd: &str) -> Option<Vec<String>> {
             }
             '`' => return None,
             '$' | '<' | '>' if chars.peek() == Some(&'(') => return None,
+            '$' if chars.peek() == Some(&'\'') => return None,
+            '<' if chars.peek() == Some(&'<') => {
+                chars.next();
+                // `<<<` is a here-string; a bare `<<` opens a heredoc: fail closed.
+                chars.next_if_eq(&'<')?;
+                cur.push_str("<<<");
+            }
             '#' if cur.chars().last().is_none_or(char::is_whitespace) => {
                 while chars.peek().is_some_and(|c| *c != '\n') {
                     chars.next();
@@ -500,9 +512,9 @@ fn simple_commands(cmd: &str) -> Option<Vec<String>> {
     Some(parts)
 }
 
-/// What a quoted span becomes in a [`simple_commands`] segment: not whitespace
-/// and not a word byte, so it neither ends a word for a pattern nor starts a
-/// `#` comment.
+/// What a quoted span or an escaped byte becomes in a [`simple_commands`]
+/// segment: not whitespace, not a word byte and not an operator, so it neither
+/// ends a word for a pattern, starts a `#` comment nor completes a redirection.
 const QUOTED: char = '"';
 
 /// A simple command made only of `:{}()` and whitespace, like the pieces of
