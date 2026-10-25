@@ -24,7 +24,11 @@ for line in sys.stdin:
         if mode == "disconnect":
             sys.exit(0)
         if mode == "evidence-failure":
-            (root / "approvals.jsonl.lock").mkdir()
+            # Make the store lock unobtainable: a directory where the lock file
+            # lives. The lock file persists after first use (AI2-75), so replace it.
+            lock = root / "approvals.jsonl.lock"
+            lock.unlink(missing_ok=True)
+            lock.mkdir()
         if mode == "mrtr":
             result = {"resultType": "input_required", "inputRequests": []}
         else:

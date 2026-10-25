@@ -13,6 +13,9 @@ and DECISIONS D89. It reuses D73 effect-bound authorization and D78 chained stor
 Configure a separate store outside paths the governed project/agent can write.
 The log, `.key`, `.head`, and `.lock` sidecars are one security boundary. Do not
 copy an older log/head pair over a live store or manually edit lifecycle records.
+The `.lock` file holds no state and stays in place. The OS lock taken on it is
+released when its holder exits, crashed or not (D93), so there is no stale lock to
+clean up.
 
 ```sh
 harness mcp-gateway --world world.yaml \

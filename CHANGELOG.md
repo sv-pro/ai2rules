@@ -12,6 +12,18 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Fixed
+
+- **Approval and staged-commit stores on Windows: a waiter no longer fails while the
+  lock changes hands (D93, AI2-75).** The store lock was a file that was created to
+  take the lock and deleted to release it. Inside Windows' delete call there is a
+  window in which creating that file fails with `Access is denied`. A concurrent
+  consumer could therefore fail with OS error 5 instead of waiting.
+
+  The lock is now an OS file lock (`LockFileEx` / `flock`) on a `.lock` file that is
+  never deleted. A crashed holder's lock is released with its process, instead of
+  leaving a `.lock` file an operator had to remove.
+
 ### Changed
 
 - **Command classification: a class must cover every simple command on the line
