@@ -1134,6 +1134,54 @@ mod tests {
         drop(waiter.join().unwrap());
     }
 
+    /// AI2-75, the mechanism: on Windows a file removed while a handle to it is
+    /// still open is only *pending* deletion, and creating the same path again
+    /// fails with `ERROR_ACCESS_DENIED` until that handle closes. A lock released
+    /// by removing its file before closing it hands that window to every waiter.
+    #[cfg(windows)]
+    #[test]
+    fn a_removed_but_still_open_file_blocks_create_new_on_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl.lock");
+        let held = private_create_new(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let racer = private_create_new(&path).map(|_| ());
+        assert_eq!(
+            racer.as_ref().map_err(io::Error::kind).err(),
+            Some(io::ErrorKind::PermissionDenied),
+            "create_new on a delete-pending path: {racer:?}"
+        );
+        drop(held);
+        private_create_new(&path).expect("free once the last handle closes");
+    }
+
+    /// AI2-75, the symptom: many holders handing the lock over in a tight loop.
+    /// Every acquisition must succeed; a waiter that meets a half-released lock
+    /// may wait, never fail.
+    #[test]
+    fn lock_hand_off_under_contention_never_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl.lock");
+        let barrier = Arc::new(Barrier::new(4));
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for round in 0..200 {
+                        let lock = StoreLock::acquire(&path)
+                            .unwrap_or_else(|e| panic!("round {round}: {e:?}"));
+                        drop(lock);
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    }
+
     #[test]
     fn concurrent_consumers_get_exactly_one_claim() {
         let dir = tempfile::tempdir().unwrap();
