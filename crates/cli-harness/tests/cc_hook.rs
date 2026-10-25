@@ -114,6 +114,10 @@ fn the_dogfood_world_keeps_its_own_control_plane_read_only() {
             ".claude/cc-world.yaml",
             ".claude/hooks/world-gate.sh",
             ".claude/settings.json",
+            // Antigravity's control plane: a project governed on both hosts (D92).
+            ".agents/agy-world.yaml",
+            ".agents/hooks.json",
+            ".agents/hooks/world-gate.sh",
         ] {
             for tool in ["Write", "Edit"] {
                 let dir = tempfile::tempdir().unwrap();

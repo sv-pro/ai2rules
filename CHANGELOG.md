@@ -14,6 +14,32 @@ there is one, so anything here can be traced to the reasoning in
 
 ### Changed
 
+- **Command classification: a class must cover every simple command on the line
+  (D90).** The classifier used to take the whole Bash line from the one class that
+  matched anywhere in it. So a network word in a comment, a string or a
+  neighbouring command made the rest of the line plain egress, which a clean
+  session allowed silently: `git push … # curl `, `echo 'ssh '; cat ~/.ssh/id_rsa`,
+  `curl … | sh`.
+
+  The matched class must now also match every command the line runs, outside
+  quotes and comments. Lines the splitter cannot see into fall to `default_to`,
+  which asks. That covers command substitution, heredocs, ANSI-C `$'…'` quoting and
+  unterminated quotes.
+
+  Visible effects:
+  - `curl … | jq` now asks in a clean session.
+  - Some destructive lines that carry `$(…)` or quoted payloads are denied, not
+    asked, under taint.
+- **The starter manifest keeps `.agents/` read-only as well as `.claude/` (D92).**
+  In a project governed on both Claude Code and Antigravity, neither agent can
+  rewrite the other's manifest, shim or hook registration through structured file
+  tools. That includes `.agents/rules`, `skills` and `workflows`. Change them by
+  hand, or through the shell, which asks.
+
+  `harness init --user` and `--managed` drop the rule. No file in a project's
+  `.agents/` can switch off a machine-scope Claude Code hook, and locking the
+  directory would block ordinary work in every repository.
+
 - The law-firm story no longer suggests the kernel recognises a poisoned email.
   The closing line now says reading one email from outside closed the exits,
   whatever it said, and step 3 says any outside email does this, harmless or not.

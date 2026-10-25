@@ -99,7 +99,7 @@ relative to the hook's cwd. At machine scope the cwd is whichever folder the ses
 is in, so a relative state dir would leave taint sidecars in every project you open.
 
 **The world protects whatever can switch it off.** It is the starter manifest with
-one change. The starter makes a project's whole `.claude/` read-only. At machine
+one change. The starter makes a project's whole `.claude/` and `.agents/` read-only (D57, D92). At machine
 scope that would block ordinary work in every repository, such as adding a skill
 or a command. So this world protects only the files that can disable the hook:
 

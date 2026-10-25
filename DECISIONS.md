@@ -3977,3 +3977,63 @@ The rest of the dogfood world (`channels`, `world_id`) stays its own.
   residual).
 - The Antigravity dogfood world, `.agents/agy-world.yaml`, has no `roots` either. That
   is the same gap on another host and is not changed here.
+
+## D92 — The starter protects both hosts' control planes; every dogfood world carries it
+
+**Date:** 2026-10-25. **Task:** AI2-82. **Extends** D57 and D91 to Antigravity.
+
+**Context.** D91 gave `.claude/cc-world.yaml` the starter's `roots`. The Antigravity
+dogfood world, `.agents/agy-world.yaml`, still had none. Measured with `harness agy-hook`
+on `main` at `4e50aea`, all of these passed with no decision:
+
+- writes to `.agents/agy-world.yaml`, `.agents/hooks.json` and `.agents/hooks/world-gate.sh`;
+- writes to Claude Code's `.claude/settings.json` and `.claude/cc-world.yaml`;
+- `write_to_file /etc/x` and `view_file ~/.ssh/id_rsa`.
+
+The gap ran the other way too. Under D91 `./.agents` sits inside the project's
+`ReadWrite` root, so Claude Code could silently rewrite Antigravity's manifest, shim and
+registration. D83 already treats a file one host writes as context the other loads. The
+same holds for governance: in a project governed on both hosts, each agent can switch
+off the other's.
+
+**Decision.**
+
+- The starter gains `- { path: "./.agents", access: Read }` beside `./.claude`.
+- Both dogfood worlds carry the starter's `roots` block verbatim, so one block governs
+  all three. `committed_worlds.rs` pins both worlds equal to the starter.
+- `init --user/--managed` drops the new rule rather than keeping it. A machine-scope
+  world governs Claude Code only. No file under a project's `.agents/` can switch that
+  hook off, and locking the directory would forbid adding a rule, skill or workflow in
+  every repository. That is the reasoning D82 applied to `./.claude`. If the rule
+  disappears from the starter, the build fails loudly, the same as for `./.claude`.
+
+**Measured effect on Antigravity** (before and after, same probes):
+
+| Calls | Verdict after |
+|---|---|
+| `view_file`, `list_directory`, `grep_search` in the project; edits to source, `README.md`, `GEMINI.md`; `/tmp`; `read_url_content` | unchanged |
+| writes under `.agents/` (including `rules/`) and `.claude/`, and writes to `/etc` | DENY `path_scope_readonly` |
+| credential reads | DENY `path_scope_denied` |
+| reads outside every root | ASK (`force_ask`) |
+
+Claude Code additionally gets DENY on `.agents/` writes.
+
+**Alternatives.**
+
+- *Give only the Antigravity world a `roots` block.* Closes half the gap. The Claude Code
+  world is pinned to the starter (D91), so the other half would need either an
+  unpinned divergence or this change.
+- *Keep `./.agents` at machine scope.* It protects nothing a Claude Code user hook
+  depends on and blocks ordinary work everywhere.
+- *A host-specific starter per host.* That means two shipped templates for one
+  guarantee. A project often runs both hosts, and the rule costs nothing where `.agents/`
+  does not exist.
+
+**Consequence.**
+
+- Every `harness init` project now has `.agents/` read-only to the agent's structured
+  tools. That includes `.agents/rules`, `skills` and `workflows`, as `.claude/` already
+  is. Changing them is a human edit or a shell write, which is ASK (the D57 residual).
+- Two `agy_hook` tests used a made-up `/workspace` root. They now use a real temp
+  workspace, because with `roots` a non-existent root is platform-dependent (D91's
+  Windows lesson).
