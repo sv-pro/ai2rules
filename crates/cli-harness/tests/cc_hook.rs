@@ -217,7 +217,10 @@ fn unwritable_taint_sidecar_still_passes_a_clean_read_through() {
 #[test]
 fn a_lower_trust_source_channel_shrinks_the_capability_surface() {
     let dir = tempfile::tempdir().unwrap();
-    let write = json!({"tool_name":"Write","tool_input":{"file_path":"/tmp/x"},"session_id":"sc1"});
+    // An in-project path: this test is about channel trust, not path scope. The
+    // dogfood world's `/tmp` root (D91) is not a real directory on Windows, so an
+    // absolute `/tmp/x` would land outside every root and ask there.
+    let write = json!({"tool_name":"Write","tool_input":{"file_path":"x"},"session_id":"sc1"});
 
     // Default posture: the live world trusts `user_prompt`, so a write is allowed.
     let out = run_hook_args(dir.path(), &write, &["--grant"]);
@@ -238,7 +241,7 @@ fn a_lower_trust_source_channel_shrinks_the_capability_surface() {
     assert_eq!(decision(&out).as_deref(), Some("deny"), "{out}");
 
     // …while a read, which that trust level *can* perform, still goes through.
-    let read = json!({"tool_name":"Read","tool_input":{"file_path":"/tmp/x"},"session_id":"sc2"});
+    let read = json!({"tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"sc2"});
     let out = run_hook_args(
         dir.path(),
         &read,
