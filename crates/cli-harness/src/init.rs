@@ -191,8 +191,10 @@ else
   BIN="$TRUSTED_BIN"
 fi
 [ -x "$BIN" ] || exit 0  # fail-open: no trusted kernel, normal permissions
+# A world that does not compile (D87): decide with the last one that did, and warn.
+# `closed` refuses every call instead; `open` lets calls through ungoverned.
 exec "$BIN" cc-hook{grant_flag} --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state" \
-  --log "$PD/.claude/state/decisions.jsonl"
+  --log "$PD/.claude/state/decisions.jsonl" --on-broken-world last-good
 "#,
         bin = sh_quote(harness_bin),
         off_file = off_file,

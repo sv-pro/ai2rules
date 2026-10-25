@@ -275,7 +275,9 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   `.claude/cc-world.yaml`: ABSENT (opt-in `--enforce-absent`), the monotonic
   **taint floor**, **ASK** on destructive commands (collapsing to DENY under
   `--mode background`), with Bash classified **kernel-side** from the manifest's
-  `command_classes` (D36). Additive (only ever `deny`/`ask`) and fail-open. The
+  `command_classes` (D36). Additive (only ever `deny`/`ask`) and fail-open when its
+  binary is missing; a world that does not compile follows `--on-broken-world`
+  (`last-good` by default, D87). The
   Python engine is archived under `.claude/hooks/superseded/`; the cutover
   consciously drops trust pins (D29) and path-based read-taint until they land
   as typed manifest fields. Cross-agent taint still follows the shared session
@@ -435,7 +437,7 @@ Consent is exact-bound, expires after five minutes, and is durably consumed befo
 forwarding; uncertain upstream outcomes require operator reconciliation. See the
 [approval workflow](docs/approval-capable-hosts.md).
 
-Builds clean offline with `clippy -D warnings`; **552 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
+Builds clean offline with `clippy -D warnings`; **566 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
 tests feed prepared events through stdin so a disabled hook's early exit cannot
 race the fixture writer.
 The Unix-only doctor integration suite includes **40 passing tests and 3 explicitly

@@ -532,6 +532,8 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 
 - [x] **E13.10** Instruction and memory files count as durable memory (DECISIONS **D83**, AI2-64 / #137, gap G1 of the *Designing AI Agents* review): a `path_classes` world section reclassifies `Write`/`Edit`/`MultiEdit`/`NotebookEdit` (and Antigravity's `write_to_file`/`propose_code`/`edit_notebook`) to a `side_effect: Memory` action when the canonical path or the normalized argument matches `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/{agents,commands,rules,skills}/**`, auto-memory or `.agents/{rules,skills,workflows}/**`. Tainted → `DENY taint_invariant`; clean → ALLOW in project worlds, ASK in `--user`/`--managed` worlds. One pattern list, pinned across host manifests. **Pending**: shell writes (`echo >> CLAUDE.md`, D57 residual), Antigravity `move` (destination key not captured), path classes for the OpenCode and DeepSeek Harness worlds.
 
+- [x] **E13.11** Broken-world mode for the host hooks (DECISIONS **D87**, AI2-56 / #128): `cc-hook` and `agy-hook` take `--on-broken-world closed|open|last-good`; a world that cannot be read or compiled (or is deleted) no longer fails open. `last-good` (the default) decides with the last world that compiled, cached in the state dir, and falls back to `closed`; `init` writes `last-good`, `init --managed` writes `closed`. Every mode warns (Claude Code `systemMessage`, agy stderr, decision log, console banner, `harness doctor`). **Pending**: a live check that Claude Code renders a PreToolUse `systemMessage`.
+
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
 
 ---

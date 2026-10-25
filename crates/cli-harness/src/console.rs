@@ -19,8 +19,9 @@
 //! says, so the page pins it, with the other kernel invariants a switch cannot
 //! change, in a band above the policy and lights it when a verdict comes from it.
 //!
-//! The write is atomic (temp file + rename) because cc-hook fails open on a world
-//! it cannot compile: a half-written file must never be visible to it.
+//! The write is atomic (temp file + rename) so cc-hook never reads a half-written
+//! file: one would count as a broken world (D87) and fall back to the last world
+//! that compiled, with a warning, for no reason.
 //!
 //! **Stop** (G7, D85) is the `stop` profile behind its own button: every base
 //! action with a declared effect beyond Read/None is Off at the agent's next call.

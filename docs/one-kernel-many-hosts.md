@@ -84,6 +84,21 @@ does not synthesize a verdict; it applies its documented strategy:
 On the verdict channel itself, an **unknown decision string** maps to
 `Block{Deny}` (fail-closed) in `host_outcome()`.
 
+**A broken world is not a process failure (D87).** For `cc-hook` and `agy-hook`,
+"process failure" above means an unreadable *event*. A world that cannot be read or
+compiled, or has been deleted, follows the hook's `--on-broken-world` mode instead:
+
+| Mode | The call | Who sets it |
+|---|---|---|
+| `last-good` | decided by the last world that compiled here (cached in the state dir); `closed` if none ever did | the hook's default; `harness init` and `init --user` write it |
+| `closed` | refused, with the compile error and the way out | `harness init --managed` writes it |
+| `open` | proceeds ungoverned | opt-in only |
+
+Every mode warns: Claude Code gets a `systemMessage` on each answer while the world
+is broken; Antigravity gets the warning on stderr and, when refused, as the `deny`
+reason. On both hosts the decision log (`--log`) marks the lines. The bootstrap shims stay fail-open
+when there is no binary (D37): without a binary there is no hook to have a mode.
+
 ## The parity guarantee
 
 Most host worlds are separate manifests (`cc-world.yaml`, `agy-world.yaml`,
