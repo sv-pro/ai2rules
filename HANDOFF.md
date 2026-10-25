@@ -1,3 +1,38 @@
+# Current fix: AI2-57 / PR #129 (2026-10-25)
+
+User authorizes fixing both review findings, reviewing, checking CI/conflicts,
+and merging if good. Worktree pr129-review, branch codex/pr129-review.
+Shared hostkit now joins native components (root/prefix preserved) and checks
+missing/.. before canonicalization. Added actual hook+kernel verdict checks,
+Windows path forms and drive prefixes, plus Unix symlink/.. compatibility.
+Focused Windows and Linux tests, full native Windows workspace tests, fmt and
+clippy passed. Independent candidate review finishing; fresh CI still required.
+No merge yet. Stand remains clean at810c1a6;
+PR150 and other deferred PRs untouched. Next: finish review/checks, push existing
+PR branch, fresh CI, resolve review threads, merge pinned head, sync Linear.
+
+Earlier review and inherited handoff follow.
+
+# Current review: AI2-57 / PR #129 (2026-10-25)
+
+Reviewed remote head 44c0ec86787e9d5e4886525a36e51d153234dfb4 in isolated
+branch codex/pr129-review. User lifted the Oct 27 hold and authorized merge only
+if review passes. No merge: two native Windows regression tests fail.
+P1: root-relative backslash path loses its root and inherits project ReadWrite;
+actual hook_request + gate returns ALLOW versus DENY for the real target.
+P2: absolute missing/.. canonicalizes before the missing-component guard.
+Tests are uncommitted at the end of hostkit.rs, module pr129_review_regressions.
+Run: cargo test -p cli-harness --bin harness --offline --locked pr129_review_regressions -- --nocapture
+No external write executed; only temp fixture directories and decision calls.
+Inline review: https://github.com/sv-pro/ai2rules/pull/129#pullrequestreview-5643163428
+All 15 original GitHub checks pass; no conflicts; D88 collision already fixed.
+Linear AI2-57 moved In Progress with findings. No production changes or pushes.
+Demo checkout started clean at 810c1a6; untouched. PR150 and others untouched.
+Next: fix Windows rooted/prefixed handling and check original absolute components
+before canonicalization; add regression coverage, rerun tests/CI and re-review.
+
+Earlier inherited main handoff follows (not evidence about PR129).
+
 # Current handoff — PR #100 managed comparison
 
 ## 2026-10-24 — managed live comparison complete

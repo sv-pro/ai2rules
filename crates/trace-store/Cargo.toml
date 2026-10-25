@@ -17,6 +17,10 @@ serde_json = { workspace = true }
 # HMAC over the approval log (finding #15). `hmac` is not in the offline crate
 # set; RFC 2104 over sha2 is implemented in `integrity.rs` against RFC 4231.
 sha2 = "0.10"
+# The approval key's 32 random bytes, from the OS CSPRNG on every platform. It was
+# `/dev/urandom` only, which left the approval store unusable on Windows (D88).
+# Already in the lockfile through tempfile, so the offline crate set covers it.
+getrandom = "0.3"
 
 [dev-dependencies]
 tempfile = { workspace = true }
