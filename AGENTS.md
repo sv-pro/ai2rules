@@ -77,8 +77,8 @@ harness-types (foundation — language-neutral contracts, pure data)
 
 **Test counts (all active tests passing, native Linux):**
 harness-types 11 · world-kernel 73 · compiler 36 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 66 · cli-harness 278 ·
-harness-wasm 0 · govbench 9 · **total 587** (plus the harness-wasm Node smoke
+provider-adapters 5 · agent-core 18 · harness-preview 66 · cli-harness 280 ·
+harness-wasm 0 · govbench 9 · **total 589** (plus the harness-wasm Node smoke
 tests, run via wasm-pack). The Unix-only doctor fixture suite includes
 40 passing tests and 3 ignored #87 specification gaps.
 
