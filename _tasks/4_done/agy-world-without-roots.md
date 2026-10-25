@@ -39,3 +39,17 @@ all three worlds. Recorded as D92.
 - Validation:
   - `cargo test --workspace`: 595 passed.
   - fmt, clippy `-D warnings` and `check-demos.sh` are clean.
+
+## Done — 2026-10-25
+
+PR #157 was merged into `main` as `6cd805d` (commit `f082706`, decision D92). CI was
+green on the merged head: all 15 checks passed on the first run, including
+`check-windows`. Moving the two `agy_hook` tests off the made-up `/workspace` root
+headed off the Windows failure that D91 hit. Linear's GitHub integration moved AI2-82 to
+Done on merge.
+
+Carried forward:
+
+- Shell writes to `.agents/` and `.claude/` remain ASK, which is the D57 residual.
+- Machine-scope worlds keep the starter's three-line comment above the dropped
+  `./.agents` rule. It is cosmetic.
