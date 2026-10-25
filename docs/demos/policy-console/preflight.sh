@@ -29,7 +29,7 @@ else
 fi
 
 SHIM="$DESK/.claude/hooks/world-gate.sh"
-if [ -f "$SHIM" ] && grep -q -- '--enforce-absent --log' "$SHIM"; then
+if [ -f "$SHIM" ] && grep -q -- '--enforce-absent' "$SHIM" && grep -q -- '--log' "$SHIM"; then
   ok "project: $DESK (hook with ABSENT enforced and the decision log on)"
 else
   fail "project missing or its hook lacks --enforce-absent/--log: run setup.sh"

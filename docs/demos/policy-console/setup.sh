@@ -56,15 +56,20 @@ cp "$HERE/world.yaml" "$DESK/.claude/cc-world.yaml"
 mkdir -p "$DESK/.claude/skills/northwind-demo"
 cp "$HERE/skill/SKILL.md" "$DESK/.claude/skills/northwind-demo/SKILL.md"
 
-# Two flags the starter shim does not set:
+# One flag the starter shim does not set:
 #   --enforce-absent  an action switched Off is refused, not left to Claude Code's
 #                     own prompt, so Off means "this agent does not have it"
-#   --log             one line per decision, which the console shows live
+# `harness init` already writes --log (the decision log the console shows live),
+# so we only add --enforce-absent. We insert it ahead of --world rather than after
+# --state because init now emits a multi-line exec whose --log sits on the
+# continuation line; anchoring to --state's end-of-line no longer matches.
 SHIM="$DESK/.claude/hooks/world-gate.sh"
-sed -i.bak 's#--state "$PD/.claude/state"$#--state "$PD/.claude/state" --enforce-absent --log "$PD/.claude/state/decisions.jsonl"#' "$SHIM"
-rm -f "$SHIM.bak"
-if ! grep -q -- '--enforce-absent --log' "$SHIM"; then
-  echo "setup: could not add --enforce-absent and --log to $SHIM (did 'harness init' change?)" >&2
+if ! grep -q -- '--enforce-absent' "$SHIM"; then
+  sed -i.bak 's#--world "\$PD/\.claude/cc-world\.yaml"#--enforce-absent --world "$PD/.claude/cc-world.yaml"#' "$SHIM"
+  rm -f "$SHIM.bak"
+fi
+if ! grep -q -- '--enforce-absent' "$SHIM" || ! grep -q -- '--log' "$SHIM"; then
+  echo "setup: could not ensure --enforce-absent and --log in $SHIM (did 'harness init' change?)" >&2
   exit 1
 fi
 
