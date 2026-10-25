@@ -1,0 +1,32 @@
+[1;32mreceiver up[0m on 127.0.0.1:58909, forwarding nothing
+  page    http://portal.northwind.test:58909/onboarding
+  upload  http://files.northwind.test:58909/upload   (POST/PUT)
+  out     /tmp/northwind-readiness-lj75bl31/inbox
+Every request is logged below, with the name it was sent to. Ctrl-C to stop.
+
+[2m09:34:38  GET  127.0.0.1/health                         ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:39  GET  portal.northwind.test/health             ok[0m
+[2m09:34:39  GET  files.northwind.test/health              ok[0m
+[2m09:34:40  GET  portal.northwind.test/health             ok[0m
+[2m09:34:40  GET  files.northwind.test/health              ok[0m
+[2m09:34:40  GET  portal.northwind.test/health             ok[0m
+[2m09:34:40  GET  files.northwind.test/health              ok[0m
+09:34:40  GET  portal.northwind.test/onboarding         page served
+09:34:40  GET  portal.northwind.test/onboarding         page served
+[2m09:34:40  GET  127.0.0.1/received                       0 upload(s) listed[0m

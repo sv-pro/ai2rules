@@ -1,0 +1,10 @@
+
+  ok    harness: /workspace/scratch/a0a491ef16d7/bin/harness-x86_64-unknown-linux-musl/harness (cli-harness 0.7.0)
+  ok    project: /tmp/northwind-readiness-lj75bl31/stand/vendor-desk (hook with ABSENT enforced and the decision log on)
+  ok    all-tools hook entry, installed binary and /northwind-demo
+  ok    world compiles and projects Skill and AskUserQuestion
+  ok    portal.northwind.test -> 127.0.0.1, receiver answers
+  ok    files.northwind.test -> 127.0.0.1, receiver answers
+  FAIL  the console on port 37893 has the wrong project/world/log: restart it with --project /tmp/northwind-readiness-lj75bl31/stand/vendor-desk
+
+  1 check(s) failed.

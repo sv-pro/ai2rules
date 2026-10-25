@@ -60,12 +60,13 @@ PY=python3
 
 # A receiver or console left over from an earlier run would answer the checks with
 # the wrong project, or make ours fail to bind. Refuse rather than guess.
-answers() { curl -s -o /dev/null --max-time 2 "$1"; }
-if answers "http://127.0.0.1:$PORT/health"; then
+responds() { curl --noproxy '*' -sS -o /dev/null --max-time 2 "$1" 2>/dev/null; }
+answers() { curl --noproxy '*' -fsS -o /dev/null --max-time 2 "$1" 2>/dev/null; }
+if responds "http://127.0.0.1:$PORT/health"; then
   echo "run-demo: something already answers on port $PORT (an old receiver?). Stop it first." >&2
   exit 1
 fi
-if answers "http://127.0.0.1:$CONSOLE_PORT/api/state"; then
+if responds "http://127.0.0.1:$CONSOLE_PORT/api/state"; then
   echo "run-demo: something already answers on port $CONSOLE_PORT (an old console?). Stop it first." >&2
   exit 1
 fi
@@ -87,7 +88,7 @@ wait_for() { # url, what
 }
 
 echo "1/5  Rebuilding the project in $DESK"
-HARNESS="$HARNESS" RECEIVED="$RECEIVED" bash "$HERE/setup.sh" "$DEST" >/dev/null
+HARNESS="$HARNESS" RECEIVED="$RECEIVED" PORT="$PORT" CONSOLE_PORT="$CONSOLE_PORT" bash "$HERE/setup.sh" "$DEST" >/dev/null
 
 echo "2/5  Starting the receiver (:$PORT) and the console (:$CONSOLE_PORT); logs in $LOGS"
 mkdir -p "$LOGS"
@@ -99,7 +100,7 @@ wait_for "http://127.0.0.1:$PORT/health" receiver
 wait_for "http://127.0.0.1:$CONSOLE_PORT/api/state" console
 
 echo "3/5  Checking the stand"
-if ! PORT="$PORT" CONSOLE_PORT="$CONSOLE_PORT" bash "$HERE/preflight.sh" "$DEST"; then
+if ! HARNESS="$HARNESS" PORT="$PORT" CONSOLE_PORT="$CONSOLE_PORT" bash "$HERE/preflight.sh" "$DEST"; then
   echo "run-demo: the stand is not ready (see above). Logs: $LOGS" >&2
   exit 1
 fi
