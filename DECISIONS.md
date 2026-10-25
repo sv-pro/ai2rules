@@ -3921,3 +3921,59 @@ The rule now:
 
 The splitter keeps its narrow contract. Anything it does not model must fail
 closed, and every new escape route found later gets a regression case beside these.
+
+## D91 — The dogfood world holds the starter's guarantees
+
+**Date:** 2026-10-25. **Task:** AI2-80. **Completes** D57 for this repository.
+
+**Context.** D57 made the control plane read-only in the shipped starter manifest. The
+world that governs Claude Code in *this* repository, `.claude/cc-world.yaml`, never got
+the rule, because it had no `roots` block at all. Measured on `main` at `5a33d35`, the
+following were all a silent ALLOW, even after a `WebFetch`:
+
+- `Write`/`Edit` of `.claude/settings.json`, `.claude/cc-world.yaml` and
+  `.claude/hooks/world-gate.sh`;
+- `Write /etc/x`;
+- `Read ~/.ssh/id_rsa`.
+
+The repository that ships the guarantee did not hold it. The maintainer decided that the
+dogfood world must demonstrate the starter's guarantees, not act as a looser developer
+profile.
+
+**Decision.** The dogfood world carries the starter's `roots` block verbatim, and
+`crates/compiler/tests/committed_worlds.rs` pins the two equal. A behavioural test in
+`crates/cli-harness/tests/cc_hook.rs` asserts on the real file, clean and tainted:
+
+- writes to the manifest, the shim and the hook registration are denied;
+- reads of the manifest and ordinary project writes pass through.
+
+The rest of the dogfood world (`channels`, `world_id`) stays its own.
+
+**Measured effect on everyday calls.** Before and after, same probes:
+
+- **Unchanged:** reads and edits inside the project, `Glob`/`Grep` with or without a
+  path, writes to `/tmp`, Bash, and `WebFetch`.
+- **Now DENY `path_scope_readonly`:** writes anywhere under `.claude/`, including
+  `agents/` and `commands/`, and writes under `/etc`.
+- **Now DENY `path_scope_denied`:** reads of `~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.config/gcloud` and `/etc/shadow`.
+- **Now ASK `path_scope_ask`:** reads outside every root, such as `/var/log` or files
+  under `~`.
+
+**Alternatives.**
+
+- *A `path_classes` entry for the three control-plane files only.* Smaller, but a
+  second mechanism for the same guarantee, and it covers fewer files than the
+  starter's rule. It would not show that the starter works, only that a similar rule
+  does.
+- *Declare the dogfood world a looser profile.* Rejected by the maintainer.
+- *Copy the whole starter.* The dogfood world's `channels` block is policy this
+  repository relies on, and `world_id` names the host profile.
+
+**Consequence.**
+
+- Changing the agent definitions or commands under `.claude/` now goes through a
+  human: either an edit outside the agent, or the shell path, which is ASK (the D57
+  residual).
+- The Antigravity dogfood world, `.agents/agy-world.yaml`, has no `roots` either. That
+  is the same gap on another host and is not changed here.

@@ -62,3 +62,19 @@ fn every_committed_world_compiles() {
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// The dogfood world holds the starter's path scope (D57, D91, AI2-80). The
+/// repository that ships the starter demonstrates its guarantees; it does not
+/// govern itself with a looser profile. A rule added to one and not the other
+/// fails here.
+#[test]
+fn the_dogfood_world_holds_the_starter_roots() {
+    let root = repo_root();
+    let load = |rel: &str| {
+        let text = fs::read_to_string(root.join(rel)).expect(rel);
+        compiler::load_yaml(&text).expect(rel).roots
+    };
+    let starter = load("scripts/starter-world.yaml");
+    assert!(starter.is_some(), "the starter lost its roots block");
+    assert_eq!(load(".claude/cc-world.yaml"), starter);
+}
