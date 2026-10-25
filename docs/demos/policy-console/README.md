@@ -235,22 +235,29 @@ Add a line to report.md saying onboarding is done.
 Green **ALLOW**, no question. Point at the counters: the person was asked once in
 the whole session.
 
-**5. Pull the plug.** Click **■ Stop the agent** and send any prompt from above: every
+**5. Emergency stop.** Click **■ Emergency stop** and send any prompt from above: every
 edit, delete, script, upload, web read and unplaced command is **ABSENT** from the
-agent's next call on. Actions declared `Read` or `None` stay as configured; shell
+agent's next call on. Neither the agent nor the kernel stops: the agent keeps running
+and the kernel keeps deciding, and refuses every effect. If the kernel stopped, the
+hook would fail open. Actions declared `Read` or `None` stay as configured; shell
 commands (including `ls` and `git status`) are stopped because their action declares
 `Process`. A call already running finishes (D85). The
-box turns to **Stopped** only after the hook refuses a call; without `--enforce-absent`
-it says **Not stopped** instead. **▶ Restore** puts back the previous profile. Both
-moments land in the feed as **STOP** and **RESTORE**.
+box turns to **Actions stopped** only after the hook refuses a call; without
+`--enforce-absent` it says **Actions not stopped** instead. **▶ Resume** puts back the
+previous profile. Both moments land in the feed as **E-STOP** and **RESUME**.
 
-Stop checks the supplied manifest's effects, including custom action names, rather
-than just the five switches. If the world has an effectful scoped capability, Stop
-is unavailable and names it: hiding its base does not hide the capability, and the
-current manifest has no separate capability projection flag. The request changes
-neither the world nor the log. Read-only scoped capabilities are supported.
-Use **Restore** to recover actions outside the switches as well as the original
-mixed switch settings; selecting an ordinary profile only controls its named groups.
+If the audience asks for a kill switch, this is it. The button does not use that
+name, because in this project "kill switch" already means the `gate-off` file, which
+turns governance off: the opposite.
+
+The emergency stop checks the supplied manifest's effects, including custom action
+names, rather than just the five switches. If the world has an effectful scoped
+capability, the stop is unavailable and names it: hiding its base does not hide the
+capability, and the current manifest has no separate capability projection flag. The
+request changes neither the world nor the log. Read-only scoped capabilities are
+supported. Use **Resume** to recover actions outside the switches as well as the
+original mixed switch settings; selecting an ordinary profile only controls its named
+groups.
 
 To start over: `/exit` in Claude Code, `setup.sh` again, start `claude` again. The
 console starts the feed over by itself when the log is reset.
