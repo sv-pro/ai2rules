@@ -9,6 +9,13 @@
 //! per session in call order. Subagent transcripts share their parent's session
 //! id, so all files are merged by timestamp before replaying.
 //!
+//! Every replayed call carries the transcript's `tool_use` id and, for a
+//! subagent, its `agentId` — the same keys the hook writes into its decision log
+//! (D84). Pass that log with `--decisions` and each call is joined to what the
+//! live hook decided and how the call ended, so a replay against a changed world
+//! shows which real verdicts would move, and the ASKs show whether the person
+//! approved them (inferred from whether the call ran).
+//!
 //! Nothing is executed and no transcript is modified. The point is evidence before
 //! enforcement: how often the hook would have asked or denied in your real work,
 //! and why, without connecting it to a live agent.
@@ -23,6 +30,7 @@
 
 use crate::cc_hook::{compile_hook_world, hook_answer, hook_request, HookEvent, HookSession};
 use crate::init::STARTER_WORLD;
+use crate::outcome::{join, read_log, Joined};
 use harness_preview::{gate, GateUsage};
 use harness_types::CompiledWorld;
 use serde::Serialize;
@@ -34,6 +42,8 @@ use std::path::{Path, PathBuf};
 struct Call {
     timestamp: String,
     session: String,
+    tool_use_id: String,
+    agent_id: Option<String>,
     cwd: String,
     tool: String,
     input: Value,
@@ -44,6 +54,10 @@ struct Call {
 struct Replayed {
     timestamp: String,
     session: String,
+    /// The host's id for this call: the join key into the decision log.
+    tool_use_id: String,
+    /// The subagent that made the call, when it was not the main agent.
+    agent_id: Option<String>,
     tool: String,
     /// A one-line summary of the call's arguments (command, path, URL, …).
     summary: String,
@@ -58,6 +72,9 @@ struct Replayed {
     reason: String,
     taint_in: String,
     taint_out: String,
+    /// What the live hook decided and how the call ended, from `--decisions`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    live: Option<Joined>,
 }
 
 pub struct Options<'a> {
@@ -69,6 +86,8 @@ pub struct Options<'a> {
     pub grant: bool,
     pub examples: usize,
     pub json: bool,
+    /// The hook's decision log (`cc-hook --log`) to join replayed calls to.
+    pub decisions: Option<&'a Path>,
 }
 
 pub fn run(opts: &Options<'_>) -> i32 {
@@ -116,6 +135,23 @@ pub fn run(opts: &Options<'_>) -> i32 {
             STARTER_WORLD.to_string(),
         ),
     };
+
+    // The live log, keyed by tool-call id. Its own lines name their session, so
+    // the key is the id alone: Claude Code ids are unique across sessions.
+    let mut live: HashMap<String, Joined> = HashMap::new();
+    if let Some(path) = opts.decisions {
+        match read_log(path) {
+            Ok(lines) => {
+                for j in join(&lines) {
+                    live.insert(j.tool_use_id.clone(), j);
+                }
+            }
+            Err(e) => {
+                eprintln!("replay-transcripts: cannot read {}: {e}", path.display());
+                return 2;
+            }
+        }
+    }
 
     let (mut calls, skipped_lines) = read_calls(&files);
     calls.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
@@ -170,6 +206,9 @@ pub fn run(opts: &Options<'_>) -> i32 {
         replayed.push(Replayed {
             timestamp: call.timestamp,
             session: call.session,
+            live: live.remove(&call.tool_use_id),
+            tool_use_id: call.tool_use_id,
+            agent_id: call.agent_id,
             tool: call.tool,
             summary,
             decision: res.decision.clone(),
@@ -190,6 +229,7 @@ pub fn run(opts: &Options<'_>) -> i32 {
             "mode": opts.mode,
             "enforce_absent": opts.enforce_absent,
             "grant": opts.grant,
+            "decisions": opts.decisions.map(|p| p.display().to_string()),
             "calls": replayed,
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
@@ -234,13 +274,15 @@ fn read_calls(files: &[PathBuf]) -> (Vec<Call>, usize) {
                 continue;
             };
             for block in blocks.iter().filter(|b| b["type"] == "tool_use") {
-                let id = block["id"].as_str().unwrap_or_default().to_string();
+                let id = id_of(block);
                 if !id.is_empty() && !seen.insert(id) {
                     continue;
                 }
                 calls.push(Call {
                     timestamp: event["timestamp"].as_str().unwrap_or_default().to_string(),
                     session: event["sessionId"].as_str().unwrap_or("default").to_string(),
+                    tool_use_id: id_of(block),
+                    agent_id: event["agentId"].as_str().map(str::to_string),
                     cwd: event["cwd"].as_str().unwrap_or_default().to_string(),
                     tool: block["name"].as_str().unwrap_or_default().to_string(),
                     input: block["input"].clone(),
@@ -249,6 +291,10 @@ fn read_calls(files: &[PathBuf]) -> (Vec<Call>, usize) {
         }
     }
     (calls, skipped)
+}
+
+fn id_of(block: &Value) -> String {
+    block["id"].as_str().unwrap_or_default().to_string()
 }
 
 /// A one-line summary of a call's arguments: the command, path, URL or query.
@@ -411,7 +457,72 @@ fn print_report(
             println!("  ... {} more tools", tools.len() - 10);
         }
     }
+    if opts.decisions.is_some() {
+        print_live(calls);
+    }
     println!("\nFor every call with its verdict and reason: --json");
+}
+
+/// What the live decision log adds: how many replayed calls it covers, how the
+/// people asked answered (inferred), and where this world disagrees with the one
+/// the hook ran under.
+fn print_live(calls: &[Replayed]) {
+    let joined: Vec<(&Replayed, &Joined)> = calls
+        .iter()
+        .filter_map(|c| c.live.as_ref().map(|l| (c, l)))
+        .collect();
+    println!(
+        "\n== Live decision log ({} of {} calls joined by tool_use_id) ==",
+        joined.len(),
+        calls.len()
+    );
+    if joined.is_empty() {
+        println!("  No call matched. The log needs a hook that records tool_use_id (D84).");
+        return;
+    }
+    let asks: Vec<&Joined> = joined
+        .iter()
+        .map(|(_, l)| *l)
+        .filter(|l| l.answer.as_deref() == Some("ask"))
+        .collect();
+    let count = |a: &str| {
+        asks.iter()
+            .filter(|l| l.human_answer.as_deref() == Some(a))
+            .count()
+    };
+    println!(
+        "  ASKs: {} — approved {}, declined or abandoned {}, unobserved {}",
+        asks.len(),
+        count("approved"),
+        count("declined_or_abandoned"),
+        count("unobserved")
+    );
+    println!("  (inferred from whether the call ran: the hook never sees the answer)");
+    let ran = joined.iter().filter(|(_, l)| l.ran == Some(true)).count();
+    let failed = joined
+        .iter()
+        .filter(|(_, l)| matches!(l.status.as_deref(), Some("error" | "interrupted")))
+        .count();
+    println!("  Ran: {ran}, of which failed or interrupted: {failed}");
+    let moved: Vec<&(&Replayed, &Joined)> = joined
+        .iter()
+        .filter(|(c, l)| c.decision != l.decision)
+        .collect();
+    println!("  Verdicts this world would change: {}", moved.len());
+    for (c, l) in moved.iter().take(10) {
+        println!(
+            "    {}  {:<10} {} -> {}  {}",
+            short_ts(&c.timestamp),
+            c.tool,
+            l.decision,
+            c.decision,
+            c.summary
+        );
+    }
+    let breaches = joined.iter().filter(|(_, l)| l.ran_despite_deny).count();
+    if breaches > 0 {
+        println!("  !! {breaches} denied call(s) ran anyway — check the host's hook wiring");
+    }
 }
 
 /// `2026-10-21T07:50:49.064Z` -> `2026-10-21 07:50`.

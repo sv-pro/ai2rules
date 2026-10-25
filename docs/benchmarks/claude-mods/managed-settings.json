@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Write",
+      "hooks": [{
+        "type": "command",
+        "command": "/usr/bin/python3 /opt/probe/managed_hook.py",
+        "timeout": 10
+      }]
+    }]
+  }
+}

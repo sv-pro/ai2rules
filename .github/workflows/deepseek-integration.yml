@@ -30,7 +30,7 @@ jobs:
           repository: deepseek-ai/deepseek-harness
           ref: 141eb6fef83422698aef7a981029e843e8161534
           path: .integration/deepseek-harness
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.20.0"
       - name: Install the pinned dsh workspace

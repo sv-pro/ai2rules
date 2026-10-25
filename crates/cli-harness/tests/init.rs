@@ -783,3 +783,83 @@ fn init_refuses_a_kernel_that_lives_inside_the_project() {
     let out = run_planted(&planted, &["init", &target.to_string_lossy(), "--force"]);
     assert!(out.status.success(), "--force did not override the refusal");
 }
+
+/// D84: `init` wires the read-only outcome observer beside the gate — the same
+/// shim on `PostToolUse` and `PostToolUseFailure`, once each however often it
+/// runs — and the shim keeps the decision log the observer appends to.
+#[test]
+fn init_wires_the_outcome_observer_once() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path();
+    assert!(init(target, &[]).status.success());
+    assert!(init(target, &[]).status.success());
+
+    let s = settings(target);
+    let gate = pretooluse(&s)[0]["hooks"][0]["command"].clone();
+    for event in ["PostToolUse", "PostToolUseFailure"] {
+        let entries = s["hooks"][event].as_array().expect(event);
+        assert_eq!(entries.len(), 1, "{event} registered twice: {entries:?}");
+        assert_eq!(entries[0]["matcher"], "*");
+        assert_eq!(entries[0]["hooks"][0]["command"], gate, "{event}");
+    }
+    let body = fs::read_to_string(target.join(".claude/hooks/world-gate.sh")).unwrap();
+    assert!(
+        body.contains(r#"--log "$PD/.claude/state/decisions.jsonl""#),
+        "{body}"
+    );
+}
+
+/// The installed shim, driven the way Claude Code drives it: the gate writes a
+/// decision line, the observer an outcome line with the same `tool_use_id`, and
+/// the observer answers nothing.
+#[test]
+fn an_installed_project_joins_a_decision_to_its_outcome() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+    let tmp = tempfile::tempdir().expect("tmp");
+    let target = tmp.path().canonicalize().unwrap();
+    assert!(init(&target, &[]).status.success());
+    let shim = target.join(".claude/hooks/world-gate.sh");
+    let run = |payload: serde_json::Value| -> String {
+        let mut child = Command::new("bash")
+            .arg(&shim)
+            .env("HOME", tmp.path())
+            .env_remove("HARNESS_BIN")
+            .env_remove("CLAUDE_PROJECT_DIR")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn shim");
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes())
+            .unwrap();
+        String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).into_owned()
+    };
+    let file = target.join("notes.md").display().to_string();
+    run(
+        serde_json::json!({"hook_event_name": "PreToolUse", "session_id": "s",
+        "tool_name": "Read", "tool_input": {"file_path": file}, "tool_use_id": "toolu_1"}),
+    );
+    let out = run(
+        serde_json::json!({"hook_event_name": "PostToolUse", "session_id": "s",
+        "tool_name": "Read", "tool_input": {"file_path": file}, "tool_use_id": "toolu_1",
+        "tool_response": {"type": "text"}}),
+    );
+    assert_eq!(out.trim(), "", "the observer answered the host: {out}");
+
+    let log = fs::read_to_string(target.join(".claude/state/decisions.jsonl")).expect("log");
+    let lines: Vec<Value> = log
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2, "{log}");
+    assert_eq!(
+        (lines[0]["kind"].as_str(), lines[1]["kind"].as_str()),
+        (Some("decision"), Some("outcome"))
+    );
+    assert_eq!(lines[0]["tool_use_id"], "toolu_1");
+    assert_eq!(lines[1]["tool_use_id"], "toolu_1");
+}

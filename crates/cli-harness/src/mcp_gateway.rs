@@ -32,8 +32,8 @@
 
 use compiler::{compile, loader::load_yaml};
 use harness_preview::{
-    gate_and_lower, host_outcome, GateContext, GateRequest, GateResponse, GateUsage, HostOutcome,
-    ABI_VERSION,
+    gate_and_lower, gate_and_lower_authorized, host_outcome, GateContext, GateRequest,
+    GateResponse, GateUsage, HostOutcome, ABI_VERSION,
 };
 use harness_types::{ActionName, BackingIdentity, CompiledWorld, ExecutionSpec, Operation};
 use serde_json::{json, Value};
@@ -181,6 +181,20 @@ pub(crate) fn govern(
     mode: &str,
     usage: GateUsage,
 ) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
+    govern_with_approval(world, tool, args, source, tainted, mode, usage, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn govern_with_approval(
+    world: &CompiledWorld,
+    tool: &str,
+    args: &Value,
+    source: &str,
+    tainted: bool,
+    mode: &str,
+    usage: GateUsage,
+    approved: bool,
+) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
     let req = GateRequest {
         v: ABI_VERSION,
         tool: tool.to_string(),
@@ -197,7 +211,11 @@ pub(crate) fn govern(
             usage: Some(usage),
         },
     };
-    gate_and_lower(world, &req)
+    if approved {
+        gate_and_lower_authorized(world, &req)
+    } else {
+        gate_and_lower(world, &req)
+    }
 }
 
 fn audit(path: Option<&Path>, entry: Value) {
@@ -393,7 +411,12 @@ pub fn run(
     initial_taint: bool,
     mode: &str,
     audit_path: Option<&Path>,
+    approvals: Option<(&Path, &str)>,
 ) -> i32 {
+    if approvals.is_some_and(|(_, principal)| principal.trim().is_empty()) {
+        eprintln!("mcp-gateway: principal must not be empty");
+        return 2;
+    }
     let content = match std::fs::read_to_string(world_path) {
         Ok(c) => c,
         Err(e) => {
@@ -528,7 +551,7 @@ pub fn run(
                     .cloned()
                     .unwrap_or_else(|| json!({}));
                 let carried_usage = session_usage;
-                let (verdict, lowered) = govern(
+                let (mut verdict, mut lowered) = govern(
                     &world,
                     &name,
                     &args,
@@ -537,6 +560,36 @@ pub fn run(
                     mode,
                     session_usage,
                 );
+                let mut claimed = None;
+                let mut approval_message = None;
+                if matches!(host_outcome(&verdict), HostOutcome::NeedsApproval { .. }) {
+                    if let Some((path, principal)) = approvals {
+                        let claim = crate::mcp_approval::binding(
+                            &world, &verdict, &params, source, principal, upstream,
+                        )
+                        .and_then(|binding| crate::mcp_approval::claim(path, &binding));
+                        match claim {
+                            Ok(grant) => {
+                                audit(
+                                    audit_path,
+                                    json!({"stage": "approval_consumed", "id": grant.id}),
+                                );
+                                claimed = Some(grant);
+                                (verdict, lowered) = govern_with_approval(
+                                    &world,
+                                    &name,
+                                    &args,
+                                    source,
+                                    session_taint,
+                                    mode,
+                                    session_usage,
+                                    true,
+                                );
+                            }
+                            Err(message) => approval_message = Some(message),
+                        }
+                    }
+                }
                 session_usage = verdict.context.usage;
                 let action = verdict.action.clone();
                 let manifest_hash = verdict.manifest_hash.clone();
@@ -597,11 +650,19 @@ pub fn run(
                                 if verdict.context.taint == "tainted" {
                                     session_taint = true;
                                 }
-                                match up.call_tool(
+                                let response = up.call_tool(
                                     &upstream_tool,
                                     &upstream_args,
                                     params.get("_meta"),
-                                ) {
+                                );
+                                // The grant was already burned before crossing this boundary.
+                                // Even a broken response can follow a completed external effect.
+                                let response = if let Some(mut grant) = claimed.take() {
+                                    grant.finish(response)
+                                } else {
+                                    response
+                                };
+                                match response {
                                     Ok(r) if demands_input(&r) => {
                                         // D49 interim deny (issue #40). The upstream answered
                                         // with a *demand* rather than a result. Note what this
@@ -636,7 +697,7 @@ pub fn run(
                         }
                     }
                     HostOutcome::NeedsApproval { reason } => json!({"isError": true,
-                        "content": [{"type": "text", "text": format!("ASK: {reason}")}]}),
+                        "content": [{"type": "text", "text": format!("ASK: {}", approval_message.as_deref().unwrap_or(&reason))}]}),
                     HostOutcome::Block { kind, reason } => json!({"isError": true,
                         "content": [{"type": "text",
                                      "text": format!("{}: {reason}", kind.label())}]}),

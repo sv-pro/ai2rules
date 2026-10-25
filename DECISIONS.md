@@ -3393,6 +3393,180 @@ classified, because its destination key has not been captured from a live
 session; the OpenCode and DeepSeek Harness worlds carry no path class yet. On
 Windows the backslash spellings are tested; the rest of Windows parity is AI2-57.
 
+## D84 — The host decision log joins each decision to its outcome; an ASK's answer is inferred, and says so
+
+**Date:** 2026-10-23. **Gap G2** of the "Designing AI Agents" review; AI2-65 / #138.
+Spec: `docs/host-decision-log.md`.
+
+**Context.** `cc-hook --log` (#116, D81) wrote one line per verdict: session, tool,
+action, decision, rule, answer, taint, manifest hash. It could not say which tool
+call a line was, which agent made it, what the person answered to an ASK, or
+whether the call ran. Without those, an ASK cannot be connected to an approval, and
+none of the metrics a world change should rest on (G3: ASK approval and override
+rates) can be computed.
+
+**Decision.**
+
+- **Identity on every decision line.** `tool_use_id`, `agent_id`, `agent_type` and
+  `cwd`, copied from the hook event when the host sends them, `null` when it does
+  not. Nothing is invented: Antigravity sends no tool-call id, so its lines carry
+  `step_idx` (the nearest key into its transcript) and a `null` id.
+- **One file, three kinds of line.** `kind: "decision"` (the gate), `"outcome"` (the
+  observer) and `"policy"` (the console). One append-only file keeps the order in
+  which things happened and gives a reader one thing to open; a missing `kind` is a
+  pre-D84 decision line, so old logs still read.
+- **The observer is the same command on another event.** `harness init` registers
+  the shim for `PostToolUse` and `PostToolUseFailure` beside `PreToolUse`; `cc-hook`
+  dispatches on `hook_event_name`. It is read-only (D77's rule): it prints nothing,
+  exits 0, never touches taint or budget, and does not compile the world. An outcome
+  line records `status` (`ok` / `error` / `interrupted`), the exit code parsed from
+  a failure's `Exit code N`, the error, `duration_ms`, and a result summary.
+- **Result summaries are redacted before they are cut.** The world's
+  `observability.redact` patterns and the D66 scanner run over the full value; then
+  a command keeps the tail of its output, any other long string becomes its size,
+  and the whole summary is cut to 240 characters. Cutting first could leave a token
+  fragment below a detector's length floor. The decision line's `call` now goes
+  through the D66 scanner as well; it did not before.
+- **An ASK's answer is inferred, not attested, and the line says so.** No Claude
+  Code hook observes a person denying a prompt (`PostToolUseFailure` does not fire
+  for permission denials; `PermissionDenied` fires only in auto mode). So an ASK
+  line carries `"human_answer": "inferred"`, and the join reads an outcome as
+  "approved" and its absence as "declined or abandoned". The join only infers in a
+  session with at least one outcome line; elsewhere the observer was not installed,
+  and it reports `unobserved` rather than counting every ASK as declined.
+- **`harness init` turns the log on** (`.claude/state/decisions.jsonl`; machine
+  scopes: their absolute state dir). An outcome line is useless without the decision
+  line it joins, and the state directory is already gitignored and per-machine.
+- **`replay-transcripts --decisions <log>`** joins the log to the transcripts by
+  `tool_use_id`, so a replay against a changed world shows which real verdicts would
+  move, and the report gives the inferred ASK answers.
+
+**Alternatives.**
+
+- *A separate outcomes file.* Rejected: two files written by concurrent hooks lose
+  their relative order, and every reader has to open both.
+- *Record the answer from `PermissionRequest`.* It fires before the prompt, carries
+  no `tool_use_id`, and says nothing about the answer.
+- *Infer the answer in the hook by reading the log back.* The observer would grow
+  with the log and become a reader of its own output; the join belongs to whoever
+  reads the log.
+- *A distinct `cc-observe` subcommand and a second shim.* Two more files to install,
+  keep in step and remove, for a dispatch that is one `match` on the event name.
+- *Wire the observer into this repository's dogfood hook now.* Not done: that hook
+  runs whatever `harness` is installed on the machine, and a pre-D84 binary would
+  treat a post-call event as a second gate call, charging budget counters twice.
+  `init` cannot hit this, because it writes the shim and the settings from the same
+  binary.
+- *OTLP export with the OpenTelemetry GenAI conventions, behind a flag on the hook.*
+  Rejected: the OpenTelemetry crates are not in the offline crate cache, they are
+  a heavy tree for a binary that runs on every tool call, and network I/O from the
+  hook adds latency to every call and egress from inside the governed session.
+  Export is a separate, offline step instead (addendum below).
+
+**Consequence.** A session's log now answers, per call: who proposed it, what the
+kernel decided, what the hook told the host, whether it ran, and how it ended; and
+for an ASK, whether the person (inferably) let it through. That is G3's input. The
+honest limits: the ASK answer is an inference with three named failure cases (no
+observer, a call still running, an outcome line that was not written), and
+Antigravity's ASKs are not joined at all until its post-call hook contract is
+verified.
+
+**Addendum (AI2-66 / #141): export is offline, and conservative about the
+conventions.** `harness export-otlp --log` converts a finished log to OTLP/JSON
+(`ExportTraceServiceRequest` per line, for a collector's `otlpjsonfile` receiver),
+written by hand with `serde_json`: OTLP/JSON is a small, stable shape, and the SDK
+would bring the dependency tree this decision rejected for the hook. The mapping
+choices, each closing an alternative:
+
+- *One trace per session, one span per decision.* Not one trace per call: a session
+  is the unit an incident is reconstructed in, and the book's requirement is one
+  trace id across proposal, approval and execution. Not separate spans for decision
+  and outcome: the convention says one span per tool call; the two moments are span
+  events.
+- *Only identifiers the host supplied.* `gen_ai.tool.call.id` is set only from a
+  real `tool_use_id`, as the convention requires; Claude Code's `agent_id` goes to
+  `ai2rules.agent_id`, because `gen_ai.agent.id` means a stable hosted-agent
+  resource and a subagent run is not one. `agent_type` is `gen_ai.agent.name`.
+- *Refusals are errors; declined prompts are not.* A DENY is status `ERROR` with
+  `error.type = ai2rules.denied`; an ASK the person did not let through is `UNSET`,
+  with `ai2rules.human_answer` still marked as inferred.
+- *Summaries stay opt-in and under `ai2rules.*`.* `--with-summaries` exports the
+  redacted call and result summaries as `ai2rules.call` / `ai2rules.result`, not as
+  `gen_ai.tool.call.arguments` / `.result`, which the conventions define as the
+  argument and result objects the log deliberately does not keep.
+- *Ids are derived, not random* (`md5`, already in the build): trace IDs use the
+  session; span IDs use a framed tuple of session, optional call ID and a per-call
+  occurrence index (`ai2rules.decision_index`). Re-exporting the same finished
+  log preserves IDs. Repeated hooks can log multiple decisions for one call;
+  coalescing them would discard distinct verdicts and ASK/DENY inferences, so
+  each remains a span, correlated by the unchanged host call ID and session.
+  These spans count decisions rather than distinct executions. Id-less records
+  have a separate per-session sequence. Inserting another call or a non-decision
+  record does not renumber this call; editing its decision sequence can. This
+  corrects the original call-only seed: span IDs change once across that fix.
+
+## D85 — Stop is a console position, and it says "stopped" only on the hook's evidence
+
+**Context.** The policy console (D81) changes what an agent may do at its next call, but
+had no single "stop this agent" control. A security reviewer asks for one first: a halt
+outside the agent's process (gap G7 of the *Designing AI Agents* review; AI2-63 / #136).
+The mechanism was already there. What was missing was the position, and an honest way to
+show that it holds.
+
+**Decision.**
+
+- **Stop is a profile (`stop`) behind its own button.** It hides every base action with
+  an effect other than `Read` or `None`, using the supplied manifest, not a name list, and
+  writes the world atomically like any other change, so it binds at the agent's next call.
+  A call already running finishes; killing one mid-call is E8.4.
+- **Custom and unplaced actions are covered.** Process, network, write, memory,
+  credential and external effects all go off regardless of their names. Read/None
+  actions keep their previous flags. The demo's `Bash` and `PowerShell` read-looking
+  classes declare `Process`, so even `ls` is stopped; there is no shell-name exemption.
+- **Effectful scoped capabilities make Stop unavailable.** D79 keeps them projected
+  even when their base is hidden, and there is no independent projection flag. The
+  console refuses the request without writes and shows which capabilities prevent
+  Stop; it never claims a partial Stop. Read-only capabilities remain supported.
+- **Restore puts back exactly what Stop replaced.** The Stop marker in the decision log
+  keeps every base action's exact projection/approval flags (`stop.before`), including
+  approval on hidden actions, so a custom or mixed policy comes back intact. Old string
+  position markers remain readable. Restore is offered only while the last policy change is that Stop. Any later
+  change ends it.
+- **"Stopped" needs evidence from the hook, never just the click.** Off is ABSENT, which
+  binds only under `cc-hook --enforce-absent`. The hook already logs what it told the host
+  (D81): `deny` for an ABSENT it enforced, `null` for one it let through to the host's
+  prompt. The page shows **Stopped** once a call after the Stop was refused that way, and
+  **Not stopped** as soon as the hook's latest ABSENT went through. Before any call, the
+  project's hook script is read as a hint: if the line that runs `cc-hook` lacks the flag,
+  the page warns before the button is pressed.
+
+**Alternatives.**
+
+- *Keep a fixed switch list or exempt shell names.* Rejected: supplied manifests can
+  expose effectful actions and capabilities under arbitrary names. Stop status checks
+  the same complete effect coverage as the write, so an old refusal cannot prove a
+  newly added action is stopped.
+- *Remove scoped capabilities and put their definitions in the restore log.* Rejected:
+  literal arguments can contain secrets, and policy markers must not copy those into
+  observability. Supporting these worlds needs an independent capability projection
+  mechanism; this console fix does not change the manifest/compiler ABI.
+- *Check the flag statically, as `doctor` inspects the hook.* Rejected as the answer. Hooks
+  can be wired from user, project, local or managed settings, and the shim can be edited.
+  A static check can be wrong in both directions. The log records what the hook did. The
+  static check stays only as an early warning.
+- *A sixth switch for reads, so Stop turns them off too.* Not done. An agent that cannot
+  even read cannot explain why it stopped, and reads are not effects. If wanted, it is a
+  separate switch with its own position in every profile.
+- *Restore to a fixed profile, or keep the previous state in the console's memory.*
+  Rejected. A fixed profile loses a custom mix of switches. Memory is lost when the console
+  restarts. The log marker survives both, and it is the record a reviewer reads anyway.
+- *Stop by killing the agent process, or by the shim's `gate-off` file.* Out of scope.
+  `gate-off` turns governance off, the opposite of a stop. Killing a running call is E8.4.
+
+**Consequence.** Stop is as strong as `--enforce-absent`, and the page says which it is.
+Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
+feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.
+
 ## D88 — Windows is a tested platform: the OS CSPRNG everywhere, the same `..` refusal, a Windows CI job
 
 **Date:** 2026-10-23. AI2-57.
@@ -3439,3 +3613,28 @@ workspace had 44 test failures and two clippy errors, none visible in CI:
 **Not done.** On Windows a timed-out command still kills only its direct child: the
 executor creates no Job Object. That was already stated in
 `executor/src/handlers/command.rs`, and its test stays `cfg(unix)`.
+
+## D89 — MCP approvals consume before effects and resume through the same kernel
+
+**Date:** 2026-10-24. **Task:** AI2-72 / PR #17, PLAN E13.4d.
+
+**Decision.** Opt-in `mcp-gateway --approvals --principal` uses D73/D78's existing
+atomic durable consume before the upstream RPC, then reevaluates through the
+same gate and scoped forwarding path. A missing reply or failed execution-record
+write leaves consent consumed. A new effect requires a new human approval.
+Consent binds the configured principal and upstream command, full request and
+effective call, policy/schema epochs and provenance. Expiry is five minutes from
+minting. Wire-supplied approval tokens still carry no authority.
+
+**Alternatives.** Marking Executed after success permits duplicate mutations when
+a reply is lost. Direct forwarding after approval bypasses budget and scoped
+lowering. A new claim primitive duplicates the existing locked store operation.
+Unbounded expiry or a shared implicit principal lets stale or cross-session
+consent authorize effects the operator did not review. All are rejected.
+
+**Consequence.** Consent can be spent without an effect if later validation fails.
+Operators reconcile unknown upstream outcomes before approving another request.
+Metadata changes require fresh consent too. This provides at-most-once forwarding
+per grant; external transactions/idempotency are outside the protocol. The trusted
+native resume helper shares implementation with the unchanged pure gate ABI.
+See [the operator workflow](docs/approval-capable-hosts.md).
