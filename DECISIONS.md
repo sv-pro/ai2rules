@@ -3591,9 +3591,12 @@ workspace had 44 test failures and two clippy errors, none visible in CI:
 1. The approval key comes from the `getrandom` crate on every platform:
    `getrandom(2)` on Linux, `ProcessPrng` on Windows. A failure is an error, never a
    weaker key.
-2. The agent's relative path is joined onto the project base one component at a
-   time, refusing a `..` after a missing component. Absolute paths get the same
-   check before the nearest-ancestor fallback. Unix verdicts are unchanged.
+2. The agent's path is joined onto the project base using native components,
+   preserving Windows roots and drive/UNC prefixes. Both rooted separator forms
+   (`/file` and `\file`) use the base drive; drive-relative prefixes retain native
+   joining semantics. Refuse a `..` after a missing component before any Windows
+   normalization can erase it, including before successful canonicalization of
+   absolute paths. Unix symlink/`..` resolution remains filesystem-based.
 3. A `check-windows` CI job runs clippy `-D warnings` and `cargo test --workspace`
    on `windows-latest`. Tests that need Unix (symlinks, process groups, shell
    shims) stay `cfg(unix)`. Format stays in the Linux job, since it does not depend

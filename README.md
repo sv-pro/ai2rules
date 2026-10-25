@@ -503,6 +503,10 @@ runs `scripts/check-demos.sh` — every example and demo script, asserting the
 verdict lines each one claims to show. The unit tests cover the kernel; that
 script covers what a reader actually sees.
 
+Windows path-scope regressions check rooted and drive-prefixed targets, reject
+`..` after missing components before canonicalization, and verify actual hook
+verdicts. Linux tests preserve filesystem resolution of symlink/`..` paths (D88).
+
 The blog CI job also checks the homepage-to-playground journey in Chromium at
 390px and 1440px widths, including the real WASM taint/tool-toggle transitions.
 The `homepage-browser-qa` artifact retains screenshots and JSON results for

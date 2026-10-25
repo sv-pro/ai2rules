@@ -19,7 +19,7 @@ use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_types::{CompiledWorld, RootsDef};
 use serde_json::Value;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Load, normalize, and compile one world at a CLI I/O boundary.
 ///
@@ -134,16 +134,12 @@ pub fn resolve_action_path(args: &Value, base: &str, home: Option<&str>) -> Opti
     let raw = ["file_path", "path", "notebook_path"]
         .iter()
         .find_map(|k| args.get(*k).and_then(|v| v.as_str()))?;
-    let path = if raw.starts_with('/') {
-        PathBuf::from(raw)
-    } else if raw == "~" {
+    let path = if raw == "~" {
         PathBuf::from(home?)
     } else if let Some(rest) = raw.strip_prefix("~/") {
-        join_relative(Path::new(home?), rest)?
-    } else if Path::new(raw).is_absolute() {
-        PathBuf::from(raw)
+        join_action_path(Path::new(home?), Path::new(rest))?
     } else {
-        join_relative(Path::new(base), raw)?
+        join_action_path(Path::new(base), Path::new(raw))?
     };
     canonicalize_action_path(&path).map(path_to_string)
 }
@@ -175,11 +171,13 @@ pub fn normalize_dots(p: &str) -> String {
 /// Resolving only the immediate parent, as this once did, denied every write into
 /// a folder the agent had not created yet (found by `harness replay-transcripts`).
 pub fn canonicalize_action_path(path: &Path) -> Option<PathBuf> {
-    if let Ok(canonical) = std::fs::canonicalize(path) {
-        return Some(canonical);
-    }
+    // Windows may erase missing/.. during a successful canonicalization.
+    // Validate the original components before that information is lost.
     if dotdot_after_missing(path) {
         return None;
+    }
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return Some(canonical);
     }
     let mut tail = Vec::new();
     let mut current = path;
@@ -201,36 +199,32 @@ pub fn canonicalize_action_path(path: &Path) -> Option<PathBuf> {
 /// at the disk: `new\..\..\x` canonicalized to a real folder above the project,
 /// and the refusal promised above did not hold there.
 fn dotdot_after_missing(path: &Path) -> bool {
-    let mut prefix = PathBuf::new();
-    let mut missing = false;
-    for component in path.components() {
-        if missing && component == std::path::Component::ParentDir {
-            return true;
-        }
-        prefix.push(component);
-        missing = missing || std::fs::symlink_metadata(&prefix).is_err();
-    }
-    false
+    join_action_path(Path::new(""), path).is_none()
 }
 
-/// `base` joined with the agent's relative `rel`, one component at a time, or
-/// `None` when a `..` follows a component that does not exist (see
-/// [`dotdot_after_missing`]). Joined in one step, a verbatim base (`\\?\C:\…`,
-/// which `canonicalize` returns on Windows) resolves every `..` lexically inside
-/// `PathBuf::push`, before any check could see it. `..` is pushed, not popped, so
-/// on Unix a symlinked directory's `..` is still resolved by the filesystem.
-fn join_relative(base: &Path, rel: &str) -> Option<PathBuf> {
-    let separator = |c: char| c == '/' || (cfg!(windows) && c == '\\');
+/// Join using native components, preserving drive prefixes and roots. In
+/// particular, Windows `\file` is rooted on the base drive, not project-relative;
+/// drive-relative and UNC prefixes retain `PathBuf::push` semantics as well.
+/// Validate each parent traversal before push can normalize a verbatim Windows
+/// path. On Unix push preserves symlink/.. for filesystem resolution.
+fn join_action_path(base: &Path, path: &Path) -> Option<PathBuf> {
     let mut out = base.to_path_buf();
     let mut missing = false;
-    for part in rel.split(separator) {
-        if part.is_empty() || part == "." {
-            continue;
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) => {
+                out.push(component);
+                // A bare drive/UNC prefix is not a directory component. A
+                // following root replaces the old location and missing state.
+                missing = false;
+                continue;
+            }
+            Component::RootDir => missing = false,
+            Component::CurDir => continue,
+            Component::ParentDir if missing => return None,
+            _ => {}
         }
-        if missing && part == ".." {
-            return None;
-        }
-        out.push(part);
+        out.push(component);
         missing = missing || std::fs::symlink_metadata(&out).is_err();
     }
     Some(out)
@@ -442,5 +436,178 @@ mod tests {
     fn sanitize_contains_session_ids_to_the_state_dir() {
         assert_eq!(sanitize("../../etc/passwd"), ".._.._etc_passwd");
         assert_eq!(sanitize("ec33ebf9-0cba-4100"), "ec33ebf9-0cba-4100");
+    }
+}
+
+#[cfg(test)]
+mod path_boundary_regressions {
+    use super::*;
+    use serde_json::json;
+
+    fn project_world(base: &Path) -> CompiledWorld {
+        crate::cc_hook::compile_hook_world(
+            r#"
+world_id: path-boundary-regression
+channels:
+  - { name: user_cli, trust: Trusted, taint: false }
+capabilities:
+  - { trust: Trusted, actions: [Write] }
+base_actions:
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+roots:
+  default: Deny
+  rules:
+    - { path: ".", access: ReadWrite }
+"#,
+            base.to_str(),
+            None,
+        )
+        .unwrap()
+    }
+
+    fn write_decision(world: &CompiledWorld, base: &Path, key: &str, raw: &str) -> String {
+        let request = crate::cc_hook::hook_request(
+            world,
+            crate::cc_hook::HookEvent {
+                tool: "Write",
+                tool_input: json!({key: raw}),
+                session_id: "path-regression".into(),
+            },
+            &crate::cc_hook::HookSession {
+                tainted: false,
+                usage: None,
+            },
+            base.to_str(),
+            None,
+            "foreground",
+            "user_cli",
+        );
+        harness_preview::gate(world, &request).decision
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rooted_and_absolute_windows_targets_keep_their_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let outside = dir.path().join("outside.txt");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::write(&outside, "outside").unwrap();
+        let base = std::fs::canonicalize(&project).unwrap();
+        let expected = std::fs::canonicalize(&outside).unwrap();
+        let ordinary = outside.to_str().unwrap();
+        let rooted = &ordinary[2..]; // tempfile uses a drive-letter path on Windows.
+        let forms = [
+            ordinary.to_string(),
+            rooted.to_string(),
+            rooted.replace('\\', "/"),
+            expected.to_str().unwrap().to_string(),
+        ];
+        let world = project_world(&base);
+        for key in ["file_path", "path", "notebook_path"] {
+            for raw in &forms {
+                assert_eq!(
+                    resolve_action_path(&json!({key: raw}), base.to_str().unwrap(), None),
+                    Some(path_to_string(expected.clone())),
+                    "{key}: {raw}"
+                );
+                assert_eq!(
+                    write_decision(&world, &base, key, raw),
+                    "DENY",
+                    "{key}: {raw}"
+                );
+            }
+            assert_eq!(write_decision(&world, &base, key, "new.txt"), "ALLOW");
+        }
+    }
+
+    #[test]
+    fn missing_parent_is_refused_in_all_path_forms() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        let world = project_world(&base);
+        let mut forms = vec![
+            "missing/..".to_string(),
+            "missing/../new.txt".to_string(),
+            format!("{}/missing/..", dir.path().display()),
+            format!("{}/missing/../new.txt", dir.path().display()),
+        ];
+        #[cfg(windows)]
+        {
+            // Construct strings: PathBuf::join could already erase verbatim .. .
+            forms.extend([
+                format!(r"{}\missing\..", base.display()),
+                format!(r"{}\missing\..", dir.path().display()),
+                format!(r"{}\missing\..", &dir.path().to_str().unwrap()[2..]),
+            ]);
+        }
+        forms.push("~/missing/..".to_string());
+        for raw in &forms {
+            assert_eq!(
+                resolve_action_path(
+                    &json!({"file_path": raw}),
+                    base.to_str().unwrap(),
+                    base.to_str()
+                ),
+                None,
+                "{raw}"
+            );
+            assert_eq!(
+                write_decision(&world, &base, "file_path", raw),
+                "DENY",
+                "{raw}"
+            );
+        }
+        // Direct callers (root canonicalization and demo helpers) get the same guard.
+        let absolute = format!("{}/missing/..", dir.path().display());
+        assert_eq!(canonicalize_action_path(Path::new(&absolute)), None);
+        std::fs::create_dir(base.join("existing")).unwrap();
+        assert_eq!(
+            resolve_action_path(
+                &json!({"file_path": "existing/../new.txt"}),
+                base.to_str().unwrap(),
+                None
+            ),
+            Some(path_to_string(base.join("new.txt")))
+        );
+        assert_eq!(
+            write_decision(&world, &base, "file_path", "existing/../new.txt"),
+            "ALLOW"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rooted_and_drive_relative_joins_preserve_native_prefix_semantics() {
+        // No parent traversal: joining must agree with native PathBuf semantics,
+        // including a base on a drive different from the process current drive.
+        for raw in [r"\leaf", "/leaf", "C:leaf", "D:leaf"] {
+            let base = Path::new(r"Q:\project");
+            assert_eq!(
+                join_action_path(base, Path::new(raw)),
+                Some(base.join(raw)),
+                "{raw}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_parent_uses_the_filesystem_not_a_lexical_pop() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(base.join("outside/child")).unwrap();
+        std::fs::create_dir(base.join("project")).unwrap();
+        std::os::unix::fs::symlink(base.join("outside/child"), base.join("project/link")).unwrap();
+        let project = base.join("project");
+        let raw = "link/../new.txt";
+        assert_eq!(
+            resolve_action_path(&json!({"file_path": raw}), project.to_str().unwrap(), None),
+            Some(path_to_string(base.join("outside/new.txt")))
+        );
+        assert_eq!(
+            write_decision(&project_world(&project), &project, "file_path", raw),
+            "DENY"
+        );
     }
 }
