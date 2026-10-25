@@ -276,7 +276,22 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   as typed manifest fields. Cross-agent taint still follows the shared session
   sidecar (E13.6, D20), and the containerized governed SUT with an
   egress-allowlist proxy supplies the E8 enforcement floor (E13.7, D21).
-  See `DECISIONS.md` D19–D21, D29, D36, D37.
+  Instruction and memory files (`CLAUDE.md`, `AGENTS.md`, `.claude/skills/**`,
+  auto-memory, Antigravity's equivalents) are classified by `path_classes` on the
+  canonical path as durable-memory writes, so a tainted session cannot leave
+  instructions for the next one (E13.10, D83).
+  See `DECISIONS.md` D19–D21, D29, D36, D37, D83.
+  **Mods coverage finding (2026-10-03):** on Claude Code 2.1.288 with released
+  harness 0.6.0, a user-tier mod overrode a project PreToolUse `deny` and the
+  native Write tool created the denied temporary marker. The kernel correctly
+  denied; the host did not retain that decision as final. See the
+  [reproducible probe and evidence](docs/benchmarks/claude-mods/).
+  **Managed comparison (2026-10-24, AI2-41 / #99):** in an isolated Linux
+  container, the genuine system-file hook denied the same native Write with
+  mod off and on; neither marker was created. sec-default loaded in prepend
+  and explicitly admitted the user-tier test mod. See the
+  [managed report and limits](docs/benchmarks/claude-mods/MANAGED.md).
+  This is a versioned native-tool result, not a sandbox or arbitrary-mod guarantee.
 - **E14 — In-browser kernel (WASM engine, started):** the real `preview(yaml) →
   {surface, decision matrix}` is now a shared pure crate (`harness-preview`) used
   by both `harness serve` and a new `wasm-bindgen` crate (`harness-wasm`) — so the
@@ -315,6 +330,12 @@ via an `mcp-remote` OAuth bridge with no kernel change — and its shaping is pr
 offline (no creds) by `harness mock-jira --rovo`, which advertises the genuine Rovo
 tool names (see [`docs/demos/jira-copilot/REAL-ATLASSIAN.md`](docs/demos/jira-copilot/REAL-ATLASSIAN.md)).
 
+The [Confluence authoring world](docs/demos/confluence-docs/) confines creation to
+one tenant/space and updates to one tenant/page (ASK, not forwarded by the gateway).
+All five remote reads taint the session, preventing subsequent external writes.
+Five offline regressions cover the pins, read-to-write taint and gateway sequence;
+the corrected manifest has not been revalidated against live Atlassian.
+
 **Author your own MCP surface (D79, E13.4):** `harness mcp-author` connects to an MCP
 server and opens a local page where you name the surface the gateway will present
 (say `My_Jira`), tick the tools that exist (everything else is ABSENT), rename them,
@@ -334,8 +355,23 @@ Allow / Ask / Off switches (read the web, send data out, delete files, edit proj
 files, run scripts) rewrite the project's world file atomically, and the hook reads
 that file on every call, so the agent's very next action gets the new answer, with no
 restart. `cc-hook --log` feeds the page a live list of what the agent tried and what
-the kernel decided. Off takes the action out of the agent's world (ABSENT, with
-`--enforce-absent`); the taint floor has no switch. Runbook and scenario:
+the kernel decided. The same log joins each decision to its outcome (D84): every line
+carries the host's `tool_use_id` and agent, and a read-only `PostToolUse` observer,
+which `harness init` wires in, records how each call that ran ended. That is enough
+to tell an approved ASK from a declined one, inferred from whether the call ran
+([`docs/host-decision-log.md`](docs/host-decision-log.md)). `harness export-otlp`
+turns a finished log into OpenTelemetry traces (OTLP/JSON, GenAI `execute_tool`
+spans, one trace per session) for an existing collector, offline. Repeated hook
+decisions retain distinct, stable span IDs and their original call ID for correlation.
+Call summaries mask
+recognized secrets before whitespace normalization and truncation, so shortening
+cannot expose a credential fragment. Off takes the action out of the agent's world (ABSENT, with
+`--enforce-absent`); the taint floor has no switch. A **Stop** button (D85) takes every
+effectful base action away at the agent's next call, including custom names and shell
+processes; actions declared Read/None stay as configured. Worlds with effectful scoped
+capabilities show Stop as unavailable, because those capabilities cannot be hidden
+independently. Restore puts the exact previous projection/approval flags back;
+the page says "Stopped" only after the hook has refused a call. Runbook and scenario:
 [`docs/demos/policy-console/`](docs/demos/policy-console/README.md).
 
 ```bash
@@ -388,7 +424,21 @@ adapter absorbs a protojson camelCase envelope, `conversationId`, and PascalCase
 argument keys (`CommandLine`, `TargetFile`) aliased into the neutral vocabulary the
 shared `command_classes` reads. See `docs/demos/antigravity/`.
 
-Builds clean offline with `clippy -D warnings`; **474 tests** green.
+The MCP gateway supports out-of-band approvals with `--approvals <store>
+--principal <operator-assigned-id>` and `harness approvals list|approve|reject`.
+Consent is exact-bound, expires after five minutes, and is durably consumed before
+forwarding; uncertain upstream outcomes require operator reconciliation. See the
+[approval workflow](docs/approval-capable-hosts.md).
+
+Builds clean offline with `clippy -D warnings`; **573 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
+tests feed prepared events through stdin so a disabled hook's early exit cannot
+race the fixture writer.
+The Unix-only doctor integration suite includes **40 passing tests and 3 explicitly
+ignored specification gaps** (#87 / #95). It uses command-hook fixtures, verifies
+the external per-project switch separately from the global switch, and rejects a
+non-command registration as evidence of a working shim. The remaining #87 matrix
+rows and three diagnostic divergences are still open.
+
 
 The epic-by-epic plan, with task checklists and acceptance-invariant traceability,
 is in **[`PLAN.md`](PLAN.md)**.
@@ -657,6 +707,12 @@ MCP **proxy sidecar**, the `world-kernel` **library**) and who each is for — i
 **[`docs/USE-CASES.md`](docs/USE-CASES.md)**. The delivery model is *infrastructure, not
 an app* (governance you plug into a host you already run; the standalone-agent path is
 cut) — see `DECISIONS.md` **D31**.
+
+For reviewers who ask which obligation a control is evidence for, and what it leaves
+behind to inspect, **[`docs/compliance-evidence-map.md`](docs/compliance-evidence-map.md)**
+maps each control to its artifact (a file, a test, a decision) and to the EU AI Act,
+NIST AI RMF, ISO/IEC 42001 and OWASP Agentic Top 10 clauses it can support, with the
+host limits of the default configuration beside each row. It is not a compliance claim.
 
 Speculative, research-grade directions that aren't committed work (e.g. a cross-host
 "super-harness" governance plane) are parked in the idea pool at

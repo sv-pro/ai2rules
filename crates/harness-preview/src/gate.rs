@@ -221,7 +221,7 @@ pub struct GateApproval {
 /// Govern one proposed call against a compiled world. Pure and deterministic in
 /// `(world, req)` — the runtime half of the kernel, exposed as a value function.
 pub fn gate(world: &CompiledWorld, req: &GateRequest) -> GateResponse {
-    gate_inner(world, req).0
+    gate_inner(world, req, false).0
 }
 
 /// [`gate`], plus — for an `ALLOW` — the `ExecutionSpec` the kernel lowers the
@@ -237,7 +237,25 @@ pub fn gate_and_lower(
     world: &CompiledWorld,
     req: &GateRequest,
 ) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
-    let (response, allowed) = gate_inner(world, req);
+    lower(world, req, false)
+}
+
+/// Trusted native resume after the runtime has durably consumed an exact-bound
+/// authorization. This does not bypass policy, budgets, taint or lowering.
+/// Never derive this authority from a request-supplied approval token.
+pub fn gate_and_lower_authorized(
+    world: &CompiledWorld,
+    req: &GateRequest,
+) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
+    lower(world, req, true)
+}
+
+fn lower(
+    world: &CompiledWorld,
+    req: &GateRequest,
+    approval_granted: bool,
+) -> (GateResponse, Option<Result<ExecutionSpec, String>>) {
+    let (response, allowed) = gate_inner(world, req, approval_granted);
     let spec = allowed.map(|(intent, effect_mode)| {
         build_execution_spec(
             world,
@@ -256,10 +274,17 @@ pub fn gate_and_lower(
 fn gate_inner(
     world: &CompiledWorld,
     req: &GateRequest,
+    approval_granted: bool,
 ) -> (GateResponse, Option<(IntentIR, EffectMode)>) {
-    // The effective action: the world's own command classifiers run first
-    // (D36), so classification is kernel data, identical for every host.
-    let action = world.classify_command(&ActionName::new(&req.tool), &req.arguments);
+    // The effective action: the world's own command classifiers (D36) and path
+    // classifiers (D83) run first, so classification is kernel data, identical
+    // for every host. Path classes read the adapter-resolved `path` as well as the
+    // argument, so every spelling of `CLAUDE.md` lands in the same class.
+    let action = world.classify_call(
+        &ActionName::new(&req.tool),
+        &req.arguments,
+        req.path.as_deref(),
+    );
     let carried = req.context.usage.unwrap_or_default();
     let inbound = match parse_taint(req.context.taint.as_deref()) {
         Ok(t) => t,
@@ -311,10 +336,10 @@ fn gate_inner(
         taint: TaintContext::from_taint(inbound),
         mode,
         usage: BudgetUsage::from(carried),
-        // The gate ABI is intentionally pure and has no verifier callback or
-        // store access. A request-supplied token is untrusted input, so it must
-        // never grant approval at this boundary.
-        approval_granted: false,
+        // Wire entry points always pass false; request-supplied tokens are
+        // untrusted. Only the native resume entry point can supply authority,
+        // after its runtime has durably consumed an exact-bound authorization.
+        approval_granted,
     };
 
     let mut sealed = None;
@@ -380,7 +405,7 @@ fn gate_inner(
     let mut out_taint = inbound;
     if decision == Decision::Allow {
         if let Some(se) = world.side_effect(&action) {
-            out_taint = out_taint.join(side_effect_taint(se));
+            out_taint = out_taint.join(side_effect_taint(se, world.action_type(&action)));
         }
         // Remote ingress (finding #13). An action served by an MCP server returns
         // bytes from another process we do not trust — whatever side effect the
@@ -528,8 +553,16 @@ fn parse_channel(world: &CompiledWorld, s: Option<&str>) -> Result<ChannelPolicy
 /// network/external/memory ingress brings in untrusted data; pure effects and
 /// local reads do not. The finer, path-sensitive taint-source policy is the
 /// deferred manifest-schema item (`docs/harness-gate-abi.md` §7).
-fn side_effect_taint(se: SideEffectClass) -> Taint {
+///
+/// A **file write** into memory brings nothing back (D83): writing `CLAUDE.md`
+/// returns an acknowledgement, not stored content, so it leaves the session's
+/// taint as it was. Memory reached any other way (`action_type: Memory`, a
+/// recall) is still ingress.
+fn side_effect_taint(se: SideEffectClass, at: Option<ActionType>) -> Taint {
     match se {
+        SideEffectClass::Memory if matches!(at, Some(ActionType::Write | ActionType::Patch)) => {
+            Taint::Clean
+        }
         SideEffectClass::Network | SideEffectClass::External | SideEffectClass::Memory => {
             Taint::Tainted
         }
@@ -700,6 +733,20 @@ mod tests {
         assert_eq!(res.decision, "ASK");
         assert_eq!(res.rule.as_deref(), Some("approval_required"));
         assert!(res.approval.is_some());
+    }
+
+    #[test]
+    fn trusted_resume_rechecks_the_kernel_and_does_not_change_the_wire_gate() {
+        let world = compile_default();
+        let mut r = req("start_pty", "clean");
+        let (res, _) = gate_and_lower_authorized(&world, &r);
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(gate(&world, &r).decision, "ASK");
+        r = req("fetch_web", "tainted");
+        assert_eq!(gate_and_lower_authorized(&world, &r).0.decision, "DENY");
+        r = req("write_workspace", "clean");
+        r.context.source_channel = Some("web".into());
+        assert_eq!(gate_and_lower_authorized(&world, &r).0.decision, "ABSENT");
     }
 
     #[test]
@@ -1527,5 +1574,44 @@ scoped_capabilities:
             }
             other => panic!("expected an MCP operation, got {other:?}"),
         }
+    }
+
+    /// D83: a path class reads the adapter-resolved `path` as well as the
+    /// argument, so a file whose name hides that it is `CLAUDE.md` (a symlink the
+    /// adapter resolved) is still an instruction file; and a clean file write into
+    /// memory brings nothing back, so the session stays clean.
+    fn instruction_world() -> harness_types::CompiledWorld {
+        let yaml = r#"
+world_id: instructions
+capabilities:
+  - { trust: Trusted, actions: [Read, Write, Patch, Command, Pty, Mcp, Web, Memory] }
+base_actions:
+  - { name: write, action_type: Write, side_effect: FilesystemWrite }
+  - { name: write_instructions, action_type: Write, side_effect: Memory }
+path_classes:
+  - to: write_instructions
+    from: [ { action: write, arg: file_path } ]
+    patterns: ["**/CLAUDE.md"]
+"#;
+        compiler::compile(&compiler::loader::load_yaml(yaml).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_path_class_matches_the_resolved_path_and_a_write_ingests_nothing() {
+        let world = instruction_world();
+        let mut r = req("write", "tainted");
+        r.arguments = serde_json::json!({ "file_path": "notes.md" });
+        r.path = Some("/proj/CLAUDE.md".into());
+        let res = gate(&world, &r);
+        assert_eq!(res.action, "write_instructions");
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+
+        let mut r = req("write", "clean");
+        r.arguments = serde_json::json!({ "file_path": "CLAUDE.md" });
+        let res = gate(&world, &r);
+        assert_eq!(res.action, "write_instructions");
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "clean", "a file write ingests nothing");
     }
 }
