@@ -72,7 +72,10 @@ sed -e 's/:8787/:__NORTHWIND_RECEIVER__/g' -e 's/:8790/:__NORTHWIND_CONSOLE__/g'
 PY=python3
 "$PY" -c '' 2>/dev/null || PY=python
 SHIM="$DESK/.claude/hooks/world-gate.sh"
-"$PY" - "$SHIM" <<'PY'
+# The script goes in with -c, not on stdin with `-`: on Windows `python3` can be
+# the Python install manager's alias, which reads the first file argument's
+# shebang (here the hook's `bash`) and runs that instead of Python.
+patch_shim="$(cat <<'PY'
 import pathlib
 import shlex
 import sys
@@ -93,6 +96,8 @@ if '--log' not in args:
     lines[i] += ' --log "$PD/.claude/state/decisions.jsonl"'
 path.write_bytes(('\n'.join(lines) + '\n').encode('utf-8'))
 PY
+)"
+"$PY" -c "$patch_shim" "$SHIM"
 bash -n "$SHIM"
 
 echo "Ready. Next, each in its own terminal, left running:"

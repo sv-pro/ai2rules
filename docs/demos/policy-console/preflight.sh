@@ -44,13 +44,27 @@ fi
 
 # Inspect the generated wiring without running the hook: a real hook probe would
 # write session state and decisions, while preflight must remain read-only.
-if "$PY" - "$DESK" "$SHIM" <<'PY'
+# Python scripts go in with -c, not on stdin with `-`: on Windows `python3` can be
+# the Python install manager's alias, which reads the first file argument's
+# shebang (the hook's `bash`) and runs that instead of Python.
+wiring_check="$(cat <<'PY'
 import json
 import os
 import pathlib
 import shlex
 import subprocess
 import sys
+
+def same_file(a, b):
+    # Claude Code on Windows writes the hook path in verbatim form (//?/C:/...),
+    # which resolve() keeps; drop the prefix and compare case-insensitively there.
+    def norm(p):
+        s = str(p)
+        for prefix in ('\\\\?\\', '//?/'):
+            if s.startswith(prefix):
+                s = s[len(prefix):]
+        return os.path.normcase(str(pathlib.Path(s).resolve()))
+    return norm(a) == norm(b)
 
 desk, shim = (pathlib.Path(p).resolve() for p in sys.argv[1:])
 try:
@@ -66,7 +80,7 @@ try:
         for hook in entry.get('hooks', []):
             args = shlex.split(hook.get('command', ''))
             if (hook.get('type') == 'command' and len(args) == 2
-                    and args[0] == 'bash' and pathlib.Path(args[1]).resolve() == shim):
+                    and args[0] == 'bash' and same_file(args[1], shim)):
                 wired = True
     if not wired:
         raise ValueError('no all-tools PreToolUse entry pointing at this project shim')
@@ -105,7 +119,8 @@ except (OSError, ValueError, StopIteration, IndexError, KeyError, TypeError, Att
     sys.exit(1)
 print('  ok    all-tools hook, exact world/state/log, grant/ABSENT, selected binary projection and /northwind-demo')
 PY
-then :; else fails=$((fails + 1)); fi
+)"
+if "$PY" -c "$wiring_check" "$DESK" "$SHIM"; then :; else fails=$((fails + 1)); fi
 
 if [ -f "$HOME/.claude/gate-off" ]; then
   fail "the kill switch is on (~/.claude/gate-off): the hook is not running"
@@ -125,26 +140,31 @@ for name in "${NAMES[@]}"; do
   fi
 done
 
-state="$(curl --noproxy '*' -fsS --max-time 3 "http://127.0.0.1:$CONSOLE_PORT/api/state" 2>/dev/null)"
-if [ -z "$state" ]; then
-  fail "the console does not answer on 127.0.0.1:$CONSOLE_PORT: run 'harness console --project $DESK'"
-elif "$PY" - "$DESK" "$state" <<'PY'
+console_check="$(cat <<'PY'
 import json
+import os
 import pathlib
 import sys
+
+def norm(p):
+    return os.path.normcase(str(pathlib.Path(p).resolve()))
 
 try:
     desk = pathlib.Path(sys.argv[1]).resolve()
     state = json.loads(sys.argv[2])
     valid = (state.get('ok') is True
              and state.get('world_id') == 'northwind-vendor-desk'
-             and pathlib.Path(state['world_path']).resolve() == desk / '.claude/cc-world.yaml'
-             and pathlib.Path(state['log_path']).resolve() == desk / '.claude/state/decisions.jsonl')
+             and norm(state['world_path']) == norm(desk / '.claude/cc-world.yaml')
+             and norm(state['log_path']) == norm(desk / '.claude/state/decisions.jsonl'))
     sys.exit(0 if valid else 1)
 except (ValueError, KeyError, TypeError, AttributeError):
     sys.exit(1)
 PY
-then
+)"
+state="$(curl --noproxy '*' -fsS --max-time 3 "http://127.0.0.1:$CONSOLE_PORT/api/state" 2>/dev/null)"
+if [ -z "$state" ]; then
+  fail "the console does not answer on 127.0.0.1:$CONSOLE_PORT: run 'harness console --project $DESK'"
+elif "$PY" -c "$console_check" "$DESK" "$state"; then
   ok "console answers on http://127.0.0.1:$CONSOLE_PORT/ for this project"
 else
   fail "the console on port $CONSOLE_PORT has the wrong project/world/log: restart it with --project $DESK"
