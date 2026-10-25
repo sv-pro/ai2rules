@@ -470,6 +470,7 @@ crates/               the harness implementation
   govbench/           MCP governance benchmark runner: 3 scenarios, weak baseline vs ai2rules (E18)
 docs/                 architecture (harness-architecture.md is canonical; one-kernel-many-hosts.md = cross-host parity)
   benchmarks/mcp-governance/  the governance smoke pack + its generated report (issue #64)
+  benchmarks/ecc/             planned external target: ECC + AgentShield on the host-hook path (E18.14)
 scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
 PLAN.md               epic-level execution plan
