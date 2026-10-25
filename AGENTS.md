@@ -29,7 +29,7 @@ ai2rules/
 │   ├── safe-mcp-proxy/
 │   └── mcp-tool-projection/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
-├── DECISIONS.md              # ADR-lite decision log (D1–D85, D87, D88, D89)
+├── DECISIONS.md              # ADR-lite decision log (D1–D89)
 ├── README.md                 # Project overview, milestone status, build instructions
 ├── rustfmt.toml              # max_width 100, edition 2021
 └── rust-toolchain.toml       # the pinned compiler — same one locally and in CI
@@ -76,9 +76,9 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all active tests passing, native Linux):**
-harness-types 9 · world-kernel 61 · compiler 29 · executor 28 · trace-store 63 ·
-provider-adapters 5 · agent-core 18 · harness-preview 66 · cli-harness 278 ·
-harness-wasm 0 · govbench 9 · **total 566** (plus the harness-wasm Node smoke
+harness-types 11 · world-kernel 73 · compiler 36 · executor 28 · trace-store 63 ·
+provider-adapters 5 · agent-core 18 · harness-preview 66 · cli-harness 280 ·
+harness-wasm 0 · govbench 9 · **total 589** (plus the harness-wasm Node smoke
 tests, run via wasm-pack). The Unix-only doctor fixture suite includes
 40 passing tests and 3 ignored #87 specification gaps.
 
@@ -158,7 +158,7 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
   harness paths explicitly.
 - **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
   a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
-  can be revisited later. Currently D1–D85, D87, D88, D89.
+  can be revisited later. Currently D1–D89.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
@@ -263,7 +263,7 @@ blog/public/demo/law-firm.html`.
 | `README.md` | Project overview, milestone table, build/run instructions |
 | `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D85, D87, D88, D89; consult before choosing alternatives |
+| `DECISIONS.md` | ADR-lite log D1–D89; consult before choosing alternatives |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |

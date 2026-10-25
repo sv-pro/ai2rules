@@ -173,7 +173,8 @@ tests green offline); E0.5/E0.6 tails tracked above.
 - [x] **E1.2** Loader + validator in `compiler` (`loader.rs`): `load_yaml` /
   `load_json`; `validate` checks empty `world_id`, duplicate actions, scoped-cap
   name collisions, and unknown base-action references, surfaced via a
-  human-readable `CompileError`.
+  human-readable `CompileError`. It also refuses any `schema` / `arg_constraints`
+  keyword the kernel does not enforce, naming it (D86).
 - [x] **E1.3** `compile()` (`compile.rs`): manifest → immutable `CompiledWorld`
   with `world_id` + `manifest_hash`; pure and deterministic.
 - [x] **E1.4** Descriptor hashing (`hashing.rs`): real SHA-256 (via `sha2`) over
