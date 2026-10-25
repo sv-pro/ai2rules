@@ -97,6 +97,54 @@ roots:
     .expect("write roots world");
 }
 
+/// The dogfood world keeps the control plane read-only, as the starter does
+/// (D57, D91, AI2-80): this repository's own manifest, shim and hook
+/// registration are not writable by the agent they govern, clean or tainted,
+/// while reading them and ordinary project writes pass through.
+#[test]
+fn the_dogfood_world_keeps_its_own_control_plane_read_only() {
+    let project = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let file = |rel: &str| project.join(rel).to_string_lossy().into_owned();
+    let env = [("CLAUDE_PROJECT_DIR", project.as_path())];
+    for taint in ["clean", "tainted"] {
+        for rel in [
+            ".claude/cc-world.yaml",
+            ".claude/hooks/world-gate.sh",
+            ".claude/settings.json",
+        ] {
+            for tool in ["Write", "Edit"] {
+                let dir = tempfile::tempdir().unwrap();
+                if taint == "tainted" {
+                    let fetch = json!({"tool_name":"WebFetch","session_id":"s",
+                        "tool_input":{"url":"https://example.invalid","prompt":"x"}});
+                    run_hook_with_world_env(&world(), dir.path(), &fetch, &[], &env);
+                }
+                let event = json!({"tool_name":tool,"session_id":"s",
+                    "tool_input":{"file_path":file(rel),"old_string":"a","new_string":"b","content":"x"}});
+                let out = run_hook_with_world_env(&world(), dir.path(), &event, &[], &env);
+                assert_eq!(
+                    decision(&out).as_deref(),
+                    Some("deny"),
+                    "{taint} {tool} {rel}: {out}"
+                );
+            }
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    for (tool, rel) in [("Read", ".claude/cc-world.yaml"), ("Edit", "README.md")] {
+        let event = json!({"tool_name":tool,"session_id":"s",
+            "tool_input":{"file_path":file(rel),"old_string":"a","new_string":"b"}});
+        let out = run_hook_with_world_env(&world(), dir.path(), &event, &[], &env);
+        assert!(
+            out.trim().is_empty(),
+            "{tool} {rel} should pass through: {out}"
+        );
+    }
+}
+
 #[test]
 fn clean_read_passes_through_silently() {
     let dir = tempfile::tempdir().unwrap();

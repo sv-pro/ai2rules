@@ -41,3 +41,35 @@ Is the dogfood world meant to demonstrate the starter's guarantees, or is it a
 deliberately looser developer profile? If it is the looser profile, say so in the
 manifest header and in `AGENTS.md`. The `.claude/` section currently describes it as the
 manifest "that governs this session", which reads as the stronger claim.
+
+## Development — 2026-10-25 (AI2-80)
+
+**Decision (maintainer):** the dogfood world must demonstrate the starter's guarantees.
+That answers the open question above.
+
+**Fix:** D91. `.claude/cc-world.yaml` carries the starter's `roots` block verbatim. Two
+new tests cover it:
+
+- `the_dogfood_world_holds_the_starter_roots` in `crates/compiler/tests/committed_worlds.rs`
+  pins the dogfood `roots` block equal to the starter's.
+- `the_dogfood_world_keeps_its_own_control_plane_read_only` in
+  `crates/cli-harness/tests/cc_hook.rs` checks the manifest, the shim and `settings.json`:
+  writes are denied, clean and tainted; reading the manifest and editing `README.md`
+  pass through.
+
+Both tests fail against the old world.
+
+This does not use the narrower `path_classes` option from the section above. That would
+be a second mechanism for the same guarantee, covering fewer files.
+
+**Measured effect** (same probes before and after):
+
+- Project work, `Glob` and `Grep`, `/tmp`, Bash and `WebFetch` are unchanged.
+- Writes under `.claude/` and `/etc` are DENY.
+- Reads of credential directories are DENY.
+- Reads outside every root are ASK.
+
+**Validation:** `cargo test --workspace` passed 594 tests; fmt, clippy `-D warnings` and
+`check-demos.sh` are clean.
+
+**Left open:** the Antigravity dogfood world, `.agents/agy-world.yaml`, has the same gap.
