@@ -114,3 +114,18 @@ real bash, using a stub `curl`. The fix:
 Regression cases are in `a_class_must_account_for_every_simple_command`, plus a
 here-string case in `a_line_the_class_fully_covers_keeps_its_class`. D90 has an
 addendum.
+
+## Done — 2026-10-25
+
+PR #153 merged into `main` as `602ad9e`, with fix commits `ddc9ae2` and `2a43f73` and
+decision D90 plus its review addendum. CI was green on the merged head: all 15 checks,
+including `check-windows`, `wasm` freshness, `governance-bench` and `demos`. The
+maintainer's review on `2a43f73` confirmed both P1 findings from round 1 closed.
+Linear's GitHub integration moved AI2-79 to Done on merge.
+
+Residuals carried forward:
+
+- A single plain network command is still ALLOW in a clean session (D90; the D57
+  shell-path residual).
+- The dogfood world gap is AI2-80, which needs a maintainer decision.
+- The host-hook benchmark pack is AI2-81 / E18.14.
