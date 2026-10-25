@@ -73,3 +73,22 @@ be a second mechanism for the same guarantee, covering fewer files.
 `check-demos.sh` are clean.
 
 **Left open:** the Antigravity dogfood world, `.agents/agy-world.yaml`, has the same gap.
+
+## Done — 2026-10-25
+
+PR #155 merged into `main` as `ba51d58`, with commits `2d3ecd0` and `7cb65fd` and
+decision D91. CI was green on the merged head: all 15 checks.
+
+CI round 1 is worth recording for the next world change. `check-windows` failed on an
+existing `cc_hook` test that wrote to `/tmp/x`. On Windows, the starter's `/tmp` root
+is not a real directory, so the path fell outside every root and got ASK. The test was
+about channel trust, so it now uses an in-project path. Tests that use the dogfood
+world should keep their paths inside the project.
+
+Linear's GitHub integration moved AI2-80 to Done on merge.
+
+Carried forward:
+
+- The Antigravity dogfood world (`.agents/agy-world.yaml`) has the same gap. It was
+  suggested as a separate task, with no Linear issue yet.
+- Shell writes to `.claude/` remain ASK, which is the D57 residual.
