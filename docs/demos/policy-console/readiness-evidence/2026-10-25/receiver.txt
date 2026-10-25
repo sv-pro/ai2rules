@@ -1,0 +1,41 @@
+[1;32mreceiver up[0m on 127.0.0.1:48567, forwarding nothing
+  page    http://portal.northwind.test:48567/onboarding
+  upload  http://files.northwind.test:48567/upload   (POST/PUT)
+  out     <RUN_DIR>/inbox
+Every request is logged below, with the name it was sent to. Ctrl-C to stop.
+
+[2m11:52:38  GET  127.0.0.1/health                         ok[0m
+[2m11:52:38  GET  portal.northwind.test/health             ok[0m
+[2m11:52:38  GET  files.northwind.test/health              ok[0m
+[2m11:52:38  GET  portal.northwind.test/health             ok[0m
+[2m11:52:38  GET  files.northwind.test/health              ok[0m
+[2m11:52:39  GET  portal.northwind.test/health             ok[0m
+[2m11:52:39  GET  files.northwind.test/health              ok[0m
+[2m11:52:39  GET  portal.northwind.test/health             ok[0m
+[2m11:52:39  GET  files.northwind.test/health              ok[0m
+[2m11:52:39  GET  portal.northwind.test/health             ok[0m
+[2m11:52:39  GET  files.northwind.test/health              ok[0m
+[2m11:52:39  GET  portal.northwind.test/health             ok[0m
+[2m11:52:39  GET  files.northwind.test/health              ok[0m
+[2m11:52:39  GET  portal.northwind.test/health             ok[0m
+[2m11:52:39  GET  files.northwind.test/health              ok[0m
+[2m11:52:40  GET  portal.northwind.test/health             ok[0m
+[2m11:52:40  GET  files.northwind.test/health              ok[0m
+[2m11:52:40  GET  portal.northwind.test/health             ok[0m
+[2m11:52:40  GET  files.northwind.test/health              ok[0m
+[2m11:52:40  GET  portal.northwind.test/health             ok[0m
+[2m11:52:40  GET  files.northwind.test/health              ok[0m
+[2m11:52:40  GET  portal.northwind.test/health             ok[0m
+[2m11:52:40  GET  files.northwind.test/health              ok[0m
+[2m11:52:40  GET  portal.northwind.test/health             ok[0m
+[2m11:52:40  GET  files.northwind.test/health              ok[0m
+[2m11:52:41  GET  portal.northwind.test/health             ok[0m
+[2m11:52:41  GET  files.northwind.test/health              ok[0m
+[2m11:52:41  GET  portal.northwind.test/health             ok[0m
+[2m11:52:41  GET  files.northwind.test/health              ok[0m
+[2m11:52:41  GET  portal.northwind.test/health             ok[0m
+[2m11:52:41  GET  files.northwind.test/health              ok[0m
+[2m11:52:41  GET  portal.northwind.test/health             ok[0m
+[2m11:52:41  GET  files.northwind.test/health              ok[0m
+11:52:41  GET  portal.northwind.test/onboarding         page served
+[2m11:52:42  GET  127.0.0.1/received                       0 upload(s) listed[0m

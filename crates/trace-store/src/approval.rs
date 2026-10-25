@@ -240,6 +240,11 @@ impl ApprovalStore {
         &self.path
     }
 
+    /// Read-only snapshot; authorization still requires `consume` under the lock.
+    pub fn all(&self) -> impl Iterator<Item = &ApprovalToken> {
+        self.tokens.values()
+    }
+
     pub fn token(&self, id: &ApprovalTokenId) -> Option<&ApprovalToken> {
         self.tokens.get(id)
     }

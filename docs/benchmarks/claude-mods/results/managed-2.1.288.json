@@ -1,0 +1,511 @@
+{
+  "recorded_at": "2026-10-24T15:18:21.997171+00:00",
+  "versions": {
+    "claude": {
+      "exit_code": 0,
+      "stdout": "2.1.288 (Claude Code)\n",
+      "stderr": ""
+    },
+    "harness": {
+      "exit_code": 0,
+      "stdout": "cli-harness 0.6.0\n",
+      "stderr": ""
+    }
+  },
+  "permission_mode": "acceptEdits",
+  "runtime_uid": 1000,
+  "source": {
+    "mechanism": "Linux file-based managed policy",
+    "path": "/etc/claude-code/managed-settings.json",
+    "sha256": "4ff8f9d6c4b240ef4270b9d8d66f1108ad5e5c615bb3e44fb6b6f1f4fd691a01",
+    "settings": {
+      "hooks": {
+        "PreToolUse": [
+          {
+            "matcher": "Write",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "/usr/bin/python3 /opt/probe/managed_hook.py",
+                "timeout": 10
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "uid": 0,
+    "mode": "0o644"
+  },
+  "binary_sha256": {
+    "claude": "0298068b686e7fdbaf9402a7a587bb7f49c0b0e084de09f69145a0719207640c",
+    "harness": "eeb35130f89f3de6ca1335b84d8f11b97642798067a4b6359b48481736c44307"
+  },
+  "model": "scripted loopback Messages API; no real inference or real credentials",
+  "source_evidence": "Only system policy registers managed_hook.py; project settings are empty. See live records and raw debug logs.",
+  "sec_default_policy": "Automatic seating; prependPlugins and admission locks unset",
+  "cases": [
+    {
+      "case": "managed-mod-off",
+      "hook": true,
+      "override": false,
+      "gate": {
+        "exit_code": 0,
+        "stdout": "{\"v\":1,\"decision\":\"DENY\",\"action\":\"Write\",\"rule\":\"path_scope_denied\",\"reason\":\"the target path is outside the allowed roots\",\"context\":{\"taint\":\"clean\",\"usage\":{\"commands_run\":0,\"network_calls\":0,\"file_writes\":0,\"tokens_used\":0}},\"manifest_hash\":\"7ab2051004f0\"}\n",
+        "stderr": ""
+      },
+      "adapter": {
+        "exit_code": 0,
+        "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the target path is outside the allowed roots (path_scope_denied)\"}}\n",
+        "stderr": ""
+      },
+      "validation": null,
+      "host": {
+        "exit_code": 0,
+        "stdout": "{\"duration_api_ms\":27,\"stop_reason\":\"end_turn\",\"session_id\":\"4e2cbdf7-d8c2-49f3-ae26-f2d68d48f29d\",\"total_cost_usd\":0.0015,\"usage\":{\"input_tokens\":200,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":60,\"output_tokens_details\":{\"thinking_tokens\":0},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-sonnet-4-5\":{\"inputTokens\":200,\"outputTokens\":60,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0,\"webSearchRequests\":0,\"costUSD\":0.0015,\"contextWindow\":200000,\"maxOutputTokens\":32000,\"thinkingTokens\":0,\"canonicalModel\":\"claude-sonnet-4-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Probe complete.\",\"ttft_ms\":104,\"type\":\"result\",\"duration_ms\":176,\"uuid\":\"d5df6178-521f-4bee-b295-4d117825f160\",\"ttft_stream_ms\":103,\"time_to_request_ms\":97,\"first_content_frame_ms\":103,\"queued_turn_count\":0,\"result_index\":0}\n",
+        "stderr": ""
+      },
+      "model_calls": [
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [],
+          "offered_tools": [
+            "Write"
+          ]
+        },
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [
+            {
+              "type": "tool_result",
+              "content": "<tool_use_error>PreToolUse:Write hook error: the target path is outside the allowed roots (path_scope_denied)</tool_use_error>\n\n<system-reminder>\n<total_tokens>14999870 tokens left</total_tokens>\n</system-reminder>",
+              "is_error": true,
+              "tool_use_id": "toolu_ai2rules_probe",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ],
+          "offered_tools": [
+            "Write"
+          ]
+        }
+      ],
+      "hook_records": [
+        {
+          "event": {
+            "session_id": "4e2cbdf7-d8c2-49f3-ae26-f2d68d48f29d",
+            "transcript_path": "<RUN_DIR>/managed-mod-off/config/projects/-evidence-managed-26wgpjcs-managed-mod-off-project/4e2cbdf7-d8c2-49f3-ae26-f2d68d48f29d.jsonl",
+            "cwd": "<RUN_DIR>/managed-mod-off/project",
+            "prompt_id": "ae62c969-abf8-4701-80e2-c71a469be321",
+            "permission_mode": "acceptEdits",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "<RUN_DIR>/managed-mod-off/project/denied-marker.txt",
+              "content": "AI2RULES_MODS_PROBE\n"
+            },
+            "tool_use_id": "toolu_ai2rules_probe"
+          },
+          "policy_source": "/etc/claude-code/managed-settings.json",
+          "wrapper": "/opt/probe/managed_hook.py",
+          "exit_code": 0,
+          "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the target path is outside the allowed roots (path_scope_denied)\"}}\n",
+          "stderr": ""
+        }
+      ],
+      "marker_exists": false,
+      "marker_content": null,
+      "mod_evidence": [
+        "2026-10-24T15:18:19.902Z [DEBUG] hooks module cc-plugin-sec-default@builtin loaded (native, environment 1, tier prepend); events: classic.*,prompt.section,prompt.context,prompt.compose,skill.prompt,attribution.text,settings.read,tool.describe,command.describe,agent.offer,agent.spawn,tool.register,tool.list,tool.check,plugin.register",
+        "2026-10-24T15:18:19.902Z [DEBUG] hooks module cc-plugin-agents-md@builtin loaded (native, environment 2, tier builtin); events: session.start,prompt.context,agent.spawn,tool.call",
+        "2026-10-24T15:18:19.908Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.SessionStart settled in 0.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.922Z [DEBUG] hooks module cc-plugin-agents-md@builtin session.start settled in 2.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.950Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.950Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.950Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.950Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.950Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.950Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.950Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.951Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.952Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 4.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 4.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 4.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 4.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 3.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 3.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 3.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 3.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.953Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 3.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.7ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.6ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.5ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.4ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.3ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.0ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 0.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.971Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 0.9ms (native link, next() included)",
+        "2026-10-24T15:18:19.973Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 0.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.973Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.compose settled in 8.1ms (native link, next() included)",
+        "2026-10-24T15:18:19.983Z [DEBUG] hooks module cc-plugin-agents-md@builtin prompt.context settled in 20.2ms (native link, next() included)",
+        "2026-10-24T15:18:19.983Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.context settled in 20.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.988Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 0.8ms (native link, next() included)",
+        "2026-10-24T15:18:19.992Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.UserPromptSubmit settled in 0.4ms (native link, next() included)",
+        "2026-10-24T15:18:20.015Z [DEBUG] hooks module cc-plugin-sec-default@builtin tool.describe settled in 0.2ms (native link, next() included)",
+        "2026-10-24T15:18:20.081Z [DEBUG] tool.call Write toolu_ai2rules_probe: resolved by a hooks module (deny: PreToolUse:Write hook error: the target path is outside the allowed roots (path_scope_denied))",
+        "2026-10-24T15:18:20.083Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.PostToolBatch settled in 0.2ms (native link, next() included)",
+        "2026-10-24T15:18:20.095Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.MessageDisplay settled in 0.2ms (native link, next() included)",
+        "2026-10-24T15:18:20.102Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.Stop settled in 0.3ms (native link, next() included)",
+        "2026-10-24T15:18:20.117Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.SessionEnd settled in 0.2ms (native link, next() included)"
+      ],
+      "world_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc",
+      "expected_input": {
+        "file_path": "<RUN_DIR>/managed-mod-off/project/denied-marker.txt",
+        "content": "AI2RULES_MODS_PROBE\n"
+      },
+      "admission_diagnostics": [],
+      "background_diagnostics": [
+        "2026-10-24T15:18:19.895Z [DEBUG] Plugin autoupdate: command-source refresh disabled by tengu_plugin_command_source_refresh (still excluding command-sourced plugins from the regular pass)"
+      ],
+      "hook_scope": "managed-file",
+      "sec_default_load_evidence": [
+        "2026-10-24T15:18:19.902Z [DEBUG] hooks module cc-plugin-sec-default@builtin loaded (native, environment 1, tier prepend); events: classic.*,prompt.section,prompt.context,prompt.compose,skill.prompt,attribution.text,settings.read,tool.describe,command.describe,agent.offer,agent.spawn,tool.register,tool.list,tool.check,plugin.register"
+      ],
+      "override_load_evidence": [],
+      "evidence_gaps": [],
+      "observation": "DENY_NO_EFFECT"
+    },
+    {
+      "case": "managed-mod-on",
+      "hook": true,
+      "override": true,
+      "gate": {
+        "exit_code": 0,
+        "stdout": "{\"v\":1,\"decision\":\"DENY\",\"action\":\"Write\",\"rule\":\"path_scope_denied\",\"reason\":\"the target path is outside the allowed roots\",\"context\":{\"taint\":\"clean\",\"usage\":{\"commands_run\":0,\"network_calls\":0,\"file_writes\":0,\"tokens_used\":0}},\"manifest_hash\":\"7ab2051004f0\"}\n",
+        "stderr": ""
+      },
+      "adapter": {
+        "exit_code": 0,
+        "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the target path is outside the allowed roots (path_scope_denied)\"}}\n",
+        "stderr": ""
+      },
+      "validation": {
+        "exit_code": 0,
+        "stdout": "{\n  \"success\": true,\n  \"strict\": false,\n  \"target\": \"<RUN_DIR>/managed-mod-on/override-mod/.claude-plugin/plugin.json\",\n  \"manifest\": {\n    \"file\": \"<RUN_DIR>/managed-mod-on/override-mod/.claude-plugin/plugin.json\",\n    \"type\": \"plugin\",\n    \"errors\": [],\n    \"warnings\": [\n      {\n        \"path\": \"author\",\n        \"message\": \"No author information provided. Consider adding author details for plugin attribution\",\n        \"code\": null\n      }\n    ],\n    \"notes\": []\n  },\n  \"contents\": [\n    {\n      \"file\": \"<RUN_DIR>/managed-mod-on/override-mod/hooks/hooks.json\",\n      \"type\": \"hooks\",\n      \"errors\": [],\n      \"warnings\": [],\n      \"notes\": [\n        \"./register.js hooks: tool.check{tool=Write}\",\n        \"./register.js calls: $.ui.log\"\n      ]\n    }\n  ]\n}\n",
+        "stderr": ""
+      },
+      "host": {
+        "exit_code": 0,
+        "stdout": "{\"duration_api_ms\":31,\"stop_reason\":\"end_turn\",\"session_id\":\"d26fd42a-30c2-46d3-ae1f-2e2cbd16e35d\",\"total_cost_usd\":0.0015,\"usage\":{\"input_tokens\":200,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":60,\"output_tokens_details\":{\"thinking_tokens\":0},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-sonnet-4-5\":{\"inputTokens\":200,\"outputTokens\":60,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0,\"webSearchRequests\":0,\"costUSD\":0.0015,\"contextWindow\":200000,\"maxOutputTokens\":32000,\"thinkingTokens\":0,\"canonicalModel\":\"claude-sonnet-4-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Probe complete.\",\"ttft_ms\":99,\"type\":\"result\",\"duration_ms\":171,\"uuid\":\"0ecc4a1c-3db3-47bd-8cf1-71360a584a12\",\"ttft_stream_ms\":98,\"time_to_request_ms\":92,\"first_content_frame_ms\":98,\"queued_turn_count\":0,\"result_index\":0}\n",
+        "stderr": ""
+      },
+      "model_calls": [
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [],
+          "offered_tools": [
+            "Write"
+          ]
+        },
+        {
+          "model": "claude-sonnet-4-5",
+          "tool_results": [
+            {
+              "type": "tool_result",
+              "content": "<tool_use_error>PreToolUse:Write hook error: the target path is outside the allowed roots (path_scope_denied)</tool_use_error>\n\n<system-reminder>\n<total_tokens>14999870 tokens left</total_tokens>\n</system-reminder>",
+              "is_error": true,
+              "tool_use_id": "toolu_ai2rules_probe",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ],
+          "offered_tools": [
+            "Write"
+          ]
+        }
+      ],
+      "hook_records": [
+        {
+          "event": {
+            "session_id": "d26fd42a-30c2-46d3-ae1f-2e2cbd16e35d",
+            "transcript_path": "<RUN_DIR>/managed-mod-on/config/projects/-evidence-managed-26wgpjcs-managed-mod-on-project/d26fd42a-30c2-46d3-ae1f-2e2cbd16e35d.jsonl",
+            "cwd": "<RUN_DIR>/managed-mod-on/project",
+            "prompt_id": "065ec0e4-5e95-4496-8e7e-d8c33f4ca35a",
+            "permission_mode": "acceptEdits",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {
+              "file_path": "<RUN_DIR>/managed-mod-on/project/denied-marker.txt",
+              "content": "AI2RULES_MODS_PROBE\n"
+            },
+            "tool_use_id": "toolu_ai2rules_probe"
+          },
+          "policy_source": "/etc/claude-code/managed-settings.json",
+          "wrapper": "/opt/probe/managed_hook.py",
+          "exit_code": 0,
+          "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the target path is outside the allowed roots (path_scope_denied)\"}}\n",
+          "stderr": ""
+        }
+      ],
+      "marker_exists": false,
+      "marker_content": null,
+      "mod_evidence": [
+        "2026-10-24T15:18:21.117Z [DEBUG] hooks module cc-plugin-sec-default@builtin loaded (native, environment 1, tier prepend); events: classic.*,prompt.section,prompt.context,prompt.compose,skill.prompt,attribution.text,settings.read,tool.describe,command.describe,agent.offer,agent.spawn,tool.register,tool.list,tool.check,plugin.register",
+        "2026-10-24T15:18:21.184Z [DEBUG] hooks module ai2rules-marker-override-probe@inline loaded (worker, environment 2, tier user); events: tool.check",
+        "2026-10-24T15:18:21.184Z [DEBUG] hooks module cc-plugin-agents-md@builtin loaded (native, environment 3, tier builtin); events: session.start,prompt.context,agent.spawn,tool.call",
+        "2026-10-24T15:18:21.188Z [DEBUG] hooks module cc-plugin-sec-default@builtin plugin.register settled in 0.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.314Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.SessionStart settled in 0.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.326Z [DEBUG] hooks module cc-plugin-agents-md@builtin session.start settled in 1.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 20.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 20.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 4.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.9ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.8ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.4ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.369Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 0.1ms (native link, next() included)",
+        "2026-10-24T15:18:21.370Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.compose settled in 8.6ms (native link, next() included)",
+        "2026-10-24T15:18:21.376Z [DEBUG] hooks module cc-plugin-agents-md@builtin prompt.context settled in 22.0ms (native link, next() included)",
+        "2026-10-24T15:18:21.376Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.context settled in 22.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.382Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 0.7ms (native link, next() included)",
+        "2026-10-24T15:18:21.385Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.UserPromptSubmit settled in 0.3ms (native link, next() included)",
+        "2026-10-24T15:18:21.411Z [DEBUG] hooks module cc-plugin-sec-default@builtin tool.describe settled in 0.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.482Z [DEBUG] tool.call Write toolu_ai2rules_probe: resolved by a hooks module (deny: PreToolUse:Write hook error: the target path is outside the allowed roots (path_scope_denied))",
+        "2026-10-24T15:18:21.484Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.PostToolBatch settled in 0.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.495Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.MessageDisplay settled in 0.2ms (native link, next() included)",
+        "2026-10-24T15:18:21.501Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.Stop settled in 0.5ms (native link, next() included)",
+        "2026-10-24T15:18:21.511Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.SessionEnd settled in 0.2ms (native link, next() included)"
+      ],
+      "world_sha256": "7e91b571feb833e7f5909cb7e621665a7a21789da5389a35291d5a7b246eb7bc",
+      "expected_input": {
+        "file_path": "<RUN_DIR>/managed-mod-on/project/denied-marker.txt",
+        "content": "AI2RULES_MODS_PROBE\n"
+      },
+      "admission_diagnostics": [],
+      "background_diagnostics": [
+        "2026-10-24T15:18:21.098Z [DEBUG] Plugin autoupdate: command-source refresh disabled by tengu_plugin_command_source_refresh (still excluding command-sourced plugins from the regular pass)"
+      ],
+      "hook_scope": "managed-file",
+      "sec_default_load_evidence": [
+        "2026-10-24T15:18:21.117Z [DEBUG] hooks module cc-plugin-sec-default@builtin loaded (native, environment 1, tier prepend); events: classic.*,prompt.section,prompt.context,prompt.compose,skill.prompt,attribution.text,settings.read,tool.describe,command.describe,agent.offer,agent.spawn,tool.register,tool.list,tool.check,plugin.register"
+      ],
+      "override_load_evidence": [
+        "2026-10-24T15:18:21.184Z [DEBUG] hooks module ai2rules-marker-override-probe@inline loaded (worker, environment 2, tier user); events: tool.check"
+      ],
+      "evidence_gaps": [],
+      "observation": "DENY_NO_EFFECT"
+    }
+  ]
+}

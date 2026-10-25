@@ -36,10 +36,10 @@ else
 fi
 
 SHIM="$DESK/.claude/hooks/world-gate.sh"
-if [ -f "$SHIM" ] && bash -n "$SHIM" && grep -q '^exec .* cc-hook --grant .*--enforce-absent --log' "$SHIM"; then
-  ok "project: $DESK (hook with ABSENT enforced and the decision log on)"
+if [ -f "$SHIM" ] && bash -n "$SHIM"; then
+  ok "project: $DESK (hook shell syntax valid)"
 else
-  fail "project missing or its hook lacks --enforce-absent/--log: run setup.sh"
+  fail "project or valid hook missing: run setup.sh"
 fi
 
 # Inspect the generated wiring without running the hook: a real hook probe would
@@ -49,6 +49,7 @@ import json
 import os
 import pathlib
 import shlex
+import subprocess
 import sys
 
 desk, shim = (pathlib.Path(p).resolve() for p in sys.argv[1:])
@@ -69,7 +70,19 @@ try:
                 wired = True
     if not wired:
         raise ValueError('no all-tools PreToolUse entry pointing at this project shim')
-    lines = shim.read_text().splitlines()
+    lines = shim.read_text(encoding='utf-8').replace('\\\n', '').splitlines()
+    commands = [shlex.split(line) for line in lines if line.startswith('exec ')]
+    if len(commands) != 1 or commands[0][:3] != ['exec', '$BIN', 'cc-hook']:
+        raise ValueError('unrecognized hook exec; rerun setup.sh')
+    command = commands[0]
+    for flag in ('--grant', '--enforce-absent'):
+        if command.count(flag) != 1:
+            raise ValueError(f'hook must enable {flag} exactly once')
+    for flag, value in (('--world', '$PD/.claude/cc-world.yaml'),
+                        ('--state', '$PD/.claude/state'),
+                        ('--log', '$PD/.claude/state/decisions.jsonl')):
+        if command.count(flag) != 1 or command[command.index(flag) + 1] != value:
+            raise ValueError(f'hook {flag} must point at {value}')
     binary = shlex.split(next(line.split('=', 1)[1] for line in lines
                              if line.startswith('TRUSTED_BIN=')))[0]
     binary = os.environ.get('HARNESS_BIN') or binary
@@ -78,23 +91,22 @@ try:
     off = shlex.split(next(line for line in lines if line.startswith('if [ -f ')))[3]
     if pathlib.Path(off).exists():
         raise ValueError(f'the project kill switch is on: {off}')
+    request = {'v': 1, 'context': {'source_channel': 'user_prompt'},
+               'tools': [{'name': 'Skill'}, {'name': 'AskUserQuestion'}]}
+    projected = subprocess.run([binary, 'project', '--world', str(desk / '.claude/cc-world.yaml')],
+                               input=json.dumps(request), capture_output=True, text=True, timeout=10)
+    if projected.returncode or {t['name'] for t in json.loads(projected.stdout)['tools']} != {'Skill', 'AskUserQuestion'}:
+        raise ValueError('the selected hook binary cannot compile/project Skill and AskUserQuestion')
     skill = desk / '.claude/skills/northwind-demo/SKILL.md'
     if not skill.is_file():
-        raise ValueError('/northwind-demo is not installed; rerun setup.sh from PR #134')
-except (OSError, ValueError, StopIteration, IndexError, TypeError, AttributeError) as exc:
+        raise ValueError('/northwind-demo is not installed; rerun setup.sh')
+except (OSError, ValueError, StopIteration, IndexError, KeyError, TypeError, AttributeError, subprocess.TimeoutExpired) as exc:
     print(f'  FAIL  hook/skill configuration: {exc}')
     sys.exit(1)
-print('  ok    all-tools hook entry, installed binary and /northwind-demo')
+print('  ok    all-tools hook, exact world/state/log, grant/ABSENT, selected binary projection and /northwind-demo')
 PY
 then :; else fails=$((fails + 1)); fi
 
-if printf '%s' '{"v":1,"context":{"source_channel":"user_prompt"},"tools":[{"name":"Skill"},{"name":"AskUserQuestion"}]}' |
-  "$HARNESS" project --world "$DESK/.claude/cc-world.yaml" 2>/dev/null |
-  "$PY" -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if {t["name"] for t in r["tools"]} == {"Skill", "AskUserQuestion"} else 1)' 2>/dev/null; then
-  ok "world compiles and projects Skill and AskUserQuestion"
-else
-  fail "world cannot compile or does not project Skill/AskUserQuestion"
-fi
 if [ -f "$HOME/.claude/gate-off" ]; then
   fail "the kill switch is on (~/.claude/gate-off): the hook is not running"
 fi

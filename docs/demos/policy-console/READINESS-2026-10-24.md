@@ -5,6 +5,10 @@ A successful automated probe or deployment does not establish readiness of the
 live Claude Code presentation. One full rehearsal on the presentation host is
 still the acceptance gate.
 
+This is a historical snapshot. For the main retarget and current checks, see
+[READINESS-2026-10-25.md](READINESS-2026-10-25.md). The PR #130/#134 states below
+refer to the original run; both are now merged into main.
+
 ## Immutable inputs
 
 | Input | Checked revision / state |

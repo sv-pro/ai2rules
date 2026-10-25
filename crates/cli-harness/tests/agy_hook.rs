@@ -390,3 +390,52 @@ fn grant_mode_allows_new_file_under_real_project_parent() {
     let out = run_hook_with_world_env(&world, &state, &event, &["--grant"], &[("HOME", &home)]);
     assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");
 }
+
+/// D84: `--log` writes `cc-hook`'s line format. Antigravity sends no tool-call
+/// id and no agent identity, so those are null; `step_idx` and the call's `Cwd`
+/// are what it does send.
+#[test]
+fn decision_log_uses_the_shared_format_with_what_antigravity_sends() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let out = run_hook_args(
+        dir.path(),
+        &json!({"conversationId": "agylog", "stepIdx": 4, "workspacePaths": ["/ws"],
+                "toolCall": {"name": "run_command",
+                             "args": {"CommandLine": "rm -rf /tmp/x", "Cwd": "/ws/sub"}}}),
+        &["--log", log.to_str().unwrap()],
+    );
+    let line: Value = serde_json::from_str(std::fs::read_to_string(&log).unwrap().trim()).unwrap();
+    assert_eq!(line["kind"], "decision");
+    assert_eq!(line["host"], "antigravity");
+    assert_eq!(line["session"], "agylog");
+    assert_eq!(line["step_idx"], 4);
+    assert_eq!(line["cwd"], "/ws/sub");
+    assert_eq!(line["call"], "rm -rf /tmp/x");
+    assert!(line["tool_use_id"].is_null() && line["agent_id"].is_null());
+    // The answer is in the neutral vocabulary, whatever channel agy was sent.
+    let sent: Value = serde_json::from_str(out.trim()).unwrap();
+    if sent["decision"] == "force_ask" {
+        assert_eq!(line["answer"], "ask");
+        assert_eq!(line["human_answer"], "inferred");
+    } else {
+        assert_eq!(line["answer"], sent["decision"]);
+    }
+}
+
+#[test]
+fn decision_calls_mask_secrets_before_shortening() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let padding = "x".repeat(140);
+    let command = format!("echo {padding} ghp_{}", "A".repeat(40));
+    run_hook_args(
+        dir.path(),
+        &json!({"conversationId": "boundary", "toolCall": {
+            "name": "run_command", "args": {"CommandLine": command}}}),
+        &["--log", log.to_str().unwrap()],
+    );
+    let line: Value = serde_json::from_str(std::fs::read_to_string(log).unwrap().trim()).unwrap();
+    assert_eq!(line["host"], "antigravity");
+    assert_eq!(line["call"], format!("echo {padding} [REDACTED]"));
+}

@@ -1,0 +1,292 @@
+2026-10-24T15:18:20.962Z [DEBUG] MDM settings load completed in 1ms
+2026-10-24T15:18:20.973Z [DEBUG] CA certs: Config fallback - globalEnv keys: , settingsEnv keys: none
+2026-10-24T15:18:20.976Z [DEBUG] [init] configureGlobalMTLS starting
+2026-10-24T15:18:20.976Z [DEBUG] [init] configureGlobalMTLS complete
+2026-10-24T15:18:20.976Z [DEBUG] [init] configureGlobalAgents starting
+2026-10-24T15:18:20.976Z [DEBUG] CA certs: stores=bundled,system, extraCertsPath=undefined
+2026-10-24T15:18:20.976Z [DEBUG] CA certs: Loaded 121 bundled root certificates
+2026-10-24T15:18:20.984Z [DEBUG] CA certs: Dropped 1 expired certificate(s) from system store
+2026-10-24T15:18:20.984Z [DEBUG] CA certs: Loaded 147 system CA certificates
+2026-10-24T15:18:20.984Z [DEBUG] mTLS: Creating HTTPS agent with custom certificates
+2026-10-24T15:18:20.984Z [DEBUG] [init] configureGlobalAgents complete
+2026-10-24T15:18:20.987Z [DEBUG] Git remote URL: null
+2026-10-24T15:18:20.987Z [DEBUG] No git remote URL found
+2026-10-24T15:18:20.988Z [DEBUG] Error log sink initialized
+2026-10-24T15:18:20.988Z [DEBUG] clearPluginCache: invalidating loadAllPlugins cache (preAction: --plugin-dir inline plugins)
+2026-10-24T15:18:20.995Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: <RUN_DIR>/managed-mod-on/config/settings.json
+2026-10-24T15:18:21.000Z [DEBUG] [Claude in Chrome] Disabled: OAuth token has no scope accepted by /api/oauth/validate (needs user:profile, user:office, or user:ccr_inference; env-var and setup-token sessions default to user:inference only)
+2026-10-24T15:18:21.003Z [DEBUG] [ToolSearch:optimistic] disabled: ANTHROPIC_BASE_URL=http://127.0.0.1:42495 is not a first-party Anthropic host. Set ENABLE_TOOL_SEARCH=true (or auto / auto:N) if your proxy forwards tool_reference blocks.
+2026-10-24T15:18:21.006Z [DEBUG] [STARTUP] Loading MCP configs...
+2026-10-24T15:18:21.008Z [DEBUG] [STARTUP] Running setup()...
+2026-10-24T15:18:21.010Z [DEBUG] Broken symlink or missing file encountered for settings.json at path: <RUN_DIR>/managed-mod-on/project/.claude/settings.local.json
+2026-10-24T15:18:21.014Z [DEBUG] Loading skills from: managed=/etc/claude-code/.claude/skills, user=<RUN_DIR>/managed-mod-on/config/skills, project=[]
+2026-10-24T15:18:21.016Z [DEBUG] Failed to stat directory /etc/claude-code/.claude/agents: ENOENT: no such file or directory, stat '/etc/claude-code/.claude/agents'
+2026-10-24T15:18:21.016Z [DEBUG] installed_plugins.json doesn't exist, returning empty V2 object
+2026-10-24T15:18:21.016Z [DEBUG] Failed to stat directory /etc/claude-code/.claude/commands: ENOENT: no such file or directory, stat '/etc/claude-code/.claude/commands'
+2026-10-24T15:18:21.017Z [DEBUG] Loaded 0 unique skills (0 unconditional, 0 conditional, managed: 0, user: 0, project: 0, additional: 0, legacy commands: 0)
+2026-10-24T15:18:21.017Z [DEBUG] --plugin-dir <RUN_DIR>/managed-mod-on/override-mod is one plugin: .claude-plugin at its top marks it
+2026-10-24T15:18:21.028Z [DEBUG] Git remote URL: null
+2026-10-24T15:18:21.028Z [DEBUG] No git remote URL found
+2026-10-24T15:18:21.030Z [DEBUG] Read hooks.json for plugin ai2rules-marker-override-probe (enabled=true): <RUN_DIR>/managed-mod-on/override-mod/hooks/hooks.json
+2026-10-24T15:18:21.031Z [INFO] [uds-messaging] Listening: /tmp/cc-socks/61.sock
+2026-10-24T15:18:21.031Z [INFO] [uds-messaging] Inject messages (auth line optional here): { echo '{"type":"auth","token":"[REDACTED]"$CLAUDE_CODE_MESSAGING_TOKEN"'"}'; echo '{"type":"user","message":{"role":"user","content":"hello"}}'; } | socat - UNIX-CONNECT:/tmp/cc-socks/61.sock
+2026-10-24T15:18:21.033Z [INFO] [uds-messaging] Connect when the data is ready (e.g. out=$(cmd); printf '%s\n' "$out" | nc -N -U "$CLAUDE_CODE_MESSAGING_SOCKET" — or the socat form above): a connection that sends no complete line within 30000 ms is closed
+2026-10-24T15:18:21.035Z [DEBUG] Error log sink initialized
+2026-10-24T15:18:21.037Z [DEBUG] [STARTUP] setup() completed in 29ms
+2026-10-24T15:18:21.037Z [DEBUG] Cleared mTLS configuration cache
+2026-10-24T15:18:21.037Z [DEBUG] Cleared proxy agent cache
+2026-10-24T15:18:21.037Z [DEBUG] mTLS: Creating HTTPS agent with custom certificates
+2026-10-24T15:18:21.040Z [DEBUG] [STARTUP] Loading commands and agents...
+2026-10-24T15:18:21.042Z [DEBUG] memory index backfill: ENOENT: no such file or directory, scandir '<RUN_DIR>/managed-mod-on/config/projects/-evidence-managed-26wgpjcs-managed-mod-on-project/memory/'
+2026-10-24T15:18:21.049Z [DEBUG] Loaded inline plugin from path: ai2rules-marker-override-probe
+2026-10-24T15:18:21.049Z [DEBUG] Loaded 1 directory-loaded plugins
+2026-10-24T15:18:21.050Z [DEBUG] Found 4 plugins (4 enabled, 0 disabled)
+2026-10-24T15:18:21.050Z [DEBUG] getPluginSkills: Processing 4 enabled plugins
+2026-10-24T15:18:21.050Z [DEBUG] Checking plugin ai2rules-marker-override-probe: skillsPath=none, skillsPaths=0 paths
+2026-10-24T15:18:21.050Z [DEBUG] Checking plugin cc-plugin-sec-default: skillsPath=none, skillsPaths=0 paths
+2026-10-24T15:18:21.050Z [DEBUG] Checking plugin cc-plugin-agents-md: skillsPath=none, skillsPaths=0 paths
+2026-10-24T15:18:21.050Z [DEBUG] Checking plugin cc-plugin-plugin-authoring: skillsPath=none, skillsPaths=0 paths
+2026-10-24T15:18:21.050Z [DEBUG] Total plugin workflows loaded: 0
+2026-10-24T15:18:21.051Z [DEBUG] Total plugin commands loaded: 0
+2026-10-24T15:18:21.051Z [DEBUG] Total plugin skills loaded: 0 (0 duplicate/user-owned entries skipped)
+2026-10-24T15:18:21.052Z [DEBUG] Total plugin agents loaded: 0
+2026-10-24T15:18:21.052Z [DEBUG] cc-plugin-sec-default@builtin seated outermost: this machine has managed settings
+2026-10-24T15:18:21.054Z [DEBUG] getSkills returning: 0 skill dir commands, 0 plugin skills, 39 bundled skills, 1 builtin plugin skills
+2026-10-24T15:18:21.065Z [DEBUG] [STARTUP] Commands and agents loaded in 25ms
+2026-10-24T15:18:21.068Z [DEBUG] [LSP MANAGER] initializeLspServerManager() called
+2026-10-24T15:18:21.068Z [DEBUG] [LSP MANAGER] Created manager instance, state=pending
+2026-10-24T15:18:21.068Z [DEBUG] [LSP MANAGER] Starting async initialization (generation 1)
+2026-10-24T15:18:21.068Z [DEBUG] Starting background startup prefetches
+2026-10-24T15:18:21.069Z [DEBUG] [Bootstrap] Skipped: Nonessential traffic disabled
+2026-10-24T15:18:21.069Z [DEBUG] [STARTUP] MCP configs resolved in 0ms (awaited at +63ms)
+2026-10-24T15:18:21.075Z [DEBUG] Cleared mTLS configuration cache
+2026-10-24T15:18:21.076Z [DEBUG] Cleared proxy agent cache
+2026-10-24T15:18:21.076Z [DEBUG] mTLS: Creating HTTPS agent with custom certificates
+2026-10-24T15:18:21.077Z [DEBUG] Initialized versioned plugins system with 0 plugins
+2026-10-24T15:18:21.080Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.081Z [DEBUG] [MCP] --mcp-config servers running fully async (nonblocking)
+2026-10-24T15:18:21.081Z [DEBUG] [MCP] claude.ai connectors running fully async (nonblocking)
+2026-10-24T15:18:21.084Z [DEBUG] [auto-mode] verifyAutoModeGateAccess: enabledState=enabled disabledBySettings=false model=claude-sonnet-4-5 modelSupported=false disableFastModeBreakerFires=false carouselAvailable=false canEnterAuto=false
+2026-10-24T15:18:21.084Z [WARN] auto mode disabled: model claude-sonnet-4-5 does not support auto mode
+2026-10-24T15:18:21.084Z [DEBUG] [auto-mode] kickOutOfAutoIfNeeded applying: ctx.mode=acceptEdits ctx.prePlanMode=undefined reason=model
+2026-10-24T15:18:21.085Z [DEBUG] [auto-mode] verifyAutoModeGateAccess setAvailable: true -> false
+2026-10-24T15:18:21.085Z [DEBUG] [servedCatalog] off (essential_traffic)
+2026-10-24T15:18:21.087Z [DEBUG] [Perfetto] initializePerfettoTracing called, env value: undefined
+2026-10-24T15:18:21.087Z [DEBUG] [3P telemetry] isTelemetryEnabled=false (CLAUDE_CODE_ENABLE_TELEMETRY=undefined)
+2026-10-24T15:18:21.098Z [DEBUG] Plugin autoupdate: command-source refresh disabled by tengu_plugin_command_source_refresh (still excluding command-sourced plugins from the regular pass)
+2026-10-24T15:18:21.100Z [DEBUG] Plugin autoupdate: skipped (auto-updater disabled)
+2026-10-24T15:18:21.102Z [DEBUG] Total LSP servers loaded: 0
+2026-10-24T15:18:21.102Z [DEBUG] [LSP SERVER MANAGER] getAllLspServers returned 0 server(s)
+2026-10-24T15:18:21.103Z [DEBUG] LSP manager initialized with 0 servers
+2026-10-24T15:18:21.103Z [DEBUG] LSP server manager initialized successfully
+2026-10-24T15:18:21.103Z [DEBUG] LSP notification handlers registered successfully for all 0 server(s)
+2026-10-24T15:18:21.108Z [DEBUG] [3P telemetry] Event dropped (no event logger initialized): hook_registered
+2026-10-24T15:18:21.115Z [DEBUG] [sessionRegistry] sweep declined by isRegistrySweepPermitted() — dead records are left in place (neither counted nor deleted)
+2026-10-24T15:18:21.115Z [DEBUG] plugin cc-plugin-agents-md: no pluginConfigs["agents-md@builtin" or "cc-plugin-agents-md@builtin"].options in user, --settings or managed settings (project settings are not read); every option is its default
+2026-10-24T15:18:21.117Z [DEBUG] hooks module cc-plugin-sec-default@builtin loaded (native, environment 1, tier prepend); events: classic.*,prompt.section,prompt.context,prompt.compose,skill.prompt,attribution.text,settings.read,tool.describe,command.describe,agent.offer,agent.spawn,tool.register,tool.list,tool.check,plugin.register
+2026-10-24T15:18:21.117Z [DEBUG] hooks worker spawned (one for every plugin)
+2026-10-24T15:18:21.118Z [DEBUG] Ripgrep first use test: PASSED (mode=embedded, path=/opt/probe-tools/node_modules/@anthropic-ai/claude-code-linux-x64/claude)
+2026-10-24T15:18:21.118Z [DEBUG] "rg error (signal=undefined, code=2, stderr: rg: <RUN_DIR>/managed-mod-on/config/plugins/cache: IO error for operation on <RUN_DIR>/managed-mod-on/config/plugins/cache: No such file or directory (os error 2)\n), 0 results"
+2026-10-24T15:18:21.119Z [DEBUG] Watching for changes in setting files <RUN_DIR>/managed-mod-on/config/settings.json, <RUN_DIR>/managed-mod-on/project/.claude/settings.json, <RUN_DIR>/managed-mod-on/project/.claude/settings.local.json, /etc/claude-code/managed-settings.json...
+2026-10-24T15:18:21.121Z [DEBUG] Preserving file permissions: 100600
+2026-10-24T15:18:21.121Z [DEBUG] Writing to temp file: <RUN_DIR>/managed-mod-on/config/.claude.json.tmp.61.ac9fc2dcd1e5
+2026-10-24T15:18:21.123Z [DEBUG] Applied original permissions to temp file
+2026-10-24T15:18:21.130Z [DEBUG] Temp file written successfully, size: 423 bytes
+2026-10-24T15:18:21.130Z [DEBUG] Renaming <RUN_DIR>/managed-mod-on/config/.claude.json.tmp.61.ac9fc2dcd1e5 to <RUN_DIR>/managed-mod-on/config/.claude.json
+2026-10-24T15:18:21.130Z [DEBUG] File <RUN_DIR>/managed-mod-on/config/.claude.json written atomically
+2026-10-24T15:18:21.134Z [DEBUG] Preserving file permissions: 100600
+2026-10-24T15:18:21.134Z [DEBUG] Writing to temp file: <RUN_DIR>/managed-mod-on/config/.claude.json.tmp.61.b5670acc33bf
+2026-10-24T15:18:21.135Z [DEBUG] Applied original permissions to temp file
+2026-10-24T15:18:21.140Z [DEBUG] Temp file written successfully, size: 997 bytes
+2026-10-24T15:18:21.140Z [DEBUG] Renaming <RUN_DIR>/managed-mod-on/config/.claude.json.tmp.61.b5670acc33bf to <RUN_DIR>/managed-mod-on/config/.claude.json
+2026-10-24T15:18:21.140Z [DEBUG] File <RUN_DIR>/managed-mod-on/config/.claude.json written atomically
+2026-10-24T15:18:21.184Z [DEBUG] hooks module ai2rules-marker-override-probe@inline loaded (worker, environment 2, tier user); events: tool.check
+2026-10-24T15:18:21.184Z [DEBUG] hooks module cc-plugin-agents-md@builtin loaded (native, environment 3, tier builtin); events: session.start,prompt.context,agent.spawn,tool.call
+2026-10-24T15:18:21.186Z [DEBUG] engine.create: no plugin-provided interfaces; $ built for cc-plugin-sec-default,ai2rules-marker-override-probe,cc-plugin-agents-md
+2026-10-24T15:18:21.186Z [DEBUG] plugin.register: cc-plugin-sec-default (prepend, cc-plugin-sec-default@builtin), judged by core alone: admitted
+2026-10-24T15:18:21.186Z [DEBUG] plugin.register: cc-plugin-agents-md (builtin, cc-plugin-agents-md@builtin), judged by core alone: admitted
+2026-10-24T15:18:21.188Z [DEBUG] hooks module cc-plugin-sec-default@builtin plugin.register settled in 0.9ms (native link, next() included)
+2026-10-24T15:18:21.188Z [DEBUG] plugin.register: ai2rules-marker-override-probe (user, ai2rules-marker-override-probe@inline), judged by cc-plugin-sec-default: admitted
+2026-10-24T15:18:21.221Z [DEBUG] Artifact gates frozen: capabilities=true comments=false db=true files=false types=false type_create=false type_catalog=false read_page_data=false room=false verify=false delete=false preview=false preview_browser=unread open=false endpoints=false pin=true share=false flag_source=disabled gb_fresh=false
+2026-10-24T15:18:21.222Z [DEBUG] Artifact input schema built: assets=false copy_from=false assets_source=cold_no_identity
+2026-10-24T15:18:21.312Z [DEBUG] type root of ai2rules-marker-override-probe at <RUN_DIR>/managed-mod-on/override-mod/.claude-plugin/types: entries claude-code, claude-code-tools, claude-code-mcp; wrote .claude-plugin/types/claude-code/index.d.ts, .claude-plugin/types/claude-code-tools/index.d.ts, .claude-plugin/types/claude-code-mcp/index.d.ts, .claude-plugin/types/tsconfig.json, .claude-plugin/types/.gitignore, tsconfig.json
+2026-10-24T15:18:21.313Z [DEBUG] Registered 0 hooks from 4 plugins
+2026-10-24T15:18:21.314Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.SessionStart settled in 0.5ms (native link, next() included)
+2026-10-24T15:18:21.323Z [DEBUG] [ScheduledTasks] scheduler start() — enabled=false, hasTasks=false
+2026-10-24T15:18:21.324Z [DEBUG] session.start: raised (surface none, not interactive)
+2026-10-24T15:18:21.325Z [DEBUG] [claudeai-mcp] Disabled: API-key auth precedence active
+2026-10-24T15:18:21.326Z [DEBUG] hooks module cc-plugin-agents-md@builtin session.start settled in 1.6ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 20.2ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 20.1ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.9ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.7ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.5ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.4ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.3ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.2ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 19.0ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.9ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.8ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.7ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.6ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.5ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.3ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.2ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.0ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 18.0ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.8ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.7ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.6ms (native link, next() included)
+2026-10-24T15:18:21.356Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.4ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.3ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.2ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 17.0ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.9ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.8ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.7ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.5ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.4ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.2ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.1ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 16.0ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.9ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.7ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.5ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 15.3ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.5ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 14.1ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.9ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.6ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.4ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.2ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 13.0ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.9ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.8ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.7ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.6ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.5ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.3ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.1ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 12.0ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.9ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.7ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.5ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.4ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.3ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.2ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 11.1ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.9ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.8ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.5ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.3ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 10.2ms (native link, next() included)
+2026-10-24T15:18:21.357Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.9ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.8ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.7ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.6ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.4ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.3ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.2ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.2ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 9.0ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.9ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.8ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.7ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.5ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.3ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.2ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 8.1ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.9ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.7ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.6ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.5ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.5ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.3ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.2ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.1ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 7.0ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.9ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.1ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 6.0ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.9ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.7ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.5ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.4ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.3ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 5.1ms (native link, next() included)
+2026-10-24T15:18:21.358Z [DEBUG] hooks module cc-plugin-sec-default@builtin command.describe settled in 4.9ms (native link, next() included)
+2026-10-24T15:18:21.360Z [DEBUG] installPluginsForHeadless: starting
+2026-10-24T15:18:21.360Z [DEBUG] installPluginsForHeadless: no marketplaces declared
+2026-10-24T15:18:21.361Z [DEBUG] Failed to stat directory /etc/claude-code/.claude/output-styles: ENOENT: no such file or directory, stat '/etc/claude-code/.claude/output-styles'
+2026-10-24T15:18:21.361Z [DEBUG] Total plugin output styles loaded: 0
+2026-10-24T15:18:21.363Z [DEBUG] act_dont_rederive_arm_active source=growthbook
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.3ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.1ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.0ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 3.0ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.9ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.7ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.7ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.4ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.3ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.1ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 2.0ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.9ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.8ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.8ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.7ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.6ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.6ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.5ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.4ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.4ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.3ms (native link, next() included)
+2026-10-24T15:18:21.368Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 1.2ms (native link, next() included)
+2026-10-24T15:18:21.369Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 0.1ms (native link, next() included)
+2026-10-24T15:18:21.370Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.compose settled in 8.6ms (native link, next() included)
+2026-10-24T15:18:21.373Z [DEBUG] $.fs.ancestors (cc-plugin-agents-md): CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md found 0 of 4 directories
+2026-10-24T15:18:21.376Z [DEBUG] $.fs.ancestors (cc-plugin-agents-md): AGENTS.md, .claude/AGENTS.md found 0 of 4 directories
+2026-10-24T15:18:21.376Z [DEBUG] hooks module cc-plugin-agents-md@builtin prompt.context settled in 22.0ms (native link, next() included)
+2026-10-24T15:18:21.376Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.context settled in 22.5ms (native link, next() included)
+2026-10-24T15:18:21.381Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-10-24T15:18:21.381Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-10-24T15:18:21.382Z [DEBUG] hooks module cc-plugin-sec-default@builtin prompt.section settled in 0.7ms (native link, next() included)
+2026-10-24T15:18:21.385Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.UserPromptSubmit settled in 0.3ms (native link, next() included)
+2026-10-24T15:18:21.391Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.391Z [DEBUG] [session-notices] advertise=false mode=acceptEdits flag=false(disabled) pollChannel=false remote=false remoteEnv=false nonInteractive=true
+2026-10-24T15:18:21.393Z [DEBUG] [engine] turn 1 start
+2026-10-24T15:18:21.411Z [DEBUG] hooks module cc-plugin-sec-default@builtin tool.describe settled in 0.2ms (native link, next() included)
+2026-10-24T15:18:21.414Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.288.9f7; cc_entrypoint=sdk-cli;
+2026-10-24T15:18:21.415Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.418Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.423Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.423Z [DEBUG] [API:timing] dispatching to firstParty model=claude-sonnet-4-5
+2026-10-24T15:18:21.425Z [DEBUG] [API REQUEST] /v1/messages source=sdk
+2026-10-24T15:18:21.429Z [DEBUG] Stream started - received first chunk
+2026-10-24T15:18:21.429Z [DEBUG] [API:timing] first byte after 6ms
+2026-10-24T15:18:21.474Z [DEBUG] Hooks: Checking first line for async: {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"the target path is outside the allowed roots (path_scope_denied)"}}
+2026-10-24T15:18:21.474Z [DEBUG] Hooks: Parsed initial response: {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"the target path is outside the allowed roots (path_scope_denied)"}}
+2026-10-24T15:18:21.474Z [DEBUG] Hooks: Initial response is not async, continuing normal processing
+2026-10-24T15:18:21.477Z [DEBUG] [fs.watch probe] verdict: delivers
+2026-10-24T15:18:21.480Z [DEBUG] Successfully parsed and validated hook JSON output
+2026-10-24T15:18:21.481Z [DEBUG] "Hook PreToolUse:Write (PreToolUse) success:\n{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"the target path is outside the allowed roots (path_scope_denied)\"}}"
+2026-10-24T15:18:21.481Z [DEBUG] Hook PreToolUse (/usr/bin/python3 /opt/probe/managed_hook.py) returned permissionDecision: deny (reason: the target path is outside the allowed roots (path_scope_denied))
+2026-10-24T15:18:21.482Z [DEBUG] tool.call Write toolu_ai2rules_probe: resolved by a hooks module (deny: PreToolUse:Write hook error: the target path is outside the allowed roots (path_scope_denied))
+2026-10-24T15:18:21.484Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.PostToolBatch settled in 0.2ms (native link, next() included)
+2026-10-24T15:18:21.485Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-10-24T15:18:21.485Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-10-24T15:18:21.489Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.288.9f7; cc_entrypoint=sdk-cli;
+2026-10-24T15:18:21.489Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.490Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.491Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.491Z [DEBUG] [API:timing] dispatching to firstParty model=claude-sonnet-4-5
+2026-10-24T15:18:21.492Z [DEBUG] [API REQUEST] /v1/messages source=sdk
+2026-10-24T15:18:21.494Z [DEBUG] Stream started - received first chunk
+2026-10-24T15:18:21.494Z [DEBUG] [API:timing] first byte after 3ms
+2026-10-24T15:18:21.495Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.MessageDisplay settled in 0.2ms (native link, next() included)
+2026-10-24T15:18:21.501Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.Stop settled in 0.5ms (native link, next() included)
+2026-10-24T15:18:21.502Z [DEBUG] [engine] turn 1 end (turns=2 usage in=200 out=60 cost=$0.0015 api=31ms stop=end_turn resultLen=15)
+2026-10-24T15:18:21.502Z [DEBUG] Fast mode unavailable: Fast mode is not available in the Agent SDK
+2026-10-24T15:18:21.506Z [DEBUG] [uds-messaging] Shutting down
+2026-10-24T15:18:21.507Z [DEBUG] LSP server manager shut down successfully
+2026-10-24T15:18:21.511Z [DEBUG] hooks module cc-plugin-sec-default@builtin classic.SessionEnd settled in 0.2ms (native link, next() included)

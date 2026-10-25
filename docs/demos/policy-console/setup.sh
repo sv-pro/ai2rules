@@ -66,20 +66,34 @@ sed -e 's/:8787/:__NORTHWIND_RECEIVER__/g' -e 's/:8790/:__NORTHWIND_CONSOLE__/g'
   -e "s/__NORTHWIND_RECEIVER__/$PORT/g" -e "s/__NORTHWIND_CONSOLE__/$CONSOLE_PORT/g" \
   "$HERE/skill/SKILL.md" > "$DESK/.claude/skills/northwind-demo/SKILL.md"
 
-# Two flags the starter shim does not set:
-#   --enforce-absent  an action switched Off is refused, not left to Claude Code's
-#                     own prompt, so Off means "this agent does not have it"
-#   --log             one line per decision, which the console shows live
-SHIM="$DESK/.claude/hooks/world-gate.sh"
-sed -i.bak 's#--state "$PD/.claude/state"$#--state "$PD/.claude/state" --enforce-absent --log "$PD/.claude/state/decisions.jsonl"#' "$SHIM"
-rm -f "$SHIM.bak"
-if ! grep -q -- '--enforce-absent --log' "$SHIM"; then
-  echo "setup: could not add --enforce-absent and --log to $SHIM (did 'harness init' change?)" >&2
-  exit 1
-fi
-
+# Current init already logs PreToolUse and outcome events; older releases did
+# not. Add ABSENT enforcement without depending on physical line breaks, and
+# add a log only when init did not supply one.
 PY=python3
 "$PY" -c '' 2>/dev/null || PY=python
+SHIM="$DESK/.claude/hooks/world-gate.sh"
+"$PY" - "$SHIM" <<'PY'
+import pathlib
+import shlex
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding='utf-8').replace('\\\n', '')
+lines = text.splitlines()
+indices = [i for i, line in enumerate(lines) if line.startswith('exec ')]
+if len(indices) != 1:
+    raise SystemExit('setup: expected one generated hook exec line; rerun harness init')
+i = indices[0]
+args = shlex.split(lines[i])
+if args[:3] != ['exec', '$BIN', 'cc-hook'] or '--grant' not in args:
+    raise SystemExit('setup: unrecognized generated hook; expected cc-hook --grant')
+if '--enforce-absent' not in args:
+    lines[i] += ' --enforce-absent'
+if '--log' not in args:
+    lines[i] += ' --log "$PD/.claude/state/decisions.jsonl"'
+path.write_bytes(('\n'.join(lines) + '\n').encode('utf-8'))
+PY
+bash -n "$SHIM"
 
 echo "Ready. Next, each in its own terminal, left running:"
 echo

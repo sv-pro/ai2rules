@@ -1,0 +1,10 @@
+world_id: claude-mods-marker-probe
+channels:
+  - { name: user_prompt, trust: Trusted, taint: false }
+capabilities:
+  - { trust: Trusted, actions: [Write] }
+base_actions:
+  - { name: Write, action_type: Write, side_effect: FilesystemWrite }
+roots:
+  default: Deny
+  rules: []

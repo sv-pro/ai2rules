@@ -238,6 +238,11 @@ kernel's, driven by `cc-world.yaml` — a real `WorldManifest`.
 - **Conformance (E14.4+):** golden GateRequest→GateResponse vectors, asserted equal
   for native and WASM `gate()`, with the reference harness as oracle.
 
+What a host adapter **records** about each verdict, and how it joins that record
+to the call's outcome, is specified separately in
+[`host-decision-log.md`](host-decision-log.md) (D84). The log is observability:
+nothing in it is read back by the gate.
+
 ## 8. Versioning
 
 `v` is an integer; v1 additions are backward-compatible (new optional fields,

@@ -22,11 +22,22 @@
 //! The write is atomic (temp file + rename) because cc-hook fails open on a world
 //! it cannot compile: a half-written file must never be visible to it.
 //!
+//! **Stop** (G7, D85) is the `stop` profile behind its own button: every base
+//! action with a declared effect beyond Read/None is Off at the agent's next call.
+//! Effectful scoped capabilities have no projection flag, so those worlds are
+//! explicitly unsupported by Stop rather than left partly running.
+//! The log marker it writes keeps the positions it replaced, so `{restore: true}`
+//! puts them back. The page says "stopped" only once the log shows a call after
+//! the Stop that the hook really refused: an ABSENT line answered `deny`, which
+//! the hook writes only with `--enforce-absent`. An ABSENT it passed through
+//! (`answer: null`) means Off does not bind, and the page warns instead.
+//!
 //! Endpoints (all JSON except `/`), guarded as `mcp-author`'s are (`local_page`):
 //! - `GET  /`                 → the page, with this run's token
-//! - `GET  /api/state`        → each switch's position, the profiles, the paths
-//! - `POST /api/policy`       → `{switches: {id: "allow"|"ask"|"off"}}` or
-//!   `{profile: id}` → applied, compiled, written; the new state
+//! - `GET  /api/state`        → each switch's position, the profiles, the paths,
+//!   whether Stop is in force and whether the hook has shown it binds
+//! - `POST /api/policy`       → `{switches: {id: "allow"|"ask"|"off"}}`,
+//!   `{profile: id}` or `{restore: true}` → applied, compiled, written; the new state
 //! - `GET  /api/events?since=N` → decision-log lines from line N on
 
 use std::collections::BTreeMap;
@@ -35,7 +46,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
 use compiler::{compile, load_yaml};
-use harness_types::WorldManifest;
+use harness_types::{BaseActionDef, SideEffectClass, WorldManifest};
 use serde_json::{json, Value};
 
 use crate::local_page::{guard, json_body, random_token, serve_one, write_atomically};
@@ -87,6 +98,19 @@ const SWITCHES: &[Switch] = &[
     },
 ];
 
+/// The commands the world cannot place (each `command_classes` entry's
+/// `default_to`). No switch shows them: they ask first under every profile but
+/// Stop, which turns them off too, or Stop would leave `touch`, `mv` and
+/// `git push` one approval away from running (D85).
+static UNPLACED: Switch = Switch {
+    id: "unplaced",
+    label: "Commands it cannot place",
+    actions: &["Bash_unclassified", "PowerShell_unclassified"],
+};
+
+/// The profile behind the Stop button.
+const STOP: &str = "stop";
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Position {
     Allow,
@@ -119,12 +143,14 @@ impl Position {
     }
 }
 
-/// A profile: a named set of positions, in [`SWITCHES`] order.
+/// A profile: a named set of positions, in [`SWITCHES`] order, and one for
+/// [`UNPLACED`].
 struct Profile {
     id: &'static str,
     label: &'static str,
     blurb: &'static str,
     positions: [Position; 5],
+    unplaced: Position,
 }
 
 const PROFILES: &[Profile] = {
@@ -135,18 +161,29 @@ const PROFILES: &[Profile] = {
             label: "Contractor",
             blurb: "Works on the files it is given. No web, no scripts, nothing leaves.",
             positions: [Off, Off, Off, Ask, Off],
+            unplaced: Ask,
         },
         Profile {
             id: "finance",
             label: "Finance",
             blurb: "Reads vendor portals and edits records. Sending out asks first.",
             positions: [Allow, Ask, Off, Allow, Off],
+            unplaced: Ask,
         },
         Profile {
             id: "developer",
             label: "Developer",
             blurb: "Full toolset. Deleting and sending out ask first.",
             positions: [Allow, Ask, Ask, Allow, Allow],
+            unplaced: Ask,
+        },
+        Profile {
+            id: STOP,
+            label: "Stop",
+            blurb:
+                "Every effectful action off at the agent's next call. Read-only actions unchanged.",
+            positions: [Off; 5],
+            unplaced: Off,
         },
     ]
 };
@@ -154,6 +191,8 @@ const PROFILES: &[Profile] = {
 struct Console {
     world_path: PathBuf,
     log_path: PathBuf,
+    /// The project's hook script, read only to warn early that Off will not bind.
+    shim_path: PathBuf,
     token: String,
     port: u16,
 }
@@ -185,6 +224,7 @@ pub fn run(project: &Path, world: Option<&Path>, log: Option<&Path>, port: u16) 
     let console = Console {
         world_path,
         log_path,
+        shim_path: project.join(".claude").join("hooks").join("world-gate.sh"),
         token: random_token(),
         port,
     };
@@ -235,6 +275,59 @@ fn load_world(path: &Path) -> Result<(String, WorldManifest), String> {
     Ok((text, manifest))
 }
 
+/// Every group a policy change can move: the switches, then [`UNPLACED`].
+fn groups() -> impl Iterator<Item = &'static Switch> {
+    SWITCHES.iter().chain(std::iter::once(&UNPLACED))
+}
+
+fn action_position(action: &BaseActionDef) -> Position {
+    match (action.projected, action.approval_required) {
+        (false, _) => Position::Off,
+        (true, true) => Position::Ask,
+        (true, false) => Position::Allow,
+    }
+}
+
+fn set_action(action: &mut BaseActionDef, at: Position) {
+    action.projected = at != Position::Off;
+    action.approval_required = at == Position::Ask;
+}
+
+fn effectful(action: &BaseActionDef) -> bool {
+    !matches!(
+        action.side_effect,
+        SideEffectClass::None | SideEffectClass::Read
+    )
+}
+
+/// Scoped capabilities stay projected when their base is hidden (D79). Until
+/// they have their own projection flag, refuse Stop for these worlds. Removing
+/// definitions would require copying literal arguments (possibly secrets) into
+/// the restore log; the log must contain only projection/approval flags.
+fn stop_unsupported(manifest: &WorldManifest) -> Option<String> {
+    let names: Vec<&str> = manifest
+        .scoped_capabilities
+        .iter()
+        .filter(|cap| {
+            manifest
+                .base_actions
+                .iter()
+                .find(|a| a.name == cap.base_action)
+                .is_none_or(effectful)
+        })
+        .map(|cap| cap.name.as_str())
+        .collect();
+    (!names.is_empty()).then(|| format!(
+        "Stop is unavailable: scoped capabilities cannot be switched off independently: {}. The world has not been stopped.", names.join(", ")
+    ))
+}
+
+fn apply_stop(manifest: &mut WorldManifest) {
+    for action in manifest.base_actions.iter_mut().filter(|a| effectful(a)) {
+        action.projected = false;
+    }
+}
+
 /// Where a switch stands in `manifest`: `None` when the world declares none of
 /// its actions, `Some(None)` when its actions disagree ("mixed").
 fn position_of(manifest: &WorldManifest, switch: &Switch) -> Option<Option<Position>> {
@@ -242,20 +335,193 @@ fn position_of(manifest: &WorldManifest, switch: &Switch) -> Option<Option<Posit
         .base_actions
         .iter()
         .filter(|a| switch.actions.contains(&a.name.as_str()))
-        .map(|a| match (a.projected, a.approval_required) {
-            (false, _) => Position::Off,
-            (true, true) => Position::Ask,
-            (true, false) => Position::Allow,
-        });
+        .map(action_position);
     let first = seen.next()?;
     Some(seen.all(|p| p == first).then_some(first))
 }
 
 fn positions(manifest: &WorldManifest) -> BTreeMap<&'static str, Option<Option<Position>>> {
-    SWITCHES
+    groups().map(|s| (s.id, position_of(manifest, s))).collect()
+}
+
+fn set(manifest: &mut WorldManifest, switch: &Switch, at: Position) {
+    for action in manifest
+        .base_actions
+        .iter_mut()
+        .filter(|a| switch.actions.contains(&a.name.as_str()))
+    {
+        set_action(action, at);
+    }
+}
+
+/// Whether `manifest` stands where profile `p` puts it. A group the world does not
+/// offer does not count against it.
+fn profile_matches(manifest: &WorldManifest, p: &Profile) -> bool {
+    if p.id == STOP {
+        return stop_unsupported(manifest).is_none()
+            && manifest
+                .base_actions
+                .iter()
+                .all(|a| !effectful(a) || !a.projected);
+    }
+    let mut wants = SWITCHES
         .iter()
-        .map(|s| (s.id, position_of(manifest, s)))
+        .zip(p.positions)
+        .chain(std::iter::once((&UNPLACED, p.unplaced)));
+    wants.all(|(s, want)| match position_of(manifest, s) {
+        None => true,
+        Some(at) => at == Some(want),
+    })
+}
+
+fn stop_profile() -> &'static Profile {
+    PROFILES
+        .iter()
+        .find(|p| p.id == STOP)
+        .expect("the stop profile")
+}
+
+/// What a Restore would return to, in words: the profile it matches, if any.
+fn restored_label(manifest: &WorldManifest) -> String {
+    PROFILES
+        .iter()
+        .filter(|p| p.id != STOP)
+        .find(|p| profile_matches(manifest, p))
+        .map(|p| p.label.to_string())
+        .unwrap_or_else(|| "the policy before Stop".to_string())
+}
+
+/// Exact flags for every base action, including hidden actions whose approval
+/// setting must survive Restore. No argument values or capability bodies enter
+/// the log. Keeping all flags also handles mixed custom worlds.
+fn action_positions(manifest: &WorldManifest) -> serde_json::Map<String, Value> {
+    manifest
+        .base_actions
+        .iter()
+        .map(|a| {
+            (
+                a.name.as_str().to_string(),
+                json!({"projected": a.projected, "approval_required": a.approval_required}),
+            )
+        })
         .collect()
+}
+
+/// Put back the positions a Stop marker kept.
+fn apply_kept(manifest: &mut WorldManifest, kept: &serde_json::Map<String, Value>) {
+    for action in manifest.base_actions.iter_mut() {
+        if let Some(flags) = kept.get(action.name.as_str()).and_then(Value::as_object) {
+            if let (Some(projected), Some(approval)) = (
+                flags.get("projected").and_then(Value::as_bool),
+                flags.get("approval_required").and_then(Value::as_bool),
+            ) {
+                action.projected = projected;
+                action.approval_required = approval;
+            }
+            continue;
+        }
+        // Restore markers from the initial Stop implementation remain readable.
+        if let Some(at) = kept
+            .get(action.name.as_str())
+            .and_then(Value::as_str)
+            .and_then(Position::parse)
+        {
+            set_action(action, at);
+        }
+    }
+}
+
+/// What the decision log says about Stop.
+#[derive(Default)]
+struct StopRecord {
+    /// The Stop in force: set when the last policy marker is a Stop.
+    open: Option<OpenStop>,
+    /// When the hook last refused a call as ABSENT since that Stop.
+    refused_ms: Option<u64>,
+    /// Whether the hook's latest ABSENT verdict, any time, was enforced. The hook
+    /// answers ABSENT with `deny` only under `--enforce-absent`; without the flag
+    /// it stays silent (`answer: null`) and the host's own prompt decides.
+    absent_enforced: Option<bool>,
+}
+
+struct OpenStop {
+    since_ms: Option<u64>,
+    kept: serde_json::Map<String, Value>,
+}
+
+fn stop_record(log: &Path) -> StopRecord {
+    let text = std::fs::read_to_string(log).unwrap_or_default();
+    let mut record = StopRecord::default();
+    for line in text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+    {
+        if line["kind"] == "policy" {
+            record.refused_ms = None;
+            record.open = line["stop"]["before"].as_object().map(|kept| OpenStop {
+                since_ms: line["ts_ms"].as_u64(),
+                kept: kept.clone(),
+            });
+        } else if line["decision"] == "ABSENT" {
+            let enforced = line["answer"] == "deny";
+            record.absent_enforced = Some(enforced);
+            if enforced && record.open.is_some() {
+                record.refused_ms = line["ts_ms"].as_u64();
+            }
+        }
+    }
+    record
+}
+
+/// A hint from the project's hook script, before any call shows it: does the line
+/// that runs `cc-hook` pass `--enforce-absent`? `None` when there is no script or
+/// no such line (the hook may be wired some other way).
+fn shim_enforces_absent(shim: &Path) -> Option<bool> {
+    let text = std::fs::read_to_string(shim).ok()?;
+    let runs: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#') && l.contains("cc-hook"))
+        .collect();
+    (!runs.is_empty()).then(|| runs.iter().any(|l| l.contains("--enforce-absent")))
+}
+
+/// Stop's state for the page. `stopped` only on evidence: a call after the Stop
+/// that the hook refused. `not_binding` when the hook is known to pass ABSENT
+/// through, so Off leaves the call to the host's prompt and nothing is stopped.
+fn stop_state(console: &Console, manifest: &WorldManifest) -> Value {
+    let record = stop_record(&console.log_path);
+    let in_force = profile_matches(manifest, stop_profile());
+    let (enforced, from) = match record.absent_enforced {
+        Some(e) => (Some(e), Some("log")),
+        None => match shim_enforces_absent(&console.shim_path) {
+            Some(e) => (Some(e), Some("hook script")),
+            None => (None, None),
+        },
+    };
+    let status = if !in_force {
+        "off"
+    } else if enforced == Some(false) {
+        "not_binding"
+    } else if record.open.is_some() && record.refused_ms.is_some() {
+        "stopped"
+    } else {
+        "pending"
+    };
+    let restore_to = record.open.as_ref().map(|open| {
+        let mut back = manifest.clone();
+        apply_kept(&mut back, &open.kept);
+        restored_label(&back)
+    });
+    json!({
+        "status": status,
+        "since_ms": record.open.as_ref().and_then(|o| o.since_ms),
+        "refused_ms": record.refused_ms,
+        "restore_to": restore_to,
+        "enforced": enforced,
+        "enforced_from": from,
+        "unsupported": stop_unsupported(manifest),
+    })
 }
 
 fn state(console: &Console) -> Value {
@@ -284,15 +550,11 @@ fn state(console: &Console) -> Value {
     let profiles: Vec<Value> = PROFILES
         .iter()
         .map(|p| {
-            let matches = SWITCHES.iter().zip(p.positions).all(|(s, want)| {
-                matches!(current.get(s.id), Some(Some(Some(at))) if *at == want)
-                    || matches!(current.get(s.id), Some(None))
-            });
             json!({
                 "id": p.id,
                 "label": p.label,
                 "blurb": p.blurb,
-                "active": matches,
+                "active": profile_matches(&manifest, p),
                 "positions": SWITCHES
                     .iter()
                     .zip(p.positions)
@@ -308,27 +570,49 @@ fn state(console: &Console) -> Value {
         "log_path": console.log_path.display().to_string(),
         "switches": switches,
         "profiles": profiles,
+        "stop": stop_state(console, &manifest),
     })
 }
 
-/// Apply `{switches}` or `{profile}`, compile, write atomically, and record what
-/// changed in the decision log so the feed shows cause next to effect.
+/// Apply `{switches}`, `{profile}` or `{restore}`, compile, write atomically, and
+/// record what changed in the decision log so the feed shows cause next to effect.
 fn policy(console: &Console, body: &Value) -> Value {
     let (text, mut manifest) = match load_world(&console.world_path) {
         Ok(v) => v,
         Err(e) => return json!({ "ok": false, "error": e }),
     };
-    let profile = match body["profile"].as_str() {
-        Some(id) => match PROFILES.iter().find(|p| p.id == id) {
-            Some(p) => Some(p),
-            None => return json!({ "ok": false, "error": format!("no profile {id:?}") }),
-        },
-        None => None,
-    };
-    let mut wanted: Vec<(&Switch, Position)> = Vec::new();
-    if let Some(p) = profile {
-        wanted.extend(SWITCHES.iter().zip(p.positions));
+    let before = positions(&manifest);
+    let original = manifest.clone();
+    let mut headline = None;
+    let mut mark = serde_json::Map::new();
+    if body["restore"] == true {
+        let Some(open) = stop_record(&console.log_path).open else {
+            return json!({ "ok": false, "error": "nothing to restore: the agent is not stopped" });
+        };
+        apply_kept(&mut manifest, &open.kept);
+        headline = Some(format!("Restored: {}", restored_label(&manifest)));
+        mark.insert("restore".into(), json!(true));
+    } else if let Some(id) = body["profile"].as_str() {
+        let Some(p) = PROFILES.iter().find(|p| p.id == id) else {
+            return json!({ "ok": false, "error": format!("no profile {id:?}") });
+        };
+        let kept = action_positions(&manifest);
+        if p.id == STOP {
+            if let Some(error) = stop_unsupported(&manifest) {
+                return json!({"ok": false, "error": error});
+            }
+            apply_stop(&mut manifest);
+            headline = Some("Stopped: every effectful action off".to_string());
+            mark.insert("stop".into(), json!({ "before": kept }));
+        } else {
+            for (switch, at) in SWITCHES.iter().zip(p.positions) {
+                set(&mut manifest, switch, at);
+            }
+            set(&mut manifest, &UNPLACED, p.unplaced);
+            headline = Some(format!("Profile: {}", p.label));
+        }
     } else if let Some(map) = body["switches"].as_object() {
+        let mut wanted: Vec<(&Switch, Position)> = Vec::new();
         for (id, at) in map {
             let Some(switch) = SWITCHES.iter().find(|s| s.id == id) else {
                 return json!({ "ok": false, "error": format!("no switch {id:?}") });
@@ -338,31 +622,41 @@ fn policy(console: &Console, body: &Value) -> Value {
             };
             wanted.push((switch, at));
         }
+        for (switch, at) in wanted {
+            set(&mut manifest, switch, at);
+        }
     } else {
-        return json!({ "ok": false, "error": "send {switches: {...}} or {profile: id}" });
+        return json!({ "ok": false, "error": "send {switches: {...}}, {profile: id} or {restore: true}" });
     }
 
-    let before = positions(&manifest);
-    let mut changes = Vec::new();
-    for (switch, at) in &wanted {
-        let Some(was) = before.get(switch.id).copied().flatten() else {
-            continue; // this world does not offer the switch
-        };
-        if was == Some(*at) {
-            continue;
-        }
-        for action in manifest
-            .base_actions
-            .iter_mut()
-            .filter(|a| switch.actions.contains(&a.name.as_str()))
+    let after = positions(&manifest);
+    let mut changes: Vec<String> = groups()
+        .filter_map(|s| {
+            // A group this world does not offer has no position to report.
+            let was = before.get(s.id).copied().flatten()?;
+            let now = after.get(s.id).copied().flatten()?;
+            let word = |at: Option<Position>| at.map(Position::word).unwrap_or("Mixed");
+            (was != now).then(|| format!("{}: {} → {}", s.label, word(was), word(now)))
+        })
+        .collect();
+    for (was, now) in original.base_actions.iter().zip(&manifest.base_actions) {
+        if (was.projected, was.approval_required) != (now.projected, now.approval_required)
+            && !groups().any(|s| s.actions.contains(&now.name.as_str()))
         {
-            action.projected = *at != Position::Off;
-            action.approval_required = *at == Position::Ask;
+            changes.push(format!(
+                "{}: {} → {}",
+                now.name,
+                action_position(was).word(),
+                action_position(now).word()
+            ));
         }
-        let was = was.map(Position::word).unwrap_or("Mixed");
-        changes.push(format!("{}: {was} → {}", switch.label, at.word()));
     }
-    if changes.is_empty() {
+    if manifest == original {
+        // A Restore still ends the Stop, even when the world already stands where
+        // it would put it back.
+        if mark.contains_key("restore") {
+            record_policy(&console.log_path, headline.as_deref(), &changes, mark);
+        }
         return json!({ "ok": true, "changed": [], "state": state(console) });
     }
 
@@ -377,8 +671,7 @@ fn policy(console: &Console, body: &Value) -> Value {
     if let Err(e) = write_atomically(&console.world_path, &written) {
         return json!({ "ok": false, "error": format!("cannot write the world file: {e}") });
     }
-    let headline = profile.map(|p| format!("Profile: {}", p.label));
-    record_policy(&console.log_path, headline.as_deref(), &changes);
+    record_policy(&console.log_path, headline.as_deref(), &changes, mark);
     json!({ "ok": true, "changed": changes, "state": state(console) })
 }
 
@@ -403,18 +696,28 @@ fn leading_comments(text: &str) -> String {
 }
 
 /// Append a policy marker to the decision log. Like the hook's own lines it is
-/// observability: the world file is already written, whatever happens here.
-fn record_policy(log: &Path, headline: Option<&str>, changes: &[String]) {
+/// observability: the world file is already written, whatever happens here. A
+/// Stop marker also carries the positions it replaced (`stop.before`), and is the
+/// only record Restore reads them back from.
+fn record_policy(
+    log: &Path,
+    headline: Option<&str>,
+    changes: &[String],
+    mark: serde_json::Map<String, Value>,
+) {
     let ts_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let line = json!({
+    let mut line = json!({
         "ts_ms": ts_ms,
         "kind": "policy",
         "headline": headline,
         "changes": changes,
     });
+    if let Value::Object(fields) = &mut line {
+        fields.extend(mark);
+    }
     if let Some(dir) = log.parent().filter(|d| !d.as_os_str().is_empty()) {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -443,9 +746,12 @@ fn events(log: &Path, since: usize) -> Value {
         (since, false)
     };
     let to = (from + EVENTS_PER_CALL).min(lines.len());
+    // Outcome lines (D84) say how an already-shown call ended; the feed counts
+    // verdicts, so they would read as extra ALLOWs.
     let events: Vec<Value> = lines[from..to]
         .iter()
-        .filter_map(|l| serde_json::from_str(l).ok())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|ev| ev["kind"] != "outcome")
         .collect();
     json!({ "ok": true, "next": to, "reset": reset, "events": events })
 }
@@ -476,15 +782,13 @@ mod tests {
     fn every_profile_compiles_and_reads_back_as_itself() {
         for p in PROFILES {
             let mut m = demo_world();
-            for (s, at) in SWITCHES.iter().zip(p.positions) {
-                for a in m
-                    .base_actions
-                    .iter_mut()
-                    .filter(|a| s.actions.contains(&a.name.as_str()))
-                {
-                    a.projected = at != Position::Off;
-                    a.approval_required = at == Position::Ask;
+            if p.id == STOP {
+                apply_stop(&mut m);
+            } else {
+                for (s, at) in SWITCHES.iter().zip(p.positions) {
+                    set(&mut m, s, at);
                 }
+                set(&mut m, &UNPLACED, p.unplaced);
             }
             compile(&m).unwrap_or_else(|e| panic!("{} does not compile: {e}", p.id));
             render(&m).unwrap_or_else(|e| panic!("{} does not render: {e}", p.id));
@@ -492,7 +796,67 @@ mod tests {
             for (s, at) in SWITCHES.iter().zip(p.positions) {
                 assert_eq!(back.get(s.id), Some(&Some(Some(at))), "{} / {}", p.id, s.id);
             }
+            assert!(profile_matches(&m, p), "{} does not read back", p.id);
+            let others: Vec<&str> = PROFILES
+                .iter()
+                .filter(|q| q.id != p.id && profile_matches(&m, q))
+                .map(|q| q.id)
+                .collect();
+            assert!(others.is_empty(), "{} also reads as {others:?}", p.id);
         }
+    }
+
+    /// Stop must reach every action that is not a read: a group the demo world
+    /// adds later without a switch would otherwise survive the Stop.
+    #[test]
+    fn stop_leaves_only_reads_in_the_demo_world() {
+        let mut m = demo_world();
+        apply_stop(&mut m);
+        let left: Vec<&str> = m
+            .base_actions
+            .iter()
+            .filter(|a| a.projected && effectful(a))
+            .map(|a| a.name.as_str())
+            .collect();
+        assert!(left.is_empty(), "effectful actions survived Stop: {left:?}");
+    }
+
+    #[test]
+    fn restore_accepts_legacy_position_markers() {
+        let mut m = demo_world();
+        apply_stop(&mut m);
+        let kept = json!({"Write": "ask", "Bash": "allow", "WebFetch": "off"});
+        apply_kept(&mut m, kept.as_object().unwrap());
+        let at = |name: &str| {
+            action_position(
+                m.base_actions
+                    .iter()
+                    .find(|a| a.name.as_str() == name)
+                    .unwrap(),
+            )
+        };
+        assert_eq!(at("Write"), Position::Ask);
+        assert_eq!(at("Bash"), Position::Allow);
+        assert_eq!(at("WebFetch"), Position::Off);
+    }
+
+    #[test]
+    fn the_shim_hint_reads_the_line_that_runs_cc_hook() {
+        let dir = std::env::temp_dir().join(format!("console-shim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shim = dir.join("world-gate.sh");
+        assert_eq!(shim_enforces_absent(&shim), None, "no script");
+        std::fs::write(&shim, "# cc-hook --enforce-absent in a comment\nexit 0\n").unwrap();
+        assert_eq!(shim_enforces_absent(&shim), None, "no cc-hook line");
+        std::fs::write(&shim, "exec \"$BIN\" cc-hook --grant --world w --state s\n").unwrap();
+        assert_eq!(shim_enforces_absent(&shim), Some(false));
+        std::fs::write(
+            &shim,
+            "exec \"$BIN\" cc-hook --world w --state s --enforce-absent --log l\n",
+        )
+        .unwrap();
+        assert_eq!(shim_enforces_absent(&shim), Some(true));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
