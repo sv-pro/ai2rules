@@ -824,7 +824,7 @@ are published per scenario with no reassuring aggregate score.
   ai2rules target. The registered profile is
   [`docs/benchmarks/ecc/README.md`](docs/benchmarks/ecc/README.md). Its first probe pass
   already found two ai2rules gaps (`_tasks/4_done/network-word-downgrades-ask.md`,
-  `_tasks/2_development/dogfood-world-without-d57.md`).
+  `_tasks/4_done/dogfood-world-without-d57.md`).
 
 **Exit:** the runner detects every intentional weak-baseline failure, ai2rules produces
 evidence-backed expected outcomes without an LLM, and an external engineer can reproduce the
