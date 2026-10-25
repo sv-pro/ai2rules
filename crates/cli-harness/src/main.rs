@@ -5,7 +5,9 @@ use agent_core::{
 use clap::Parser;
 use compiler::{compile, compile_default, loader::load_yaml};
 use harness_preview::{gate, GateRequest};
-use harness_types::{CompiledWorld, Decision, EffectMode, ExecutionMode, Provenance, ToolCall};
+use harness_types::{
+    ApprovalTokenId, CompiledWorld, Decision, EffectMode, ExecutionMode, Provenance, ToolCall,
+};
 use provider_adapters::anthropic::tool_use_block;
 use serde_json::Value;
 use std::io::Read;
@@ -24,9 +26,12 @@ mod hostkit;
 mod init;
 mod init_machine;
 mod local_page;
+mod mcp_approval;
 mod mcp_author;
 mod mcp_gateway;
 mod mock_jira;
+mod otlp;
+mod outcome;
 mod project;
 mod replay_transcripts;
 mod serve;
@@ -145,6 +150,27 @@ enum Command {
         /// Every call with its verdict and reason, as JSON.
         #[arg(long)]
         json: bool,
+        /// The hook's decision log (`cc-hook --log`): join each replayed call to
+        /// the live verdict and its outcome by `tool_use_id` (D84).
+        #[arg(long)]
+        decisions: Option<PathBuf>,
+    },
+    /// Convert a finished host decision log (`cc-hook --log`) to OpenTelemetry
+    /// traces as OTLP/JSON, for a collector's `otlpjsonfile` receiver (AI2-66).
+    /// One trace per session, one GenAI `execute_tool` span per decision, from
+    /// the verdict to the call's outcome. Offline: nothing is sent anywhere.
+    ExportOtlp {
+        /// The decision log to convert.
+        #[arg(long)]
+        log: PathBuf,
+        /// Write here instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Also export the call and result summaries (already redacted, D66).
+        /// Off by default: the GenAI conventions make tool arguments and
+        /// results opt-in, as they may be sensitive.
+        #[arg(long)]
+        with_summaries: bool,
     },
     /// Launch the World Authoring Tool: a local browser editor for world
     /// manifests, backed by the real compiler + kernel (E11).
@@ -244,8 +270,11 @@ enum Command {
         #[arg(long)]
         grant: bool,
         /// Append one JSON line per decision to this file: what the agent tried,
-        /// the verdict, the rule and the session's taint after the call. It is
-        /// what `harness console` shows as its live feed. Observability only: a
+        /// the verdict, the rule, the session's taint after the call, and the
+        /// host's `tool_use_id` / `agent_id` / `agent_type` / `cwd`. It is what
+        /// `harness console` shows as its live feed. Wired to `PostToolUse` and
+        /// `PostToolUseFailure` as well, the same command appends an outcome line
+        /// per executed call, keyed by `tool_use_id` (D84). Observability only: a
         /// log that cannot be written never changes the verdict. Off by default.
         #[arg(long)]
         log: Option<PathBuf>,
@@ -307,6 +336,12 @@ enum Command {
         /// kernel required.
         #[arg(long)]
         soft_ask: bool,
+        /// Append one JSON line per decision to this file, in `cc-hook --log`'s
+        /// format (D84). Antigravity sends no tool-call id, so its lines carry
+        /// `step_idx` instead. Observability only: a log that cannot be written
+        /// never changes the verdict. Off by default.
+        #[arg(long)]
+        log: Option<PathBuf>,
         /// What to do when the world cannot be read or compiled (D87): `closed`
         /// refuses every call, `open` lets it through ungoverned, `last-good`
         /// decides with the last world that compiled here (cached in `--state`)
@@ -335,9 +370,25 @@ enum Command {
         /// Optional append-only JSONL audit log path.
         #[arg(long)]
         audit: Option<PathBuf>,
+        /// Optional `ApprovalStore` (JSONL) enabling out-of-band approval of `ASK`
+        /// actions (D89): the gateway mints a pending token, a human runs
+        /// `harness approvals approve <id>`, and a matching retry may execute once after kernel reevaluation.
+        /// Without it, `ASK` stays a non-forwarded block. Point `harness approvals`
+        /// at the same path.
+        #[arg(long, requires = "principal")]
+        approvals: Option<PathBuf>,
+        /// Operator-configured identity for this gateway process (never request metadata).
+        #[arg(long, requires = "approvals")]
+        principal: Option<String>,
         /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
+    },
+    /// Review and act on out-of-band approvals recorded by `mcp-gateway
+    /// --approvals` (D89). Operates on the same JSONL `ApprovalStore`.
+    Approvals {
+        #[command(subcommand)]
+        action: ApprovalsAction,
     },
     /// The policy console (D81 / E15.7): a local page whose profiles and
     /// Allow / Ask / Off switches rewrite a project's world file, which
@@ -373,6 +424,30 @@ enum Command {
         /// Upstream MCP server command (pass after `--`), e.g. `-- harness mock-jira --rovo`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         upstream: Vec<String>,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum ApprovalsAction {
+    /// List approvals, including consumed grants with no confirmed outcome.
+    List {
+        /// Path to the `ApprovalStore` JSONL (same as the gateway's `--approvals`).
+        #[arg(long, default_value = ".ai2rules/approvals.jsonl")]
+        store: PathBuf,
+    },
+    /// Approve a pending request by id; a retry must still pass the kernel.
+    Approve {
+        /// The approval token id (see `harness approvals list`).
+        id: String,
+        #[arg(long, default_value = ".ai2rules/approvals.jsonl")]
+        store: PathBuf,
+    },
+    /// Reject a pending request by id.
+    Reject {
+        /// The approval token id (see `harness approvals list`).
+        id: String,
+        #[arg(long, default_value = ".ai2rules/approvals.jsonl")]
+        store: PathBuf,
     },
 }
 
@@ -494,6 +569,7 @@ fn main() {
         grant,
         examples,
         json,
+        decisions,
     }) = &cli.command
     {
         std::process::exit(replay_transcripts::run(&replay_transcripts::Options {
@@ -505,6 +581,20 @@ fn main() {
             grant: *grant,
             examples: *examples,
             json: *json,
+            decisions: decisions.as_deref(),
+        }));
+    }
+
+    if let Some(Command::ExportOtlp {
+        log,
+        out,
+        with_summaries,
+    }) = &cli.command
+    {
+        std::process::exit(otlp::run(&otlp::Options {
+            log,
+            out: out.as_deref(),
+            with_summaries: *with_summaries,
         }));
     }
 
@@ -569,6 +659,7 @@ fn main() {
         enforce_absent,
         grant,
         soft_ask,
+        log,
         on_broken_world,
     }) = &cli.command
     {
@@ -580,6 +671,7 @@ fn main() {
             *enforce_absent,
             *grant,
             *soft_ask,
+            log.as_deref(),
             *on_broken_world,
         ));
     }
@@ -614,6 +706,8 @@ fn main() {
         taint,
         mode,
         audit,
+        approvals,
+        principal,
         upstream,
     }) = &cli.command
     {
@@ -625,7 +719,12 @@ fn main() {
             tainted,
             mode,
             audit.as_deref(),
+            approvals.as_deref().zip(principal.as_deref()),
         ));
+    }
+
+    if let Some(Command::Approvals { action }) = &cli.command {
+        std::process::exit(run_approvals(action));
     }
 
     let world = if let Some(path) = cli.world {
@@ -695,6 +794,80 @@ fn main() {
 /// malformed request or an unreadable/uncompilable manifest; `1` = internal
 /// error. The verdict is never encoded in the exit code (D24): mapping it to a
 /// host's decision shape is the adapter's job.
+fn run_approvals(action: &ApprovalsAction) -> i32 {
+    let open = |store: &PathBuf| ApprovalStore::open(store.clone());
+    match action {
+        ApprovalsAction::List { store } => {
+            let s = match open(store) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("approvals: cannot open store {}: {e}", store.display());
+                    return 2;
+                }
+            };
+            let mut any = false;
+            for t in s.all() {
+                any = true;
+                let ph = t.params_hash.as_str();
+                println!(
+                    "{:<18}  {:<9}  {:<26}  params={} principal={} resource={} expires_ms={}",
+                    t.id.as_str(),
+                    format!("{:?}", t.state),
+                    t.action.as_str(),
+                    ph,
+                    t.principal.as_str(),
+                    t.resource,
+                    t.valid_until_unix_ms,
+                );
+            }
+            if !any {
+                println!("(no approvals recorded in {})", store.display());
+            }
+            0
+        }
+        ApprovalsAction::Approve { id, store } => {
+            let mut s = match open(store) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("approvals: cannot open store {}: {e}", store.display());
+                    return 2;
+                }
+            };
+            match s.approve(&ApprovalTokenId::new(id.clone())) {
+                Ok(()) => {
+                    println!(
+                        "approved {id} — one exact-call claim; expiry and kernel policy still apply"
+                    );
+                    0
+                }
+                Err(e) => {
+                    eprintln!("approvals: cannot approve {id}: {e}");
+                    1
+                }
+            }
+        }
+        ApprovalsAction::Reject { id, store } => {
+            let mut s = match open(store) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("approvals: cannot open store {}: {e}", store.display());
+                    return 2;
+                }
+            };
+            match s.reject(&ApprovalTokenId::new(id.clone())) {
+                Ok(()) => {
+                    println!("rejected {id}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("approvals: cannot reject {id}: {e}");
+                    1
+                }
+            }
+        }
+    }
+}
+
 fn run_gate(world_path: &Path) -> i32 {
     let world = match hostkit::load_compiled_world(world_path) {
         Ok(world) => world,

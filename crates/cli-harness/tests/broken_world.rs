@@ -378,3 +378,53 @@ fn the_decision_log_records_the_mode_and_the_error() {
     assert_eq!(lines[2]["broken_world"]["mode"], "closed");
     assert_eq!(lines[2]["call"], "rm -rf /tmp/x");
 }
+
+/// Antigravity's decision log (D84) carries the same broken-world state, in the
+/// same shape, with the host's own identity stamped on the line.
+#[test]
+fn the_agy_decision_log_records_the_broken_world_too() {
+    let (dir, world, state) = project(Host::Agy);
+    let log = dir.path().join("decisions.jsonl");
+    let log_arg = ["--log", log.to_str().unwrap()];
+    run(
+        Host::Agy,
+        &world,
+        &state,
+        &Host::Agy.destructive("a"),
+        &log_arg,
+    );
+    std::fs::write(&world, AGENT_WRITTEN).unwrap();
+    run(
+        Host::Agy,
+        &world,
+        &state,
+        &Host::Agy.destructive("a"),
+        &log_arg,
+    );
+    let mut open = log_arg.to_vec();
+    open.extend(["--on-broken-world", "open"]);
+    run(
+        Host::Agy,
+        &world,
+        &state,
+        &Host::Agy.destructive("a"),
+        &open,
+    );
+
+    let lines: Vec<Value> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 3, "{lines:#?}");
+    assert!(lines[0].get("broken_world").is_none());
+    assert_eq!(lines[1]["decision"], "ASK");
+    assert_eq!(lines[1]["broken_world"]["applied"], "last-good");
+    // open: nobody decided and the call went through, so the answer is null.
+    assert_eq!(lines[2]["decision"], "BROKEN_WORLD");
+    assert!(lines[2]["answer"].is_null(), "{}", lines[2]);
+    assert_eq!(lines[2]["broken_world"]["mode"], "open");
+    for line in &lines {
+        assert_eq!(line["host"], "antigravity", "{line}");
+    }
+}

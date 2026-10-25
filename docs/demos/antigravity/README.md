@@ -128,6 +128,15 @@ echo '{"conversationId":"t1","workspacePaths":["/w"],
 # {"decision":"deny","reason":"tainted context cannot reach an externally-effectful action …"}
 ```
 
+## Decision log
+
+`agy-hook --log <file>` writes `cc-hook`'s decision-line format
+([`docs/host-decision-log.md`](../../host-decision-log.md), D84). Antigravity sends
+no tool-call id and no agent identity, so `tool_use_id`, `agent_id` and `agent_type`
+are `null`; `step_idx` and the call's `Cwd` are recorded instead. No outcome observer
+is wired for this host: its post-call hook contract has not been verified, so its
+ASKs cannot be joined to an outcome.
+
 ## A world that does not compile (D87)
 
 A world file that cannot be read, does not compile, or has been deleted is not a
@@ -142,7 +151,9 @@ process failure: `agy-hook --on-broken-world` decides what happens.
 Antigravity has no verified user-facing message field, so the warning is written to
 **stderr** on every call while the world is broken (whether agy shows hook stderr
 to the user is unverified), and a refusal carries it as the `deny` reason, which is
-verified to reach the agent. The shim used to pass through when the world file was
+verified to reach the agent. With `--log`, the decision log marks those calls with a
+`broken_world` object (a call no world decided is logged as `BROKEN_WORLD`). The
+shim used to pass through when the world file was
 missing; it now leaves that to the hook, so deleting the world no longer switches
 governance off.
 

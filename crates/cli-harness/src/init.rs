@@ -20,8 +20,10 @@
 //!
 //! ```text
 //! .claude/cc-world.yaml          the manifest (never clobbered without --force)
-//! .claude/hooks/world-gate.sh    the PreToolUse shim, kill-switch baked in
-//! .claude/settings.json          the hook entry, merged idempotently
+//! .claude/hooks/world-gate.sh    the hook shim, kill-switch baked in
+//! .claude/settings.json          the hook entries, merged idempotently: PreToolUse
+//!                                (the gate) and PostToolUse / PostToolUseFailure
+//!                                (the read-only outcome observer, D84)
 //! .gitignore                     .claude/state/
 //! ```
 //!
@@ -153,8 +155,11 @@ fn shim_body(harness_bin: &str, off_file: &str, grant: bool) -> String {
     format!(
         r#"#!/usr/bin/env bash
 # ai2rules governance shim — written by `harness init`. Execs the Rust kernel's
-# PreToolUse adapter; no governance logic lives here. Fail-open: no binary -> exit 0
+# hook adapter; no governance logic lives here. Fail-open: no binary -> exit 0
 # (the tool call falls through to the host's normal permission flow).
+# Registered for PreToolUse (the gate) and PostToolUse / PostToolUseFailure (a
+# read-only observer that appends how each call ended to the decision log, D84);
+# cc-hook tells them apart by the event name.
 #
 # The governed project is untrusted. Never resolve harness from $PD/target; use
 # HARNESS_BIN only when it is an explicit absolute executable, otherwise use the
@@ -188,7 +193,8 @@ fi
 [ -x "$BIN" ] || exit 0  # fail-open: no trusted kernel, normal permissions
 # A world that does not compile (D87): decide with the last one that did, and warn.
 # `closed` refuses every call instead; `open` lets calls through ungoverned.
-exec "$BIN" cc-hook{grant_flag} --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state" --on-broken-world last-good
+exec "$BIN" cc-hook{grant_flag} --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state" \
+  --log "$PD/.claude/state/decisions.jsonl" --on-broken-world last-good
 "#,
         bin = sh_quote(harness_bin),
         off_file = off_file,
@@ -323,6 +329,62 @@ pub fn merge_settings(existing: Option<&str>, command: &str) -> Result<(String, 
     Ok((out, outcome))
 }
 
+/// The host events the outcome observer is registered for (D84).
+pub(crate) const OBSERVER_EVENTS: [&str; 2] = ["PostToolUse", "PostToolUseFailure"];
+
+/// Register the same shim for the observer events: one entry per event, matcher
+/// `"*"`. Idempotent on the marker, like [`merge_settings`]: an entry of ours
+/// with an outdated command is rewritten in place, never duplicated. Returns the
+/// document and whether anything was added.
+///
+/// The observer is optional by construction. A settings file without these
+/// entries keeps working exactly as before; its decision log simply has no
+/// outcome lines, and readers report its ASKs as `unobserved`.
+pub fn merge_observers(existing: &str, command: &str) -> Result<(String, bool), String> {
+    let mut root: Value = serde_json::from_str(existing)
+        .map_err(|e| format!("settings.json is not valid JSON: {e}"))?;
+    let hooks = root
+        .as_object_mut()
+        .ok_or("settings.json does not contain a JSON object")?
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or("settings.json `hooks` is not an object")?;
+    let mut added = false;
+    for event in OBSERVER_EVENTS {
+        let arr = hooks
+            .entry(event)
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| format!("settings.json `hooks.{event}` is not an array"))?;
+        let mut ours = false;
+        for entry in arr.iter_mut() {
+            if let Some(list) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
+                for h in list.iter_mut() {
+                    let marked = h
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .is_some_and(|c| c.contains(HOOK_MARKER));
+                    if marked {
+                        ours = true;
+                        h["command"] = json!(command);
+                    }
+                }
+            }
+        }
+        if !ours {
+            arr.push(json!({
+                "matcher": "*",
+                "hooks": [{ "type": "command", "command": command, "timeout": HOOK_TIMEOUT }]
+            }));
+            added = true;
+        }
+    }
+    let mut out = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    out.push('\n');
+    Ok((out, added))
+}
+
 fn merge_gitignore(existing: Option<&str>) -> Option<String> {
     let current = existing.unwrap_or("");
     let missing: Vec<&str> = GITIGNORE_LINES
@@ -396,6 +458,7 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
     let settings_path = target.join(".claude/settings.json");
     let current = fs::read_to_string(&settings_path).ok();
     let (merged, outcome) = merge_settings(current.as_deref(), &hook_command(target))?;
+    let (merged, observer_added) = merge_observers(&merged, &hook_command(target))?;
     writes.push((settings_path, merged));
     steps.push(Step {
         verb: "write",
@@ -414,6 +477,13 @@ pub fn plan(target: &Path, harness_bin: &str, grant: bool, force: bool) -> Resul
             ),
         },
     });
+    if observer_added {
+        steps.push(Step {
+            verb: "write",
+            path: ".claude/settings.json".into(),
+            note: "PostToolUse / PostToolUseFailure observer added (outcomes in .claude/state/decisions.jsonl)".into(),
+        });
+    }
 
     // 4. gitignore
     let gitignore = target.join(".gitignore");

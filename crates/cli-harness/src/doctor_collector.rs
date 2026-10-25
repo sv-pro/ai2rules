@@ -306,8 +306,10 @@ fn parse_current_init_shim(content: &str) -> Option<ShimProfile> {
     // Check for --grant flag
     let grant = content.contains("cc-hook --grant");
 
-    // The broken-world mode the exec line passes (D87), if any.
-    let on_broken_world = content
+    // The broken-world mode the exec line passes (D87), if any. The init shims
+    // continue that line with `\`, so continuations are joined first.
+    let joined = content.replace("\\\r\n", " ").replace("\\\n", " ");
+    let on_broken_world = joined
         .lines()
         .filter(|l| l.trim_start().starts_with("exec "))
         .find_map(|l| {
@@ -618,7 +620,8 @@ exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/sta
 TRUSTED_BIN='/opt/harness'
 if [ -f /home/user/.claude/ai2rules/off/test ] || [ -f "$HOME/.claude/gate-off" ]; then exit 0; fi
 # `closed` refuses every call instead; `open` lets calls through ungoverned.
-exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state" --on-broken-world closed
+exec "$BIN" cc-hook --world "$PD/.claude/cc-world.yaml" --state "$PD/.claude/state" \
+  --log "$PD/.claude/state/decisions.jsonl" --on-broken-world closed
 "#;
         match parse_current_init_shim(shim) {
             Some(ShimProfile::CurrentInitGenerated {

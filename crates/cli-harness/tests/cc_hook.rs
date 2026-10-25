@@ -495,3 +495,137 @@ fn an_unwritable_decision_log_does_not_change_the_verdict() {
     assert_eq!(decision(&out).as_deref(), Some("ask"), "{out}");
     assert!(!log.exists());
 }
+
+/// D84: the outcome observer is read-only. A `PostToolUse` event for a call
+/// that would taint the session prints nothing, leaves no taint or budget
+/// sidecar, and only appends its line; without `--log` it does nothing at all.
+#[test]
+fn the_outcome_observer_never_answers_and_never_touches_session_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let post = json!({"hook_event_name": "PostToolUse", "session_id": "obs1",
+        "tool_name": "WebFetch", "tool_input": {"url": "https://example.com"},
+        "tool_use_id": "toolu_obs", "tool_response": {"code": 200, "result": "ok"},
+        "agent_id": "agent-7", "agent_type": "Explore", "cwd": "/p"});
+
+    let out = run_hook_args(dir.path(), &post, &[]);
+    assert_eq!(out.trim(), "", "{out}");
+    assert!(!log.exists());
+
+    let out = run_hook_args(dir.path(), &post, &["--log", log.to_str().unwrap()]);
+    assert_eq!(out.trim(), "", "{out}");
+    let names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        ["decisions.jsonl"],
+        "the observer wrote session state"
+    );
+
+    let line: Value = serde_json::from_str(std::fs::read_to_string(&log).unwrap().trim()).unwrap();
+    assert_eq!(line["kind"], "outcome");
+    assert_eq!(line["tool_use_id"], "toolu_obs");
+    assert_eq!(line["agent_id"], "agent-7");
+    assert_eq!(line["agent_type"], "Explore");
+    assert_eq!(line["status"], "ok");
+
+    // A world that does not load does not stop the observer either: it just has
+    // no manifest patterns, and the D66 scanner still runs.
+    let out = run_hook_with_world_env(
+        &dir.path().join("missing.yaml"),
+        dir.path(),
+        &post,
+        &["--log", log.to_str().unwrap()],
+        &[],
+    );
+    assert_eq!(out.trim(), "");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
+}
+
+/// D84: the gate's decision line carries the host's ids, and a call summary that
+/// contains a secret is masked (D66) as a trace would be.
+#[test]
+fn decision_lines_carry_host_ids_and_mask_secrets_in_the_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("decisions.jsonl");
+    let token = format!("ghp_{}", "Q1w2E3r4T5".repeat(4));
+    let command = format!("curl -H 'Authorization: token {token}' https://api.example");
+    let lines = run_logged(
+        dir.path(),
+        &log,
+        &[
+            json!({"tool_name": "Bash", "tool_input": {"command": command},
+                   "session_id": "ids1", "tool_use_id": "toolu_9", "agent_id": "a-1",
+                   "agent_type": "general-purpose", "cwd": "/work"}),
+            json!({"tool_name": "Read", "tool_input": {"file_path": "x"}, "session_id": "ids1"}),
+        ],
+        &[],
+    );
+    assert_eq!(lines[0]["kind"], "decision");
+    assert_eq!(lines[0]["tool_use_id"], "toolu_9");
+    assert_eq!(lines[0]["agent_id"], "a-1");
+    assert_eq!(lines[0]["agent_type"], "general-purpose");
+    assert_eq!(lines[0]["cwd"], "/work");
+    assert!(!lines[0].to_string().contains("Q1w2E3r4T5"), "{}", lines[0]);
+    // A host that sends no ids gets nulls, not invented values.
+    assert!(lines[1]["tool_use_id"].is_null() && lines[1]["agent_id"].is_null());
+}
+
+/// A summary must not turn a recognizable secret into an unrecognizable fragment.
+#[test]
+fn decision_and_outcome_calls_mask_secrets_before_shortening() {
+    let token = format!("ghp_{}", "A".repeat(40));
+    let padding = "x".repeat(140);
+    let unicode_padding = "я".repeat(140);
+    let pem = format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
+        "Q".repeat(80)
+    );
+    let cases = [
+        (
+            "Bash",
+            "command",
+            format!("echo {padding} {token}"),
+            format!("echo {padding} [REDACTED]"),
+        ),
+        (
+            "Bash",
+            "command",
+            format!("echo {unicode_padding} {token} tail that must be cut"),
+            format!("echo {unicode_padding} [REDACTED] ta…"),
+        ),
+        (
+            "Bash",
+            "command",
+            format!("echo {padding} {pem}"),
+            format!("echo {padding} [REDACTED]"),
+        ),
+        (
+            "WebFetch",
+            "url",
+            format!("https://user:{}@example.com", "p".repeat(170)),
+            "https://user:[REDACTED]@example.com".to_string(),
+        ),
+    ];
+    for (tool, key, value, expected) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("decisions.jsonl");
+        let events: Vec<Value> = ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
+            .into_iter()
+            .map(|event| {
+                json!({"hook_event_name": event, "session_id": "boundary",
+                    "tool_name": tool, "tool_input": {key: value},
+                    "tool_response": "ok", "error": "Exit code 1"})
+            })
+            .collect();
+        let lines = run_logged(dir.path(), &log, &events, &[]);
+        assert_eq!(lines.len(), 3);
+        for (line, kind) in lines.iter().zip(["decision", "outcome", "outcome"]) {
+            assert_eq!(line["kind"], kind);
+            assert_eq!(line["call"], expected, "{line}");
+            assert!(line["call"].as_str().unwrap().chars().count() <= 160);
+        }
+    }
+}

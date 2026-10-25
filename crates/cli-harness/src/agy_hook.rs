@@ -63,14 +63,16 @@
 //!   it lasts, and a `closed` refusal carries it as the `deny` reason, which is
 //!   verified to reach the agent.
 
-use crate::broken_world::{self, BrokenWorldMode, WorldLoad};
+use crate::broken_world::{self, BrokenWorld, BrokenWorldMode, WorldLoad};
+use crate::cc_hook::{call_summary, decision_line};
 use crate::hostkit::{
     canonicalize_root_paths, normalize_tool, persist_taint, persist_usage, read_usage,
     resolve_action_path, sanitize,
 };
+use crate::outcome::{append_line, HostIds};
 use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
-    gate, host_outcome, BlockKind, GateContext, GateRequest, HostOutcome, ABI_VERSION,
+    gate, host_outcome, BlockKind, GateContext, GateRequest, GateResponse, HostOutcome, ABI_VERSION,
 };
 use harness_types::CompiledWorld;
 use serde_json::{json, Map, Value};
@@ -180,6 +182,35 @@ fn project_base(ev: &Value, args: &Value) -> Option<String> {
         })
 }
 
+/// Record one decision-log line (`--log`), in the same format as `cc-hook`'s
+/// (D84). Antigravity sends no tool-call id and no agent identity, so those stay
+/// `null`; `step_idx` is the nearest key into its transcript. No outcome
+/// observer is wired for this host yet: its post-call hook contract has not been
+/// verified, so an ASK here is never joined to an outcome.
+struct Recorder<'a> {
+    log: Option<&'a Path>,
+    sid: String,
+    tool: String,
+    call: String,
+    ids: HostIds,
+    /// Set when the call is decided by the last world that compiled (D87).
+    broken: Option<BrokenWorld>,
+}
+
+impl Recorder<'_> {
+    fn record(&self, res: &GateResponse, answer: Option<&str>, reason: &str) {
+        if let Some(path) = self.log {
+            let mut line = decision_line(
+                &self.sid, &self.tool, &self.call, res, answer, reason, &self.ids,
+            );
+            if let Some(b) = &self.broken {
+                line["broken_world"] = b.log_fields();
+            }
+            append_line(path, &line, "agy-hook");
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     world_path: &Path,
@@ -189,6 +220,7 @@ pub fn run(
     enforce_absent: bool,
     grant: bool,
     soft_ask: bool,
+    log: Option<&Path>,
     on_broken_world: BrokenWorldMode,
 ) -> i32 {
     let mut input = String::new();
@@ -218,6 +250,8 @@ pub fn run(
     };
     // (3) argument casing: alias PascalCase into the neutral vocabulary.
     let args = alias_neutral_args(&raw_args);
+    let call = call_summary(&args);
+    let ids = HostIds::antigravity(&ev, &raw_args);
 
     // (2) session key: `conversationId`.
     let sid = ev
@@ -245,15 +279,33 @@ pub fn run(
     let loaded = broken_world::load(world_path, state_dir, on_broken_world, |text| {
         hook_world(text, base.as_deref(), home.as_deref())
     });
-    let world = match loaded {
-        WorldLoad::Live(w) => w,
+    let (world, broken) = match loaded {
+        WorldLoad::Live(w) => (w, None),
         WorldLoad::Broken { world, broken } => {
             let warning = broken.message(WAY_OUT);
             eprintln!("{warning}");
-            match world {
-                Some(w) => w,
-                None if broken.applied == BrokenWorldMode::Closed => emit("deny", &warning),
-                None => return passthrough(), // `open`: ungoverned, and said so
+            if let Some(w) = world {
+                (w, Some(broken))
+            } else {
+                // No world decides: `closed` refuses, `open` passes, both logged.
+                let refuse = broken.applied == BrokenWorldMode::Closed;
+                if let Some(path) = log {
+                    let line = broken_world::log_line(
+                        &sid,
+                        tool,
+                        &call,
+                        tainted,
+                        &broken,
+                        refuse.then_some("deny"),
+                        &warning,
+                        &ids,
+                    );
+                    append_line(path, &line, "agy-hook");
+                }
+                if refuse {
+                    emit("deny", &warning);
+                }
+                return passthrough(); // `open`: ungoverned, and said so
             }
         }
     };
@@ -268,7 +320,7 @@ pub fn run(
         arguments: args,
         path: action_path,
         context: GateContext {
-            session_id: sid,
+            session_id: sid.clone(),
             mode: Some(mode.to_string()),
             taint: Some(if tainted { "tainted" } else { "clean" }.to_string()),
             // Declared by the operator, not inferred from the event (finding #22):
@@ -280,6 +332,14 @@ pub fn run(
         },
     };
     let res = gate(&world, &req);
+    let rec = Recorder {
+        log,
+        sid,
+        tool: tool.to_string(),
+        call,
+        ids,
+        broken,
+    };
 
     // Persist the kernel-computed monotonic taint for the next call. The note
     // records the host tool and the kernel's effective action (D36).
@@ -301,10 +361,9 @@ pub fn run(
             "harness agy-hook: cannot record budget counters under {} — refusing the call they would charge",
             state_dir.display()
         );
-        emit(
-            "deny",
-            "budget counters could not be recorded, so this call cannot be counted against the world's limits (untracked_budget)",
-        );
+        let reason = "budget counters could not be recorded, so this call cannot be counted against the world's limits (untracked_budget)";
+        rec.record(&res, Some("deny"), reason);
+        emit("deny", reason);
     }
 
     if res.context.taint == "tainted" && !tainted {
@@ -314,10 +373,9 @@ pub fn run(
                 "harness agy-hook: cannot record session taint under {} — refusing the call that would escalate",
                 state_dir.display()
             );
-            emit(
-                "deny",
-                "session taint could not be recorded, so this ingestion cannot be governed (untracked_taint)",
-            );
+            let reason = "session taint could not be recorded, so this ingestion cannot be governed (untracked_taint)";
+            rec.record(&res, Some("deny"), reason);
+            emit("deny", reason);
         }
     }
 
@@ -333,28 +391,45 @@ pub fn run(
         // manifest is the authoritative allowlist, not an overlay.
         HostOutcome::Proceed => {
             if grant {
-                emit("allow", &format!("manifest ALLOW: {}", res.action));
+                let reason = format!("manifest ALLOW: {}", res.action);
+                rec.record(&res, Some("allow"), &reason);
+                emit("allow", &reason);
             }
+            rec.record(&res, None, &res.reason);
             passthrough()
         }
-        HostOutcome::NeedsApproval { reason } => emit(ask_channel, &reason),
+        // The log's answer vocabulary is the host-neutral one: `force_ask` and
+        // `ask` are both an ASK the person must answer.
+        HostOutcome::NeedsApproval { reason } => {
+            rec.record(&res, Some("ask"), &reason);
+            emit(ask_channel, &reason)
+        }
         HostOutcome::Block {
             kind: BlockKind::Deny,
             reason,
-        } => emit("deny", &reason),
+        } => {
+            rec.record(&res, Some("deny"), &reason);
+            emit("deny", &reason)
+        }
         HostOutcome::Block {
             kind: BlockKind::Absent,
             reason,
         } => {
             if enforce_absent {
-                emit("deny", &format!("ABSENT: {reason}"));
+                let reason = format!("ABSENT: {reason}");
+                rec.record(&res, Some("deny"), &reason);
+                emit("deny", &reason);
             }
+            rec.record(&res, None, &res.reason);
             passthrough() // additive dogfooding default
         }
         HostOutcome::Block {
             kind: BlockKind::Replan,
             reason: _,
-        } => passthrough(), // no host channel for "smaller step"
+        } => {
+            rec.record(&res, None, &res.reason);
+            passthrough() // no host channel for "smaller step"
+        }
     }
 }
 

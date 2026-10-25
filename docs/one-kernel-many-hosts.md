@@ -95,8 +95,8 @@ compiled, or has been deleted, follows the hook's `--on-broken-world` mode inste
 | `open` | proceeds ungoverned | opt-in only |
 
 Every mode warns: Claude Code gets a `systemMessage` on each answer while the world
-is broken, and the decision log marks the lines; Antigravity gets the warning on
-stderr and, when refused, as the `deny` reason. The bootstrap shims stay fail-open
+is broken; Antigravity gets the warning on stderr and, when refused, as the `deny`
+reason. On both hosts the decision log (`--log`) marks the lines. The bootstrap shims stay fail-open
 when there is no binary (D37): without a binary there is no hook to have a mode.
 
 ## The parity guarantee

@@ -21,6 +21,7 @@
 //! The bootstrap shim's "no binary, fail open" (D37) is unchanged: without a
 //! binary there is no hook to have a mode.
 
+use crate::outcome::{now_ms, HostIds};
 use compiler::sha256_hex;
 use harness_types::CompiledWorld;
 use serde_json::{json, Value};
@@ -208,7 +209,8 @@ pub fn warning() -> Option<&'static str> {
 /// The decision-log line for a call answered without a kernel verdict (`closed`
 /// refuses, `open` passes). Same fields as a kernel line, so the console's feed
 /// reads it; `decision` is `BROKEN_WORLD` because no world decided it.
-pub fn log_line(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn log_line(
     session: &str,
     tool: &str,
     call: &str,
@@ -216,13 +218,11 @@ pub fn log_line(
     broken: &BrokenWorld,
     answer: Option<&str>,
     reason: &str,
+    ids: &HostIds,
 ) -> Value {
-    let ts_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    json!({
-        "ts_ms": ts_ms,
+    let mut line = json!({
+        "ts_ms": now_ms(),
+        "kind": "decision",
         "session": session,
         "tool": tool,
         "action": null,
@@ -234,7 +234,9 @@ pub fn log_line(
         "taint": if tainted { "tainted" } else { "clean" },
         "manifest_hash": null,
         "broken_world": broken.log_fields(),
-    })
+    });
+    ids.stamp(&mut line);
+    line
 }
 
 fn short(sha: &str) -> &str {
