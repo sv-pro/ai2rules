@@ -55,6 +55,13 @@ pub enum Scope {
 /// silently installing a world without its self-protection.
 const PROJECT_CONTROL_PLANE: &str = "- { path: \"./.claude\", access: Read }";
 
+/// The starter's Antigravity control-plane rule (D92). A machine-scope world
+/// governs Claude Code only: no file under a project's `.agents/` can switch this
+/// hook off, and locking the whole directory would forbid ordinary work in every
+/// repository (adding a rule, a skill, a workflow). So it is dropped, not
+/// replaced, under the same loud-failure rule as [`PROJECT_CONTROL_PLANE`].
+const PROJECT_AGENTS_PLANE: &str = "- { path: \"./.agents\", access: Read }";
+
 /// The starter's instruction-file action (D83). In a project world a clean
 /// session may write `CLAUDE.md` and its kin; a machine-scope world governs every
 /// project and the user's own `~/.claude`, so there a clean write asks. Same
@@ -226,6 +233,14 @@ pub fn render_world(layout: &Layout) -> Result<String, String> {
             "embedded starter manifest has no `./.claude` control-plane rule to replace".into(),
         );
     }
+    if !STARTER_WORLD
+        .lines()
+        .any(|l| l.trim() == PROJECT_AGENTS_PLANE)
+    {
+        return Err(
+            "embedded starter manifest has no `./.agents` control-plane rule to drop".into(),
+        );
+    }
     if !STARTER_WORLD.lines().any(|l| l.trim() == INSTRUCTION_WRITE) {
         return Err(
             "embedded starter manifest has no `Write_instructions` action to make ask".into(),
@@ -251,6 +266,8 @@ pub fn render_world(layout: &Layout) -> Result<String, String> {
     for line in STARTER_WORLD.lines() {
         if line.trim() == PROJECT_CONTROL_PLANE {
             world.push_str(&control_plane_rules(layout));
+        } else if line.trim() == PROJECT_AGENTS_PLANE {
+            // Dropped at machine scope (D92); see the constant.
         } else if line.trim() == INSTRUCTION_WRITE {
             world.push_str(INSTRUCTION_WRITE_ASK);
         } else if line.trim() == "world_id: claude-code-starter" {

@@ -97,12 +97,77 @@ fn payload(tool: &str, args: Value, conversation: &str) -> Value {
     })
 }
 
+/// As [`payload`], for a file action on a real workspace. The dogfood world has
+/// the starter's `roots` (D92), and a made-up `/workspace` is not a directory on
+/// every platform (on Windows it is a drive-relative path), so a file action there
+/// would test path scope instead of what the caller means to test.
+fn file_payload(tool: &str, workspace: &Path, rel: &str, conversation: &str) -> Value {
+    let workspace = std::fs::canonicalize(workspace).unwrap();
+    let mut ev = payload(
+        tool,
+        json!({"AbsolutePath": workspace.join(rel).to_str().unwrap()}),
+        conversation,
+    );
+    ev["workspacePaths"] = json!([workspace.to_str().unwrap()]);
+    ev
+}
+
+/// The Antigravity dogfood world keeps both hosts' control planes read-only, as
+/// the starter does (D92, AI2-82): this repository's `.agents/` manifest, shim and
+/// `hooks.json`, and Claude Code's `.claude/` files, are not writable by the agent
+/// they govern, clean or tainted, while reading them and ordinary project edits
+/// pass through.
+#[test]
+fn the_dogfood_world_keeps_both_control_planes_read_only() {
+    let project = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let event = |tool: &str, key: &str, rel: &str| {
+        json!({
+            "conversationId": "s",
+            "stepIdx": 1,
+            "workspacePaths": [project.to_str().unwrap()],
+            "toolCall": { "name": tool, "args": { key: project.join(rel).to_str().unwrap() } },
+        })
+    };
+    for taint in ["clean", "tainted"] {
+        for rel in [
+            ".agents/agy-world.yaml",
+            ".agents/hooks.json",
+            ".agents/hooks/world-gate.sh",
+            ".claude/cc-world.yaml",
+            ".claude/settings.json",
+        ] {
+            for tool in ["write_to_file", "propose_code"] {
+                let dir = tempfile::tempdir().unwrap();
+                if taint == "tainted" {
+                    std::fs::write(dir.path().join("taint-s"), "seed").unwrap();
+                }
+                let out = run_hook(dir.path(), &event(tool, "TargetFile", rel));
+                assert_eq!(
+                    decision(&out).as_deref(),
+                    Some("deny"),
+                    "{taint} {tool} {rel}: {out}"
+                );
+            }
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    for (tool, key, rel) in [
+        ("view_file", "AbsolutePath", ".agents/agy-world.yaml"),
+        ("propose_code", "TargetFile", "README.md"),
+    ] {
+        assert_passthrough(&run_hook(dir.path(), &event(tool, key, rel)));
+    }
+}
+
 #[test]
 fn clean_read_passes_through_as_the_no_decision_noop() {
     let dir = tempfile::tempdir().unwrap();
     let out = run_hook(
         dir.path(),
-        &payload("view_file", json!({"AbsolutePath": "/workspace/x"}), "s1"),
+        &file_payload("view_file", dir.path(), "x", "s1"),
     );
     assert_passthrough(&out);
     assert!(!dir.path().join("taint-s1").exists());
@@ -207,7 +272,7 @@ fn grant_mode_emits_explicit_allow_on_clean_action() {
     let dir = tempfile::tempdir().unwrap();
     let out = run_hook_args(
         dir.path(),
-        &payload("view_file", json!({"AbsolutePath": "/workspace/x"}), "g1"),
+        &file_payload("view_file", dir.path(), "x", "g1"),
         &["--grant"],
     );
     assert_eq!(decision(&out).as_deref(), Some("allow"), "{out}");

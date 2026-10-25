@@ -63,10 +63,10 @@ fn every_committed_world_compiles() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// The dogfood world holds the starter's path scope (D57, D91, AI2-80). The
-/// repository that ships the starter demonstrates its guarantees; it does not
-/// govern itself with a looser profile. A rule added to one and not the other
-/// fails here.
+/// Both dogfood worlds hold the starter's path scope (D57, D91, D92). The
+/// repository that ships the starter demonstrates its guarantees on every host it
+/// governs; it does not govern itself with a looser profile. A rule added to one
+/// and not the others fails here.
 #[test]
 fn the_dogfood_world_holds_the_starter_roots() {
     let root = repo_root();
@@ -76,5 +76,14 @@ fn the_dogfood_world_holds_the_starter_roots() {
     };
     let starter = load("scripts/starter-world.yaml");
     assert!(starter.is_some(), "the starter lost its roots block");
-    assert_eq!(load(".claude/cc-world.yaml"), starter);
+    assert_eq!(
+        load(".claude/cc-world.yaml"),
+        starter,
+        "Claude Code dogfood world"
+    );
+    assert_eq!(
+        load(".agents/agy-world.yaml"),
+        starter,
+        "Antigravity dogfood world (D92)"
+    );
 }

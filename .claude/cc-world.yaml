@@ -124,6 +124,10 @@ roots:
     # Read stays allowed on purpose — an agent should be able to see the rules it is
     # under, and it needs to in order to propose a change to them.
     - { path: "./.claude", access: Read }
+    # The same for Antigravity (D92): `.agents/` holds its manifest, its shim and
+    # `hooks.json`, and in a project governed on both hosts each agent must be
+    # unable to rewrite the other's governance as well as its own.
+    - { path: "./.agents", access: Read }
     # sensitive paths — out of bounds even inside an allowed parent
     - { path: "/etc/shadow", access: Deny, class: Secret }
     - { path: "~/.ssh", access: Deny, class: Credential }
