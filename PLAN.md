@@ -566,6 +566,12 @@ Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × s
 
 ---
 
+**Northwind readiness follow-up (AI2-62 / PR #150, 2026-10-25):** preflight
+checks actual hook registration, flags, paths and selected binary; setup supports
+the current logged hook. The native scenario and launcher regressions run in CI.
+See [integration evidence](docs/demos/policy-console/READINESS-2026-10-25.md).
+Interactive presentation rehearsal remains separate; E15 is not marked complete.
+
 ### E16 — Internal demo: governed JIRA MCP on Copilot + Claude Code  🔝 HIGH PRIORITY
 **Goal:** A live internal demo showing **one governance manifest shaping the capability
 surface of the Atlassian/JIRA MCP** across **GitHub Copilot (VS Code + JetBrains)** and

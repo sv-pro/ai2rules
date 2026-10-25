@@ -180,7 +180,7 @@ const PROFILES: &[Profile] = {
         },
         Profile {
             id: STOP,
-            label: "Stop",
+            label: "Emergency stop",
             blurb:
                 "Every effectful action off at the agent's next call. Read-only actions unchanged.",
             positions: [Off; 5],
@@ -319,7 +319,7 @@ fn stop_unsupported(manifest: &WorldManifest) -> Option<String> {
         .map(|cap| cap.name.as_str())
         .collect();
     (!names.is_empty()).then(|| format!(
-        "Stop is unavailable: scoped capabilities cannot be switched off independently: {}. The world has not been stopped.", names.join(", ")
+        "Emergency stop is unavailable: scoped capabilities cannot be switched off independently: {}. The world has not been changed.", names.join(", ")
     ))
 }
 
@@ -588,10 +588,10 @@ fn policy(console: &Console, body: &Value) -> Value {
     let mut mark = serde_json::Map::new();
     if body["restore"] == true {
         let Some(open) = stop_record(&console.log_path).open else {
-            return json!({ "ok": false, "error": "nothing to restore: the agent is not stopped" });
+            return json!({ "ok": false, "error": "nothing to resume: no emergency stop is in effect" });
         };
         apply_kept(&mut manifest, &open.kept);
-        headline = Some(format!("Restored: {}", restored_label(&manifest)));
+        headline = Some(format!("Resumed: {}", restored_label(&manifest)));
         mark.insert("restore".into(), json!(true));
     } else if let Some(id) = body["profile"].as_str() {
         let Some(p) = PROFILES.iter().find(|p| p.id == id) else {
@@ -603,7 +603,7 @@ fn policy(console: &Console, body: &Value) -> Value {
                 return json!({"ok": false, "error": error});
             }
             apply_stop(&mut manifest);
-            headline = Some("Stopped: every effectful action off".to_string());
+            headline = Some("Emergency stop: every effectful action off".to_string());
             mark.insert("stop".into(), json!({ "before": kept }));
         } else {
             for (switch, at) in SWITCHES.iter().zip(p.positions) {

@@ -1,0 +1,9 @@
+
+  ok    harness: <HARNESS> (cli-harness 0.7.0)
+  ok    project: <RUN_DIR>/stand/vendor-desk (hook shell syntax valid)
+  ok    all-tools hook, exact world/state/log, grant/ABSENT, selected binary projection and /northwind-demo
+  ok    portal.northwind.test -> 127.0.0.1, receiver answers
+  ok    files.northwind.test -> 127.0.0.1, receiver answers
+  FAIL  the console on port 47429 has the wrong project/world/log: restart it with --project <RUN_DIR>/stand/vendor-desk
+
+  1 check(s) failed.
