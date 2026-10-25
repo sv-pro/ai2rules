@@ -32,9 +32,10 @@ The same activity arrives in many shapes: `curl` in Bash, `curl.exe` or
 `Invoke-WebRequest` in PowerShell, `WebFetch`, an MCP fetch tool. Structured tools
 (`Write`, `WebFetch`, an MCP tool) identify themselves by name, exactly. A shell does
 not: its tool name says nothing, so the world classifies the command text with
-`command_classes`. Exactly one matching class decides; none, or two different ones,
-falls to the classifier's `default_to`, which a careful world declares as "may reach
-the network" (D36, finding #17). Classification is the world's judgement, not a
+`command_classes`. Exactly one matching class decides, and only if it matches every
+simple command on the line (D90); none, two different ones, or a class that leaves
+part of the line unaccounted for falls to the classifier's `default_to`, which a
+careful world declares as "may reach the network" (D36, finding #17). Classification is the world's judgement, not a
 parser, so evasion is always possible; the point is that it lands in the cautious
 bucket.
 

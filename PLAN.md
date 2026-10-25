@@ -815,14 +815,15 @@ are published per scenario with no reassuring aggregate score.
   and failure direction with runner-owned effect counts. The registered target profile is
   [`docs/benchmarks/openclaw-2/README.md`](docs/benchmarks/openclaw-2/README.md); it remains
   outside generated results until the executable evidence contract is met.
-- [ ] **E18.14** ECC + AgentShield external target and the host-hook pack it needs. ECC has
+- [ ] **E18.14** ECC + AgentShield external target and the host-hook pack it needs
+  ([Linear AI2-81](https://linear.app/ai2rules/issue/AI2-81)). ECC has
   no discovery or authorization surface, so the `mcp-governance` lines would be `ABSENT` by
   construction. The comparison belongs on the Claude Code `PreToolUse` path: classification
   under evasion, RCE vs egress, taint dependence, self-protection of the hook and its config,
   and failure direction, all with runner-owned effect counts. `harness cc-hook` is its first
   ai2rules target. The registered profile is
   [`docs/benchmarks/ecc/README.md`](docs/benchmarks/ecc/README.md). Its first probe pass
-  already found two ai2rules gaps (`_tasks/1_discovery/network-word-downgrades-ask.md`,
+  already found two ai2rules gaps (`_tasks/2_development/network-word-downgrades-ask.md`,
   `_tasks/1_discovery/dogfood-world-without-d57.md`).
 
 **Exit:** the runner detects every intentional weak-baseline failure, ai2rules produces

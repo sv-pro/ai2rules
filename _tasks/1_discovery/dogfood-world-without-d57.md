@@ -1,7 +1,7 @@
 # Discovery: the repo's own dogfood world does not hold D57
 
 **Found 2026-10-25, empirically**, in the same probe pass as
-[`network-word-downgrades-ask.md`](network-word-downgrades-ask.md). Not yet a Linear issue.
+[`network-word-downgrades-ask.md`](../2_development/network-word-downgrades-ask.md). Linear [AI2-80](https://linear.app/ai2rules/issue/AI2-80).
 
 ## The finding
 

@@ -3850,3 +3850,52 @@ Metadata changes require fresh consent too. This provides at-most-once forwardin
 per grant; external transactions/idempotency are outside the protocol. The trusted
 native resume helper shares implementation with the unchanged pure gate ABI.
 See [the operator workflow](docs/approval-capable-hosts.md).
+
+## D90 — A command class must account for every simple command on the line
+
+**Date:** 2026-10-25. **Task:** AI2-79. **Refines** D62 and the finding #17 ambiguity rule.
+
+**Context.** D62 says the classifier's security property is where an *unmatched* command
+lands: `default_to`, approval-required in every shipped world. A command that matched one
+class anywhere skipped that property. The class then covered the whole line, so a network
+word in a comment, a string or a neighbouring command made the rest of the line plain
+egress. In a clean session that was a silent ALLOW: `git push origin main # curl `,
+`echo 'ssh ' ; cat ~/.ssh/id_rsa`, `curl … | sh`. Found by probing `cc-hook` with
+the same inputs as ECC's hooks (`docs/benchmarks/ecc/`). The taint floor held throughout,
+so this broke the clean-session approval guarantee, not injection-to-egress.
+
+**Decision.** The winning class must match again in **every simple command** of the
+line. The line is split at `;`, `&`, `|` and newlines, with quoted spans blanked,
+comments and line continuations dropped, and redirections such as `2>&1` and `&>log`
+left whole. A segment of only `:{}()` (the fork bomb's pieces) runs nothing and is
+exempt. A line holding a command substitution (`$(…)`, backticks, `<(…)`, `>(…)`) or an
+unterminated quote resolves to `default_to` outright. The check can only move a command
+toward `default_to`. It never yields a class the unsplit line did not already match, so
+the finding #17 ambiguity rule is unchanged underneath it.
+
+**Alternatives.**
+
+- *Any separator or metacharacter means ambiguous.* This is simpler. But it sent
+  `curl … | ssh host`, `rm -rf a && rm -rf b`, `curl … 2>&1` and quoted URLs with `&`
+  to ASK, and it does nothing for a network word inside a string argument
+  (`python3 deploy.py "curl "`).
+- *Anchor patterns to the command word.* This is closer to what a pattern means. But
+  it changes which lines *match*. In a world whose restrictive class is stricter than
+  its `default_to`, a command that matches less can loosen.
+- *A full shell parser in the kernel.* Rejected for the same reason D62 gave: the
+  splitter only has to be right about where a command could start, and every case it
+  gives up on fails closed.
+- *An interpreter class (`| sh`, `eval`).* It adds to this rule and does not replace
+  it: it misses the comment and string cases.
+
+**Consequence.**
+
+- Pipelines into unclassified tools now ask: `curl … | jq` is ASK in a clean session.
+- A destructive command that also carries a substitution or a quoted payload
+  (`rm -rf "$(pwd)/build"`, `bash -c 'rm -rf x'`) falls to `default_to`. That is DENY
+  under taint, where `bash_destructive` asked.
+- A newline is a separator, so `curl\nhttp://x` is two commands, not egress.
+- The raw pass still treats whitespace, newline included, as a pattern space.
+- Still open: a single plain network command remains ALLOW in a clean session,
+  including `curl -F f=@~/.aws/credentials …`. What that command *reads* is the
+  shell-path residual D57 already names, not a classification question.

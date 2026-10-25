@@ -437,7 +437,7 @@ Consent is exact-bound, expires after five minutes, and is durably consumed befo
 forwarding; uncertain upstream outcomes require operator reconciliation. See the
 [approval workflow](docs/approval-capable-hosts.md).
 
-Builds clean offline with `clippy -D warnings`; **589 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
+Builds clean offline with `clippy -D warnings`; **592 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
 tests feed prepared events through stdin so a disabled hook's early exit cannot
 race the fixture writer.
 The Unix-only doctor integration suite includes **40 passing tests and 3 explicitly
