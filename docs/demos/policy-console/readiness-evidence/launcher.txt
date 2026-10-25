@@ -1,0 +1,33 @@
+1/5  Rebuilding the project in /tmp/northwind-launcher-jv8bs7q_/stand/vendor-desk
+2/5  Starting the receiver (:55391) and the console (:45791); logs in /tmp/northwind-launcher-jv8bs7q_/logs
+3/5  Checking the stand
+
+  ok    harness: /workspace/scratch/a0a491ef16d7/bin/harness-x86_64-unknown-linux-musl/harness (cli-harness 0.7.0)
+  ok    project: /tmp/northwind-launcher-jv8bs7q_/stand/vendor-desk (hook with ABSENT enforced and the decision log on)
+  ok    all-tools hook entry, installed binary and /northwind-demo
+  ok    world compiles and projects Skill and AskUserQuestion
+  ok    portal.northwind.test -> 127.0.0.1, receiver answers
+  ok    files.northwind.test -> 127.0.0.1, receiver answers
+  ok    console answers on http://127.0.0.1:45791/ for this project
+
+  Stand checks passed. Interactive /northwind-demo rehearsal is still required.
+4/5  Console: http://127.0.0.1:45791/
+5/5  Open Claude yourself:
+       Claude app: a new Code session on the folder /tmp/northwind-launcher-jv8bs7q_/stand/vendor-desk
+                   mode Manual, model Opus 4.8
+       terminal  : cd /tmp/northwind-launcher-jv8bs7q_/stand/vendor-desk && claude --model claude-opus-4-8 --permission-mode default
+
+     The receiver's request log follows. Ctrl+C here stops the receiver and the console.
+
+[1;32mreceiver up[0m on 127.0.0.1:55391, forwarding nothing
+  page    http://portal.northwind.test:55391/onboarding
+  upload  http://files.northwind.test:55391/upload   (POST/PUT)
+  out     /tmp/northwind-launcher-jv8bs7q_/inbox
+Every request is logged below, with the name it was sent to. Ctrl-C to stop.
+
+[2m09:33:51  GET  127.0.0.1/health                         ok[0m
+[2m09:33:51  GET  portal.northwind.test/health             ok[0m
+[2m09:33:51  GET  files.northwind.test/health              ok[0m
+Terminated
+
+Stopping the receiver and the console.
