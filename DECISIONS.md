@@ -4037,3 +4037,50 @@ Claude Code additionally gets DENY on `.agents/` writes.
 - Two `agy_hook` tests used a made-up `/workspace` root. They now use a real temp
   workspace, because with `roots` a non-existent root is platform-dependent (D91's
   Windows lesson).
+
+## D93 — The store lock is an OS file lock on a file that is never deleted
+
+**Date:** 2026-10-25. **Task:** AI2-75. **Revises** the lock behaviour D78's consequence
+describes.
+
+**Context.** `concurrent_consumers_get_exactly_one_claim` failed intermittently on
+Windows with `Access is denied` (OS error 5). `StoreLock` *was* the file: it took the
+lock with `create_new` and released it with `remove_file`, retrying only on
+`AlreadyExists`.
+
+The issue's lead was that the file is removed while its handle is still open. Windows
+CI tested that lead on PR #159 and refuted it in that form. With a handle still open,
+`remove_file` frees the name at once, so a sequential `create_new` succeeds; Windows
+deletes with POSIX semantics here.
+
+The symptom reproduced anyway: four threads handing the lock over failed with OS error
+5 by round 3. The window is inside `DeleteFileW`, between marking the file for deletion
+and closing its own handle. A waiter's `CREATE_NEW` in that window meets a
+delete-pending file and gets `ERROR_ACCESS_DENIED`, so it failed instead of waiting.
+Reordering our own close and remove cannot reach a window inside the OS call.
+
+**Decision.** The lock is `File::try_lock`: `LockFileEx` on Windows and `flock`
+elsewhere. It is taken on a `.lock` file that is created once, `0600` with no symlink
+following, and never removed. The 5 s wait and the `WouldBlock` "busy" error are
+unchanged. The lock is released when its handle closes.
+
+**Alternatives.**
+
+- *Retry only on `STATUS_DELETE_PENDING`, via `RtlGetLastNtStatus`.* This keeps the
+  delete-based design and its crash behaviour. But it brings the first `unsafe` and FFI
+  into trace-store, against a poorly documented ntdll export.
+- *Retry on any `PermissionDenied`.* Simplest, but a real permission error would then
+  wait 5 s like a busy lock. AI2-75 rules out exactly this broad swallowing.
+- *Close the handle before removing.* Refuted on CI, as above.
+
+**Consequence.**
+
+- A crashed holder no longer leaves a `.lock` that blocks every later caller until an
+  operator deletes it. The OS releases the lock with the process. A crash mid-mutation
+  leaves at most a torn tail, which the chained log refuses or tolerates as D78
+  describes. D78's note that "a stale `.lock` can make such an open fail after 5 s"
+  no longer applies.
+- The `.lock` file now persists next to the store and holds no state. A directory or
+  an unopenable file at that path still makes the lock unobtainable, and the call fails
+  closed. Two `mcp_approvals` tests and their fixture rely on this, so they now replace
+  the persistent file with a directory instead of creating one.

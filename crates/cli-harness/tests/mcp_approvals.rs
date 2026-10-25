@@ -194,7 +194,11 @@ fn concurrent_gateways_cannot_spend_one_grant_twice() {
 fn claim_persistence_failure_never_reaches_upstream() {
     let f = Fixture::new("ok");
     f.prepare();
-    std::fs::create_dir(f.dir.path().join("approvals.jsonl.lock")).unwrap();
+    // A directory where the store lock file lives makes the lock unobtainable.
+    // The lock file persists after first use (AI2-75), so replace it.
+    let lock = f.dir.path().join("approvals.jsonl.lock");
+    let _ = std::fs::remove_file(&lock);
+    std::fs::create_dir(&lock).unwrap();
     let response = f.gateway("alice", &[]).call(proposal());
     assert!(text(&response).contains("no call forwarded"), "{response}");
     assert!(f.effects().is_empty());

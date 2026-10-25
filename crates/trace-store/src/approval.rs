@@ -483,11 +483,20 @@ pub(crate) fn lock_path(store: &Path) -> PathBuf {
 }
 
 /// Cross-process critical section for authorization lifecycle mutations.
-/// A crashed holder leaves a visible stale lock and therefore fails closed; an
-/// operator may remove that one exact `.lock` file after verifying no process is
-/// using the store.
+///
+/// An OS advisory lock (`LockFileEx` on Windows, `flock` elsewhere) on a lock file
+/// that is created once and never removed (AI2-75). The earlier design *was* the
+/// file: `create_new` to take it, `remove_file` to release it. On Windows that
+/// release has a window inside `DeleteFileW` itself, between marking the file for
+/// deletion and closing its handle, where a waiter's `create_new` fails with
+/// `ERROR_ACCESS_DENIED` instead of `ERROR_FILE_EXISTS`, so a waiter failed rather
+/// than waited. A file that is never deleted has no such window.
+///
+/// The lock is released when the handle closes, including when the holder crashes.
+/// A crash mid-mutation leaves at most a torn tail, which the chained log refuses
+/// or tolerates as D78 describes; it no longer leaves a `.lock` that blocks every
+/// later caller until an operator deletes it.
 pub(crate) struct StoreLock {
-    path: PathBuf,
     _file: File,
 }
 
@@ -496,34 +505,38 @@ impl StoreLock {
         const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
         const RETRY_DELAY: Duration = Duration::from_millis(1);
         let deadline = Instant::now() + WAIT_TIMEOUT;
+        let file = private_lock_file(path)?;
 
         loop {
-            match private_create_new(path) {
-                Ok(file) => {
-                    return Ok(Self {
-                        path: path.to_path_buf(),
-                        _file: file,
-                    })
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists && Instant::now() < deadline => {
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { _file: file }),
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
                     std::thread::sleep(RETRY_DELAY);
                 }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                Err(std::fs::TryLockError::WouldBlock) => {
                     return Err(io::Error::new(
                         io::ErrorKind::WouldBlock,
                         format!("authorization store lock {} is busy", path.display()),
                     ));
                 }
-                Err(e) => return Err(e),
+                Err(std::fs::TryLockError::Error(e)) => return Err(e),
             }
         }
     }
 }
 
-impl Drop for StoreLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+/// Open the lock file, creating it `0600` on first use, refusing to follow a
+/// symlink. It is opened for writing because an exclusive lock needs a handle
+/// with write access on some platforms; nothing is ever written to it.
+fn private_lock_file(path: &Path) -> io::Result<File> {
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600).custom_flags(libc_o_nofollow());
     }
+    opts.open(path)
 }
 
 /// Open a file for appending, creating it `0600`, refusing to follow a symlink.
@@ -1132,6 +1145,60 @@ mod tests {
         std::thread::sleep(Duration::from_millis(25));
         drop(owner);
         drop(waiter.join().unwrap());
+    }
+
+    /// AI2-75: the lock file is created once and outlives every holder. Releasing
+    /// by deleting it is what opened the Windows window this replaces.
+    #[test]
+    fn releasing_the_lock_keeps_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl.lock");
+        drop(StoreLock::acquire(&path).unwrap());
+        assert!(path.is_file(), "the lock file must survive its holder");
+        drop(StoreLock::acquire(&path).expect("an existing lock file is not a held lock"));
+    }
+
+    /// A held lock is busy for every other handle, in this process or another,
+    /// until it is released; it fails with `WouldBlock`, never with the OS error.
+    #[test]
+    fn a_held_lock_is_busy_for_another_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl.lock");
+        let held = StoreLock::acquire(&path).unwrap();
+        let other = private_lock_file(&path).unwrap();
+        assert!(matches!(
+            other.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        drop(held);
+        other.try_lock().expect("free once the holder releases");
+    }
+
+    /// AI2-75, the symptom: many holders handing the lock over in a tight loop.
+    /// Every acquisition must succeed; a waiter that meets a half-released lock
+    /// may wait, never fail.
+    #[test]
+    fn lock_hand_off_under_contention_never_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl.lock");
+        let barrier = Arc::new(Barrier::new(4));
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for round in 0..200 {
+                        let lock = StoreLock::acquire(&path)
+                            .unwrap_or_else(|e| panic!("round {round}: {e:?}"));
+                        drop(lock);
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
     }
 
     #[test]
