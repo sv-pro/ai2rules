@@ -278,16 +278,17 @@ function renderStop(st) {
   if (st.unsupported) {
     btn.hidden = true;
     cls = "warn";
-    head = "Stop unavailable for this world";
+    head = "Emergency stop unavailable for this world";
     sub = st.unsupported;
   } else if (st.status === "off") {
-    btn.textContent = "■ Stop the agent";
+    btn.textContent = "■ Emergency stop";
     btn.onclick = () => send({ profile: "stop" }, btn);
-    sub = "Every effectful action off at the agent's next call. " + STOP_SCOPE;
-    if (st.enforced === false) { cls = "warn"; head = "Stop would not bind here"; sub = NOT_ENFORCED; }
+    sub = "Every effectful action off at the agent's next call. The agent keeps running; " +
+      "the kernel keeps deciding and refuses every effect. " + STOP_SCOPE;
+    if (st.enforced === false) { cls = "warn"; head = "Emergency stop would not bind here"; sub = NOT_ENFORCED; }
   } else {
     if (st.restore_to) {
-      btn.textContent = "▶ Restore " + st.restore_to;
+      btn.textContent = "▶ Resume " + st.restore_to;
       btn.classList.add("restore");
       btn.onclick = () => send({ restore: true }, btn);
     } else {
@@ -296,15 +297,15 @@ function renderStop(st) {
     const resume = st.restore_to ? "" : " Pick a profile below to resume.";
     if (st.status === "not_binding") {
       cls = "warn";
-      head = "⚠ Not stopped";
+      head = "⚠ Actions not stopped";
       sub = NOT_ENFORCED + resume;
     } else if (st.status === "stopped") {
       cls = "in";
-      head = "■ Stopped";
+      head = "■ Actions stopped";
       sub = "The agent's call at " + hhmmss(st.refused_ms) + " was refused. " + STOP_SCOPE + resume;
     } else {
       cls = "in";
-      head = "Stop set: takes effect at the agent's next call";
+      head = "Emergency stop set: takes effect at the agent's next call";
       sub = "Not confirmed until the hook refuses a call. " + STOP_SCOPE + resume;
     }
   }
@@ -446,8 +447,10 @@ function addEvent(ev) {
   $("empty").hidden = true;
   if (ev.kind === "policy") {
     const lines = ev.changes || [];
+    // The class names stay STOP / RESTORE; the label says what a person reads.
     const chip = ev.stop ? "STOP" : ev.restore ? "RESTORE" : "POLICY";
-    feed.prepend(row(chip, chip, ev.headline || lines[0] || "Policy changed",
+    const label = ev.stop ? "E-STOP" : ev.restore ? "RESUME" : "POLICY";
+    feed.prepend(row(chip, label,ev.headline || lines[0] || "Policy changed",
       [document.createTextNode((ev.headline ? lines : lines.slice(1)).join(" · "))], ev.ts_ms, false));
     refreshState();
     return;

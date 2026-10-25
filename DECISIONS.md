@@ -3567,6 +3567,15 @@ show that it holds.
 Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
 feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.
 
+**Amended 2026-10-25 (AI2-74): the button reads "Emergency stop".** "Stop the agent"
+promised more than the button does: the agent keeps running and the kernel keeps deciding,
+and refuses every effect. If the kernel stopped, the hook would fail open. "Emergency stop"
+is the industrial term for the same shape: motion halts while the controller stays powered
+and watching. "Kill switch" was rejected because here it already names `gate-off`, which
+turns governance off. On the page, Restore became Resume, the status reads "Actions
+stopped" / "Actions not stopped", and the feed labels read E-STOP / RESUME. The profile id
+`stop`, the request bodies and the log markers are unchanged, so existing logs still read.
+
 ## D88 — Windows is a tested platform: the OS CSPRNG everywhere, the same `..` refusal, a Windows CI job
 
 **Date:** 2026-10-23. AI2-57.
