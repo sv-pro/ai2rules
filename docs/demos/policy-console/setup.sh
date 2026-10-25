@@ -20,6 +20,14 @@ DEST="${1:-$HOME/northwind}"
 DESK="$DEST/vendor-desk"
 RECEIVED="${RECEIVED:-$HOME/northwind-inbox}"
 HARNESS="${HARNESS:-$(command -v harness || true)}"
+PORT="${PORT:-8787}"
+CONSOLE_PORT="${CONSOLE_PORT:-8790}"
+for port in "$PORT" "$CONSOLE_PORT"; do
+  if ! [[ "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
+    echo "setup: PORT and CONSOLE_PORT must be in 1..65535." >&2
+    exit 2
+  fi
+done
 
 if [ -z "$HARNESS" ] || [ ! -x "$HARNESS" ]; then
   echo "setup: no 'harness' binary found. Install it outside this project:" >&2
@@ -54,31 +62,52 @@ cp "$HERE/world.yaml" "$DESK/.claude/cc-world.yaml"
 # each switch the presenter flips. Only here, not in the shared project kit, so
 # the side-by-side demo's copies do not get it.
 mkdir -p "$DESK/.claude/skills/northwind-demo"
-cp "$HERE/skill/SKILL.md" "$DESK/.claude/skills/northwind-demo/SKILL.md"
+sed -e 's/:8787/:__NORTHWIND_RECEIVER__/g' -e 's/:8790/:__NORTHWIND_CONSOLE__/g' \
+  -e "s/__NORTHWIND_RECEIVER__/$PORT/g" -e "s/__NORTHWIND_CONSOLE__/$CONSOLE_PORT/g" \
+  "$HERE/skill/SKILL.md" > "$DESK/.claude/skills/northwind-demo/SKILL.md"
 
-# Two flags the starter shim does not set:
-#   --enforce-absent  an action switched Off is refused, not left to Claude Code's
-#                     own prompt, so Off means "this agent does not have it"
-#   --log             one line per decision, which the console shows live
-SHIM="$DESK/.claude/hooks/world-gate.sh"
-sed -i.bak 's#--state "$PD/.claude/state"$#--state "$PD/.claude/state" --enforce-absent --log "$PD/.claude/state/decisions.jsonl"#' "$SHIM"
-rm -f "$SHIM.bak"
-if ! grep -q -- '--enforce-absent --log' "$SHIM"; then
-  echo "setup: could not add --enforce-absent and --log to $SHIM (did 'harness init' change?)" >&2
-  exit 1
-fi
-
+# Current init already logs PreToolUse and outcome events; older releases did
+# not. Add ABSENT enforcement without depending on physical line breaks, and
+# add a log only when init did not supply one.
 PY=python3
 "$PY" -c '' 2>/dev/null || PY=python
+SHIM="$DESK/.claude/hooks/world-gate.sh"
+# The script goes in with -c, not on stdin with `-`: on Windows `python3` can be
+# the Python install manager's alias, which reads the first file argument's
+# shebang (here the hook's `bash`) and runs that instead of Python.
+patch_shim="$(cat <<'PY'
+import pathlib
+import shlex
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding='utf-8').replace('\\\n', '')
+lines = text.splitlines()
+indices = [i for i, line in enumerate(lines) if line.startswith('exec ')]
+if len(indices) != 1:
+    raise SystemExit('setup: expected one generated hook exec line; rerun harness init')
+i = indices[0]
+args = shlex.split(lines[i])
+if args[:3] != ['exec', '$BIN', 'cc-hook'] or '--grant' not in args:
+    raise SystemExit('setup: unrecognized generated hook; expected cc-hook --grant')
+if '--enforce-absent' not in args:
+    lines[i] += ' --enforce-absent'
+if '--log' not in args:
+    lines[i] += ' --log "$PD/.claude/state/decisions.jsonl"'
+path.write_bytes(('\n'.join(lines) + '\n').encode('utf-8'))
+PY
+)"
+"$PY" -c "$patch_shim" "$SHIM"
+bash -n "$SHIM"
 
 echo "Ready. Next, each in its own terminal, left running:"
 echo
 echo "  1) receiver (the outside sites, all on 127.0.0.1):"
-echo "       $PY $KIT/receiver.py --out $RECEIVED"
-echo "  2) the console, then open http://127.0.0.1:8790/ in a browser:"
-echo "       $HARNESS console --project $DESK"
+echo "       $PY $KIT/receiver.py --port $PORT --out $RECEIVED"
+echo "  2) the console, then open http://127.0.0.1:$CONSOLE_PORT/ in a browser:"
+echo "       $HARNESS console --project $DESK --port $CONSOLE_PORT"
 echo "  3) check the stand:"
-echo "       bash $HERE/preflight.sh $DEST"
+echo "       HARNESS='$HARNESS' PORT=$PORT CONSOLE_PORT=$CONSOLE_PORT bash $HERE/preflight.sh $DEST"
 echo "  4) Claude Code in the project:"
 echo "       cd $DESK && claude --model claude-opus-4-8 --permission-mode default"
 echo

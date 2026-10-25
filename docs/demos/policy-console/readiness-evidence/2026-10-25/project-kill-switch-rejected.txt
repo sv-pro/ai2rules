@@ -1,0 +1,9 @@
+
+  ok    harness: <HARNESS> (cli-harness 0.7.0)
+  ok    project: <RUN_DIR>/stand/vendor-desk (hook shell syntax valid)
+  FAIL  hook/skill configuration: the project kill switch is on: <RUN_DIR>/project-off
+  ok    portal.northwind.test -> 127.0.0.1, receiver answers
+  ok    files.northwind.test -> 127.0.0.1, receiver answers
+  ok    console answers on http://127.0.0.1:35875/ for this project
+
+  1 check(s) failed.

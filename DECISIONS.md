@@ -3567,6 +3567,14 @@ show that it holds.
 Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
 feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.
 
+**Amended 2026-10-25 (AI2-74): the button reads "Emergency stop".** "Stop the agent"
+promised more than the button does: the agent keeps running and the kernel keeps deciding,
+and refuses every effect. If the kernel stopped, the hook would fail open. "Emergency stop"
+is the industrial term for the same shape: motion halts while the controller stays powered
+and watching. "Kill switch" was rejected because here it already names `gate-off`, which
+turns governance off. On the page, Restore became Resume, the status reads "Actions
+stopped" / "Actions not stopped", and the feed labels read E-STOP / RESUME. The profile id
+`stop`, the request bodies and the log markers are unchanged, so existing logs still read.
 
 ## D86 — A limit the kernel cannot enforce is refused, never skipped
 
@@ -3669,6 +3677,154 @@ not load. `amount: { maximum: 10000 }` denies 10,000.01 with `schema_violation`.
 Still not expressible: a limit that routes to an approval instead of denying ("over
 10,000 needs the CFO"), and sums across calls (G6). Those are the next value
 conditions.
+
+## D87 — A broken world follows a declared mode (closed / open / last-good), and says so
+
+**Date:** 2026-10-23. AI2-56 / #128. Adds `--on-broken-world` to `harness cc-hook`
+and `harness agy-hook` (`crates/cli-harness/src/broken_world.rs`). D83–D86 are held
+by parallel work (AI2-64, AI2-65, AI2-63, AI2-55).
+
+**Context.** A review of the book gap analysis (#135) found the docs promising a
+hard boundary that the default hook configuration did not keep. Both hooks treated a
+world that could not be read or compiled as a process failure and failed open: the
+call went to the host's own flow, ungoverned, and nobody was told. A broken world is
+not only an accident. An agent that can write the world file can break it on
+purpose, or delete it, and under fail-open that is a kill-switch the agent throws
+itself, the same exploit as the in-project `gate-off` file. D71 already says an
+*engaged* adapter fails closed, but only the DeepSeek adapter did. Once AI2-55 makes
+the compiler reject more worlds, a rejected world must not quietly mean "no policy".
+
+**Decision.** The hook's answer to a broken world is a mode, chosen by whoever
+installs the hook, and the person is told in every mode.
+
+- **The mode lives outside the world**, as a hook flag, because a broken world cannot
+  say how it wants to be handled. `harness init` writes it into the shim beside
+  `--grant`; at managed scope that shim is admin-owned, so the user cannot change it.
+- **Three modes.**
+  - `closed`: every call is refused. The reason names the mode, the compile error
+    (a YAML error carries its line) and the way out.
+  - `open`: the call proceeds ungoverned, with a warning.
+  - `last-good`: the call is decided by the last world that compiled here, with a
+    warning that the current file has not taken effect. When no world ever
+    compiled here, `closed`.
+- **The last-good cache** is one file in the hook's state directory,
+  `last-good-world.json`: the world text that last compiled, its SHA-256, and the
+  world path it came from. It is kept only in `last-good` mode, rewritten only when
+  the text changes, written atomically, and used only when the text still matches
+  its hash and the path matches the hook's `--world`. The text is cached, not the
+  compiled world, and recompiled with the current base and home, because roots
+  resolve per project.
+- **A missing world is a broken world.** The agy shim no longer passes through when
+  the world file is absent; the hook's mode decides. Deleting the file must not
+  switch governance off.
+- **The warning reaches the person.** Claude Code: a `systemMessage` on every answer
+  while the world is broken, including the silent passthrough, plus the refusal
+  reason under `closed`. Antigravity has no verified user-facing field, so the
+  warning goes to stderr, and a `closed` refusal carries it as the `deny` reason,
+  which is verified to reach the agent. The decision log (`--log`, both hooks) marks
+  lines decided by a cached world with a `broken_world` object, and a call no world
+  decided gets a `BROKEN_WORLD` line. The policy console shows a banner from those
+  lines. `harness doctor` reports the mode (shim flag or hook default), the cached
+  hash, and a `CC_BROKEN_WORLD_MODE` finding when the world does not compile.
+- **Unchanged:** the bootstrap shim's "no binary, fail open" (D37). Without a binary
+  there is no hook to have a mode. An unreadable *event* is still a process failure
+  and still fails open.
+
+**Defaults, by scope.**
+
+| Where | Mode | Why |
+|---|---|---|
+| hook, no flag (shims written before D87, hand-written shims) | `last-good` | the issue's default; a world that compiled keeps holding |
+| `harness init` (project) and `init --user` | `last-good`, written explicitly | the person is present to fix a typo; refusing everything over one would push them to the off switch |
+| `init --managed` | `closed` | the cache would sit in the per-user state dir, which the user can write; see below |
+
+Why not `open` at project scope, which keeps existing installs working exactly as
+before: the agent can write the project's world, so `open` hands it the switch. That
+is the security note in the issue. `last-good` keeps existing installs working too:
+their worlds compile, so the first call after the upgrade caches one.
+
+Why `closed` at managed scope: the managed world is admin-owned, but the hook runs
+as the user and can only cache where the user can write. A user could plant a
+permissive "last good" world there and wait for an administrator's broken
+deployment to promote it. `open` would make the policy optional. The cost is that a
+broken managed world refuses every call on the machine until an administrator fixes
+it; `init --managed` compiles the world before installing it, which is where that
+should be caught. At project and user scope the cache is exactly as writable as the
+world itself (both are read-only to the agent's file tools, both writable by an
+approved Bash command), so it adds no hole the world does not already have.
+
+**Alternatives.**
+
+- *A key in the world file.* Rejected: a broken world cannot be read.
+- *An environment variable.* Rejected: invisible to `doctor`, and set by whoever
+  starts the host rather than by whoever installs the policy.
+- *Keep fail-open, add only the warning.* Rejected: the warning would announce the
+  agent's own off switch rather than close it.
+- *`closed` everywhere.* Rejected as the project default: a typo in an edit refuses
+  every call until fixed, including the edit that would fix it through the agent.
+- *Sign or hash-lock the cache.* Not done: there is no place the hook can keep a key
+  or hash that the same user cannot also write. At managed scope the answer is
+  `closed`; at the other scopes it would protect nothing the world file does not
+  already expose.
+
+**Consequence.** A world that does not compile no longer switches governance off by
+default, and every broken-world call says so where the person looks. The price of
+`last-good` is stated in its warning: if the edit was meant to tighten the policy,
+the looser old one holds until the file is fixed. Unverified on a live host: that
+Claude Code renders a PreToolUse `systemMessage` (its docs list the field as
+universal and name no exception for PreToolUse), and whether Antigravity shows hook
+stderr to the user. Since D84 `agy-hook --log` writes the same decision lines as
+`cc-hook`, and its broken-world lines are marked the same way.
+
+## D88 — Windows is a tested platform: the OS CSPRNG everywhere, the same `..` refusal, a Windows CI job
+
+**Date:** 2026-10-23. AI2-57.
+
+**Context.** The harness ships a Windows binary, and the live policy-console demo
+runs on Windows, but CI tested Linux only. The first native Windows run of the
+workspace had 44 test failures and two clippy errors, none visible in CI:
+
+- `trace-store::approval::random_key()` read `/dev/urandom` and returned
+  `Unsupported` on every other platform, so `ApprovalStore::open` failed on
+  Windows. It failed closed, but REPL approvals, staged effects and the benchmark's
+  ai2rules target did not work at all there.
+- `hostkit` promises that a `..` after a component that does not exist is refused.
+  Unix does that by itself. Windows resolves `..` lexically, and `PathBuf::join`
+  onto a verbatim `\?\` base (what `canonicalize` returns there) does so before any
+  check runs, so `new/../../../etc/passwd` resolved to a real folder above the
+  project. That is not a bypass, because the resolved path is where Windows would
+  write and `roots` judged it. But the stated refusal did not hold.
+
+**Decision.**
+
+1. The approval key comes from the `getrandom` crate on every platform:
+   `getrandom(2)` on Linux, `ProcessPrng` on Windows. A failure is an error, never a
+   weaker key.
+2. The agent's path is joined onto the project base using native components,
+   preserving Windows roots and drive/UNC prefixes. Both rooted separator forms
+   (`/file` and `\file`) use the base drive; drive-relative prefixes retain native
+   joining semantics. Refuse a `..` after a missing component before any Windows
+   normalization can erase it, including before successful canonicalization of
+   absolute paths. Unix symlink/`..` resolution remains filesystem-based.
+3. A `check-windows` CI job runs clippy `-D warnings` and `cargo test --workspace`
+   on `windows-latest`. Tests that need Unix (symlinks, process groups, shell
+   shims) stay `cfg(unix)`. Format stays in the Linux job, since it does not depend
+   on the platform.
+
+**Alternatives.**
+
+- *Direct FFI to `BCryptGenRandom`/`ProcessPrng`.* No new dependency, but it needs
+  `unsafe` in a crate that has none, and per-platform code to maintain. `getrandom`
+  was already in the lockfile through `tempfile`, so the offline crate set covers it.
+- *Keep `/dev/urandom` and declare approvals Unix-only.* That is honest, but it
+  makes the Windows binary a second-class product while the demo runs on Windows.
+- *Accept lexical `..` on Windows as the OS's own semantics.* The kernel's path
+  answers should not depend on the host OS; one rule on every host is the point of
+  the conformance suite.
+
+**Not done.** On Windows a timed-out command still kills only its direct child: the
+executor creates no Job Object. That was already stated in
+`executor/src/handlers/command.rs`, and its test stays `cfg(unix)`.
 
 ## D89 — MCP approvals consume before effects and resume through the same kernel
 

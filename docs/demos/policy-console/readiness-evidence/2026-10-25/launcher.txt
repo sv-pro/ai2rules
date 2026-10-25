@@ -1,0 +1,32 @@
+1/5  Rebuilding the project in <RUN_DIR>/launcher stand/vendor-desk
+2/5  Starting the receiver (:48999) and the console (:40715); logs in <RUN_DIR>/launcher-logs
+3/5  Checking the stand
+
+  ok    harness: <HARNESS> (cli-harness 0.7.0)
+  ok    project: <RUN_DIR>/launcher stand/vendor-desk (hook shell syntax valid)
+  ok    all-tools hook, exact world/state/log, grant/ABSENT, selected binary projection and /northwind-demo
+  ok    portal.northwind.test -> 127.0.0.1, receiver answers
+  ok    files.northwind.test -> 127.0.0.1, receiver answers
+  ok    console answers on http://127.0.0.1:40715/ for this project
+
+  Stand checks passed. Interactive /northwind-demo rehearsal is still required.
+4/5  Console: http://127.0.0.1:40715/
+5/5  Open Claude yourself:
+       Claude app: a new Code session on the folder <RUN_DIR>/launcher stand/vendor-desk
+                   mode Manual, model Opus 4.8
+       terminal  : cd <RUN_DIR>/launcher stand/vendor-desk && claude --model claude-opus-4-8 --permission-mode default
+
+     The receiver's request log follows. Ctrl+C here stops the receiver and the console.
+
+[1;32mreceiver up[0m on 127.0.0.1:48999, forwarding nothing
+  page    http://portal.northwind.test:48999/onboarding
+  upload  http://files.northwind.test:48999/upload   (POST/PUT)
+  out     <RUN_DIR>/launcher-inbox
+Every request is logged below, with the name it was sent to. Ctrl-C to stop.
+
+[2m11:52:43  GET  127.0.0.1/health                         ok[0m
+[2m11:52:43  GET  portal.northwind.test/health             ok[0m
+[2m11:52:43  GET  files.northwind.test/health              ok[0m
+Terminated
+
+Stopping the receiver and the console.

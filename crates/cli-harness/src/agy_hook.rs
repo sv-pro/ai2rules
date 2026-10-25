@@ -53,11 +53,17 @@
 //!   silently satisfying it would void the approval guarantee — so the strict
 //!   channel is the default. `--soft-ask` opts back into cache-respecting `ask`
 //!   for a less intrusive dogfooding posture.
-//! - **Fail-open (documented strategy):** any PROCESS error — unreadable event,
-//!   uncompilable world — exits 0 emitting `{}` (the no-decision no-op). A
-//!   broken hook must never brick a session. A process failure is never an
-//!   outcome (see `host.rs`).
+//! - **Fail-open (documented strategy):** a PROCESS error — an unreadable event —
+//!   exits 0 emitting `{}` (the no-decision no-op). A broken hook must never brick
+//!   a session. A process failure is never an outcome (see `host.rs`).
+//! - **A broken world is not a process error (D87).** A world that cannot be read
+//!   or compiled is handled by `--on-broken-world` (`closed` / `open` /
+//!   `last-good`, see [`crate::broken_world`]). Antigravity has no verified
+//!   user-facing message field, so the warning goes to stderr on every call while
+//!   it lasts, and a `closed` refusal carries it as the `deny` reason, which is
+//!   verified to reach the agent.
 
+use crate::broken_world::{self, BrokenWorld, BrokenWorldMode, WorldLoad};
 use crate::cc_hook::{call_summary, decision_line};
 use crate::hostkit::{
     canonicalize_root_paths, normalize_tool, persist_taint, persist_usage, read_usage,
@@ -68,6 +74,7 @@ use compiler::{compile, loader::load_yaml, resolve_root_paths};
 use harness_preview::{
     gate, host_outcome, BlockKind, GateContext, GateRequest, GateResponse, HostOutcome, ABI_VERSION,
 };
+use harness_types::CompiledWorld;
 use serde_json::{json, Map, Value};
 use std::io::Read;
 use std::path::Path;
@@ -77,6 +84,26 @@ use std::path::Path;
 fn passthrough() -> i32 {
     println!("{}", json!({}));
     0
+}
+
+/// The way out a `closed` refusal names. The agy shim has no kill-switch file, so
+/// the off switch is the hook registration itself.
+const WAY_OUT: &str =
+    "switch governance off by removing the PreToolUse entry from .agents/hooks.json";
+
+/// Compile a world as this hook does: roots resolved against the project `base`
+/// and `home` at the I/O boundary, then the pure compile.
+fn hook_world(
+    content: &str,
+    base: Option<&str>,
+    home: Option<&str>,
+) -> Result<CompiledWorld, String> {
+    let mut m = load_yaml(content).map_err(|e| e.to_string())?;
+    if let Some(r) = &m.roots {
+        let roots = resolve_root_paths(r, home, base);
+        m.roots = Some(canonicalize_root_paths(&roots));
+    }
+    compile(&m).map_err(|e| e.to_string())
 }
 
 /// Emit an Antigravity hook decision and exit 0.
@@ -166,14 +193,19 @@ struct Recorder<'a> {
     tool: String,
     call: String,
     ids: HostIds,
+    /// Set when the call is decided by the last world that compiled (D87).
+    broken: Option<BrokenWorld>,
 }
 
 impl Recorder<'_> {
     fn record(&self, res: &GateResponse, answer: Option<&str>, reason: &str) {
         if let Some(path) = self.log {
-            let line = decision_line(
+            let mut line = decision_line(
                 &self.sid, &self.tool, &self.call, res, answer, reason, &self.ids,
             );
+            if let Some(b) = &self.broken {
+                line["broken_world"] = b.log_fields();
+            }
             append_line(path, &line, "agy-hook");
         }
     }
@@ -189,6 +221,7 @@ pub fn run(
     grant: bool,
     soft_ask: bool,
     log: Option<&Path>,
+    on_broken_world: BrokenWorldMode,
 ) -> i32 {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
@@ -241,19 +274,40 @@ pub fn run(
     let home = std::env::var("HOME").ok();
 
     // Compile the world and decide, in-process (D34). Roots paths are resolved to
-    // absolute here (env-dependent) before the pure compile.
-    let world = match std::fs::read_to_string(world_path)
-        .ok()
-        .and_then(|c| load_yaml(&c).ok())
-        .and_then(|mut m| {
-            if let Some(r) = &m.roots {
-                let roots = resolve_root_paths(r, home.as_deref(), base.as_deref());
-                m.roots = Some(canonicalize_root_paths(&roots));
+    // absolute here (env-dependent) before the pure compile. A world that does not
+    // compile is handled by the broken-world mode (D87).
+    let loaded = broken_world::load(world_path, state_dir, on_broken_world, |text| {
+        hook_world(text, base.as_deref(), home.as_deref())
+    });
+    let (world, broken) = match loaded {
+        WorldLoad::Live(w) => (w, None),
+        WorldLoad::Broken { world, broken } => {
+            let warning = broken.message(WAY_OUT);
+            eprintln!("{warning}");
+            if let Some(w) = world {
+                (w, Some(broken))
+            } else {
+                // No world decides: `closed` refuses, `open` passes, both logged.
+                let refuse = broken.applied == BrokenWorldMode::Closed;
+                if let Some(path) = log {
+                    let line = broken_world::log_line(
+                        &sid,
+                        tool,
+                        &call,
+                        tainted,
+                        &broken,
+                        refuse.then_some("deny"),
+                        &warning,
+                        &ids,
+                    );
+                    append_line(path, &line, "agy-hook");
+                }
+                if refuse {
+                    emit("deny", &warning);
+                }
+                return passthrough(); // `open`: ungoverned, and said so
             }
-            compile(&m).ok()
-        }) {
-        Some(w) => w,
-        None => return passthrough(), // fail-open
+        }
     };
 
     let action_path = base
@@ -284,6 +338,7 @@ pub fn run(
         tool: tool.to_string(),
         call,
         ids,
+        broken,
     };
 
     // Persist the kernel-computed monotonic taint for the next call. The note

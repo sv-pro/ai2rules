@@ -533,6 +533,8 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 
 - [x] **E13.10** Instruction and memory files count as durable memory (DECISIONS **D83**, AI2-64 / #137, gap G1 of the *Designing AI Agents* review): a `path_classes` world section reclassifies `Write`/`Edit`/`MultiEdit`/`NotebookEdit` (and Antigravity's `write_to_file`/`propose_code`/`edit_notebook`) to a `side_effect: Memory` action when the canonical path or the normalized argument matches `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/{agents,commands,rules,skills}/**`, auto-memory or `.agents/{rules,skills,workflows}/**`. Tainted → `DENY taint_invariant`; clean → ALLOW in project worlds, ASK in `--user`/`--managed` worlds. One pattern list, pinned across host manifests. **Pending**: shell writes (`echo >> CLAUDE.md`, D57 residual), Antigravity `move` (destination key not captured), path classes for the OpenCode and DeepSeek Harness worlds.
 
+- [x] **E13.11** Broken-world mode for the host hooks (DECISIONS **D87**, AI2-56 / #128): `cc-hook` and `agy-hook` take `--on-broken-world closed|open|last-good`; a world that cannot be read or compiled (or is deleted) no longer fails open. `last-good` (the default) decides with the last world that compiled, cached in the state dir, and falls back to `closed`; `init` writes `last-good`, `init --managed` writes `closed`. Every mode warns (Claude Code `systemMessage`, agy stderr, decision log, console banner, `harness doctor`). **Pending**: a live check that Claude Code renders a PreToolUse `systemMessage`.
+
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
 
 ---
@@ -564,6 +566,12 @@ Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × s
 **Exit:** `ai2rules.dev/playground` hosts several real-kernel-backed interactive visualizations — led by the Taint-Flow Simulator embedded in the sandbox guide — each running entirely in the reader's browser and each provably faithful via the E14 fidelity guard.
 
 ---
+
+**Northwind readiness follow-up (AI2-62 / PR #150, 2026-10-25):** preflight
+checks actual hook registration, flags, paths and selected binary; setup supports
+the current logged hook. The native scenario and launcher regressions run in CI.
+See [integration evidence](docs/demos/policy-console/READINESS-2026-10-25.md).
+Interactive presentation rehearsal remains separate; E15 is not marked complete.
 
 ### E16 — Internal demo: governed JIRA MCP on Copilot + Claude Code  🔝 HIGH PRIORITY
 **Goal:** A live internal demo showing **one governance manifest shaping the capability

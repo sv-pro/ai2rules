@@ -479,7 +479,7 @@ fn stop_takes_every_effectful_action_away_and_restore_gives_it_back() {
     assert_eq!(markers.len(), 2, "{feed}");
     assert_eq!(
         markers[0]["headline"],
-        "Stopped: every effectful action off"
+        "Emergency stop: every effectful action off"
     );
     assert_eq!(
         markers[0]["stop"]["before"]["Bash_destructive"]["approval_required"],
@@ -489,7 +489,7 @@ fn stop_takes_every_effectful_action_away_and_restore_gives_it_back() {
         markers[0]["stop"]["before"]["Bash_unclassified"]["approval_required"],
         true
     );
-    assert_eq!(markers[1]["headline"], "Restored: Developer");
+    assert_eq!(markers[1]["headline"], "Resumed: Developer");
     assert_eq!(markers[1]["restore"], true);
     assert!(markers[1]["ts_ms"].as_u64() >= markers[0]["ts_ms"].as_u64());
 

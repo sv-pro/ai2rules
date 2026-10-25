@@ -318,7 +318,10 @@ else
   BIN="$TRUSTED_BIN"
 fi
 [ -x "$BIN" ] || exit 0  # fail-open: no trusted kernel, normal permissions
-exec "$BIN" cc-hook{grant_flag} --world "$WORLD" --state "$STATE" --log "$STATE/decisions.jsonl"
+# A world that does not compile (D87): decide with the last one that did, and warn.
+# `closed` refuses every call instead; `open` lets calls through ungoverned.
+exec "$BIN" cc-hook{grant_flag} --world "$WORLD" --state "$STATE" --log "$STATE/decisions.jsonl" \
+  --on-broken-world last-good
 "#,
                 bin = sh_quote(harness_bin),
                 world = sh_quote(&world),
@@ -344,7 +347,11 @@ WORLD={world}
 [ -x "$BIN" ] || exit 0  # fail-open: a broken install must not brick every session
 # Per-user state: one policy serves every account on the machine.
 STATE="${{HOME:-/tmp}}/.claude/ai2rules/managed/state"
-exec "$BIN" cc-hook{grant_flag} --world "$WORLD" --state "$STATE" --log "$STATE/decisions.jsonl"
+# A world that does not compile refuses every call (D87). Not `last-good`: its cache
+# would live in STATE, which the user can write, so a planted "last good" world
+# could stand in for this one. Not `open`: that makes the policy optional.
+exec "$BIN" cc-hook{grant_flag} --world "$WORLD" --state "$STATE" --log "$STATE/decisions.jsonl" \
+  --on-broken-world closed
 "#,
             bin = sh_quote(harness_bin),
             world = sh_quote(&world),
