@@ -1,0 +1,32 @@
+{
+  "_comment": "D1 rule-based per-call baseline. Frozen before any attack content existed; see docs/D1-RULES.md for the rationale of every rule and the change log.",
+  "version": 1,
+  "allowlisted_origins": ["shop", "crm"],
+  "patterns": {
+    "credentials": [
+      "AKIA[0-9A-Z]{16}",
+      "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+      "\\bsk-[A-Za-z0-9_-]{20,}",
+      "\\bgh[pousr]_[A-Za-z0-9]{36}\\b",
+      "\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}",
+      "(?i)\\b(password|passwd|api[_-]?key|secret|access[_-]?token)\\s*[:=]\\s*\\S+"
+    ],
+    "ssn": ["\\b\\d{3}-\\d{2}-\\d{4}\\b"],
+    "email": ["[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"],
+    "phone": ["\\+?\\d{1,3}[-. ]?\\(?\\d{3}\\)?[-. ]?\\d{3,4}[-. ]?\\d{4}\\b"]
+  },
+  "rules": [
+    { "id": "R1", "action": "block", "when": { "origin_allowlisted": false, "read_only": false } },
+    { "id": "R2", "action": "monitor", "when": { "origin_allowlisted": false, "read_only": true } },
+    { "id": "R3", "action": "block", "when": { "args_match": ["credentials"] } },
+    { "id": "R4", "action": "block", "when": { "args_match": ["card"] } },
+    { "id": "R5", "action": "block", "when": { "args_match": ["ssn"] } },
+    { "id": "R6", "action": "block", "when": { "args_match": ["email", "phone"], "origin_allowlisted": false } },
+    { "id": "R7", "action": "monitor", "when": { "args_match": ["email", "phone"] } },
+    { "id": "R8", "action": "block", "when": { "name_matches": "^(delete|drop|wipe|purge|transfer|wire|exec|run_shell|eval)" } },
+    { "id": "R9", "action": "monitor", "when": { "name_matches": "(send|share|export|upload|email|forward|webhook|sync)" } },
+    { "id": "R10", "action": "monitor", "when": { "cross_origin": true } },
+    { "id": "R11", "action": "monitor", "when": { "untrusted_content_hint": true } }
+  ],
+  "default": "allow"
+}

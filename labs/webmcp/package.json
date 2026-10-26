@@ -1,0 +1,16 @@
+{
+  "name": "webmcp-attack-lab",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Deterministic WebMCP attack lab: 5 attacks x 3 defenses (AI2-83)",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "cell": "node src/run.js --cell",
+    "matrix": "node src/run.js --matrix"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}

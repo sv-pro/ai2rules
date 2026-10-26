@@ -185,6 +185,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
 
 **Done so far:**
 
+- **WebMCP attack lab (#160 / AI2-83, `labs/webmcp/`):** 5 epic attacks plus 3 variants against no defense (D0), a rule-based per-call baseline (D1) and ai2rules (D2, the real kernel via `harness project` / `harness gate`), under a deterministic compromised agent. Attacks are judged from effects only, and D1 and the tasks were frozen before any attack. Result: D1 lets 6 of 8 through; D2 lets 2 through (S3b, handler tampering in a shared realm; S5b, exfiltration through a permitted read tool) and loses utility wherever per-session taint fires. A fourth column, D3, prototypes the value-level flow labels of AI2-70 / #151 in the adapter: it recovers all the utility D2 loses, closes S5b, and regresses nothing — its one cost is that a transform of a labelled value escapes the surface match, the limit AI2-70 itself calls out. Independently verified (`labs/webmcp/verification/`), plus a real-model column. `cd labs/webmcp && npm run matrix`; CI job `webmcp-lab` fails on result drift.
 - **E0 — Foundations & Core Contracts:** the Cargo workspace, the language-neutral
   contracts in `harness-types`, the sealed `IntentIR` / `IRBuilder` in
   `world-kernel`, the `BuildError` taxonomy, and CI.
@@ -473,6 +474,7 @@ docs/                 architecture (harness-architecture.md is canonical; one-ke
   benchmarks/ecc/             planned external target: ECC + AgentShield on the host-hook path (E18.14)
 scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
+labs/webmcp/          WebMCP attack lab: 5 attacks × D0/D1/D2, CompromisedAgent, Playwright (#160 / AI2-83; Node sub-project)
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
 CLAUDE.md             Claude Code pointer → AGENTS.md
