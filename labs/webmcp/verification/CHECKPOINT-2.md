@@ -189,3 +189,7 @@ WEBMCP_VERIFY_PORT=19480 WEBMCP_REVIEW_SHA=6ab1a28 \
 Exit 1 from a probe file flags a FAILed property (CP1: the documented I04 TOFU;
 CP2: the self-noted `B01-seven-distinct-cells` assertion bug). Rerun against a
 corrected SHA rather than weakening an assertion.
+
+## Checkpoint 3
+
+D3 (value-level flow labels) is verified in [`CHECKPOINT-3.md`](CHECKPOINT-3.md).
