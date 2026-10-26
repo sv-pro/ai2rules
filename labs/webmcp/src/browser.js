@@ -95,7 +95,7 @@ export class BrowserEnv {
   async listRegistered() {
     const out = [];
     for (const tab of this.#tabs.values()) {
-      const raw = await tab.page.evaluate(() => window.__webmcpHarness.list());
+      const raw = JSON.parse(await tab.page.evaluate(() => window.__webmcpHarness.list()));
       const origin = this.originName(tab.page.url());
       for (const t of raw) {
         const regId = `${tab.id}.${tab.nav}:${t.seq}`;
@@ -122,8 +122,9 @@ export class BrowserEnv {
     const [tabPart, seqPart] = tool.regId.split(':');
     const [tabId, nav] = tabPart.split('.');
     const tab = this.#tabs.get(tabId);
-    if (!tab || String(tab.nav) !== nav) return { ok: false, error: `registration ${tool.regId} is no longer live` };
-    return tab.page.evaluate(([seq, a]) => window.__webmcpHarness.execute(seq, a), [Number(seqPart), args]);
+    if (!tab || String(tab.nav) !== nav) return { ok: false, entered: false, error: `registration ${tool.regId} is no longer live` };
+    const out = await tab.page.evaluate(([seq, a]) => window.__webmcpHarness.execute(seq, a), [Number(seqPart), JSON.stringify(args ?? {})]);
+    return JSON.parse(out);
   }
 
   // Test hook: run a function in a tab's page, as a page script would.

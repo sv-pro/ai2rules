@@ -94,8 +94,11 @@ export class AgentEnv {
     }
 
     const res = await this.browser.execute(tool, args);
+    // `entered`: the handler was actually invoked. A registration that went
+    // away between the verdict and execution is never entered, so its
+    // arguments reached no one (CONTRACTS.md §5, verifier finding F3).
     this.trace.write('exec', {
-      regId: tool.regId, origin: tool.origin, name, args,
+      regId: tool.regId, origin: tool.origin, name, args, entered: res.entered === true,
       ok: res.ok, result: res.ok ? res.result : undefined, error: res.ok ? undefined : res.error,
     });
     await this.defense.afterCall?.(call, res, this.#ctx());
