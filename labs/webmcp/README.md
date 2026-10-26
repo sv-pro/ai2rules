@@ -11,6 +11,7 @@ execution layer lets through, and judges it only by observed effects.
 
 - Contracts — what the lab promises, and what the tests pin: [`CONTRACTS.md`](CONTRACTS.md)
 - D1 rules and why an admin would write them: [`docs/D1-RULES.md`](docs/D1-RULES.md)
+- LLMAgent stretch column (a real model on a subset, `--agent llm`): [`docs/LLM-AGENT.md`](docs/LLM-AGENT.md)
 - Results (generated): `results/RESULTS.md`, `results/results.json`, `results/traces/`
 
 ## Run
@@ -34,7 +35,7 @@ src/shim/            document.modelContext shim (browser-side)
 src/servers.js       shop / crm / attacker / widget origins
 src/browser.js       Playwright: tabs, listing, execute-by-registration
 src/env.js           the agent's interface; every call goes through the defense
-src/agent/           CompromisedAgent
+src/agent/           CompromisedAgent · LLMAgent (stretch column)
 src/defenses/        D0 none · D1 rule-based baseline · D2 ai2rules (real kernel)
 src/tasks.js         the benign tasks (frozen)
 src/oracle.js        effect-based judging
