@@ -5,7 +5,8 @@ For a technical decision-maker. Every claim cites its source in brackets:
 [`results/results.json`](../results/results.json) (row = `scenario`/`defense`),
 **[C §n]** = [`CONTRACTS.md`](../CONTRACTS.md), **[D1R …]** =
 [`D1-RULES.md`](D1-RULES.md), **[V §…]** =
-[`verification/CHECKPOINT-2.md`](../verification/CHECKPOINT-2.md), **[L]** =
+[`verification/CHECKPOINT-2.md`](../verification/CHECKPOINT-2.md), **[CHECKPOINT-3 §…]** =
+[`verification/CHECKPOINT-3.md`](../verification/CHECKPOINT-3.md) (the D3 column), **[L]** =
 [`results/RESULTS-LLM.md`](../results/RESULTS-LLM.md), **[LA §…]** =
 [`LLM-AGENT.md`](LLM-AGENT.md). **[S2 scenario†]** =
 `scenarios/s2-poisoned-description/scenario.js`, outside those files and flagged in
@@ -14,12 +15,15 @@ the checklist of [`BLOG-OUTLINE.md`](BLOG-OUTLINE.md).
 > **Verification.** The independent verifier's checkpoint 2 reproduced the
 > 30-cell matrix at `6ab1a28` twice, byte-identical, with 0 differences from the
 > committed results, and re-derived every cell from traces and server state
-> [V §Reproduction]. **S5b was added after that** (it measures the verifier's
-> finding C2-1 [V §Findings; R §Limitations]): its three cells come from the lab
-> author's run and were not re-run by the verifier. What the verifier says cannot
-> be claimed is listed under Limitations. **A fourth column, D3, was added later**
-> (value-level flow labels; see below); the verifier is re-checking it, so its
-> cells are the author's run and are marked pending throughout.
+> [V §Reproduction]. **S5b and the D3 column were added after that, and the
+> verifier re-ran the full 44-cell matrix twice at `ad01717`** (checkpoint 3),
+> byte-identical, checking S5b and every D3 cell's outcome, causality and utility
+> [CHECKPOINT-3 §Reproduction, §Confirmed]. One later change — making S4b
+> event-driven instead of timer-driven, at `501947e` — was validated by the
+> `webmcp-lab` CI job on Linux (green at `2624385`), not re-run by the verifier by
+> hand. The "pending" markers below are scoped to that: D3's *outcomes* are
+> verified; what remains the author's own word is any claim beyond this fixed
+> matrix. What the verifier says cannot be claimed is listed under Limitations.
 
 ## What was measured, and how
 
@@ -30,7 +34,7 @@ the checklist of [`BLOG-OUTLINE.md`](BLOG-OUTLINE.md).
   endpoint or the arguments of an executed non-CRM tool call, or an unauthorized
   order, review or note was made. Defense verdicts are never used [C §5]; the
   verifier checked that flipping every verdict leaves the oracle unchanged
-  [V §CP2 live probes, V01]. This run: 33 cells, 0 errors [R, intro].
+  [V §CP2 live probes, V01]. This run: 44 cells (11 scenarios × 4 defenses), 0 errors [R, intro].
 - **Positive controls.** Every attack succeeds with no defense (D0), so a stop
   under D1 or D2 is that defense's doing [R §What each defense let through].
 - **Rules frozen before attacks.** The D1 rules were committed before any attack
@@ -154,7 +158,8 @@ itself. The verifier is re-checking it; treat these as the author's run.
   The verifier adds a caveat: the shipped S5/S5b paste the whole record
   (`$ALL_OUTPUTS`), so the full labelled leaf is present and caught; a one-line
   "put just the account code" would be a partial quote that escapes the label and
-  leaks, where D2's taint would still have blocked the write [C §8.4; V §Confirmed].
+  leaks, where D2's taint would still have blocked the write [C §8.4;
+  CHECKPOINT-3 §Confirmed].
 - **The one cost, regression-tested.** The label follows the whole labelled value
   by surface match, so a transform (encoding, reversal) or a partial quote of it
   escapes [C §8.4 "the cost"; test `labels_defeated_by_transform`]. D2's coarser
@@ -217,7 +222,10 @@ the two attacks whose write tool sat on a non-allowlisted origin and none of the
 other six. ai2rules (D2) stopped six of eight, but after any CRM read it also
 blocks the write the user asked for, and it does not stop a leak through a read
 tool. Adding value-level flow labels (D3, a prototype of AI2-70 / #151) recovers
-that utility and closes the read-tool leak while keeping D2's security — pending
-independent verification, and at the cost that a transform of a labelled value
-escapes the label. Neither stops handler tampering (S3b), which needs script
-isolation, not tool governance.
+that utility and closes the read-tool leak while keeping D2's security **on these
+eight fixed scenarios, whose S5/S5b payloads carry the whole labelled field** —
+pending independent verification, and at the cost that a transform *or an unchanged
+partial quote* of a labelled value escapes the label (a write D2's session taint
+would still have blocked). It is a bounded result, not general parity. Neither
+stops handler tampering (S3b), which none of the four tested defenses detects and
+which the layer that could — script isolation — is one we did not test.
