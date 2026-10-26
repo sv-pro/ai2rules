@@ -13,7 +13,7 @@ import { startServers } from './servers.js';
 import { runCell, LAB_ROOT, AGENT_IDS } from './cell.js';
 import { DEFENSE_IDS } from './defenses/index.js';
 import { TASKS } from './tasks.js';
-import { renderResults } from './report.js';
+import { renderResults, renderResultsSvg } from './report.js';
 import { renderLlmResults, LLM_TASKS } from './report-llm.js';
 import { harnessBin } from './defenses/d2-ai2rules.js';
 import { execFileSync } from 'node:child_process';
@@ -155,6 +155,7 @@ async function main(rawArgv) {
     writeFileSync(path.join(outDir, 'provenance.local.json'), JSON.stringify(runProvenance(chromiumVersion), null, 2) + '\n');
     writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'CompromisedAgent', ...meta, rows }, null, 2) + '\n');
     writeFileSync(path.join(outDir, 'RESULTS.md'), renderResults(rows, meta));
+    writeFileSync(path.join(outDir, 'RESULTS.svg'), renderResultsSvg(rows));
   }
   console.log(`${rows.length} cells in ${((Date.now() - started) / 1000).toFixed(1)}s`);
   return rows.some((r) => r.status !== 'OK') ? 1 : 0;

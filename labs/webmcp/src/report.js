@@ -39,6 +39,7 @@ export function renderResults(rows, meta = {}) {
   L.push('- **Utility** means the user\'s benign task still completed.');
   L.push('- `ERROR` means the lab failed, never that a defense held.', '');
   if (meta.harness) L.push(`Kernel: \`${meta.harness}\`. Cells: ${rows.length}. Errors: ${errors.length}.`, '');
+  L.push('Figure (generated, same data): [`RESULTS.svg`](RESULTS.svg).', '');
   if (errors.length) L.push(`**This run has errors; no conclusion below holds:** ${errors.map((r) => `${r.scenario}/${r.defense}`).join(', ')}.`, '');
 
   L.push('## Attack outcome', '');
@@ -149,4 +150,63 @@ export function renderResults(rows, meta = {}) {
   L.push('```', '');
   L.push('Per-cell traces: `results/traces/<scenario>--<defense>.jsonl` (CONTRACTS.md §4).', '');
   return L.join('\n');
+}
+
+// A generated results figure (SVG) for the write-ups: the attack × defense grid,
+// one coloured cell per outcome, plus the per-task utility strip. No timestamps,
+// computed only from the rows, so `npm run matrix` keeps it in step and the CI
+// diff gate keeps it honest — it can never go stale the way a pasted image would.
+// Dark-mode-friendly via CSS variables with a light fallback.
+export function renderResultsSvg(rows) {
+  const scenarios = [...new Set(rows.map((r) => r.scenario))];
+  const attacks = scenarios.filter((s) => !s.startsWith('benign:'));
+  const defenses = [...new Set(rows.map((r) => r.defense))];
+  const at = (s, d) => rows.find((r) => r.scenario === s && r.defense === d);
+  const short = (s) => rows.find((r) => r.scenario === s)?.short ?? s;
+
+  // Outcome → fill token + glyph. Effects only; ERROR is its own state.
+  const cell = (r) => {
+    if (!r || r.status !== 'OK') return { f: 'var(--err)', t: 'ERR', title: 'ERROR' };
+    if (r.attack_success) return { f: 'var(--bad)', t: '✕', title: 'attack succeeded' };
+    if (r.stopped_by === 'not_triggered') return { f: 'var(--neutral)', t: '–', title: 'no effect (not triggered)' };
+    return { f: 'var(--good)', t: '✓', title: `stopped: ${r.stopped_by}` };
+  };
+
+  const x0 = 170, y0 = 54, cw = 118, ch = 30, gap = 4;
+  const w = x0 + defenses.length * (cw + gap) + 16;
+  const h = y0 + attacks.length * (ch + gap) + 70;
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+  const parts = [];
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13">`);
+  parts.push(`<style>:root{--fg:#1a1a1a;--muted:#666;--good:#1b7f4b;--bad:#b4231f;--neutral:#8a8a8a;--err:#8a5a00;--line:#ddd}@media(prefers-color-scheme:dark){:root{--fg:#e8e8e8;--muted:#9aa;--good:#2ea36a;--bad:#e05a55;--neutral:#999;--err:#c89a3a;--line:#333}}text{fill:var(--fg)}</style>`);
+  parts.push(`<text x="12" y="24" font-size="15" font-weight="700">WebMCP attack lab — attack outcome</text>`);
+  parts.push(`<text x="12" y="40" fill="var(--muted)">CompromisedAgent; judged from effects. ✓ stopped · ✕ succeeded · – not triggered.</text>`);
+  // Column headers.
+  defenses.forEach((d, i) => {
+    const cx = x0 + i * (cw + gap) + cw / 2;
+    parts.push(`<text x="${cx}" y="${y0 - 8}" text-anchor="middle" font-weight="700">${esc(d)}</text>`);
+  });
+  // Rows.
+  attacks.forEach((s, ri) => {
+    const y = y0 + ri * (ch + gap);
+    parts.push(`<text x="12" y="${y + ch / 2 + 4}">${esc(short(s))}</text>`);
+    defenses.forEach((d, ci) => {
+      const x = x0 + ci * (cw + gap);
+      const c = cell(at(s, d));
+      parts.push(`<rect x="${x}" y="${y}" width="${cw}" height="${ch}" rx="4" fill="${c.f}"><title>${esc(s)} / ${esc(d)}: ${esc(c.title)}</title></rect>`);
+      parts.push(`<text x="${x + cw / 2}" y="${y + ch / 2 + 4}" text-anchor="middle" fill="#fff" font-weight="700">${c.t}</text>`);
+    });
+  });
+  // Totals footer: attacks let through per defense.
+  const fy = y0 + attacks.length * (ch + gap) + 24;
+  parts.push(`<text x="12" y="${fy}" fill="var(--muted)">attacks let through:</text>`);
+  defenses.forEach((d, i) => {
+    const through = attacks.filter((s) => at(s, d)?.attack_success).length;
+    const cx = x0 + i * (cw + gap) + cw / 2;
+    parts.push(`<text x="${cx}" y="${fy}" text-anchor="middle" font-weight="700">${through}/${attacks.length}</text>`);
+  });
+  parts.push(`<text x="12" y="${fy + 22}" fill="var(--muted)">Generated from results.json; see RESULTS.md for the full tables and the utility column.</text>`);
+  parts.push('</svg>');
+  return parts.join('\n') + '\n';
 }

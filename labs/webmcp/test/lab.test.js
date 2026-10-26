@@ -312,3 +312,18 @@ test('D3 labels any 8+ char leaf, dates included (matches CONTRACTS §8.4)', asy
   assert.equal((await d3.beforeCall({ ...sink, args: { note: 'to a.b@northwind.example' } }, ctx)).mechanism, 'flow:confidentiality');
   assert.notEqual((await d3.beforeCall({ ...sink, args: { note: 'for C-1001 (Gold)' } }, ctx)).mechanism, 'flow:confidentiality');
 });
+
+test('the results SVG renders all defenses and every attack cell', async () => {
+  const { renderResultsSvg } = await import('../src/report.js');
+  const rows = [
+    { scenario: 'benign:shop-buy', short: 'B', defense: 'D0', status: 'OK', attack_success: null, utility: true },
+    { scenario: 's1', short: 'S1', defense: 'D0', status: 'OK', attack_success: true, utility: true, stopped_by: 'none' },
+    { scenario: 's1', short: 'S1', defense: 'D3', status: 'OK', attack_success: false, utility: true, stopped_by: 'flow:confidentiality' },
+  ];
+  const svg = renderResultsSvg(rows);
+  assert.match(svg, /^<svg /);
+  assert.match(svg, />D0</);
+  assert.match(svg, />D3</);
+  assert.match(svg, /attacks let through/);
+  assert.doesNotMatch(svg, /\d{4}-\d\d-\d\dT/, 'no timestamp, so it stays deterministic');
+});
