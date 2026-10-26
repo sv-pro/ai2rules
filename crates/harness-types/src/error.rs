@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::action::ActionType;
+use crate::flow::FlowAxis;
 use crate::ids::{ActionName, DescriptorHash};
 use crate::provenance::TrustLevel;
 
@@ -46,6 +47,19 @@ pub enum BuildError {
     BudgetExceeded {
         detail: String,
     },
+    /// A flow-contracted action was built without host-owned flow context
+    /// (AI2-70). Fails closed: the kernel never guesses a label.
+    MissingFlowContext {
+        action: ActionName,
+    },
+    /// A labelled value may not flow into this argument's declared sink
+    /// (AI2-70). `axis` keeps the two refusal reasons distinct.
+    FlowViolation {
+        action: ActionName,
+        argument: String,
+        axis: FlowAxis,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for BuildError {
@@ -81,6 +95,19 @@ impl std::fmt::Display for BuildError {
                 write!(f, "action {action} requires approval")
             }
             BuildError::BudgetExceeded { detail } => write!(f, "budget exceeded: {detail}"),
+            BuildError::MissingFlowContext { action } => write!(
+                f,
+                "flow context missing for {action}: the action declares a flow contract"
+            ),
+            BuildError::FlowViolation {
+                action,
+                argument,
+                axis,
+                detail,
+            } => write!(
+                f,
+                "{axis:?} flow violation for {action}.{argument}: {detail}"
+            ),
         }
     }
 }

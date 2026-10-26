@@ -108,6 +108,18 @@ fn classify(error: &BuildError) -> (Decision, &'static str) {
         BuildError::InvariantViolation { .. } => (Decision::Deny, "invariant_violation"),
         BuildError::ApprovalRequired { .. } => (Decision::Ask, "approval_required"),
         BuildError::BudgetExceeded { .. } => (Decision::Replan, "budget_exceeded"),
+        // Flow admission (AI2-70, D95): a contracted action without host
+        // labels, and a labelled value that may not enter a sink, keyed by axis
+        // so the two reasons stay distinct and stable.
+        BuildError::MissingFlowContext { .. } => (Decision::Deny, "missing_flow_context"),
+        BuildError::FlowViolation {
+            axis: harness_types::FlowAxis::Confidentiality,
+            ..
+        } => (Decision::Deny, "confidentiality_violation"),
+        BuildError::FlowViolation {
+            axis: harness_types::FlowAxis::Integrity,
+            ..
+        } => (Decision::Deny, "integrity_violation"),
         // `decide` peels this off before calling `classify`.
         BuildError::UnknownToOntology { .. } => (Decision::Absent, "unknown_to_ontology"),
     }
