@@ -211,6 +211,10 @@ fn the_user_world_protects_the_files_that_can_switch_it_off() {
         !world.contains(r#"{ path: "./.claude", access: Read }"#),
         "the project-wide `.claude` lock would forbid ordinary work in every repository"
     );
+    assert!(
+        !world.contains(r#"{ path: "./.agents", access: Read }"#),
+        "the project-wide `.agents` lock would forbid ordinary work in every repository (D92)"
+    );
     let manifest = compiler::loader::load_yaml(&world).expect("loads");
     compiler::compile(&manifest).expect("compiles");
 }

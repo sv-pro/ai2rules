@@ -3,7 +3,8 @@
 use std::collections::BTreeSet;
 
 use harness_types::{
-    ArgSource, BackingIdentity, ScopedCapabilityDef, SourceChannel, WorldManifest,
+    check_action_schema, ArgSource, BackingIdentity, SchemaProblem, ScopedCapabilityDef,
+    SourceChannel, WorldManifest,
 };
 
 use crate::error::CompileError;
@@ -46,6 +47,19 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
         if !base_names.insert(action.name.as_str()) {
             return Err(CompileError::DuplicateAction(action.name.to_string()));
         }
+        // Every keyword in the schema and the constraints must be one the kernel
+        // enforces or a pure annotation (D86). A limit the kernel would skip is
+        // refused here, so the author learns before the world ever loads.
+        check_action_schema(&action.schema, &action.arg_constraints).map_err(|p| match p {
+            SchemaProblem::Unsupported { at, keyword } => CompileError::UnsupportedKeyword {
+                action: action.name.to_string(),
+                at,
+                keyword,
+            },
+            malformed @ SchemaProblem::Malformed { .. } => {
+                CompileError::Invalid(format!("action {}: {malformed}", action.name))
+            }
+        })?;
     }
 
     let mut cap_names: BTreeSet<&str> = BTreeSet::new();

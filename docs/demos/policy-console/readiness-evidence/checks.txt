@@ -1,0 +1,85 @@
+PASS: real harness init + setup
+PASS: skill installed with selected receiver and console ports
+PASS: healthy stand
+PASS: healthy stand is read-only
+PASS: missing skill rejected
+PASS: missing skill rejected is read-only
+PASS: invalid binary override rejected
+PASS: invalid binary override rejected is read-only
+PASS: missing hook entry rejected
+PASS: missing hook entry rejected is read-only
+PASS: original preflight false success with missing hook reproduced
+PASS: disabled hooks rejected
+PASS: disabled hooks rejected is read-only
+PASS: invalid world rejected
+PASS: invalid world rejected is read-only
+PASS: missing grant rejected
+PASS: missing grant rejected is read-only
+PASS: project kill switch rejected
+PASS: project kill switch rejected is read-only
+PASS: wrong project console rejected
+PASS: wrong project console rejected is read-only
+PASS: original preflight false success with wrong project reproduced
+PASS: readiness-pr134 Skill allow
+PASS: readiness-pr134 AskUserQuestion allow
+PASS: readiness-pr134 PowerShell deny
+PASS: pr134 PowerShell contractor ABSENT
+PASS: readiness-pr134 Bash deny
+PASS: pr134 contractor ABSENT and no taint
+PASS: readiness-pr134 Bash allow
+PASS: pr134 developer ALLOW and tainted
+PASS: pr134 real receiver serves onboarding
+PASS: readiness-pr134 Bash ask
+PASS: pr134 delete ASK
+PASS: pr134 archive intact
+PASS: readiness-pr134 Bash deny
+PASS: pr134 delete ABSENT
+PASS: readiness-pr134 Bash deny
+PASS: pr134 upload taint DENY
+PASS: readiness-pr134 Bash deny
+PASS: pr134 upload Allow still DENY
+PASS: readiness-pr134 PowerShell deny
+PASS: pr134 PowerShell upload taint DENY
+PASS: readiness-pr134 AskUserQuestion allow
+PASS: readiness-pr134 Edit allow
+PASS: pr134 local Edit remains ALLOW
+PASS: readiness-pr134 Bash deny
+PASS: pr134 re-fetch requires fresh session
+PASS: pr134 real decision log equals console feed
+PASS: readiness-pr134-plus-pr130 Skill allow
+PASS: readiness-pr134-plus-pr130 AskUserQuestion allow
+PASS: readiness-pr134-plus-pr130 PowerShell deny
+PASS: pr134-plus-pr130 PowerShell contractor ABSENT
+PASS: readiness-pr134-plus-pr130 Bash deny
+PASS: pr134-plus-pr130 contractor ABSENT and no taint
+PASS: readiness-pr134-plus-pr130 Bash allow
+PASS: pr134-plus-pr130 developer ALLOW and tainted
+PASS: pr134-plus-pr130 real receiver serves onboarding
+PASS: readiness-pr134-plus-pr130 Bash ask
+PASS: pr134-plus-pr130 delete ASK
+PASS: pr134-plus-pr130 archive intact
+PASS: readiness-pr134-plus-pr130 Bash deny
+PASS: pr134-plus-pr130 delete ABSENT
+PASS: readiness-pr134-plus-pr130 Bash deny
+PASS: pr134-plus-pr130 upload taint DENY
+PASS: readiness-pr134-plus-pr130 Bash deny
+PASS: pr134-plus-pr130 upload Allow still DENY
+PASS: readiness-pr134-plus-pr130 PowerShell deny
+PASS: pr134-plus-pr130 PowerShell upload taint DENY
+PASS: readiness-pr134-plus-pr130 AskUserQuestion allow
+PASS: readiness-pr134-plus-pr130 Edit allow
+PASS: pr134-plus-pr130 local Edit remains ALLOW
+PASS: readiness-pr134-plus-pr130 Bash deny
+PASS: pr134-plus-pr130 re-fetch requires fresh session
+PASS: readiness-pr134-plus-pr130 ListAgents allow
+PASS: readiness-pr134-plus-pr130 Monitor deny
+PASS: PR130 Monitor absent by projection
+PASS: readiness-pr134-plus-pr130 mcp__Claude_Browser__navigate deny
+PASS: PR130 browser not projected
+PASS: pr134-plus-pr130 real decision log equals console feed
+PASS: boundary-probe Edit allow
+PASS: known limit .claude/cc-world.yaml writable in demo world
+PASS: boundary-probe Edit allow
+PASS: known limit .claude/hooks/world-gate.sh writable in demo world
+PASS: no upload received during deterministic probes
+TOTAL: 84 checks passed; interactive Claude Code: NOT RUN

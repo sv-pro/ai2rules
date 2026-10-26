@@ -28,6 +28,11 @@ replayable. See [Status](#status).
 > ~45 minutes, all offline and credential-free — from the five verdicts, to one
 > kernel deciding for four different hosts, to governing a project of your own.
 
+The [policy-console demo](docs/demos/policy-console/README.md) includes the
+`/northwind-demo` skill and read-only stand checks. Automated probes cover setup,
+preflight and launcher against the current runtime. Start a fresh session and
+rehearse interactively; passing preflight does not establish live-agent readiness.
+
 ---
 
 ## Govern a project in one command
@@ -270,7 +275,9 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   `.claude/cc-world.yaml`: ABSENT (opt-in `--enforce-absent`), the monotonic
   **taint floor**, **ASK** on destructive commands (collapsing to DENY under
   `--mode background`), with Bash classified **kernel-side** from the manifest's
-  `command_classes` (D36). Additive (only ever `deny`/`ask`) and fail-open. The
+  `command_classes` (D36). Additive (only ever `deny`/`ask`) and fail-open when its
+  binary is missing; a world that does not compile follows `--on-broken-world`
+  (`last-good` by default, D87). The
   Python engine is archived under `.claude/hooks/superseded/`; the cutover
   consciously drops trust pins (D29) and path-based read-taint until they land
   as typed manifest fields. Cross-agent taint still follows the shared session
@@ -430,7 +437,7 @@ Consent is exact-bound, expires after five minutes, and is durably consumed befo
 forwarding; uncertain upstream outcomes require operator reconciliation. See the
 [approval workflow](docs/approval-capable-hosts.md).
 
-Builds clean offline with `clippy -D warnings`; **552 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
+Builds clean offline with `clippy -D warnings`; **598 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
 tests feed prepared events through stdin so a disabled hook's early exit cannot
 race the fixture writer.
 The Unix-only doctor integration suite includes **40 passing tests and 3 explicitly
@@ -463,6 +470,7 @@ crates/               the harness implementation
   govbench/           MCP governance benchmark runner: 3 scenarios, weak baseline vs ai2rules (E18)
 docs/                 architecture (harness-architecture.md is canonical; one-kernel-many-hosts.md = cross-host parity)
   benchmarks/mcp-governance/  the governance smoke pack + its generated report (issue #64)
+  benchmarks/ecc/             planned external target: ECC + AgentShield on the host-hook path (E18.14)
 scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
 labs/webmcp/          WebMCP attack lab: 5 attacks × D0/D1/D2, CompromisedAgent, Playwright (#160 / AI2-83; Node sub-project)
@@ -498,10 +506,15 @@ echo '{"tool":"fetch_web","context":{"taint":"tainted"}}' \
 ```
 
 CI runs all four checks on every push and PR
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), plus a `demos` job that
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), clippy and the tests
+again on Windows, plus a `demos` job that
 runs `scripts/check-demos.sh` — every example and demo script, asserting the
 verdict lines each one claims to show. The unit tests cover the kernel; that
 script covers what a reader actually sees.
+
+Windows path-scope regressions check rooted and drive-prefixed targets, reject
+`..` after missing components before canonicalization, and verify actual hook
+verdicts. Linux tests preserve filesystem resolution of symlink/`..` paths (D88).
 
 The blog CI job also checks the homepage-to-playground journey in Chromium at
 390px and 1440px widths, including the real WASM taint/tool-toggle transitions.

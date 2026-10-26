@@ -42,6 +42,7 @@ if [ -z "$BIN" ]; then
 fi
 
 WORLD="$PD/.agents/agy-world.yaml"
-[ -f "$WORLD" ] || noop
+# A missing or broken world is the hook's to handle (--on-broken-world, D87), not
+# a fail-open here: deleting the world file must not switch governance off.
 
 exec "$BIN" agy-hook --world "$WORLD" --state "$PD/.agents/state"

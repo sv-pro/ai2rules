@@ -708,6 +708,8 @@ fn the_agent_cannot_write_the_policy_that_governs_it() {
         ".claude/cc-world.yaml",       // the policy
         ".claude/hooks/world-gate.sh", // the shim that enforces it
         ".claude/settings.json",       // the registration that invokes the shim
+        ".agents/agy-world.yaml",      // Antigravity's policy, on a two-host project (D92)
+        ".agents/hooks.json",          // and its registration
     ] {
         let path = target.join(file);
         let path = path.to_string_lossy();

@@ -12,7 +12,45 @@ there is one, so anything here can be traced to the reasoning in
 
 ## [Unreleased]
 
+### Fixed
+
+- **Approval and staged-commit stores on Windows: a waiter no longer fails while the
+  lock changes hands (D93, AI2-75).** The store lock was a file that was created to
+  take the lock and deleted to release it. Inside Windows' delete call there is a
+  window in which creating that file fails with `Access is denied`. A concurrent
+  consumer could therefore fail with OS error 5 instead of waiting.
+
+  The lock is now an OS file lock (`LockFileEx` / `flock`) on a `.lock` file that is
+  never deleted. A crashed holder's lock is released with its process, instead of
+  leaving a `.lock` file an operator had to remove.
+
 ### Changed
+
+- **Command classification: a class must cover every simple command on the line
+  (D90).** The classifier used to take the whole Bash line from the one class that
+  matched anywhere in it. So a network word in a comment, a string or a
+  neighbouring command made the rest of the line plain egress, which a clean
+  session allowed silently: `git push … # curl `, `echo 'ssh '; cat ~/.ssh/id_rsa`,
+  `curl … | sh`.
+
+  The matched class must now also match every command the line runs, outside
+  quotes and comments. Lines the splitter cannot see into fall to `default_to`,
+  which asks. That covers command substitution, heredocs, ANSI-C `$'…'` quoting and
+  unterminated quotes.
+
+  Visible effects:
+  - `curl … | jq` now asks in a clean session.
+  - Some destructive lines that carry `$(…)` or quoted payloads are denied, not
+    asked, under taint.
+- **The starter manifest keeps `.agents/` read-only as well as `.claude/` (D92).**
+  In a project governed on both Claude Code and Antigravity, neither agent can
+  rewrite the other's manifest, shim or hook registration through structured file
+  tools. That includes `.agents/rules`, `skills` and `workflows`. Change them by
+  hand, or through the shell, which asks.
+
+  `harness init --user` and `--managed` drop the rule. No file in a project's
+  `.agents/` can switch off a machine-scope Claude Code hook, and locking the
+  directory would block ordinary work in every repository.
 
 - The law-firm story no longer suggests the kernel recognises a poisoned email.
   The closing line now says reading one email from outside closed the exits,

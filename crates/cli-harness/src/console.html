@@ -129,6 +129,10 @@
   .chip.POLICY, .chip.RESTORE { background: var(--policy-bg); color: var(--policy); }
   .chip.STOP { background: var(--deny); color: #fff; }
   .chip.SESSION { background: var(--soft); color: var(--muted); }
+  .chip.UNGOVERNED { background: var(--ask-bg); color: var(--ask); }
+  #brokenWorld { padding: 12px 24px; background: var(--deny-bg); color: var(--deny);
+                 border-bottom: 1px solid var(--line); font-size: 14px; }
+  #brokenWorld code { font-size: 12.5px; }
   .call { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-word; }
   .why { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
   .why code { font-size: 11.5px; }
@@ -143,6 +147,7 @@
   <span class="spacer"></span>
   <span id="conn">connecting…</span>
 </header>
+<div id="brokenWorld" role="alert" hidden></div>
 <section class="invariants" aria-labelledby="invTitle">
   <div class="invband">
     <div class="invhead">
@@ -278,16 +283,17 @@ function renderStop(st) {
   if (st.unsupported) {
     btn.hidden = true;
     cls = "warn";
-    head = "Stop unavailable for this world";
+    head = "Emergency stop unavailable for this world";
     sub = st.unsupported;
   } else if (st.status === "off") {
-    btn.textContent = "■ Stop the agent";
+    btn.textContent = "■ Emergency stop";
     btn.onclick = () => send({ profile: "stop" }, btn);
-    sub = "Every effectful action off at the agent's next call. " + STOP_SCOPE;
-    if (st.enforced === false) { cls = "warn"; head = "Stop would not bind here"; sub = NOT_ENFORCED; }
+    sub = "Every effectful action off at the agent's next call. The agent keeps running; " +
+      "the kernel keeps deciding and refuses every effect. " + STOP_SCOPE;
+    if (st.enforced === false) { cls = "warn"; head = "Emergency stop would not bind here"; sub = NOT_ENFORCED; }
   } else {
     if (st.restore_to) {
-      btn.textContent = "▶ Restore " + st.restore_to;
+      btn.textContent = "▶ Resume " + st.restore_to;
       btn.classList.add("restore");
       btn.onclick = () => send({ restore: true }, btn);
     } else {
@@ -296,15 +302,15 @@ function renderStop(st) {
     const resume = st.restore_to ? "" : " Pick a profile below to resume.";
     if (st.status === "not_binding") {
       cls = "warn";
-      head = "⚠ Not stopped";
+      head = "⚠ Actions not stopped";
       sub = NOT_ENFORCED + resume;
     } else if (st.status === "stopped") {
       cls = "in";
-      head = "■ Stopped";
+      head = "■ Actions stopped";
       sub = "The agent's call at " + hhmmss(st.refused_ms) + " was refused. " + STOP_SCOPE + resume;
     } else {
       cls = "in";
-      head = "Stop set: takes effect at the agent's next call";
+      head = "Emergency stop set: takes effect at the agent's next call";
       sub = "Not confirmed until the hook refuses a call. " + STOP_SCOPE + resume;
     }
   }
@@ -409,7 +415,24 @@ function invariantOf(ev, v) {
 function verdictOf(ev) {
   // What the agent experienced: the kernel's verdict, except that an ALLOW the
   // hook left to the host is still an ALLOW.
+  // A broken world (D87): no kernel verdict. `closed` refused the call; `open`
+  // let it through with nobody deciding.
+  if (ev.decision === "BROKEN_WORLD") return ev.answer === "deny" ? "DENY" : "UNGOVERNED";
   return ev.decision || "ALLOW";
+}
+
+// The hook's world did not compile when this line was written (D87): say which
+// broken-world mode is in effect, until a line arrives from a world that compiles.
+function showBrokenWorld(bw) {
+  const el = $("brokenWorld");
+  el.hidden = !bw;
+  if (!bw) return;
+  const what = bw.applied === "last-good"
+    ? "decided by the last world that compiled (" + (bw.last_good_sha256 || "").slice(0, 12) + "); the current file has not taken effect"
+    : bw.applied === "open" ? "tool calls proceed UNGOVERNED" : "every tool call is refused";
+  const code = document.createElement("code");
+  code.textContent = bw.error || "";
+  el.replaceChildren(document.createTextNode("⚠ The world file does not compile. Mode " + bw.applied + ": " + what + ". "), code);
 }
 
 function why(ev) {
@@ -446,8 +469,10 @@ function addEvent(ev) {
   $("empty").hidden = true;
   if (ev.kind === "policy") {
     const lines = ev.changes || [];
+    // The class names stay STOP / RESTORE; the label says what a person reads.
     const chip = ev.stop ? "STOP" : ev.restore ? "RESTORE" : "POLICY";
-    feed.prepend(row(chip, chip, ev.headline || lines[0] || "Policy changed",
+    const label = ev.stop ? "E-STOP" : ev.restore ? "RESUME" : "POLICY";
+    feed.prepend(row(chip, label,ev.headline || lines[0] || "Policy changed",
       [document.createTextNode((ev.headline ? lines : lines.slice(1)).join(" · "))], ev.ts_ms, false));
     refreshState();
     return;
@@ -460,10 +485,11 @@ function addEvent(ev) {
     }
     lastSession = ev.session;
   }
+  showBrokenWorld(ev.broken_world);
   const v = verdictOf(ev);
   if (v === "ALLOW") counts.allow++;
   else if (v === "ASK") counts.ask++;
-  else counts.stop++;
+  else if (v !== "UNGOVERNED") counts.stop++;
   $("nAllow").textContent = counts.allow;
   $("nAsk").textContent = counts.ask;
   $("nStop").textContent = counts.stop;

@@ -173,7 +173,8 @@ tests green offline); E0.5/E0.6 tails tracked above.
 - [x] **E1.2** Loader + validator in `compiler` (`loader.rs`): `load_yaml` /
   `load_json`; `validate` checks empty `world_id`, duplicate actions, scoped-cap
   name collisions, and unknown base-action references, surfaced via a
-  human-readable `CompileError`.
+  human-readable `CompileError`. It also refuses any `schema` / `arg_constraints`
+  keyword the kernel does not enforce, naming it (D86).
 - [x] **E1.3** `compile()` (`compile.rs`): manifest → immutable `CompiledWorld`
   with `world_id` + `manifest_hash`; pure and deterministic.
 - [x] **E1.4** Descriptor hashing (`hashing.rs`): real SHA-256 (via `sha2`) over
@@ -532,6 +533,8 @@ One compiled `WorldManifest` drives both: an **MCP shim** (projection + scoped-c
 
 - [x] **E13.10** Instruction and memory files count as durable memory (DECISIONS **D83**, AI2-64 / #137, gap G1 of the *Designing AI Agents* review): a `path_classes` world section reclassifies `Write`/`Edit`/`MultiEdit`/`NotebookEdit` (and Antigravity's `write_to_file`/`propose_code`/`edit_notebook`) to a `side_effect: Memory` action when the canonical path or the normalized argument matches `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/{agents,commands,rules,skills}/**`, auto-memory or `.agents/{rules,skills,workflows}/**`. Tainted → `DENY taint_invariant`; clean → ALLOW in project worlds, ASK in `--user`/`--managed` worlds. One pattern list, pinned across host manifests. **Pending**: shell writes (`echo >> CLAUDE.md`, D57 residual), Antigravity `move` (destination key not captured), path classes for the OpenCode and DeepSeek Harness worlds.
 
+- [x] **E13.11** Broken-world mode for the host hooks (DECISIONS **D87**, AI2-56 / #128): `cc-hook` and `agy-hook` take `--on-broken-world closed|open|last-good`; a world that cannot be read or compiled (or is deleted) no longer fails open. `last-good` (the default) decides with the last world that compiled, cached in the state dir, and falls back to `closed`; `init` writes `last-good`, `init --managed` writes `closed`. Every mode warns (Claude Code `systemMessage`, agy stderr, decision log, console banner, `harness doctor`). **Pending**: a live check that Claude Code renders a PreToolUse `systemMessage`.
+
 Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × side-effect floor), 9/10 (approval / fail-closed) — re-proved on the Claude Code host.
 
 ---
@@ -563,6 +566,12 @@ Relates to acceptance invariants 2 (ABSENT-over-DENY), 6/7 (monotonic taint × s
 **Exit:** `ai2rules.dev/playground` hosts several real-kernel-backed interactive visualizations — led by the Taint-Flow Simulator embedded in the sandbox guide — each running entirely in the reader's browser and each provably faithful via the E14 fidelity guard.
 
 ---
+
+**Northwind readiness follow-up (AI2-62 / PR #150, 2026-10-25):** preflight
+checks actual hook registration, flags, paths and selected binary; setup supports
+the current logged hook. The native scenario and launcher regressions run in CI.
+See [integration evidence](docs/demos/policy-console/READINESS-2026-10-25.md).
+Interactive presentation rehearsal remains separate; E15 is not marked complete.
 
 ### E16 — Internal demo: governed JIRA MCP on Copilot + Claude Code  🔝 HIGH PRIORITY
 **Goal:** A live internal demo showing **one governance manifest shaping the capability
@@ -806,6 +815,16 @@ are published per scenario with no reassuring aggregate score.
   and failure direction with runner-owned effect counts. The registered target profile is
   [`docs/benchmarks/openclaw-2/README.md`](docs/benchmarks/openclaw-2/README.md); it remains
   outside generated results until the executable evidence contract is met.
+- [ ] **E18.14** ECC + AgentShield external target and the host-hook pack it needs
+  ([Linear AI2-81](https://linear.app/ai2rules/issue/AI2-81)). ECC has
+  no discovery or authorization surface, so the `mcp-governance` lines would be `ABSENT` by
+  construction. The comparison belongs on the Claude Code `PreToolUse` path: classification
+  under evasion, RCE vs egress, taint dependence, self-protection of the hook and its config,
+  and failure direction, all with runner-owned effect counts. `harness cc-hook` is its first
+  ai2rules target. The registered profile is
+  [`docs/benchmarks/ecc/README.md`](docs/benchmarks/ecc/README.md). Its first probe pass
+  already found two ai2rules gaps (`_tasks/4_done/network-word-downgrades-ask.md`,
+  `_tasks/4_done/dogfood-world-without-d57.md`).
 
 **Exit:** the runner detects every intentional weak-baseline failure, ai2rules produces
 evidence-backed expected outcomes without an LLM, and an external engineer can reproduce the

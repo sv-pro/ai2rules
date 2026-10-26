@@ -99,7 +99,7 @@ relative to the hook's cwd. At machine scope the cwd is whichever folder the ses
 is in, so a relative state dir would leave taint sidecars in every project you open.
 
 **The world protects whatever can switch it off.** It is the starter manifest with
-one change. The starter makes a project's whole `.claude/` read-only. At machine
+one change. The starter makes a project's whole `.claude/` and `.agents/` read-only (D57, D92). At machine
 scope that would block ordinary work in every repository, such as adding a skill
 or a command. So this world protects only the files that can disable the hook:
 
@@ -249,6 +249,14 @@ go further.
   administrator can remove the binary, so this does not hand the user a switch.
   It does mean a botched deployment fails silently. Check with `/status` and one
   denied call.
+- **A broken managed world refuses every call** (D87). The managed shim passes
+  `--on-broken-world closed`: a world that does not compile, or is missing, stops
+  every tool call on the machine with the compile error, until an administrator
+  fixes it. Not `last-good`, because its cache would sit in the per-user state
+  directory, where the user could plant a permissive "last good" world; not
+  `open`, because that makes the policy optional. `init --managed` compiles the
+  world before installing it; check any hand edit compiles before deploying it.
+  User scope writes `last-good`.
 - **Local administrators** can edit managed settings. That holds for every managed
   setting in Claude Code, not just this one.
 - **Other agents and other tools.** Managed settings bind Claude Code. An employee

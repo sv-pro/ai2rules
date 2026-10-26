@@ -11,6 +11,7 @@
 
 pub mod action;
 pub mod approval;
+pub mod arg_schema;
 pub mod compiled;
 pub mod decision;
 pub mod descriptor;
@@ -25,6 +26,7 @@ pub mod tool_call;
 
 pub use action::*;
 pub use approval::*;
+pub use arg_schema::{check_action_schema, SchemaProblem};
 pub use compiled::*;
 pub use decision::*;
 pub use descriptor::*;

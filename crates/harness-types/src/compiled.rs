@@ -232,6 +232,17 @@ impl CompiledWorld {
     /// the two findings are fixed by each other. Several classes pointing at the
     /// *same* target is not ambiguity and resolves normally.
     ///
+    /// **A class must account for every simple command on the line** (D90,
+    /// AI2-79). One class matching somewhere is not enough: `git push # curl `,
+    /// `echo 'ssh '; cat ~/.ssh/id_rsa` and `curl … | sh` all matched only the
+    /// network class, so a word in a comment, a string or a neighbouring command
+    /// turned the unmatched rest of the line into network egress, silently
+    /// allowed in a clean session. The winning class therefore has to match each
+    /// simple command again, with quoted text and comments removed (see
+    /// [`simple_commands`]), and a line holding a command substitution resolves to
+    /// `default_to` outright. The check only ever moves a command *toward*
+    /// `default_to`; it can never produce a class the line did not already match.
+    ///
     /// Actions without a classifier resolve to the raw action. Classification is
     /// pure world data; no adapter may carry its own copy.
     pub fn classify_command(
@@ -264,7 +275,27 @@ impl CompiledWorld {
                 Some(_) => return fallback(),
             }
         }
-        matched.cloned().unwrap_or_else(fallback)
+        let Some(target) = matched else {
+            return fallback();
+        };
+        // D90: the class must be evident in every simple command, outside quotes
+        // and comments. A line that cannot be split safely fails closed.
+        let patterns = || {
+            def.classes
+                .iter()
+                .filter(|c| &c.to == target)
+                .flat_map(|c| c.patterns.iter())
+        };
+        let covered = |part: &String| patterns().any(|p| left_word_match(part, p));
+        match simple_commands(cmd) {
+            Some(parts)
+                if parts.iter().any(covered)
+                    && parts.iter().all(|part| covered(part) || runs_nothing(part)) =>
+            {
+                target.clone()
+            }
+            _ => fallback(),
+        }
     }
 
     /// Resolve the **effective action** for a proposed call: the command
@@ -392,6 +423,106 @@ fn path_under(path: &str, root: &str) -> bool {
     let root = root.trim_end_matches('/');
     let path = path.trim_end_matches('/');
     path == root || path.starts_with(&format!("{root}/"))
+}
+
+/// The simple commands of a shell line, as the text a command class must match
+/// in each of them (D90): the line split at `;`, `&`, `|` and newlines, quoted
+/// spans and backslash-escaped bytes replaced by [`QUOTED`], `#` comments and
+/// backslash-newline continuations dropped, and blank segments skipped. `&`
+/// after `<`/`>` or before `>` is a redirection (`2>&1`, `&>log`), not a
+/// separator, and `<<<` is a here-string, whose word is quoted like any other.
+///
+/// `None` when the line cannot be split without a shell: a command substitution
+/// (`$(…)`, backticks, `<(…)`, `>(…)`) runs a command this split cannot see; a
+/// heredoc (`<<`) makes the following lines data up to a delimiter this split
+/// does not track, so a quote inside the body would mis-pair with one after it;
+/// ANSI-C quoting (`$'…'`) has escapes a plain single quote does not; and an
+/// unterminated quote means the split is a guess. The caller fails closed on
+/// `None`. This is a splitter, not a parser; it only has to be right about where
+/// a command could start, and every case it gives up on resolves to `default_to`.
+fn simple_commands(cmd: &str) -> Option<Vec<String>> {
+    // A quoted span or an escaped byte is part of the word it sits in, so its
+    // stand-in must be neither whitespace nor an operator byte: `"x"#; cmd` and
+    // `x \ #; cmd` start no comment in a shell, and `\>&` is no redirection.
+    // Every one of these was a way past the check (PR #153 review).
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    let mut chars = cmd.chars().peekable();
+    let flush = |cur: &mut String, parts: &mut Vec<String>| {
+        if !cur.trim().is_empty() {
+            // Trailing space so a pattern like `"curl "` still sees its word end
+            // at the end of a segment.
+            parts.push(format!("{} ", cur.trim()));
+        }
+        cur.clear();
+    };
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some('\n') | None => {}
+                Some(_) => cur.push(QUOTED),
+            },
+            '\'' => {
+                loop {
+                    match chars.next() {
+                        Some('\'') => break,
+                        Some(_) => {}
+                        None => return None,
+                    }
+                }
+                cur.push(QUOTED);
+            }
+            '"' => {
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => {
+                            chars.next()?;
+                        }
+                        Some('`') => return None,
+                        Some('$') if chars.peek() == Some(&'(') => return None,
+                        Some(_) => {}
+                        None => return None,
+                    }
+                }
+                cur.push(QUOTED);
+            }
+            '`' => return None,
+            '$' | '<' | '>' if chars.peek() == Some(&'(') => return None,
+            '$' if chars.peek() == Some(&'\'') => return None,
+            '<' if chars.peek() == Some(&'<') => {
+                chars.next();
+                // `<<<` is a here-string; a bare `<<` opens a heredoc: fail closed.
+                chars.next_if_eq(&'<')?;
+                cur.push_str("<<<");
+            }
+            '#' if cur.chars().last().is_none_or(char::is_whitespace) => {
+                while chars.peek().is_some_and(|c| *c != '\n') {
+                    chars.next();
+                }
+            }
+            '&' if matches!(cur.chars().last(), Some('<' | '>')) || chars.peek() == Some(&'>') => {
+                cur.push(c)
+            }
+            ';' | '&' | '|' | '\n' | '\r' => flush(&mut cur, &mut parts),
+            _ => cur.push(c),
+        }
+    }
+    flush(&mut cur, &mut parts);
+    Some(parts)
+}
+
+/// What a quoted span or an escaped byte becomes in a [`simple_commands`]
+/// segment: not whitespace, not a word byte and not an operator, so it neither
+/// ends a word for a pattern, starts a `#` comment nor completes a redirection.
+const QUOTED: char = '"';
+
+/// A simple command made only of `:{}()` and whitespace, like the pieces of
+/// `:(){ :|:& };:` around the pattern that names it. It cannot name a program,
+/// so a class need not account for it (D90).
+fn runs_nothing(part: &str) -> bool {
+    part.chars()
+        .all(|c| c.is_whitespace() || matches!(c, ':' | '{' | '}' | '(' | ')'))
 }
 
 /// True iff `pat` occurs in `cmd` at a LEFT word boundary (an occurrence not

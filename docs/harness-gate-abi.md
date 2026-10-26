@@ -198,7 +198,10 @@ since D36 — command *classification* live in the kernel + the compiled
 `WorldManifest`.** Adapters send the **raw host tool name**; the world's
 `command_classes` resolve the effective action (returned as `response.action`).
 For shell-shaped actions, D44 requires a fail-closed `default_to` fallback; shell
-whitespace such as tabs/newlines is treated as whitespace for command patterns.
+whitespace such as tabs/newlines is treated as whitespace for command patterns. A
+class decides only if it also matches every simple command on the line, outside
+quotes and comments; a line with a command substitution falls to `default_to`
+(D90).
 
 ### Claude Code adapter (illustrative)
 

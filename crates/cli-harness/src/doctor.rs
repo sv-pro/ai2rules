@@ -260,7 +260,22 @@ pub struct FailureBehavior {
     pub shim_missing_binary: FailureMode,
     pub adapter_process_error: FailureMode,
     pub state_persistence_error: FailureMode,
+    /// What the hook does when the world does not compile (D87).
+    pub broken_world: BrokenWorldBehavior,
     pub evidence: Vec<String>,
+}
+
+/// The hook's broken-world mode and the last-good world it would fall back to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokenWorldBehavior {
+    /// `closed`, `open`, `last-good`, or `unknown` when the shim is not recognised.
+    pub mode: String,
+    /// `shim_flag` when the shim passes `--on-broken-world`, `hook_default` when it
+    /// passes none (a pre-D87 shim), `unknown` otherwise.
+    pub source: String,
+    /// SHA-256 of the cached last-good world for this project, if there is one.
+    pub last_good_sha256: Option<String>,
+    pub last_good_saved_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +385,7 @@ impl DoctorReport {
         let mut shim_path = None;
         let mut shim_profile_name = None;
         let mut grant_flag = None;
+        let mut broken_world_flag: Option<Option<String>> = None;
         let mut harness_bin_from_shim = None;
         let mut off_file_from_shim = None;
 
@@ -520,9 +536,11 @@ impl DoctorReport {
                             ref harness_bin,
                             ref off_file,
                             grant,
+                            ref on_broken_world,
                         }) => {
                             shim_profile_name = Some("current_init_generated".into());
                             grant_flag = Some(grant);
+                            broken_world_flag = Some(on_broken_world.clone());
                             harness_bin_from_shim = Some(harness_bin.clone());
                             off_file_from_shim = Some(off_file.clone());
                             hook_status = if hook_status == HookStatus::Unknown {
@@ -938,6 +956,55 @@ impl DoctorReport {
             }
         };
 
+        // Broken-world mode (D87): what the hook does with the world as it stands.
+        let broken_world_mode = match &broken_world_flag {
+            Some(Some(mode)) => (mode.clone(), "shim_flag"),
+            Some(None) => ("last-good".to_string(), "hook_default"),
+            None => ("unknown".to_string(), "unknown"),
+        };
+        let last_good = crate::broken_world::cached_last_good(&project_root.join(".claude/state"));
+        if matches!(
+            manifest_status,
+            CompileStatus::Invalid | CompileStatus::Unknown
+        ) {
+            let mode = broken_world_mode.0.as_str();
+            let (severity, what) = match (mode, &last_good) {
+                ("open", _) => (
+                    Severity::Error,
+                    "every tool call proceeds UNGOVERNED until the manifest compiles".to_string(),
+                ),
+                ("last-good", Some((sha, _))) => (
+                    Severity::Warning,
+                    format!(
+                        "calls are decided by the last manifest that compiled (sha256 {}); \
+                         the current file has not taken effect",
+                        &sha[..sha.len().min(12)]
+                    ),
+                ),
+                ("last-good", None) | ("closed", _) => (
+                    Severity::Error,
+                    "every tool call is refused until the manifest compiles".to_string(),
+                ),
+                _ => (
+                    Severity::Warning,
+                    "what the hook does with it is unknown (shim not recognised)".to_string(),
+                ),
+            };
+            findings.push(Finding {
+                code: "CC_BROKEN_WORLD_MODE".into(),
+                severity,
+                component: "manifest".into(),
+                message: format!("Broken-world mode `{mode}`: {what}"),
+                evidence_paths: vec![manifest_path.to_string_lossy().into()],
+                affects_installation: true,
+                next_action: Some(NextAction {
+                    kind: "manual".into(),
+                    argv: None,
+                    message: "Fix the manifest; the hook picks it up on the next tool call".into(),
+                }),
+            });
+        }
+
         // Policy/coverage findings
 
         // Report ABSENT passthrough behavior
@@ -1203,6 +1270,12 @@ impl DoctorReport {
                 } else {
                     FailureMode::Unknown
                 },
+                broken_world: BrokenWorldBehavior {
+                    mode: broken_world_mode.0.clone(),
+                    source: broken_world_mode.1.into(),
+                    last_good_sha256: last_good.as_ref().map(|(sha, _)| sha.clone()),
+                    last_good_saved_ms: last_good.as_ref().map(|(_, ms)| *ms),
+                },
                 evidence: {
                     let mut ev = vec![];
                     if shim_profile_name.is_some() {
@@ -1210,6 +1283,10 @@ impl DoctorReport {
                     }
                     if harness_version_source == VersionSource::SameExecutable {
                         ev.push("Adapter errors fail open (exit 0)".into());
+                        ev.push(format!(
+                            "A world that does not compile follows the broken-world mode ({})",
+                            broken_world_mode.0
+                        ));
                         ev.push("State persistence errors fail closed (conditional deny)".into());
                     } else if harness_binary_info.resolved_path.is_some() {
                         ev.push(

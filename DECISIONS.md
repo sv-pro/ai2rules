@@ -3567,6 +3567,264 @@ show that it holds.
 Without a decision log (`--log`), the page can only say "Stop set", never "Stopped". The
 feed still counts an ABSENT the hook let through among "stopped" calls. That predates Stop.
 
+**Amended 2026-10-25 (AI2-74): the button reads "Emergency stop".** "Stop the agent"
+promised more than the button does: the agent keeps running and the kernel keeps deciding,
+and refuses every effect. If the kernel stopped, the hook would fail open. "Emergency stop"
+is the industrial term for the same shape: motion halts while the controller stays powered
+and watching. "Kill switch" was rejected because here it already names `gate-off`, which
+turns governance off. On the page, Restore became Resume, the status reads "Actions
+stopped" / "Actions not stopped", and the feed labels read E-STOP / RESUME. The profile id
+`stop`, the request bodies and the log markers are unchanged, so existing logs still read.
+
+## D86 — A limit the kernel cannot enforce is refused, never skipped
+
+**Context.** AI2-55 / #127. `world-kernel/src/schema.rs` checked two keywords in
+`arg_constraints`, `enum` and `const`, and skipped every other one. A world that
+wrote `amount: { maximum: 10000 }` compiled, and the limit was never checked. The
+same file let an unknown `type` name through (`_ => true`), and a property's `enum`
+or `maxLength` inside `schema` was skipped as well. An author who writes a limit
+believes it binds, so this was a fail-open in the kernel. It also blocked every
+value condition `docs/action-layers.md` describes, and with it G6 (cumulative caps):
+a threshold that passes silently is worse than none.
+
+**Decision.** The issue's option 3, plus a small enforced set (option 4).
+
+- **One vocabulary, in one place.** `harness_types::arg_schema` lists every keyword
+  the kernel understands. The compiler and the kernel both read it. A keyword is
+  either an *annotation* or an *assertion*:
+  - annotations: `title`, `description`, `default`, `examples`, `format`,
+    `deprecated`, `readOnly`, `writeOnly`, `$schema`, `$id`, `$comment`;
+  - assertions, all enforced: `type` (a name or a list of names), `enum`, `const`,
+    `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`,
+    `maxLength`, `items`, `minItems`, `maxItems`, `properties`, `required`,
+    `additionalProperties` (boolean form only).
+- **One grammar everywhere.** The vocabulary is the same for the root `schema`,
+  each of its properties (recursively, through `items` and nested `properties`), and
+  each `arg_constraints` entry. Nested objects are closed by default, like the root.
+- **Compile time.** Any other keyword fails the world with
+  `CompileError::UnsupportedKeyword`, which names the action, the keyword and where
+  it sits (`arg_constraints.amount`, `schema.properties.tags.items`). A known
+  keyword with a malformed value (`maxLength: -1`, `type: money`, `enum: []`) is
+  `CompileError::Invalid`. The root schema's `type` may only be `object`.
+- **Decision time, as a backstop.** `schema::validate` runs the same check first and
+  denies the call (`schema_violation`) if it fails, even when the constrained
+  argument is absent. `CompiledWorld::new` is public, so a descriptor can reach the
+  kernel without the compiler. A limit the kernel cannot evaluate must deny, not
+  pass.
+- **Type-specific limits fail closed.** In JSON Schema, `maximum` ignores a string.
+  Here, `amount: { maximum: 10000 }` refuses `"10001"` ("must be a number to be
+  checked against `maximum`"). The exception is when the schema's own `type` admits
+  the other type: `type: [number, "null"]` with `maximum` lets `null` through
+  because the author said so.
+- **Small details.** Integer bounds compare exactly, as `i128`. An `f64` rounds
+  2^53 + 1 down to 2^53. String lengths count characters, not bytes. A call with no
+  arguments is an empty object.
+- **Misspelt keys are parse errors.** `BaseActionDef` and `InputRule` now deny
+  unknown fields. Without this, `arg_constraint:` (singular) or
+  `!Input { max_len: 8 }` dropped its limit as silently as `maximum` did.
+
+**Not enforced, so refused:**
+
+- **`pattern`.** The kernel's only regex engine would be Rust's `regex`. It is a
+  different dialect from the ECMA-262 regex that JSON Schema specifies and that
+  authors test against. `\d` matches every Unicode digit in Rust but only ASCII
+  digits in ECMA, so a Rust check would admit *more* than the author tested.
+  Lookaround and backreferences do not exist in Rust's `regex`. Enforcing it would
+  also add a dependency to the pure kernel and to the WASM engine. Scoped `prefix`
+  and `enum` cover the uses we have. Revisit with a pinned, ASCII-only dialect if a
+  world needs it.
+- **`anyOf` / `oneOf` / `allOf` / `not`, `$ref` / `$defs`, `multipleOf`,
+  `uniqueItems`, `patternProperties`, the schema form of `additionalProperties`,
+  and the rest.** Composition needs branch evaluation and error reporting the kernel
+  does not have.
+
+**Costs.**
+
+- **Some upstream MCP schemas will not compile as they stand.** Upstreams generated
+  from Pydantic often spell an optional argument as
+  `anyOf: [{type: X}, {type: "null"}]`, and that is now refused. The author rewrites
+  it as `type: [X, "null"]`. `mcp-author` copies upstream schemas into the world,
+  but it compiles before it saves, so it shows the error instead of writing a world
+  that will not load. `harness doctor` reports the compile error for a world already
+  on disk.
+- **Interplay with the hooks.** A world that compiled before this change and uses a
+  keyword that is now refused stops compiling. `cc-hook` and `agy-hook` fail open on
+  a world that does not compile, so that session would run ungoverned. That behaviour
+  is AI2-56 / #128 (D87), handled separately, and this change should land with or
+  after it. No committed world is affected: none uses `arg_constraints`, and their
+  schemas use only `type`, `required`, `properties` and `description`. A new test
+  (`compiler/tests/committed_worlds.rs`) compiles every world in the repository, so a
+  committed world cannot break unnoticed.
+
+**Alternatives.**
+
+- *Refuse at compile time only (option 1).* Rejected. It leaves the kernel
+  trusting every descriptor's author, and the compiler is not the only way to build
+  one.
+- *Deny at decision time only (option 2).* Rejected as the only line. The author
+  would learn at the first call, possibly in front of an audience, instead of when
+  saving.
+- *Refuse and enforce nothing new.* Rejected. The bounds and lengths are a few lines
+  each, have no dialect question, and are what threshold and length policies need.
+- *A full JSON Schema crate (`jsonschema`).* Rejected. It brings a regex engine,
+  remote `$ref` resolution and format validators into a kernel that is pure, has no
+  I/O and ships as a 576 KB WASM module. It also accepts every keyword, which
+  defeats the point: a keyword we have not reviewed would bind with semantics we did
+  not choose.
+
+**Consequence.** A per-call limit written in a world now binds, or the world does
+not load. `amount: { maximum: 10000 }` denies 10,000.01 with `schema_violation`.
+Still not expressible: a limit that routes to an approval instead of denying ("over
+10,000 needs the CFO"), and sums across calls (G6). Those are the next value
+conditions.
+
+## D87 — A broken world follows a declared mode (closed / open / last-good), and says so
+
+**Date:** 2026-10-23. AI2-56 / #128. Adds `--on-broken-world` to `harness cc-hook`
+and `harness agy-hook` (`crates/cli-harness/src/broken_world.rs`). D83–D86 are held
+by parallel work (AI2-64, AI2-65, AI2-63, AI2-55).
+
+**Context.** A review of the book gap analysis (#135) found the docs promising a
+hard boundary that the default hook configuration did not keep. Both hooks treated a
+world that could not be read or compiled as a process failure and failed open: the
+call went to the host's own flow, ungoverned, and nobody was told. A broken world is
+not only an accident. An agent that can write the world file can break it on
+purpose, or delete it, and under fail-open that is a kill-switch the agent throws
+itself, the same exploit as the in-project `gate-off` file. D71 already says an
+*engaged* adapter fails closed, but only the DeepSeek adapter did. Once AI2-55 makes
+the compiler reject more worlds, a rejected world must not quietly mean "no policy".
+
+**Decision.** The hook's answer to a broken world is a mode, chosen by whoever
+installs the hook, and the person is told in every mode.
+
+- **The mode lives outside the world**, as a hook flag, because a broken world cannot
+  say how it wants to be handled. `harness init` writes it into the shim beside
+  `--grant`; at managed scope that shim is admin-owned, so the user cannot change it.
+- **Three modes.**
+  - `closed`: every call is refused. The reason names the mode, the compile error
+    (a YAML error carries its line) and the way out.
+  - `open`: the call proceeds ungoverned, with a warning.
+  - `last-good`: the call is decided by the last world that compiled here, with a
+    warning that the current file has not taken effect. When no world ever
+    compiled here, `closed`.
+- **The last-good cache** is one file in the hook's state directory,
+  `last-good-world.json`: the world text that last compiled, its SHA-256, and the
+  world path it came from. It is kept only in `last-good` mode, rewritten only when
+  the text changes, written atomically, and used only when the text still matches
+  its hash and the path matches the hook's `--world`. The text is cached, not the
+  compiled world, and recompiled with the current base and home, because roots
+  resolve per project.
+- **A missing world is a broken world.** The agy shim no longer passes through when
+  the world file is absent; the hook's mode decides. Deleting the file must not
+  switch governance off.
+- **The warning reaches the person.** Claude Code: a `systemMessage` on every answer
+  while the world is broken, including the silent passthrough, plus the refusal
+  reason under `closed`. Antigravity has no verified user-facing field, so the
+  warning goes to stderr, and a `closed` refusal carries it as the `deny` reason,
+  which is verified to reach the agent. The decision log (`--log`, both hooks) marks
+  lines decided by a cached world with a `broken_world` object, and a call no world
+  decided gets a `BROKEN_WORLD` line. The policy console shows a banner from those
+  lines. `harness doctor` reports the mode (shim flag or hook default), the cached
+  hash, and a `CC_BROKEN_WORLD_MODE` finding when the world does not compile.
+- **Unchanged:** the bootstrap shim's "no binary, fail open" (D37). Without a binary
+  there is no hook to have a mode. An unreadable *event* is still a process failure
+  and still fails open.
+
+**Defaults, by scope.**
+
+| Where | Mode | Why |
+|---|---|---|
+| hook, no flag (shims written before D87, hand-written shims) | `last-good` | the issue's default; a world that compiled keeps holding |
+| `harness init` (project) and `init --user` | `last-good`, written explicitly | the person is present to fix a typo; refusing everything over one would push them to the off switch |
+| `init --managed` | `closed` | the cache would sit in the per-user state dir, which the user can write; see below |
+
+Why not `open` at project scope, which keeps existing installs working exactly as
+before: the agent can write the project's world, so `open` hands it the switch. That
+is the security note in the issue. `last-good` keeps existing installs working too:
+their worlds compile, so the first call after the upgrade caches one.
+
+Why `closed` at managed scope: the managed world is admin-owned, but the hook runs
+as the user and can only cache where the user can write. A user could plant a
+permissive "last good" world there and wait for an administrator's broken
+deployment to promote it. `open` would make the policy optional. The cost is that a
+broken managed world refuses every call on the machine until an administrator fixes
+it; `init --managed` compiles the world before installing it, which is where that
+should be caught. At project and user scope the cache is exactly as writable as the
+world itself (both are read-only to the agent's file tools, both writable by an
+approved Bash command), so it adds no hole the world does not already have.
+
+**Alternatives.**
+
+- *A key in the world file.* Rejected: a broken world cannot be read.
+- *An environment variable.* Rejected: invisible to `doctor`, and set by whoever
+  starts the host rather than by whoever installs the policy.
+- *Keep fail-open, add only the warning.* Rejected: the warning would announce the
+  agent's own off switch rather than close it.
+- *`closed` everywhere.* Rejected as the project default: a typo in an edit refuses
+  every call until fixed, including the edit that would fix it through the agent.
+- *Sign or hash-lock the cache.* Not done: there is no place the hook can keep a key
+  or hash that the same user cannot also write. At managed scope the answer is
+  `closed`; at the other scopes it would protect nothing the world file does not
+  already expose.
+
+**Consequence.** A world that does not compile no longer switches governance off by
+default, and every broken-world call says so where the person looks. The price of
+`last-good` is stated in its warning: if the edit was meant to tighten the policy,
+the looser old one holds until the file is fixed. Unverified on a live host: that
+Claude Code renders a PreToolUse `systemMessage` (its docs list the field as
+universal and name no exception for PreToolUse), and whether Antigravity shows hook
+stderr to the user. Since D84 `agy-hook --log` writes the same decision lines as
+`cc-hook`, and its broken-world lines are marked the same way.
+
+## D88 — Windows is a tested platform: the OS CSPRNG everywhere, the same `..` refusal, a Windows CI job
+
+**Date:** 2026-10-23. AI2-57.
+
+**Context.** The harness ships a Windows binary, and the live policy-console demo
+runs on Windows, but CI tested Linux only. The first native Windows run of the
+workspace had 44 test failures and two clippy errors, none visible in CI:
+
+- `trace-store::approval::random_key()` read `/dev/urandom` and returned
+  `Unsupported` on every other platform, so `ApprovalStore::open` failed on
+  Windows. It failed closed, but REPL approvals, staged effects and the benchmark's
+  ai2rules target did not work at all there.
+- `hostkit` promises that a `..` after a component that does not exist is refused.
+  Unix does that by itself. Windows resolves `..` lexically, and `PathBuf::join`
+  onto a verbatim `\?\` base (what `canonicalize` returns there) does so before any
+  check runs, so `new/../../../etc/passwd` resolved to a real folder above the
+  project. That is not a bypass, because the resolved path is where Windows would
+  write and `roots` judged it. But the stated refusal did not hold.
+
+**Decision.**
+
+1. The approval key comes from the `getrandom` crate on every platform:
+   `getrandom(2)` on Linux, `ProcessPrng` on Windows. A failure is an error, never a
+   weaker key.
+2. The agent's path is joined onto the project base using native components,
+   preserving Windows roots and drive/UNC prefixes. Both rooted separator forms
+   (`/file` and `\file`) use the base drive; drive-relative prefixes retain native
+   joining semantics. Refuse a `..` after a missing component before any Windows
+   normalization can erase it, including before successful canonicalization of
+   absolute paths. Unix symlink/`..` resolution remains filesystem-based.
+3. A `check-windows` CI job runs clippy `-D warnings` and `cargo test --workspace`
+   on `windows-latest`. Tests that need Unix (symlinks, process groups, shell
+   shims) stay `cfg(unix)`. Format stays in the Linux job, since it does not depend
+   on the platform.
+
+**Alternatives.**
+
+- *Direct FFI to `BCryptGenRandom`/`ProcessPrng`.* No new dependency, but it needs
+  `unsafe` in a crate that has none, and per-platform code to maintain. `getrandom`
+  was already in the lockfile through `tempfile`, so the offline crate set covers it.
+- *Keep `/dev/urandom` and declare approvals Unix-only.* That is honest, but it
+  makes the Windows binary a second-class product while the demo runs on Windows.
+- *Accept lexical `..` on Windows as the OS's own semantics.* The kernel's path
+  answers should not depend on the host OS; one rule on every host is the point of
+  the conformance suite.
+
+**Not done.** On Windows a timed-out command still kills only its direct child: the
+executor creates no Job Object. That was already stated in
+`executor/src/handlers/command.rs`, and its test stays `cfg(unix)`.
 
 ## D89 — MCP approvals consume before effects and resume through the same kernel
 
@@ -3592,3 +3850,237 @@ Metadata changes require fresh consent too. This provides at-most-once forwardin
 per grant; external transactions/idempotency are outside the protocol. The trusted
 native resume helper shares implementation with the unchanged pure gate ABI.
 See [the operator workflow](docs/approval-capable-hosts.md).
+
+## D90 — A command class must account for every simple command on the line
+
+**Date:** 2026-10-25. **Task:** AI2-79. **Refines** D62 and the finding #17 ambiguity rule.
+
+**Context.** D62 says the classifier's security property is where an *unmatched* command
+lands: `default_to`, approval-required in every shipped world. A command that matched one
+class anywhere skipped that property. The class then covered the whole line, so a network
+word in a comment, a string or a neighbouring command made the rest of the line plain
+egress. In a clean session that was a silent ALLOW: `git push origin main # curl `,
+`echo 'ssh ' ; cat ~/.ssh/id_rsa`, `curl … | sh`. Found by probing `cc-hook` with
+the same inputs as ECC's hooks (`docs/benchmarks/ecc/`). The taint floor held throughout,
+so this broke the clean-session approval guarantee, not injection-to-egress.
+
+**Decision.** The winning class must match again in **every simple command** of the
+line. The line is split at `;`, `&`, `|` and newlines, with quoted spans blanked,
+comments and line continuations dropped, and redirections such as `2>&1` and `&>log`
+left whole. A segment of only `:{}()` (the fork bomb's pieces) runs nothing and is
+exempt. A line holding a command substitution (`$(…)`, backticks, `<(…)`, `>(…)`) or an
+unterminated quote resolves to `default_to` outright. The check can only move a command
+toward `default_to`. It never yields a class the unsplit line did not already match, so
+the finding #17 ambiguity rule is unchanged underneath it.
+
+**Alternatives.**
+
+- *Any separator or metacharacter means ambiguous.* This is simpler. But it sent
+  `curl … | ssh host`, `rm -rf a && rm -rf b`, `curl … 2>&1` and quoted URLs with `&`
+  to ASK, and it does nothing for a network word inside a string argument
+  (`python3 deploy.py "curl "`).
+- *Anchor patterns to the command word.* This is closer to what a pattern means. But
+  it changes which lines *match*. In a world whose restrictive class is stricter than
+  its `default_to`, a command that matches less can loosen.
+- *A full shell parser in the kernel.* Rejected for the same reason D62 gave: the
+  splitter only has to be right about where a command could start, and every case it
+  gives up on fails closed.
+- *An interpreter class (`| sh`, `eval`).* It adds to this rule and does not replace
+  it: it misses the comment and string cases.
+
+**Consequence.**
+
+- Pipelines into unclassified tools now ask: `curl … | jq` is ASK in a clean session.
+- A destructive command that also carries a substitution or a quoted payload
+  (`rm -rf "$(pwd)/build"`, `bash -c 'rm -rf x'`) falls to `default_to`. That is DENY
+  under taint, where `bash_destructive` asked.
+- A newline is a separator, so `curl\nhttp://x` is two commands, not egress.
+- The raw pass still treats whitespace, newline included, as a pattern space.
+- Still open: a single plain network command remains ALLOW in a clean session,
+  including `curl -F f=@~/.aws/credentials …`. What that command *reads* is the
+  shell-path residual D57 already names, not a classification question.
+
+**Addendum (PR #153 review, 2026-10-25).** An external review of the first version
+found that the splitter itself could be talked past. Each line below got a silent ALLOW
+from the hook, and real bash ran its second command:
+
+- `curl x \ #; printf X`: an escaped space was kept as whitespace, so `#` looked like
+  the start of a comment.
+- `curl x \>& printf X`: an escaped `>` made `&` look like a redirection.
+- `curl --config - <<EOF` with a quote inside the heredoc body: the quote paired
+  with one after the delimiter and hid the next command.
+- `curl x $'\'' ; printf X #'`: ANSI-C quoting has escapes a plain single quote
+  does not. This one was found in the same pass.
+
+The rule now:
+
+- an escaped byte becomes the same non-whitespace, non-operator stand-in as a quoted
+  span;
+- a heredoc (`<<`, `<<-`) and ANSI-C quoting resolve to `default_to`;
+- a here-string (`<<<`) stays a single word.
+
+The splitter keeps its narrow contract. Anything it does not model must fail
+closed, and every new escape route found later gets a regression case beside these.
+
+## D91 — The dogfood world holds the starter's guarantees
+
+**Date:** 2026-10-25. **Task:** AI2-80. **Completes** D57 for this repository.
+
+**Context.** D57 made the control plane read-only in the shipped starter manifest. The
+world that governs Claude Code in *this* repository, `.claude/cc-world.yaml`, never got
+the rule, because it had no `roots` block at all. Measured on `main` at `5a33d35`, the
+following were all a silent ALLOW, even after a `WebFetch`:
+
+- `Write`/`Edit` of `.claude/settings.json`, `.claude/cc-world.yaml` and
+  `.claude/hooks/world-gate.sh`;
+- `Write /etc/x`;
+- `Read ~/.ssh/id_rsa`.
+
+The repository that ships the guarantee did not hold it. The maintainer decided that the
+dogfood world must demonstrate the starter's guarantees, not act as a looser developer
+profile.
+
+**Decision.** The dogfood world carries the starter's `roots` block verbatim, and
+`crates/compiler/tests/committed_worlds.rs` pins the two equal. A behavioural test in
+`crates/cli-harness/tests/cc_hook.rs` asserts on the real file, clean and tainted:
+
+- writes to the manifest, the shim and the hook registration are denied;
+- reads of the manifest and ordinary project writes pass through.
+
+The rest of the dogfood world (`channels`, `world_id`) stays its own.
+
+**Measured effect on everyday calls.** Before and after, same probes:
+
+- **Unchanged:** reads and edits inside the project, `Glob`/`Grep` with or without a
+  path, writes to `/tmp`, Bash, and `WebFetch`.
+- **Now DENY `path_scope_readonly`:** writes anywhere under `.claude/`, including
+  `agents/` and `commands/`, and writes under `/etc`.
+- **Now DENY `path_scope_denied`:** reads of `~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.config/gcloud` and `/etc/shadow`.
+- **Now ASK `path_scope_ask`:** reads outside every root, such as `/var/log` or files
+  under `~`.
+
+**Alternatives.**
+
+- *A `path_classes` entry for the three control-plane files only.* Smaller, but a
+  second mechanism for the same guarantee, and it covers fewer files than the
+  starter's rule. It would not show that the starter works, only that a similar rule
+  does.
+- *Declare the dogfood world a looser profile.* Rejected by the maintainer.
+- *Copy the whole starter.* The dogfood world's `channels` block is policy this
+  repository relies on, and `world_id` names the host profile.
+
+**Consequence.**
+
+- Changing the agent definitions or commands under `.claude/` now goes through a
+  human: either an edit outside the agent, or the shell path, which is ASK (the D57
+  residual).
+- The Antigravity dogfood world, `.agents/agy-world.yaml`, has no `roots` either. That
+  is the same gap on another host and is not changed here.
+
+## D92 — The starter protects both hosts' control planes; every dogfood world carries it
+
+**Date:** 2026-10-25. **Task:** AI2-82. **Extends** D57 and D91 to Antigravity.
+
+**Context.** D91 gave `.claude/cc-world.yaml` the starter's `roots`. The Antigravity
+dogfood world, `.agents/agy-world.yaml`, still had none. Measured with `harness agy-hook`
+on `main` at `4e50aea`, all of these passed with no decision:
+
+- writes to `.agents/agy-world.yaml`, `.agents/hooks.json` and `.agents/hooks/world-gate.sh`;
+- writes to Claude Code's `.claude/settings.json` and `.claude/cc-world.yaml`;
+- `write_to_file /etc/x` and `view_file ~/.ssh/id_rsa`.
+
+The gap ran the other way too. Under D91 `./.agents` sits inside the project's
+`ReadWrite` root, so Claude Code could silently rewrite Antigravity's manifest, shim and
+registration. D83 already treats a file one host writes as context the other loads. The
+same holds for governance: in a project governed on both hosts, each agent can switch
+off the other's.
+
+**Decision.**
+
+- The starter gains `- { path: "./.agents", access: Read }` beside `./.claude`.
+- Both dogfood worlds carry the starter's `roots` block verbatim, so one block governs
+  all three. `committed_worlds.rs` pins both worlds equal to the starter.
+- `init --user/--managed` drops the new rule rather than keeping it. A machine-scope
+  world governs Claude Code only. No file under a project's `.agents/` can switch that
+  hook off, and locking the directory would forbid adding a rule, skill or workflow in
+  every repository. That is the reasoning D82 applied to `./.claude`. If the rule
+  disappears from the starter, the build fails loudly, the same as for `./.claude`.
+
+**Measured effect on Antigravity** (before and after, same probes):
+
+| Calls | Verdict after |
+|---|---|
+| `view_file`, `list_directory`, `grep_search` in the project; edits to source, `README.md`, `GEMINI.md`; `/tmp`; `read_url_content` | unchanged |
+| writes under `.agents/` (including `rules/`) and `.claude/`, and writes to `/etc` | DENY `path_scope_readonly` |
+| credential reads | DENY `path_scope_denied` |
+| reads outside every root | ASK (`force_ask`) |
+
+Claude Code additionally gets DENY on `.agents/` writes.
+
+**Alternatives.**
+
+- *Give only the Antigravity world a `roots` block.* Closes half the gap. The Claude Code
+  world is pinned to the starter (D91), so the other half would need either an
+  unpinned divergence or this change.
+- *Keep `./.agents` at machine scope.* It protects nothing a Claude Code user hook
+  depends on and blocks ordinary work everywhere.
+- *A host-specific starter per host.* That means two shipped templates for one
+  guarantee. A project often runs both hosts, and the rule costs nothing where `.agents/`
+  does not exist.
+
+**Consequence.**
+
+- Every `harness init` project now has `.agents/` read-only to the agent's structured
+  tools. That includes `.agents/rules`, `skills` and `workflows`, as `.claude/` already
+  is. Changing them is a human edit or a shell write, which is ASK (the D57 residual).
+- Two `agy_hook` tests used a made-up `/workspace` root. They now use a real temp
+  workspace, because with `roots` a non-existent root is platform-dependent (D91's
+  Windows lesson).
+
+## D93 — The store lock is an OS file lock on a file that is never deleted
+
+**Date:** 2026-10-25. **Task:** AI2-75. **Revises** the lock behaviour D78's consequence
+describes.
+
+**Context.** `concurrent_consumers_get_exactly_one_claim` failed intermittently on
+Windows with `Access is denied` (OS error 5). `StoreLock` *was* the file: it took the
+lock with `create_new` and released it with `remove_file`, retrying only on
+`AlreadyExists`.
+
+The issue's lead was that the file is removed while its handle is still open. Windows
+CI tested that lead on PR #159 and refuted it in that form. With a handle still open,
+`remove_file` frees the name at once, so a sequential `create_new` succeeds; Windows
+deletes with POSIX semantics here.
+
+The symptom reproduced anyway: four threads handing the lock over failed with OS error
+5 by round 3. The window is inside `DeleteFileW`, between marking the file for deletion
+and closing its own handle. A waiter's `CREATE_NEW` in that window meets a
+delete-pending file and gets `ERROR_ACCESS_DENIED`, so it failed instead of waiting.
+Reordering our own close and remove cannot reach a window inside the OS call.
+
+**Decision.** The lock is `File::try_lock`: `LockFileEx` on Windows and `flock`
+elsewhere. It is taken on a `.lock` file that is created once, `0600` with no symlink
+following, and never removed. The 5 s wait and the `WouldBlock` "busy" error are
+unchanged. The lock is released when its handle closes.
+
+**Alternatives.**
+
+- *Retry only on `STATUS_DELETE_PENDING`, via `RtlGetLastNtStatus`.* This keeps the
+  delete-based design and its crash behaviour. But it brings the first `unsafe` and FFI
+  into trace-store, against a poorly documented ntdll export.
+- *Retry on any `PermissionDenied`.* Simplest, but a real permission error would then
+  wait 5 s like a busy lock. AI2-75 rules out exactly this broad swallowing.
+- *Close the handle before removing.* Refuted on CI, as above.
+
+**Consequence.**
+
+- A crashed holder no longer leaves a `.lock` that blocks every later caller until an
+  operator deletes it. The OS releases the lock with the process. A crash mid-mutation
+  leaves at most a torn tail, which the chained log refuses or tolerates as D78
+  describes. D78's note that "a stale `.lock` can make such an open fail after 5 s"
+  no longer applies.
+- The `.lock` file now persists next to the store and holds no state. A directory or
+  an unopenable file at that path still makes the lock unobtainable, and the call fails
+  closed. Two `mcp_approvals` tests and their fixture rely on this, so they now replace
+  the persistent file with a directory instead of creating one.
