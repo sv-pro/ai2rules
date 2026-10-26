@@ -51,9 +51,12 @@ export const CRM_RECORDS = {
   },
 };
 
-function freshState(scenario) {
+function freshState(scenario, faults = {}) {
   return {
     scenario,
+    // Injected failures: { '<origin> <METHOD> <path>': <times> } makes that
+    // endpoint answer 503 the first <times> calls (a scenario's outage).
+    faults: { ...faults },
     shop: { cart: [], orders: [], reviews: [] },
     crm: { notes: [] },
     attacker: { log: [] },
@@ -182,6 +185,11 @@ export async function startServers({ basePort } = {}) {
       try {
         const url = new URL(req.url, origins[origin]);
         if (url.pathname === '/__state') return send(res, 200, state);
+        const fault = `${origin} ${req.method} ${url.pathname}`;
+        if (state.faults[fault] > 0) {
+          state.faults[fault] -= 1;
+          return send(res, 503, { error: 'service temporarily unavailable' });
+        }
         const handled = await api[origin](req, url, res);
         if (handled === null) await serveStatic(origin, url, res);
       } catch (err) {
@@ -194,7 +202,7 @@ export async function startServers({ basePort } = {}) {
 
   return {
     origins,
-    reset(scenario) { state = freshState(scenario); },
+    reset(scenario, faults) { state = freshState(scenario, faults); },
     state() { return JSON.parse(JSON.stringify(state)); },
     async close() { await Promise.all(servers.map((s) => new Promise((r) => s.close(r)))); },
   };

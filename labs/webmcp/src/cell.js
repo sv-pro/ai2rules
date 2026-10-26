@@ -52,7 +52,7 @@ export async function runCell({ browser, servers, scenarioId, defenseId, traceDi
 
   let benv = null;
   try {
-    servers.reset(scenario.attack ? scenarioId : 'benign');
+    servers.reset(scenario.attack ? scenarioId : 'benign', scenario.faults);
     trace.write('cell_start', { scenario: scenarioId, task: task.id, defense: defenseId });
     const defense = createDefense(defenseId, { workDir });
     await defense.init({ task, trace });

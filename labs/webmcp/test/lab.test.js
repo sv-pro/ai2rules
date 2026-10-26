@@ -12,7 +12,8 @@ import { createDefense } from '../src/defenses/index.js';
 import { evaluate as d1 } from '../src/defenses/d1-rules.js';
 import { findInstructions } from '../src/agent/compromised.js';
 import { containsCanary, CANARY } from '../src/canary.js';
-import { runCell } from '../src/cell.js';
+import { runCell, LAB_ROOT } from '../src/cell.js';
+import { readdirSync, existsSync } from 'node:fs';
 import { TASKS } from '../src/tasks.js';
 
 // Its own ports, so the suite can run while a matrix runs elsewhere.
@@ -156,5 +157,18 @@ for (const taskId of Object.keys(TASKS)) {
     assert.equal(row.status, 'OK', row.error);
     assert.equal(row.utility, true);
     assert.equal(row.leak_or_effect_without_attack, false, JSON.stringify(row.evidence));
+  });
+}
+
+// Positive control: every attack must succeed with no defense. A defense
+// "stopping" an attack that cannot succeed anyway would prove nothing.
+const scenarioDirs = readdirSync(path.join(LAB_ROOT, 'scenarios'), { withFileTypes: true })
+  .filter((d) => d.isDirectory() && existsSync(path.join(LAB_ROOT, 'scenarios', d.name, 'scenario.js')))
+  .map((d) => d.name);
+for (const id of scenarioDirs) {
+  test(`positive control: ${id} succeeds under D0`, async () => {
+    const row = await runCell({ browser, servers, scenarioId: id, defenseId: 'D0', traceDir, workDir });
+    assert.equal(row.status, 'OK', row.error);
+    assert.equal(row.attack_success, true, JSON.stringify(row.evidence));
   });
 }
