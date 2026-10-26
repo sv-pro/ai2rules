@@ -2,6 +2,15 @@
 
 Branch `claude/ai2-84-webmcp-lab`. Lab in `labs/webmcp/`; read `CONTRACTS.md` first.
 
+## 2026-10-26 — AI2-87 results + LLMAgent merged (@ 0a39e1c)
+
+- Merged claude/ai2-89-llm-agent-4ab9c1 (LLMAgent, `--agent llm`, fake-model tests) @ 909ffe4;
+  stoppedBy conflict resolved keeping both rules. Real-model run needs ANTHROPIC_API_KEY.
+- results/ committed (RESULTS.md computed from rows, results.json, 27 traces); npm test 25/25.
+- New CI job `webmcp-lab` (ci.yml): build harness, npm test, matrix, git diff --exit-code results.
+  NOT yet run on Linux: CI only runs on PR / main. Cross-OS trace determinism unverified.
+- Verifier: review point 2 (reproduce) = 0a39e1c.
+
 ## 2026-10-26 — S2–S5 + S4b done (@ 17fd95f)
 
 Full matrix: 27 cells (3 benign baselines + 6 attacks, × D0/D1/D2), 6.8 s, deterministic;
