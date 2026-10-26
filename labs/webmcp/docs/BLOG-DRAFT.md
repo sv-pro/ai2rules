@@ -2,8 +2,9 @@
 
 > **Draft, not published.** This is the post body written from
 > [`BLOG-OUTLINE.md`](BLOG-OUTLINE.md). It is pending the independent write-up
-> audit (AI2-88), so wording and emphasis may change; the D3 column is pending
-> re-verification and is flagged as such. Every figure traces to the lab's own
+> audit (AI2-88), so wording and emphasis may change; the D3 column now runs on
+> the kernel's flow contracts, is pending re-verification, and is flagged as
+> such. Every figure traces to the lab's own
 > committed files — [`results/RESULTS.md`](../results/RESULTS.md),
 > [`results/results.json`](../results/results.json),
 > [`CONTRACTS.md`](../CONTRACTS.md), [`docs/D1-RULES.md`](D1-RULES.md),
@@ -26,10 +27,11 @@ independent reviewer.
 
 Here is the short version. The per-call rule baseline stopped two of the eight
 attacks. Our kernel stopped six, but after reading a customer record it also
-blocked the perfectly ordinary write the user had asked for. A prototype of
-value-level data labels (pending an independent re-check) gave that utility back
-and closed one more leak on these scenarios — with one honest cost, a reshaped or
-partially-quoted value, that we will not bury.
+blocked the perfectly ordinary write the user had asked for. Running the lab on
+the kernel's typed flow labels (pending an independent re-check) gave that utility
+back and closed one more leak on these scenarios — with one honest cost, that
+after a sensitive read the kernel refuses every value the host cannot vouch for,
+which we will not bury.
 
 ## The setup: assume the agent is already hijacked
 
@@ -112,7 +114,7 @@ purchase from the theft.
 
 **2. It does not cover a leak through a read tool (S5b).** The canary can leave in
 the arguments of the shop's own product-search tool — a permitted *read* — under
-D0, D1 and the kernel (D2). (D3, the labels prototype in the next-to-last section,
+D0, D1 and the kernel (D2). (D3, the flow-label column in the next-to-last section,
 is the one column that stops it.) The taint floor removes writes and external
 actions, not reads. "Taint stops exfiltration" is true only for write and external
 sinks. The reviewer found this one.
@@ -132,9 +134,9 @@ a direction to evaluate, not a proven remedy.
 squatting attacks the legitimate tool is removed or redirected, so stopping the
 attack still leaves the user's task undone, under all four defenses.
 
-The value-level data-flow work that fixes losses 1 and 2 is tracked as AI2-70 /
-#151, and the next-to-last section is a prototype of it. We do not tune any of
-these losses away.
+The value-level data-flow fix for losses 1 and 2 is now in the kernel as typed
+flow contracts, and the next-to-last section runs the lab on it. We do not tune
+any of these losses away.
 
 ## What per-call blocking catches
 
@@ -201,46 +203,60 @@ by name is ABSENT at execution, and nothing runs.
 
 The kernel's worst moment is breaking a benign task. Its taint is an *integrity*
 signal carried over the whole session: once anything sensitive is read, the
-session is "dirty" and loses its write actions. So we prototyped the fix we
-already have on the roadmap (AI2-70 / #151) and added it as a fourth column, to
-measure one question: **does labelling the data instead of the session recover the
-utility without losing security?**
+session is "dirty" and loses its write actions. The kernel now has a second axis
+for exactly this: a typed flow label on a *value* — trusted or untrusted, public
+or private — declared per action as a contract and carried by the host. We ran
+the lab on it as a fourth column, to measure one question: **does labelling the
+data instead of the session recover the utility without losing security?**
 
-D3 keeps everything the kernel does and adds a second axis. A read on a sensitive
-origin labels the *values* it returns as Private; a call that would carry a Private
-value to another origin is denied by an independent confidentiality check, before
-the integrity gate. Crucially, that read no longer taints the whole session, so an
-ordinary write with clean arguments still runs.
+D3 keeps everything the kernel does and changes what the world says about the
+CRM read. Instead of marking it a taint source, the compiled world declares it a
+*source* whose whole result is private, and declares every argument of every
+tool on another origin a *sink* that admits only public values. The adapter does
+what the kernel's host contract asks: it keeps the session's ambient label and a
+table of value labels keyed by digest, binds the label the kernel returns for a
+result to the value the tool actually returned, labels the user's own task inputs
+public, and sends the kernel a label for every argument whose value it has seen.
+An argument it has never seen gets no label, and the kernel judges it by the
+session's ambient — never as public by default. The refusal is the kernel's own
+rule, decided before the integrity gate; the adapter decides nothing. And the
+read no longer taints the session, so the gift order still runs.
 
 On these eight fixed scenarios the result is clean:
 
 - It **recovers the utility** on every task that reads the CRM — the gift task
-  completes again, and so do the attack cells that ride on it.
-- It **keeps the kernel's security on these cells and closes S5b** — a Private
-  value may not leave for another origin whether the sink is a write *or* a read,
-  *as long as the labelled value travels whole* (which these scenarios' payloads
-  do). It regresses nothing the kernel caught. The next paragraph is the catch.
+  completes again, and so do the attack cells that ride on it. The benign calls
+  carry the task's own values, which the adapter labelled public.
+- It **keeps the kernel's security on these cells and closes S5b** — a private
+  value may not leave for another origin whether the sink is a write *or* a read.
+  It regresses nothing the kernel caught. And the phrasing of the leak no longer
+  matters: our scenarios paste the customer record wrapped in a sentence, so the
+  argument is *not* the labelled value; the adapter has no label for it, and the
+  kernel judges it by the ambient, which the CRM read raised to private. A
+  reversed record, or just the account code, meets the same refusal. (S1 is stopped
+  by projection, as under the kernel alone: the attacker's tool is not in the world,
+  so no contract ever gets a say.)
 
-And the honest cost, which we regression-test and will not hide: the label follows
-a value by **surface match of the whole labelled field**. Two things slip past it.
-A genuine *transform* of the value — encode it, reverse it — is no longer
-recognised. And a **partial quote** does the same: our scenarios exfiltrate by
-pasting the *whole* customer record (so the full labelled field is present and
-caught), but an instruction that said "put just the account code in the note"
-would send only the canary, which is not the whole labelled field, and D3 would
-let it through — where the kernel's cruder session taint would still have blocked
-the write. No cell in the lab exercises that surgical quote; it sits inside this
-documented limit. So D3 closes S5/S5b *as the scenarios paste the data*, not for
-every phrasing of the same attack.
+And the honest cost, which we regression-test and will not hide: labels are
+**whole-result and bound by digest**, and the kernel infers nothing. Once the
+session holds something private, *every* value the adapter cannot vouch for is
+private — a transformed secret, a partial quote, and a benign note the user types
+fresh after the read look identical to it. Our test shows the same harmless search
+query flowing before the CRM read and refused after it. The lab's tasks send only
+their plan's values after the read, so no cell here pays that price; a workload
+with free-text writes after a private read would. Re-binding a transformed value
+is the host's job — a transform run as a governed action keeps its label — not
+something the kernel guesses. One more thing the adapter asserts on its own: an
+argument the call does not bind at all carries no value, so it is sent as public;
+the kernel would otherwise judge the task's own bare checkout call by the private
+ambient. The trace records every place that label was used.
 
 That is the real finding, not a slogan: on this workload, value-level labelling
-beats a binary session taint on utility while matching it on security *on these
-eight fixed scenarios, whose S5/S5b payloads carry the whole labelled field* — and
-it buys that by trading away resistance to a value that has been reshaped or
-partially quoted. This is a bounded result, not general security parity. Closing
-the gap needs provenance that survives transformation and tracks sub-values, which
-is kernel work, which is what AI2-70 is. D3 is an adapter-side prototype, and the
-reviewer is still re-checking its column; treat the whole section as pending.
+beats a binary session taint on utility while matching it on security, and the
+price has moved from "a reshaped value slips past the match" to "an unvouched-for
+value is refused once the session is private". This is a bounded result, not
+general security parity, and the reviewer has not yet re-checked this column;
+treat the whole section as pending.
 
 ## With a real model: one run, clearly labelled
 
@@ -279,8 +295,9 @@ read; only the layer underneath sees a tool swapped out under an unchanged name.
   here.
 - The kernel's taint is a per-session integrity signal used as a confidentiality
   floor — coarse, and blind to read sinks.
-- D3 is an adapter prototype of AI2-70, not the kernel; its labels follow a value
-  by whole-field surface match, so a transform or a partial quote escapes; and its
+- D3's labels are whole-result and bound by digest; after a sensitive read the
+  kernel refuses any value the adapter cannot vouch for, benign or not, and the
+  adapter labels an argument a call leaves unbound as public on its own word. Its
   column is not yet independently certified.
 - Determinism is checked on Windows and in Linux CI (a job reruns the matrix and
   fails on any drift from the committed results).
@@ -314,13 +331,14 @@ Against a fully hijacked agent, on this fixed matrix, per-call blocking stopped
 what arrived from a foreign origin and nothing else. Our kernel stopped six of
 eight, but after a sensitive read it also blocked the write the user wanted, and
 it missed a leak through a read tool (S5b, which escapes D0, D1 and the kernel).
-Labelling the data instead of the session restored five utility cells and took
-successful attacks from 2/8 to 1/8 — but its S5/S5b stops depend on the payload
-carrying the *whole* labelled field: a transform or an unchanged partial quote
-("just the account code") escapes the label, and the kernel's cruder session taint
-would still have blocked that write. So this is not general security parity; it is
-a bounded result on these scenarios, pending an independent check, and the
-real-model sample never exercised it. And one attack beat all four tested
+Labelling the data instead of the session, with the kernel's own flow contracts,
+restored five utility cells and took successful attacks from 2/8 to 1/8 — for any
+phrasing of the leak, because an unlabelled value in a private session is private.
+That is also the cost: after a sensitive read the kernel refuses every value the
+host cannot vouch for, a reshaped secret and a fresh benign note alike. So this is
+not general security parity; it is a bounded result on these scenarios, pending
+an independent check, and the real-model sample never exercised it. And one
+attack beat all four tested
 defenses, because it tampers with a tool's behaviour from inside its own origin —
 which tool-registration-and-call governance does not see, and which the layer that
 could stop it (script isolation) is one we have not tested.

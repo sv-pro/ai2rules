@@ -2,6 +2,20 @@
 
 Branch `claude/ai2-84-webmcp-lab`. Lab in `labs/webmcp/`; read `CONTRACTS.md` first.
 
+## 2026-10-26 — D3 on the kernel's flow contracts (branch `claude/ai2-70-webmcp-d3-kernel-flows`)
+
+- Cut from `claude/ai2-70-flow-contracts` (PR #169, not yet on `main`); PR targets that branch.
+- `labels: true` now derives a world with `schema` + `flow_contract` (source on the CRM read,
+  Public sinks on every other-origin argument), carries `context.flow` per the gate ABI §6, and
+  reports the kernel's `confidentiality_violation` as `flow:confidentiality`. No JS verdicts.
+- Tasks declare each capability's `args` (needed for sinks; closed schemas). D2 world/traces
+  byte-identical. Matrix 44/44 OK; S1/D3 `flow:confidentiality` → `projection` (explained in
+  CONTRACTS §8.4 / RESULTS). `npm test` 35/35 on Windows with `HARNESS_BIN` pointing at the
+  main checkout's release binary (the worktree has no `target/`).
+- Open kernel question (in the task record): absent declared sink args are judged by the
+  ambient; the adapter labels them Public itself and records `absent` in the trace.
+- Verifier has NOT re-checked the new D3 column; TAKEAWAY/BLOG keep it "pending".
+
 ## 2026-10-26 — AI2-87 results + LLMAgent merged (@ 0a39e1c)
 
 - Merged claude/ai2-89-llm-agent-4ab9c1 (LLMAgent, `--agent llm`, fake-model tests) @ 909ffe4;

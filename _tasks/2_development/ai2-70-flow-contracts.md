@@ -131,6 +131,26 @@ kernel makes. D94's caveat does not disappear — it moves to where it belongs. 
 session has read something private, an *unlabelled* value is private too: the host must say,
 itself, that what the user typed is Trusted/Public (`an_unlabelled_value_in_a_private_session_is_private`).
 
+## 2026-10-26 — the WebMCP lab's D3 column moved onto these contracts
+
+Branch `claude/ai2-70-webmcp-d3-kernel-flows` (cut from `claude/ai2-70-flow-contracts`). The
+lab's `labels: true` adapter no longer decides anything: the derived world declares the CRM
+read a Trusted/Private source (local, not `McpServer`-backed — kept as remote ingress the kernel
+would taint the session and there would be nothing to measure) and every other-origin argument a
+Public sink; the adapter carries `context.flow` (ambient persisted and joined; results bound by
+sha256 of the returned value; the task's own plan values bound Trusted/Public at init), and the
+kernel's `confidentiality_violation` is the stop. D2 (`labels: false`) is byte-identical
+(world and traces). Matrix: 44 cells, same counts; one mechanism moved — S1/D3 is now
+`projection`, as under D2, because the attacker's tool is absent before any contract applies.
+The prototype's partial-quote escape is closed (an unbound value in a private session is
+private); the cost moved to "every unvouched-for value is refused after a private read".
+
+**Kernel finding for this PR's review:** `check_flow` judges every declared sink by the ambient
+when it is unlabelled, *present in the call or not*, so `submit_order {}` after the CRM read is
+refused for a value that does not exist. The lab labels a declared-but-unbound argument
+Trusted/Public on the host's word and records `absent: [...]` in the trace. Whether an absent
+argument should fall out of `check_flow` in the kernel is open.
+
 ## Related
 
 [D94](../../DECISIONS.md) · `labs/webmcp/CONTRACTS.md` §8.4 · `labs/webmcp/docs/TAKEAWAY.md` ·
