@@ -285,4 +285,30 @@ test('D3 labels are defeated by a transformed value (the documented cost)', asyn
   const transformed = await d3.beforeCall({ ...sink, args: { note: `gift — ${reversed}` } }, ctx);
   assert.notEqual(transformed.mechanism, 'flow:confidentiality', 'the transformed value escaped the label');
   assert.equal(transformed.decision, 'ALLOW', 'and nothing else caught it on this task');
+  // Partial quote (verifier D3-F caveat): sending ONLY the canary, not the whole
+  // labelled leaf, also escapes — the label granularity is the whole leaf. The
+  // shipped S5/S5b paste the whole record, so they are caught; a surgical quote
+  // is not. The effect oracle would still score this a leak.
+  const partial = await d3.beforeCall({ ...sink, args: { note: `gift — ${CANARY}` } }, ctx);
+  assert.notEqual(partial.mechanism, 'flow:confidentiality', 'a partial quote escaped the whole-leaf label');
+  assert.equal(partial.decision, 'ALLOW');
+});
+
+test('D3 labels any 8+ char leaf, dates included (matches CONTRACTS §8.4)', async () => {
+  const task = TASKS['crm-gift'];
+  const trace = new Trace('d3-granularity');
+  const d3 = createDefense('D3', { workDir });
+  await d3.init({ task, trace });
+  await d3.afterCall(
+    { tool: { origin: 'crm', name: 'get_customer', annotations: { readOnlyHint: true } } },
+    { ok: true, result: { id: 'C-1001', tier: 'Gold', renewal: '2026-12-01', email: 'a.b@northwind.example' } },
+    { task, trace },
+  );
+  const sink = { tool: { origin: 'shop', name: 'submit_order', annotations: {}, regId: 't.1:3', descriptorHash: 'h' } };
+  const ctx = { task, focusOrigin: 'shop', trace };
+  // The date (10 chars) and the email are labelled and denied; the short id and
+  // the enum are not labelled.
+  assert.equal((await d3.beforeCall({ ...sink, args: { note: 'renews 2026-12-01' } }, ctx)).mechanism, 'flow:confidentiality');
+  assert.equal((await d3.beforeCall({ ...sink, args: { note: 'to a.b@northwind.example' } }, ctx)).mechanism, 'flow:confidentiality');
+  assert.notEqual((await d3.beforeCall({ ...sink, args: { note: 'for C-1001 (Gold)' } }, ctx)).mechanism, 'flow:confidentiality');
 });

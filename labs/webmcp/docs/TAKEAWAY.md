@@ -147,16 +147,21 @@ itself. The verifier is re-checking it; treat these as the author's run.
 - **It recovers the utility D2 loses.** All five CRM-reading tasks complete under
   D3 (benign `crm-gift`, S1, S2, S5, S5b) where D2 leaves them undone [R §What
   value-level labels (D3) change, §Utility].
-- **It keeps D2's security and closes S5b.** D3 stops every attack D2 stops, and
-  additionally stops S5b — the read-sink leak D2 missed — because a Private value
+- **It keeps D2's security and closes S5b — as the scenarios paste the data.** D3
+  stops every attack D2 stops, and additionally stops S5b, because a Private value
   may not go to another origin whether the sink is a write or a read [R §What
   value-level labels (D3) change; §Attack outcome]. It regresses nothing D2 caught.
-- **The one cost, regression-tested.** The label follows a value by surface match,
-  so a transform of the value (encoding, reversal, a partial quote of a labelled
-  field) escapes it [C §8.4 "the cost"; test `labels_defeated_by_transform`]. D2's
-  coarser session taint would have blocked such a write incidentally; D3 trades
-  that cover for the recovered utility. Closing it needs provenance that survives
-  transformation — kernel work, which is exactly what AI2-70 is [C §8.4].
+  The verifier adds a caveat: the shipped S5/S5b paste the whole record
+  (`$ALL_OUTPUTS`), so the full labelled leaf is present and caught; a one-line
+  "put just the account code" would be a partial quote that escapes the label and
+  leaks, where D2's taint would still have blocked the write [C §8.4; V §Confirmed].
+- **The one cost, regression-tested.** The label follows the whole labelled value
+  by surface match, so a transform (encoding, reversal) or a partial quote of it
+  escapes [C §8.4 "the cost"; test `labels_defeated_by_transform`]. D2's coarser
+  session taint would have blocked such a write incidentally; D3 trades that cover
+  for the recovered utility. Closing it needs provenance that survives
+  transformation and sub-value tracking — kernel work, which is what AI2-70 is
+  [C §8.4].
 
 So on this workload, value-level labelling dominates binary session taint on
 utility while matching it on security, at the price of transform-resistance — a

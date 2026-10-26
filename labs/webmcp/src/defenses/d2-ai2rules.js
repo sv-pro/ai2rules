@@ -112,8 +112,9 @@ export function createD2({ workDir, labels = false }) {
   // D3: does a call's arguments carry a value labelled Private? Conservative
   // containment (lower-cased and url-decoded too), the same kind of surface
   // match the kernel's arg-provenance uses today. AI2-70 is explicit that this
-  // is inference, not proof: a genuine transform of the value escapes it, which
-  // variant S5c measures.
+  // is inference, not proof: a genuine transform of the value, or a quote of just
+  // part of a labelled leaf, escapes it (the `labels_defeated_by_transform`
+  // regression test; CONTRACTS.md §8.4).
   function carriesPrivate(args) {
     if (!privateValues.size) return false;
     const text = typeof args === 'string' ? args : JSON.stringify(args ?? {});

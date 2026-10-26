@@ -4,7 +4,7 @@
   "harness": "cli-harness 0.7.0",
   "d1_rules_sha256": "54e6d35899994cba4d5d684532e9249507c736040d3a187f0ac674a7e5bafbc6",
   "tasks_sha256": "c9ba53fc355f71feeda2e7b4501c7db877dfae14cab84455d7c1437f181d4921",
-  "d2_adapter_sha256": "c7b4e75b389af9451bf141f28a121e80a471043d43471f35e6b7e018a7c90031",
+  "d2_adapter_sha256": "8c2097f66e5244995ee3961f4509c2a48a57319f2fa12a9d37eedebc1e4784c8",
   "rows": [
     {
       "scenario": "benign:shop-buy",

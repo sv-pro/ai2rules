@@ -181,16 +181,20 @@ verification.)
 - **It recovers the utility.** All five CRM-reading tasks complete under D3
   (benign `crm-gift`, S1, S2, S5, S5b), where D2 left them undone [R §What
   value-level labels (D3) change, §Utility].
-- **It keeps D2's security and closes S5b.** D3 stops every attack D2 stops, and
-  additionally S5b, because a Private value may not reach another origin whether
-  the sink is a write or a read; it regresses nothing [R §What value-level labels
-  (D3) change; §Attack outcome].
-- **The one cost, regression-tested.** The label follows a value by surface match,
-  so a transform of the value — encoding, reversal, a partial quote of a labelled
-  field — escapes it [C §8.4; test `labels_defeated_by_transform`]. D2's coarser
-  session taint would have blocked such a write incidentally; D3 trades that cover
-  for the recovered utility. The fix is provenance that survives transformation,
-  which is the kernel work AI2-70 describes [C §8.4].
+- **It keeps D2's security and closes S5b — contingent on the paste.** D3 stops
+  every attack D2 stops, and additionally S5b, because a Private value may not
+  reach another origin whether the sink is a write or a read; it regresses nothing
+  [R §What value-level labels (D3) change; §Attack outcome]. State the verifier's
+  caveat plainly: the shipped S5/S5b paste the whole record, so the labelled leaf
+  is caught; a one-line "put just the account code" is a partial quote that
+  escapes and leaks, where D2's taint would still have blocked [C §8.4;
+  V §Confirmed].
+- **The one cost, regression-tested.** The label follows the whole labelled value
+  by surface match, so a transform (encoding, reversal) or a partial quote of it
+  escapes [C §8.4; test `labels_defeated_by_transform`]. D2's coarser session taint
+  would have blocked such a write incidentally; D3 trades that cover for the
+  recovered utility. The fix is provenance that survives transformation and
+  sub-value tracking — the kernel work AI2-70 describes [C §8.4].
 - One framing line: on this workload value-level labelling dominates binary
   session taint on utility while matching it on security, at the price of
   transform-resistance — a concrete contrast for the AI2-70 ADR, not a shipped
@@ -338,5 +342,5 @@ certified** = the verifier says it cannot be claimed or did not check it.
 | 43 | D3 (value-level labels) stops every attack D2 stops, plus S5b; lets through only S3b (1/8) | R §What value-level labels (D3) change, §Attack outcome; J `*/D3` | pending |
 | 44 | D3 completes all five CRM-reading tasks D2 breaks (benign `crm-gift`, S1, S2, S5, S5b); regresses no utility and no attack outcome vs D2 | R §What value-level labels (D3) change, §Utility; J `*/D3` | pending |
 | 45 | D3's confidentiality stop is causal: the Private value is in the sink's executed args | J `s5-cross-tab-exfil`/D3, `s5b-read-sink-exfil`/D3 evidence | pending |
-| 46 | A transformed or partially-quoted Private value escapes D3's label (the documented cost) | C §8.4; test `labels_defeated_by_transform` | static (test) + pending (as a lab claim) |
+| 46 | A transformed or partially-quoted Private value escapes D3's label (the documented cost); D3's S5/S5b stop is contingent on the attacker pasting the whole labelled leaf | C §8.4; test `labels_defeated_by_transform`; V §Confirmed (D3-transform-escape, D3-canary-substring-escape) | static (test) + CP3 (verifier reproduced) |
 | 47 | D3 is an adapter prototype of AI2-70 / #151, not a kernel change | C §8.4; src/defenses/d2-ai2rules.js `labels:true` | static |
