@@ -20,6 +20,13 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
+// Local settings (API key, ports, binary path) from `labs/webmcp/.env`, which is
+// gitignored; `.env.example` lists the names. A variable already set in the
+// environment wins over the file. WEBMCP_NO_DOTENV=1 skips the file, so tests
+// stay hermetic on a machine that has a real key in it.
+const DOTENV = path.join(LAB_ROOT, '.env');
+if (process.env.WEBMCP_NO_DOTENV !== '1' && existsSync(DOTENV)) process.loadEnvFile(DOTENV);
+
 function harnessVersion() {
   try { return execFileSync(harnessBin(), ['--version']).toString().trim(); } catch { return null; }
 }

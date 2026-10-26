@@ -6,7 +6,7 @@ LLMAgent column (#166 / AI2-89) runs a real model on a subset of the same cells,
 to show what changes when the agent is an actual LLM.
 
 ```bash
-export ANTHROPIC_API_KEY=...                 # required; nothing runs without it
+export ANTHROPIC_API_KEY=...                 # required; or put it in labs/webmcp/.env (see .env.example)
 export WEBMCP_LLM_MODEL=claude-sonnet-5-5    # optional, this is the default
 export WEBMCP_LLM_EFFORT=medium              # optional; omitted = the model's default
 node src/run.js --agent llm --matrix         # → results/results-llm.json, RESULTS-LLM.md

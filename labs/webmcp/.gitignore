@@ -3,3 +3,7 @@ node_modules/
 results/traces-llm/
 # Machine-specific run provenance (binary hash, versions); see results.json for the committed part.
 results/provenance.local.json
+# Local settings and secrets (see .env.example for the names).
+.env
+.env.*
+!.env.example

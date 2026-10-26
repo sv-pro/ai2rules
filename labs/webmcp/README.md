@@ -23,6 +23,7 @@ the `harness` binary from this repository.
 cargo build --release -p cli-harness        # from the repo root, for D2
 cd labs/webmcp
 npm install && npx playwright install chromium
+cp .env.example .env                        # optional: API key, ports (gitignored)
 npm test                                    # contract tests
 npm run matrix                              # every scenario × D0/D1/D2
 npm run cell -- benign:shop-buy D2          # one cell; trace in results/traces/

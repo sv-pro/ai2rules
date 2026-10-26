@@ -226,7 +226,8 @@ test('LLM results render as their own table', () => {
 });
 
 test('--agent llm without ANTHROPIC_API_KEY exits with a message and runs nothing', () => {
-  const env = { ...process.env };
+  // WEBMCP_NO_DOTENV: a real key in a local .env must not leak into this test.
+  const env = { ...process.env, WEBMCP_NO_DOTENV: '1' };
   delete env.ANTHROPIC_API_KEY;
   delete env.WEBMCP_LLM_TRANSPORT;
   const r = spawnSync(process.execPath, ['src/run.js', '--agent', 'llm', '--matrix'], { cwd: LAB_ROOT, env, encoding: 'utf8' });
