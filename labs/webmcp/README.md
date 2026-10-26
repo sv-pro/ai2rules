@@ -28,7 +28,16 @@ cp .env.example .env                        # optional: API key, ports (gitignor
 npm test                                    # contract tests
 npm run matrix                              # every scenario × D0/D1/D2
 npm run cell -- benign:shop-buy D2          # one cell; trace in results/traces/
+npm run demo                                # live demo page on http://127.0.0.1:4180
 ```
+
+**The demo** (`demo/`) is a page for showing the lab to people: pick a defense,
+run S5b (or S5, or the no-attack baseline) and watch the agent's steps arrive:
+the tabs it opens, the tools it calls and why, each verdict, what actually ran,
+and the oracle's result. It runs the same `runCell` as the matrix, against the
+same servers and the real `harness` binary, and only renders the trace records
+as they are written. Its traces go to a temp directory, never to `results/`.
+`WEBMCP_DEMO_PORT` changes its port.
 
 ## Layout
 

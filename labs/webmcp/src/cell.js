@@ -65,12 +65,12 @@ const AGENTS = {
 };
 export const AGENT_IDS = Object.keys(AGENTS);
 
-export async function runCell({ browser, servers, scenarioId, defenseId, traceDir, workDir, agent = 'compromised', agentOptions }) {
+export async function runCell({ browser, servers, scenarioId, defenseId, traceDir, workDir, agent = 'compromised', agentOptions, onRecord }) {
   if (!AGENTS[agent]) throw new Error(`unknown agent ${agent}`);
   const scenario = await loadScenario(scenarioId);
   const task = TASKS[scenario.task];
   const cell = `${scenarioId}/${defenseId}`;
-  const trace = new Trace(cell);
+  const trace = new Trace(cell, { onRecord });
   const traceFile = path.join(traceDir, `${scenarioId.replace(/[:/]/g, '_')}--${defenseId}.jsonl`);
   const row = { scenario: scenarioId, short: scenario.short, name: scenario.name, task: task.id, defense: defenseId, ...(agent === 'compromised' ? {} : { agent }) };
 
