@@ -465,6 +465,7 @@ docs/                 architecture (harness-architecture.md is canonical; one-ke
   benchmarks/mcp-governance/  the governance smoke pack + its generated report (issue #64)
 scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
+labs/webmcp/          WebMCP attack lab: 5 attacks × D0/D1/D2, CompromisedAgent, Playwright (#160 / AI2-83; Node sub-project)
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
 CLAUDE.md             Claude Code pointer → AGENTS.md

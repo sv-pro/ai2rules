@@ -20,6 +20,7 @@ ai2rules/
 ├── docs/                     # 17 architecture/design markdown files
 ├── blog/                     # Astro website (Node sub-project, separate from Rust workspace)
 ├── docker/                   # Containerisation: Dockerfile, compose, egress proxy
+├── labs/webmcp/              # WebMCP attack lab (Node sub-project, separate from Rust workspace; #160 / AI2-83)
 ├── .claude/                  # Claude Code integration (hooks, agents, commands, config)
 ├── .uh/                      # Workspace manifest (project.yaml, hand-edited) and the brief generated from it (brief.md)
 ├── .mcp.json                 # Project MCP servers for Claude Code (Linear); entries added by universal-harness

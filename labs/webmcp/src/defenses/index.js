@@ -1,0 +1,12 @@
+import { createD0 } from './d0-none.js';
+import { createD1 } from './d1-rules.js';
+import { createD2 } from './d2-ai2rules.js';
+
+export const DEFENSE_IDS = ['D0', 'D1', 'D2'];
+
+export function createDefense(id, { workDir }) {
+  if (id === 'D0') return createD0();
+  if (id === 'D1') return createD1();
+  if (id === 'D2') return createD2({ workDir });
+  throw new Error(`unknown defense ${id}`);
+}
