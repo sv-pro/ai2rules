@@ -12,7 +12,10 @@
 //                seen for it (adapter: ABSENT, CONTRACTS.md §8.2)
 //   taint      — the kernel's taint floor / capability matrix after the session
 //                ingested a taint source (kernel: DENY or ABSENT, verbatim)
+//   flow:*     — D3 only: the kernel's flow-contract rules (D95), verbatim
+//                (`confidentiality_violation` → `flow:confidentiality`, …)
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +43,14 @@ const CLASS_MAP = {
 
 // The compiled world for a task, as YAML. Only the task's capabilities exist;
 // every other registration — any origin, any name — is ABSENT by omission.
-export function worldYaml(task) {
+//
+// With `labels` (D3), the same actions also declare the kernel's flow contracts
+// (D95, CONTRACTS.md §8.4): a read on a sensitive origin is a SOURCE whose whole
+// result is Trusted/Private, and every argument of an action on any other
+// origin is a SINK that admits only Public values. The task's `args` become the
+// action's schema, because a sink must name an argument the schema declares.
+// Without `labels` the world is byte-for-byte what D2 has always compiled.
+export function worldYaml(task, { labels = false } = {}) {
   const sensitive = new Set(task.sensitiveOrigins ?? []);
   const lines = [
     `world_id: webmcp-${task.id}`,
@@ -61,11 +71,36 @@ export function worldYaml(task) {
     lines.push(`  - name: ${actionName(cap.origin, cap.tool)}`);
     lines.push(`    action_type: ${m.action_type}`);
     lines.push(`    side_effect: ${m.side_effect}`);
-    // A sensitive origin's reads are declared as remote ingress, which is how
-    // today's kernel marks an action's output as a taint source (gate.rs:
-    // McpServer backing ⇒ post-call taint). See CONTRACTS.md §8.3.
+    if (!labels) {
+      // A sensitive origin's reads are declared as remote ingress, which is how
+      // today's kernel marks an action's output as a taint source (gate.rs:
+      // McpServer backing ⇒ post-call taint). See CONTRACTS.md §8.3.
+      if (sensitive.has(cap.origin)) {
+        lines.push(`    backing: !McpServer { server: ${cap.origin}, tool: ${cap.tool} }`);
+      }
+      continue;
+    }
+    const args = Object.entries(cap.args ?? {});
+    if (args.length) {
+      lines.push('    schema:');
+      lines.push('      type: object');
+      lines.push('      properties:');
+      for (const [name, type] of args) lines.push(`        ${name}: { type: ${type} }`);
+    }
     if (sensitive.has(cap.origin)) {
-      lines.push(`    backing: !McpServer { server: ${cap.origin}, tool: ${cap.tool} }`);
+      // The source. Declared local, not as remote ingress: the CRM is one of the
+      // task's own origins, and what its read returns is private, not untrusted.
+      // The contract says so explicitly, where D2 had only the taint bit.
+      if (m.action_type === 'Read') {
+        lines.push('    flow_contract:');
+        lines.push('      output: { integrity: Trusted, confidentiality: Private }');
+      }
+    } else if (args.length) {
+      // A sink on every argument: a private value may not reach another origin
+      // through any of them, whether the action reads or writes.
+      lines.push('    flow_contract:');
+      lines.push('      sinks:');
+      for (const [name] of args) lines.push(`        ${name}: { confidentiality: Public }`);
     }
   }
   return lines.join('\n') + '\n';
@@ -81,26 +116,59 @@ function run(bin, args, input) {
   });
 }
 
-// String leaves of a tool result, the values a label can attach to.
-function leaves(v, out = []) {
-  if (typeof v === 'string') out.push(v);
-  else if (Array.isArray(v)) v.forEach((x) => leaves(x, out));
-  else if (v && typeof v === 'object') Object.values(v).forEach((x) => leaves(x, out));
+// ---- D3: the host side of the kernel's flow labels (gate ABI §6) ----
+
+const TRUSTED_PUBLIC = { integrity: 'trusted', confidentiality: 'public' };
+
+// Labels only ever go up: joining is the only operation a host has.
+const joinLabel = (a, b) => ({
+  integrity: a.integrity === 'untrusted' || b.integrity === 'untrusted' ? 'untrusted' : 'trusted',
+  confidentiality: a.confidentiality === 'private' || b.confidentiality === 'private' ? 'private' : 'public',
+});
+const showLabel = (l) => `${l.integrity}/${l.confidentiality}`;
+
+// A value's identity, for binding a label to it: its text, or its JSON for
+// anything that is not a string. A label follows the whole value, by digest,
+// and nothing less: a quote of part of it, or a transform of it, is a value the
+// host has never seen (CONTRACTS.md §8.4).
+const identity = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
+const digest = (v) => createHash('sha256').update(identity(v)).digest('hex');
+
+// Every primitive in a value tree.
+function primitives(v, out = []) {
+  if (Array.isArray(v)) v.forEach((x) => primitives(x, out));
+  else if (v && typeof v === 'object') Object.values(v).forEach((x) => primitives(x, out));
+  else if (v !== undefined && v !== null) out.push(v);
   return out;
 }
 
-// D3 (`labels: true`) is D2 with the per-session CRM taint replaced by
-// value-level confidentiality labels, an adapter-side prototype of AI2-70 /
-// #151 (CONTRACTS.md §8.4). Projection, pinning and the integrity taint from
-// untrusted page text are unchanged and still decided by the kernel.
+// The kernel's flow rules, reported under the lab's mechanism names.
+const FLOW_RULES = {
+  confidentiality_violation: 'flow:confidentiality',
+  integrity_violation: 'flow:integrity',
+  missing_flow_context: 'flow:missing_context',
+  invalid_flow_context: 'flow:invalid_context',
+};
+
+// D3 (`labels: true`) is D2 with the per-session taint from a sensitive-origin
+// read replaced by the kernel's own flow contracts (D95; CONTRACTS.md §8.4).
+// The adapter carries `context.flow` on every gate request — the session's
+// ambient label and a label for each argument whose value it has a label for —
+// and persists what the kernel returns: the ambient, and the floor it puts on
+// each ALLOWed call's result, which the adapter binds to the value the tool
+// actually returned. It decides nothing: every DENY here is the kernel's rule.
+// Projection, pinning and the integrity taint from untrusted page text are
+// unchanged.
 export function createD2({ workDir, labels = false }) {
   const bin = harnessBin();
   let worldPath = null;
   let task = null;
   let taint = 'clean';
   const pins = new Map(); // action name -> { regId, descriptorHash }
-  const privateValues = new Set(); // D3: values read from a sensitive origin
-  const MIN_LABELLED = 8; // shorter strings (ids, booleans, dates) are not labelled
+  // D3 host state (gate ABI §6 step 2): the monotonic ambient label and the
+  // digest-keyed table of value labels. Both are the host's word.
+  let ambient = TRUSTED_PUBLIC;
+  const valueLabels = new Map(); // sha256(identity(value)) -> label
 
   const channel = () => (taint === 'tainted' ? 'mcp_output' : 'user_prompt');
 
@@ -109,39 +177,62 @@ export function createD2({ workDir, labels = false }) {
     return pin && pin.regId === tool.regId && pin.descriptorHash === tool.descriptorHash;
   }
 
-  // D3: does a call's arguments carry a value labelled Private? Conservative
-  // containment (lower-cased and url-decoded too), the same kind of surface
-  // match the kernel's arg-provenance uses today. AI2-70 is explicit that this
-  // is inference, not proof: a genuine transform of the value, or a quote of just
-  // part of a labelled leaf, escapes it (the `labels_defeated_by_transform`
-  // regression test; CONTRACTS.md §8.4).
-  function carriesPrivate(args) {
-    if (!privateValues.size) return false;
-    const text = typeof args === 'string' ? args : JSON.stringify(args ?? {});
-    let decoded = text;
-    try { decoded = decodeURIComponent(text); } catch { /* keep raw */ }
-    const low = text.toLowerCase();
-    for (const v of privateValues) {
-      if (text.includes(v) || decoded.includes(v) || low.includes(v.toLowerCase())) return true;
+  // Bind a label to a value, joined with any label it already has: a later
+  // claim can raise a label, never lower it.
+  function bind(value, label) {
+    const k = digest(value);
+    valueLabels.set(k, valueLabels.has(k) ? joinLabel(valueLabels.get(k), label) : label);
+  }
+
+  // The sidecar for a call: the ambient, plus the label of every argument whose
+  // value the host has seen labelled. An argument the host cannot vouch for is
+  // left out and falls back to the ambient in the kernel — never to
+  // Trusted/Public.
+  //
+  // One claim the host makes on its own word: a declared argument the call does
+  // not bind at all carries no value, so nothing flows through it, and it is
+  // labelled Trusted/Public. The kernel judges every declared sink, present or
+  // not, by the ambient when it is unlabelled (`check_flow`), which would refuse
+  // `submit_order {}` in a session that has read the CRM — for a value that does
+  // not exist. The lab reports which arguments this applied to in the trace.
+  function flowFor(action, args) {
+    const labelled = {};
+    const absent = [];
+    for (const [name, value] of Object.entries(args ?? {})) {
+      const label = valueLabels.get(digest(value));
+      if (label) labelled[name] = label;
     }
-    return false;
+    const declared = task.capabilities.find((c) => actionName(c.origin, c.tool) === action)?.args ?? {};
+    for (const name of Object.keys(declared)) {
+      if (!(name in (args ?? {}))) { labelled[name] = TRUSTED_PUBLIC; absent.push(name); }
+    }
+    return { ambient, args: labelled, absent };
   }
 
   return {
     id: labels ? 'D3' : 'D2',
     label: labels
-      ? 'ai2rules + value-level flow labels (AI2-70 prototype)'
+      ? 'ai2rules + flow contracts (kernel flow labels, D95)'
       : 'ai2rules (compiled world + pinning + taint)',
 
     async init({ task: t, trace }) {
       task = t;
       mkdirSync(workDir, { recursive: true });
       worldPath = path.join(workDir, `world-${task.id}.yaml`);
-      writeFileSync(worldPath, worldYaml(task));
+      writeFileSync(worldPath, worldYaml(task, { labels }));
       taint = 'clean';
       pins.clear();
-      privateValues.clear();
+      ambient = TRUSTED_PUBLIC;
+      valueLabels.clear();
       trace.write('defense_init', { defense: labels ? 'D3' : 'D2', world: path.basename(worldPath), capabilities: task.capabilities.length, labels });
+      if (labels) {
+        // The user's own input, labelled explicitly: every value the task's
+        // workflow sends is Trusted/Public by the host's word. This is what lets
+        // the benign write out of a session that has read something private.
+        const inputs = task.plan.flatMap((step) => (step.call ? primitives(step.args ?? {}) : []));
+        for (const v of inputs) bind(v, TRUSTED_PUBLIC);
+        trace.write('flow_label', { source: 'user_task', label: showLabel(TRUSTED_PUBLIC), bound: inputs.length });
+      }
     },
 
     // Page text from an origin the task did not name is untrusted ingress, the
@@ -191,17 +282,12 @@ export function createD2({ workDir, labels = false }) {
       if (pins.has(a) && !pinned(tool)) {
         return { decision: 'ABSENT', mechanism: 'pinning', reason: `${a}: live registration ${tool.regId} is not the pinned identity ${pins.get(a).regId}` };
       }
-      // D3 confidentiality check, before and independent of the integrity gate
-      // (AI2-70 §4): a Private value may not flow to an origin outside the
-      // task's declared sensitive readers. A write OR a read is a disclosure.
-      if (labels && !(task.sensitiveOrigins ?? []).includes(tool.origin) && carriesPrivate(args)) {
-        return { decision: 'DENY', mechanism: 'flow:confidentiality', reason: `${tool.origin}/${tool.name}: a Private value may not flow to this origin` };
-      }
+      const flow = labels ? flowFor(a, args) : undefined;
       const res = await run(bin, ['gate', '--world', worldPath], {
         v: 1,
         tool: a,
         arguments: args ?? {},
-        context: { session_id: 'webmcp-lab', mode: 'background', taint, source_channel: channel() },
+        context: { session_id: 'webmcp-lab', mode: 'background', taint, source_channel: channel(), ...(flow ? { flow: { ambient: flow.ambient, args: flow.args } } : {}) },
       });
       // Persist the kernel's post-call taint (monotonic) only for a call that
       // will run; a refused call ingests nothing.
@@ -210,34 +296,47 @@ export function createD2({ workDir, labels = false }) {
       const decision = res.decision === 'ALLOW' ? 'ALLOW' : res.decision === 'ABSENT' ? 'ABSENT' : 'DENY';
       const mechanism = decision === 'ALLOW' ? null
         : ['unknown_to_ontology', 'absent'].includes(res.rule) ? 'projection'
-          : taint === 'tainted' ? 'taint' : `kernel:${res.rule}`;
+          : FLOW_RULES[res.rule] ?? (taint === 'tainted' ? 'taint' : `kernel:${res.rule}`);
       if (decision === 'ALLOW') this._pendingTaint = res.context.taint;
-      return { decision, mechanism, reason: res.reason ?? null, kernel: { decision: res.decision, rule: res.rule, manifest_hash: res.manifest_hash } };
+      const verdict = { decision, mechanism, reason: res.reason ?? null, kernel: { decision: res.decision, rule: res.rule, manifest_hash: res.manifest_hash } };
+      if (flow) {
+        // ABI §6 step 5: the post-call ambient is persisted after every call,
+        // joined, never lowered. The result floor is kept for `afterCall`,
+        // which binds it to the value the tool actually returns.
+        const out = res.context.flow ?? null;
+        if (out?.ambient) ambient = joinLabel(ambient, out.ambient);
+        this._pendingResult = decision === 'ALLOW' ? out?.result ?? null : null;
+        verdict.flow = {
+          ambient: showLabel(flow.ambient),
+          args: Object.fromEntries(Object.entries(flow.args).map(([k, l]) => [k, showLabel(l)])),
+          ...(flow.absent.length ? { absent: flow.absent } : {}),
+          result: this._pendingResult ? showLabel(this._pendingResult) : null,
+        };
+      }
+      return verdict;
     },
 
     // The kernel's post-call taint is persisted for every ALLOWed call, whether
     // or not the tool then succeeded: an error message is ingested text too.
     //
-    // D3 replaces the per-session integrity taint from a sensitive-origin READ
-    // with per-value confidentiality labels: the values that read returned are
-    // labelled Private, and the session is NOT tainted, so a later benign write
-    // with clean arguments still runs (the utility D2 spends). Foreign-page-text
-    // taint and every other integrity taint still stand.
+    // D3: the floor the kernel returned for this call's result is bound to the
+    // value the tool returned (or to its error text: that is a returned value
+    // too), as the whole value, by digest. A sink-only action returns no floor
+    // and binds nothing.
     async afterCall(call, _res, { trace }) {
-      const sensitiveRead = labels && _res?.ok
-        && (task.sensitiveOrigins ?? []).includes(call?.tool?.origin)
-        && call?.tool?.annotations?.readOnlyHint === true;
-      if (sensitiveRead) {
-        const before = privateValues.size;
-        for (const v of leaves(_res.result)) if (String(v).length >= MIN_LABELLED) privateValues.add(String(v));
-        if (privateValues.size !== before) {
-          trace.write('flow_label', { label: 'Private', source: `${call.tool.origin}/${call.tool.name}`, tracked: privateValues.size });
+      if (labels && this._pendingResult) {
+        const value = _res?.ok ? _res.result : _res?.error;
+        if (value !== undefined) {
+          bind(value, this._pendingResult);
+          trace.write('flow_label', { source: `${call.tool.origin}/${call.tool.name}`, label: showLabel(this._pendingResult), bound: 1 });
         }
-      } else if (this._pendingTaint === 'tainted' && taint !== 'tainted') {
+      }
+      if (this._pendingTaint === 'tainted' && taint !== 'tainted') {
         taint = 'tainted';
         trace.write('taint', { state: 'tainted' });
       }
       this._pendingTaint = undefined;
+      this._pendingResult = undefined;
     },
   };
 }

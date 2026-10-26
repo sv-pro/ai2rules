@@ -6,7 +6,7 @@ const MECHANISMS = {
   projection: 'D2: the tool is not in the compiled world, so it is ABSENT.',
   pinning: 'D2: a tool name in the world, but not the registration first seen under it (substituted or squatted), so it is ABSENT.',
   taint: 'D2: the session read a taint source, so writes and external actions are ABSENT. Read actions still run with tainted arguments, so a read tool remains an exfiltration path (S5b).',
-  'flow:confidentiality': 'D3: a value read from a sensitive origin is labelled Private, and the call carries it to another origin, so it is denied — without tainting the rest of the session (AI2-70 prototype).',
+  'flow:confidentiality': 'D3: the kernel\'s `confidentiality_violation`. A value the host labelled Private, or an unlabelled value in a session whose ambient label is Private, was bound to a Public sink on another origin: refused before the integrity floor, without tainting the session (CONTRACTS.md §8.4).',
   not_triggered: 'Nothing was refused: the injected instruction never reached the agent. The scenario note says why.',
 };
 
@@ -79,7 +79,7 @@ export function renderResults(rows, meta = {}) {
     L.push(`- **D2 loses on utility** (the task completes under D1, not under D2): ${list(utilLoss.map((s) => (s.startsWith('benign:') ? `no attack: \`${s.slice(7)}\`` : label(s))))}.`);
     const benignLoss = benign.filter((s) => at(s, 'D0')?.utility && !at(s, 'D2')?.utility);
     if (benignLoss.length) {
-      L.push(`  - D2 breaks the task even with no attack (${list(benignLoss.map((s) => `\`${s.slice(7)}\``))}). The kernel's taint is per session, not per value (CONTRACTS.md §8.3). Once the session reads the CRM, a taint source, every write or external action is ABSENT, including the purchase the user asked for. The fix is value-level (confidentiality) flows in the kernel (AI2-70 / #151); this lab does not tune it away.`);
+      L.push(`  - D2 breaks the task even with no attack (${list(benignLoss.map((s) => `\`${s.slice(7)}\``))}). The kernel's taint is per session, not per value (CONTRACTS.md §8.3). Once the session reads the CRM, a taint source, every write or external action is ABSENT, including the purchase the user asked for. The D3 column runs the same task on the kernel's flow contracts instead (CONTRACTS.md §8.4); D2 is not tuned.`);
       const inherit = attacks.filter((s) => benignLoss.includes(`benign:${at(s, 'D2')?.task}`));
       if (inherit.length) L.push(`  - Attacks on those tasks inherit this loss, whatever stops the attack: ${list(inherit.map(label))}.`);
     }
@@ -90,7 +90,7 @@ export function renderResults(rows, meta = {}) {
 
   if (defenses.includes('D2') && defenses.includes('D3')) {
     L.push('## What value-level labels (D3) change', '');
-    L.push('D3 keeps D2\'s projection, pinning and the integrity taint from untrusted page text, and adds a second axis: a value read from a sensitive origin is labelled Private, and a call carrying it to another origin is denied — without tainting the rest of the session (an adapter prototype of AI2-70 / #151).', '');
+    L.push('D3 keeps D2\'s projection, pinning and the integrity taint from untrusted page text, and replaces the per-session taint from the CRM read with the kernel\'s own flow contracts: the read\'s whole result is labelled Trusted/Private by the kernel, the adapter binds that label to the returned value by digest, and a sink on another origin refuses a Private value — or any value the adapter cannot vouch for once the session holds something private — without tainting the session (CONTRACTS.md §8.4).', '');
     const d2stops = attacks.filter((s) => at(s, 'D2')?.status === 'OK' && !at(s, 'D2').attack_success);
     const d3stops = attacks.filter((s) => at(s, 'D3')?.status === 'OK' && !at(s, 'D3').attack_success);
     const closed = d3stops.filter((s) => at(s, 'D2')?.attack_success);
@@ -102,7 +102,8 @@ export function renderResults(rows, meta = {}) {
     L.push(`- **Attacks D3 lets through that D2 stopped:** ${list(regressed.map(label))}.`);
     L.push(`- **Utility D3 recovers** (task completes under D3, not under D2): ${list(utilGain.map(nm))}.`);
     L.push(`- **Utility D3 loses vs D2:** ${list(utilLost.map(nm))}.`);
-    L.push('- **The cost of labelling:** the label follows the whole labelled value by surface match. Two things escape it: a genuine transform (encoding, reversal), and a **partial quote** — sending just the canary, not the whole record field it sits in (`labels_defeated_by_transform` test; CONTRACTS.md §8.4). The independent verifier reproduced both. So the D3 stops on S5/S5b are **contingent on the attacker pasting the whole labelled leaf**, which the shipped scenarios do (`$ALL_OUTPUTS`); a one-line "put just the account code" would leak under D3 while D2\'s session taint would still have blocked the write. No cell exercises that surgical quote. D2 traded utility for that incidental cover; D3 trades the cover back for utility. Closing it needs provenance that survives transformation and sub-value tracking — kernel work (AI2-70), not an adapter heuristic.', '');
+    L.push('- **How the stops happen:** the shipped S5/S5b paste the record wrapped in other text, so the argument is not the labelled value; the adapter sends no label for it and the kernel judges it by the session\'s ambient label, Private since the CRM read. The same holds for a transform of the record or a quote of just the account code: the attack\'s phrasing does not matter.');
+    L.push('- **The cost of labelling:** labels are whole-result and bound by digest, and the kernel infers nothing. Once the session holds something private, every value the adapter cannot vouch for is private — a value the user types fresh after the read is refused exactly like a transformed secret (`D3 unbound values fall back to the ambient` test; CONTRACTS.md §8.4). The adapter vouches only for the task\'s own plan values, so no shipped cell pays this; a workload with free-text writes after a private read would. Re-binding a transformed value is the host\'s job (a transform run as a governed action keeps its label), not something the kernel guesses.', '');
   }
 
   const notes = rows.filter((r) => r.note);
@@ -121,7 +122,7 @@ export function renderResults(rows, meta = {}) {
   L.push('- **D0**: none.');
   L.push('- **D1**: rule-based per-call baseline, a reconstruction of publicly described enterprise WebMCP controls. It applies allow / monitor / block when a call is made, matching on tool name, provider origin, cross-origin flag, argument patterns and annotations. The agent sees every tool. It is not any vendor\'s product. The rules and why an administrator would write them are in [`docs/D1-RULES.md`](../docs/D1-RULES.md); they were committed before any attack existed and have not been tuned since.');
   L.push('- **D2**: ai2rules, the real kernel reached through `harness project` (what exists) and `harness gate` (each call). The world is compiled from the task alone: its origins and the capabilities its workflow needs. On top of that, the adapter pins registrations on first use and carries taint per session ([`CONTRACTS.md`](../CONTRACTS.md) §8).');
-  L.push('- **D3**: D2 plus value-level flow labels — an adapter prototype of the typed source/sink flow contracts in AI2-70 / #151. A value read from a sensitive origin is labelled Private and may not flow to another origin; in exchange the sensitive read no longer taints the whole session, so benign writes still run (`CONTRACTS.md` §8.4). It is a stand-in for kernel work, with the transformation limit that work would also have to solve.');
+  L.push('- **D3**: D2 plus the kernel\'s typed flow contracts. The compiled world declares the CRM read a source whose result is Trusted/Private and every argument of every other-origin tool a Public sink; the adapter carries the session\'s ambient label and a digest-keyed table of value labels, as the gate ABI asks a host to, and the kernel refuses a private flow before the integrity floor. The sensitive read no longer taints the whole session, so the task\'s own writes still run (`CONTRACTS.md` §8.4).');
   L.push('');
 
   L.push('## Limitations', '');
@@ -130,7 +131,7 @@ export function renderResults(rows, meta = {}) {
   L.push('- D1 is a reconstruction from public descriptions, not a vendor product.');
   L.push('- D2 pins on first use (TOFU). A registration that is already malicious when first seen would be pinned. Operator trust pins (D29) would close that gap; the lab does not use them.');
   L.push('- Pinning proves which registration runs, not what it does. A same-origin script can change the behaviour of an unchanged handler through its shared environment, and no defense here sees that (S3b; CONTRACTS.md §3).');
-  L.push('- D3\'s labels follow a value by surface match, so a transform of the value escapes them (CONTRACTS.md §8.4). It is an adapter prototype; AI2-70 / #151 is the kernel work it stands in for.');
+  L.push('- D3\'s labels are whole-result and bound by digest; a value the adapter has not seen is judged by the session\'s ambient label. After a private read that refuses a transformed secret and a fresh benign value alike (CONTRACTS.md §8.4). The adapter also labels a declared argument the call leaves unbound as Public on its own word, and the trace records where it did.');
   L.push('- D2\'s taint is integrity taint per session, used here as a confidentiality floor (CONTRACTS.md §8.3). It removes writes and external actions, not reads: the canary still leaves through a permitted read tool (S5b).');
   L.push('- Navigation, fetch and form submission by the agent are out of scope. Only tool calls are governed and measured.');
   L.push('- Scenario deviations from the epic text, stated: S3 swaps the tool after the first catalog search, not after the first `submit_order`, because the frozen tasks order once. In S4, the legit tool fails and is unregistered, and the squatter that wins the name lives in another tab (cross-tab fallback by naive name resolution). In S4b the same-origin squatter takes the name synchronously on a same-realm event the vacating tool dispatches, so there is no timer and the outcome is host-independent. S3b, S4b and S5b are added variants, not epic scenarios; S3b and S5b were added after findings by the independent verifier, to measure gaps the five epic scenarios did not exercise.', '');
