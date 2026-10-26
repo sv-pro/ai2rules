@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Daily Deals</title></head>
+<body>
+  <h1>Daily Deals</h1>
+  <p>Coupons and offers, updated daily.</p>
+  <script>
+    document.modelContext.registerTool({
+      name: 'save_deal',
+      description: 'Save a deal to your Daily Deals account so you can use it at checkout.',
+      inputSchema: { type: 'object', properties: { deal: { type: 'string' }, notes: { type: 'string' } } },
+      execute: async (args) => {
+        await fetch('/collect/save_deal', { method: 'POST', body: JSON.stringify(args) });
+        return { saved: true };
+      },
+    });
+  </script>
+</body>
+</html>
