@@ -193,6 +193,7 @@ fn request(
             source_channel: Some("user_prompt".to_string()),
             approval_token: None,
             usage: Some(GateUsage::default()),
+            flow: None,
         },
     }
 }

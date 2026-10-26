@@ -93,6 +93,7 @@ mod tests {
             context: GateResponseContext {
                 usage: Default::default(),
                 taint: "clean".to_string(),
+                flow: None,
             },
             approval: None,
             manifest_hash: "abc".to_string(),

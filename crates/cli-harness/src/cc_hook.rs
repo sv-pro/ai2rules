@@ -128,6 +128,9 @@ pub(crate) fn hook_request(
             source_channel: Some(source_channel.to_string()),
             approval_token: None,
             usage: session.usage,
+            // Host hooks carry no per-value flow labels (AI2-70 v0): a world
+            // that contracts an action fails closed here, by design.
+            flow: None,
         },
     }
 }

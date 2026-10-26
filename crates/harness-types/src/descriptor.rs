@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::flow::FlowContract;
 use crate::ids::ActionName;
 
 /// The policy role of a tool argument (PACT §3.2, arXiv:2605.11039).
@@ -85,6 +86,11 @@ pub struct Descriptor {
     /// authority-bearing check in `world-kernel`.
     #[serde(default)]
     pub arg_roles: BTreeMap<String, ArgRole>,
+    /// Typed source/sink flow contract (AI2-70, D95). Part of the descriptor's
+    /// identity when present — changing a contract is descriptor drift. Skipped
+    /// when absent so every pre-D95 descriptor hash is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_contract: Option<FlowContract>,
 }
 
 impl Descriptor {

@@ -329,6 +329,9 @@ pub fn run(
             source_channel: Some(source_channel.to_string()),
             approval_token: None,
             usage: carried_usage,
+            // Host hooks carry no per-value flow labels (AI2-70 v0): a world
+            // that contracts an action fails closed here, by design.
+            flow: None,
         },
     };
     let res = gate(&world, &req);
@@ -484,6 +487,7 @@ base_actions:
                 source_channel: Some("user_prompt".to_string()),
                 approval_token: None,
                 usage: Some(Default::default()),
+                flow: None,
             },
         };
         let res = gate(&world, &req);
@@ -522,6 +526,7 @@ base_actions:
                 source_channel: Some("user_prompt".to_string()),
                 approval_token: None,
                 usage: Some(Default::default()),
+                flow: None,
             },
         };
         assert_eq!(gate(&world, &req).decision, "DENY");

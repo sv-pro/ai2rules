@@ -97,6 +97,7 @@ mod tests {
             backing: BackingIdentity::LocalHandler(action.to_string()),
             metadata: Value::Null,
             arg_roles: Default::default(),
+            flow_contract: None,
         }
     }
 

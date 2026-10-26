@@ -946,8 +946,6 @@ fn compile_roots_world(world_path: &Path) -> harness_types::CompiledWorld {
 }
 
 /// Run one `GateRequest` through the `harness gate` CLI against an explicit world.
-/// Only the Unix-only roots tests use it.
-#[cfg(unix)]
 fn gate_cli_with_world(world: &Path, stdin_payload: &str) -> (i32, String) {
     let bin = env!("CARGO_BIN_EXE_harness");
     let mut child = Command::new(bin)
@@ -1034,6 +1032,40 @@ fn every_entry_point_agrees_on_path_scope() {
         // `harness gate` that compiles the world without resolving its roots
         // (finding #26) — the rule paths would stay lexical and the symlinked
         // Deny would fall through to `default`.
+        let (code, stdout) = gate_cli_with_world(&world_path, &request.to_string());
+        assert_eq!(code, 0, "{name}: gate CLI evaluates");
+        let b: Value = serde_json::from_str(&stdout).expect("gate CLI response json");
+        assert_eq!(a, b, "{name}: CLI response must equal in-process response");
+    }
+}
+
+/// The flow-contract parity beat (AI2-70, D95): (a) in-process and (b) the wire
+/// ABI must agree, case by case, on decision / rule / post-call taint / post-call
+/// flow state for `flow-cases.yaml` against `flow-world.yaml`. Not Unix-only:
+/// nothing here touches the filesystem beyond reading the two files.
+#[test]
+fn every_entry_point_agrees_on_flow_contracts() {
+    let world_path = repo_path("docs/demos/one-kernel/flow-world.yaml");
+    let text = std::fs::read_to_string(&world_path).expect("read flow-world.yaml");
+    let world = compiler::compile(&compiler::loader::load_yaml(&text).expect("parse flow world"))
+        .expect("compile flow world");
+    let cases = std::fs::read_to_string(repo_path("docs/demos/one-kernel/flow-cases.yaml"))
+        .expect("read flow-cases.yaml");
+    let doc: Value = serde_yaml::from_str(&cases).expect("parse flow-cases.yaml");
+
+    for case in doc["cases"].as_array().expect("cases list") {
+        let name = case["name"].as_str().unwrap();
+        let request = &case["request"];
+        let expect = &case["expect"];
+
+        // (a) in-process — the pinned expectation is the kernel's own answer.
+        let a = gate_in_process(&world, request);
+        assert_eq!(a["decision"], expect["decision"], "{name}: decision");
+        assert_eq!(a["rule"], expect["rule"], "{name}: rule");
+        assert_eq!(a["context"]["taint"], expect["taint"], "{name}: taint");
+        assert_eq!(a["context"]["flow"], expect["flow"], "{name}: flow");
+
+        // (b) the wire ABI: full-response parity with (a), flow sidecar included.
         let (code, stdout) = gate_cli_with_world(&world_path, &request.to_string());
         assert_eq!(code, 0, "{name}: gate CLI evaluates");
         let b: Value = serde_json::from_str(&stdout).expect("gate CLI response json");

@@ -1,4 +1,49 @@
-# Current handoff — AI2-83 / #160 WebMCP attack lab
+# 2026-10-26 — #169 P1 fixed (Claude)
+
+- Codex's P1 on #169 is fixed: `world-kernel/src/invariants.rs` replaces `actor_key`
+  with a `Binding` helper (Actor / Literal / Ambient). A `ContextRef` or an argument a
+  scoped capability does not list is judged by the ambient, never by an actor label
+  or taint that shares its name. Applied to `check_flow`, `result_label_floor` **and**
+  `effective_floor_taint` (same root cause, pre-existing since D79).
+- Regression: 4 kernel tests in `tests/flow_contract.rs` (rename collision, stripped
+  actor arg, ambient-only, inherited) fail on 56a2d83 and pass now; 1 floor unit test.
+  Codex's reproducer `target/pr-review-flow/` now refuses at `build`.
+- Bench/demos unchanged, WASM rebuilt; `check-wasm-freshness.mjs` now also watches
+  `crates/world-kernel/src` (it was missing from the stale-build anchor).
+- Next: re-review #169, then merge #169 → main, then #170.
+
+# 2026-10-26 — Codex review of PRs #168 / #169 / #170
+
+User requested review and merge only if safe. No product source changed or PR merged.
+
+- #169 at `56a2d83d24cf955c0378303212d4fa12900c3484`: blocking P1. `actor_key`
+  falls back to the base name for ContextRef, so an unrelated same-named actor
+  label can admit a private context value into a Public sink. Reproduced through
+  compiler, `decide` (Allow/default_allow/Execute), and `build_execution_spec`.
+  Scope: `body: !ContextRef secret`, `subject: !Input { as: body }`; private ambient,
+  correctly Public-labelled actor body. Control without the actor label refuses.
+  Fix both `check_flow` and `result_label_floor`, and add binding regression tests.
+  Review and full manifest: https://github.com/sv-pro/ai2rules/pull/169#pullrequestreview-5657851605
+- #170 at `0b19ce9c3a8229fc04ebe087b648bdfd1fbc2ca8`: no independent blocker in
+  the lab delta, but cannot merge before #169 is corrected. Local source-built
+  kernel, 35/35 tests, 44/44 matrix cells OK (11.9 s); all 47 result artifacts
+  match after CRLF normalization. S5/S5b stop with utility true. Reviewed limits:
+  pre-labelled task-plan values, private ambient fallback, absent-argument labels.
+  Review: https://github.com/sv-pro/ai2rules/pull/170#pullrequestreview-5657856181
+- #168 closed as already integrated: all 13 files have identical blobs on
+  main `4261f88`, imported by `a9884a9` via #167. AI2-88 / #165 stays open.
+- Reviews are COMMENT because the GitHub connection is the PR author's account;
+  #169 explicitly says changes required / do not merge. No formal approval given.
+- Local ignored reproducer: `target/pr-review-flow/`; run
+  `cargo run --offline --manifest-path target/pr-review-flow/Cargo.toml --target-dir target`.
+  Isolated #170 export and test/matrix logs: `target/pr-review-170/labs/webmcp/`.
+  Browser tests needed loopback access outside the sandbox and then all passed.
+  Existing untracked `labs/webmcp/docs/PROMO.md` was untouched.
+
+Next: correct #169 binding provenance, re-review/regression checks, update #170,
+then rerun CI and merge in dependency order. No fixes were requested in this review pass.
+
+# Earlier handoff — AI2-83 / #160 WebMCP attack lab
 
 Branch `claude/ai2-84-webmcp-lab`. Lab in `labs/webmcp/`; read `CONTRACTS.md` first.
 

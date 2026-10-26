@@ -11,6 +11,7 @@ use serde_json::Value;
 use crate::action::{ActionType, ActorKind, DataClass};
 use crate::decision::Decision;
 use crate::descriptor::{ArgRole, BackingIdentity, SideEffectClass};
+use crate::flow::FlowContract;
 use crate::ids::{ActionName, WorldId};
 use crate::provenance::{Taint, TrustLevel};
 
@@ -69,6 +70,12 @@ pub struct BaseActionDef {
     /// their hash.
     #[serde(default = "projected_default", skip_serializing_if = "is_projected")]
     pub projected: bool,
+    /// Typed source/sink flow contract (AI2-70, D95). Opt-in per action: a
+    /// result label floor, the arguments whose labels the result inherits, and
+    /// per-argument sink constraints. Skipped when absent so existing manifests
+    /// keep their hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_contract: Option<FlowContract>,
 }
 
 fn projected_default() -> bool {

@@ -1,0 +1,5 @@
+# The default world is embedded byte-for-byte into the WASM engine
+# (`include_str!`), and `scripts/check-wasm-freshness.mjs` compares the embedded
+# text across builds. A Windows checkout under `core.autocrlf=true` would embed
+# CRLF and disagree with the Linux build in CI, so pin it to LF everywhere.
+crates/compiler/assets/*.yaml text eol=lf

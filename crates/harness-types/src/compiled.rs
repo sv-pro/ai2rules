@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::action::ActionType;
 use crate::decision::{Decision, EffectMode};
 use crate::descriptor::{Descriptor, SideEffectClass};
+use crate::flow::FlowContract;
 use crate::ids::{ActionName, DescriptorHash, ManifestHash, WorldId};
 use crate::manifest::{
     Budget, CommandClassDef, McpSurfaceDef, PathClassDef, RootAccess, RootRule, RootsDef,
@@ -118,6 +119,14 @@ impl CompiledWorld {
     }
     pub fn descriptor_hash(&self, action: &ActionName) -> Option<&DescriptorHash> {
         self.parts.descriptor_hashes.get(action)
+    }
+    /// The action's flow contract (AI2-70, D95), if it declares one. Read from
+    /// the descriptor, so a contract is descriptor identity, not a side table.
+    pub fn flow_contract(&self, action: &ActionName) -> Option<&FlowContract> {
+        self.parts
+            .descriptors
+            .get(action)
+            .and_then(|d| d.flow_contract.as_ref())
     }
     pub fn action_type(&self, action: &ActionName) -> Option<ActionType> {
         self.parts.action_types.get(action).copied()

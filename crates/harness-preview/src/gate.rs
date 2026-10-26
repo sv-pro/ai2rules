@@ -20,9 +20,10 @@
 //! [`preview`]: crate::preview
 
 use harness_types::{
-    ActionName, ActionType, BackingIdentity, CallId, ChannelPolicy, CompiledWorld, ContentHash,
-    Decision, EffectMode, ExecutionMode, ExecutionSpec, Provenance, Provider, RootAccess,
-    SessionId, SideEffectClass, Taint, TaintContext, ToolCall, TraceId,
+    ActionName, ActionType, BackingIdentity, CallId, ChannelPolicy, CompiledWorld, Confidentiality,
+    ContentHash, Decision, EffectMode, ExecutionMode, ExecutionSpec, FlowContext, FlowLabel,
+    Integrity, Provenance, Provider, RootAccess, SessionId, SideEffectClass, Taint, TaintContext,
+    ToolCall, TraceId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -86,6 +87,80 @@ pub struct GateContext {
     /// Required when the world declares a counted budget; see `missing_usage`.
     #[serde(default)]
     pub usage: Option<GateUsage>,
+    /// Host-owned per-value flow labels (AI2-70, D95): the session's ambient
+    /// label and the labels of the values bound to this call's arguments. The
+    /// host binds labels to values it has seen leave the kernel; model
+    /// arguments and remote metadata are data, never labels. Required by any
+    /// action that declares a `flow_contract`; see `missing_flow_context`.
+    #[serde(default)]
+    pub flow: Option<GateFlowContext>,
+}
+
+/// A flow label on the wire (§3/§4): `integrity` is `trusted` | `untrusted`,
+/// `confidentiality` is `public` | `private`. Lowercase like `taint`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateLabel {
+    pub integrity: String,
+    pub confidentiality: String,
+}
+
+impl GateLabel {
+    fn parse(&self) -> Result<FlowLabel, &'static str> {
+        let integrity = match self.integrity.as_str() {
+            "trusted" => Integrity::Trusted,
+            "untrusted" => Integrity::Untrusted,
+            _ => return Err("invalid_flow_context"),
+        };
+        let confidentiality = match self.confidentiality.as_str() {
+            "public" => Confidentiality::Public,
+            "private" => Confidentiality::Private,
+            _ => return Err("invalid_flow_context"),
+        };
+        Ok(FlowLabel {
+            integrity,
+            confidentiality,
+        })
+    }
+}
+
+impl From<FlowLabel> for GateLabel {
+    fn from(label: FlowLabel) -> Self {
+        GateLabel {
+            integrity: match label.integrity {
+                Integrity::Trusted => "trusted",
+                Integrity::Untrusted => "untrusted",
+            }
+            .to_string(),
+            confidentiality: match label.confidentiality {
+                Confidentiality::Public => "public",
+                Confidentiality::Private => "private",
+            }
+            .to_string(),
+        }
+    }
+}
+
+/// The flow sidecar a host carries with a call (§3). `ambient` is required
+/// whenever the sidecar is present; `args` maps actor-facing argument names to
+/// the labels of the values bound to them, and an argument it leaves out falls
+/// back to `ambient` in the kernel.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateFlowContext {
+    #[serde(default)]
+    pub ambient: Option<GateLabel>,
+    #[serde(default)]
+    pub args: BTreeMap<String, GateLabel>,
+}
+
+/// Post-call flow state (§4), present only when the request carried a flow
+/// sidecar. `ambient` is the monotonic session label to persist; `result` is
+/// the floor the host must bind to the value this call returns — `null` for
+/// any call that did not run, since a never-executed call invents no result,
+/// and for an action whose contract says nothing about its result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateFlowResponse {
+    pub ambient: GateLabel,
+    pub result: Option<GateLabel>,
 }
 
 /// Session budget counters on the wire (§3/§4). Absent counters are zero, so a
@@ -207,6 +282,10 @@ pub struct GateResponseContext {
     /// Charged only on an ALLOW that will actually run — a blocked call consumes
     /// nothing.
     pub usage: GateUsage,
+    /// Post-call flow labels (AI2-70). Present exactly when the request carried
+    /// `context.flow`, so the wire shape of every other call is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<GateFlowResponse>,
 }
 
 /// Approval handshake returned on `ASK` (§4). The token is a correlation id,
@@ -314,6 +393,19 @@ fn gate_inner(
             None,
         );
     }
+    // Flow labels (AI2-70) are host state the pure kernel cannot hold either. A
+    // sidecar that is present but malformed is refused here; one that is absent
+    // is the kernel's call (`missing_flow_context`), per action, so a world with
+    // one contracted action does not break every host on every other action.
+    let flow = match parse_flow(req.context.flow.as_ref()) {
+        Ok(f) => f,
+        Err(rule) => {
+            return (
+                denied_response(world, &action, rule, inbound, carried),
+                None,
+            )
+        }
+    };
     let inbound = inbound.join(channel.taint);
     let session = SessionId::new(&req.context.session_id);
 
@@ -332,8 +424,14 @@ fn gate_inner(
         ContentHash::new("gate"),
     );
     let mode = parse_mode(req.context.mode.as_deref());
+    let mut taint_context = TaintContext::from_taint(inbound);
+    if let Some(flow) = &flow {
+        // The labels' integrity axis joins into the binary taint (one-way), so
+        // an Untrusted authority-bearing argument reaches the existing floor.
+        taint_context = taint_context.with_flow(flow.clone());
+    }
     let ctx = EvalContext {
-        taint: TaintContext::from_taint(inbound),
+        taint: taint_context,
         mode,
         usage: BudgetUsage::from(carried),
         // Wire entry points always pass false; request-supplied tokens are
@@ -403,30 +501,60 @@ fn gate_inner(
     // taint this action's *output* introduces. Only an executed (ALLOW) call
     // ingests anything — a blocked call brings in nothing (§4).
     let mut out_taint = inbound;
+    // Remote ingress (finding #13). An action served by an MCP server returns
+    // bytes from another process we do not trust — whatever side effect the
+    // world declared for it. Keying this on the *backing* rather than the
+    // side-effect class means a manifest cannot describe a remote fetch as a
+    // clean local read, by accident or otherwise; the three jira demo worlds
+    // all did exactly that, and the session stayed clean across a read.
+    let remote_backed = matches!(
+        world.descriptor(&action).map(|d| &d.backing),
+        Some(BackingIdentity::McpServer { .. })
+    );
+    // Path-aware read-taint: reading under a `taint_source` root taints the
+    // session (restores the D25/D37-deferred read-taint, now declared per path).
+    let path_taints = req.path.as_deref().is_some_and(|p| world.path_taints(p));
     if decision == Decision::Allow {
         if let Some(se) = world.side_effect(&action) {
             out_taint = out_taint.join(side_effect_taint(se, world.action_type(&action)));
         }
-        // Remote ingress (finding #13). An action served by an MCP server returns
-        // bytes from another process we do not trust — whatever side effect the
-        // world declared for it. Keying this on the *backing* rather than the
-        // side-effect class means a manifest cannot describe a remote fetch as a
-        // clean local read, by accident or otherwise; the three jira demo worlds
-        // all did exactly that, and the session stayed clean across a read.
-        if matches!(
-            world.descriptor(&action).map(|d| &d.backing),
-            Some(BackingIdentity::McpServer { .. })
-        ) {
+        if remote_backed || path_taints {
             out_taint = out_taint.join(Taint::Tainted);
         }
-        // Path-aware read-taint: reading under a `taint_source` root taints the
-        // session (restores the D25/D37-deferred read-taint, now declared per path).
-        if let Some(path) = req.path.as_deref() {
-            if world.path_taints(path) {
-                out_taint = out_taint.join(Taint::Tainted);
-            }
-        }
     }
+
+    // Post-call flow labels (AI2-70), only for a caller that carried them. The
+    // result floor is the sealed intent's, on ALLOW only — a call that did not
+    // run returns nothing to label — with the same two ingress rules as the
+    // taint joined in as `Untrusted` (decision H): a remote tool's result is
+    // untrusted whatever its contract declares. The persisted ambient is the
+    // inbound ambient joined with the result, and never says less than the
+    // binary taint beside it.
+    let flow_out = flow.as_ref().map(|f| {
+        const UNTRUSTED: FlowLabel = FlowLabel {
+            integrity: Integrity::Untrusted,
+            confidentiality: Confidentiality::Public,
+        };
+        let result = sealed
+            .as_ref()
+            .filter(|_| decision == Decision::Allow)
+            .and_then(|intent| intent.result_label())
+            .map(|label| {
+                if remote_backed || path_taints {
+                    label.join(UNTRUSTED)
+                } else {
+                    label
+                }
+            });
+        let mut ambient = result.map_or(f.ambient(), |r| f.ambient().join(r));
+        if out_taint.is_tainted() {
+            ambient = ambient.join(UNTRUSTED);
+        }
+        GateFlowResponse {
+            ambient: ambient.into(),
+            result: result.map(Into::into),
+        }
+    });
 
     // Charge the budget for a call that will actually run. `charge` lives beside
     // `budget_exceeded` in the kernel so a limit and its cost cannot drift apart.
@@ -464,6 +592,7 @@ fn gate_inner(
         context: GateResponseContext {
             taint: taint_str(out_taint).to_string(),
             usage: out_usage,
+            flow: flow_out,
         },
         approval,
         manifest_hash: short_hash(world),
@@ -495,6 +624,9 @@ fn denied_response(
         context: GateResponseContext {
             taint: taint_str(out_taint).to_string(),
             usage,
+            // A request refused before the kernel ran carries no flow state
+            // back: its sidecar was absent or could not be read.
+            flow: None,
         },
         approval: None,
         manifest_hash: short_hash(world),
@@ -509,6 +641,26 @@ fn parse_taint(s: Option<&str>) -> Result<Taint, &'static str> {
         Some(_) => Err("invalid_taint"),
         None => Err("missing_taint"),
     }
+}
+
+/// The host's flow sidecar as the kernel's `FlowContext`. Absent is `None` —
+/// whether that is acceptable is decided per action by the kernel. Present but
+/// without `ambient`, or with a label outside the vocabulary, is refused: the
+/// gate never guesses a label.
+fn parse_flow(ctx: Option<&GateFlowContext>) -> Result<Option<FlowContext>, &'static str> {
+    let Some(ctx) = ctx else {
+        return Ok(None);
+    };
+    let ambient = ctx
+        .ambient
+        .as_ref()
+        .ok_or("invalid_flow_context")?
+        .parse()?;
+    let mut args = BTreeMap::new();
+    for (name, label) in &ctx.args {
+        args.insert(name.clone(), label.parse()?);
+    }
+    Ok(Some(FlowContext::new(ambient).with_arg_labels(args)))
 }
 
 fn parse_mode(s: Option<&str>) -> ExecutionMode {
@@ -616,6 +768,16 @@ fn reason_for(d: Decision, rule: &str) -> &'static str {
             "gate request is missing required source channel"
         }
         (Decision::Deny, "invalid_source_channel") => "gate request has invalid source channel",
+        (Decision::Deny, "missing_flow_context") => {
+            "the action declares a flow contract but the request carries no flow labels"
+        }
+        (Decision::Deny, "invalid_flow_context") => "gate request has invalid flow labels",
+        (Decision::Deny, "confidentiality_violation") => {
+            "a private value cannot flow into a public sink"
+        }
+        (Decision::Deny, "integrity_violation") => {
+            "an untrusted value cannot flow into a sink that requires a trusted one"
+        }
         (Decision::Deny, _) => "policy blocked a visible action",
         (Decision::Ask, _) => "human approval is required before this action",
         (Decision::Replan, _) => "over budget or too broad; propose a smaller step",
@@ -648,6 +810,7 @@ mod tests {
                 source_channel: Some("user_prompt".to_string()),
                 approval_token: None,
                 usage: Some(GateUsage::default()),
+                flow: None,
             },
         }
     }
@@ -1689,5 +1852,338 @@ path_classes:
         assert_eq!(res.action, "write_instructions");
         assert_eq!(res.decision, "ALLOW");
         assert_eq!(res.context.taint, "clean", "a file write ingests nothing");
+    }
+
+    // ---- flow contracts (AI2-70, D95) ----
+
+    /// The vertical slice: a private source, a transform, a hidden publish
+    /// behind a scoped capability with a Public sink, and a remote lookup whose
+    /// result inherits a trusted argument (to pin the remote-ingress join).
+    const FLOW_WORLD: &str = r#"
+world_id: flow-gate
+channels:
+  - { name: user_prompt, trust: Trusted, taint: false }
+capabilities:
+  - { trust: Trusted, actions: [Read, Mcp] }
+base_actions:
+  - name: read_document
+    action_type: Read
+    side_effect: Read
+    schema: { type: object, required: [name], properties: { name: { type: string } } }
+    flow_contract:
+      output: { integrity: Trusted, confidentiality: Private }
+  - name: summarize_fixture
+    action_type: Read
+    side_effect: None
+    schema: { type: object, required: [body], properties: { body: { type: string } } }
+    flow_contract:
+      inherits: [body]
+  - name: lookup
+    action_type: Mcp
+    side_effect: Read
+    backing: !McpServer { server: directory, tool: lookup }
+    schema: { type: object, required: [q], properties: { q: { type: string } } }
+    flow_contract:
+      inherits: [q]
+  - name: publish
+    action_type: Mcp
+    side_effect: External
+    projected: false
+    approval_required: true
+    backing: !McpServer { server: reports, tool: publish }
+    arg_roles: { to: Target, body: Content }
+    schema:
+      type: object
+      required: [to, body]
+      properties: { to: { type: string }, body: { type: string } }
+    flow_contract:
+      sinks:
+        body: { confidentiality: Public }
+  - name: note
+    action_type: Read
+    side_effect: None
+scoped_capabilities:
+  - name: publish_report
+    base_action: publish
+    args:
+      to: !Input { one_of: ["https://reports.example/weekly"] }
+      body: !ActorInput
+"#;
+
+    fn flow_world() -> CompiledWorld {
+        compiler::compile(&compiler::load_yaml(FLOW_WORLD).unwrap()).unwrap()
+    }
+
+    fn label(integrity: &str, confidentiality: &str) -> GateLabel {
+        GateLabel {
+            integrity: integrity.to_string(),
+            confidentiality: confidentiality.to_string(),
+        }
+    }
+
+    fn flow_req(
+        tool: &str,
+        taint: &str,
+        arguments: serde_json::Value,
+        ambient: Option<GateLabel>,
+        args: &[(&str, GateLabel)],
+    ) -> GateRequest {
+        let mut r = req(tool, taint);
+        r.arguments = arguments;
+        r.context.flow = Some(GateFlowContext {
+            ambient,
+            args: args
+                .iter()
+                .map(|(k, l)| (k.to_string(), l.clone()))
+                .collect(),
+        });
+        r
+    }
+
+    fn publish_args() -> serde_json::Value {
+        serde_json::json!({ "to": "https://reports.example/weekly", "body": "the summary" })
+    }
+
+    #[test]
+    fn a_contracted_action_without_flow_context_is_denied() {
+        let world = flow_world();
+        for (tool, args) in [
+            ("publish_report", publish_args()),
+            ("read_document", serde_json::json!({ "name": "q3" })),
+        ] {
+            let res = gate(&world, &call(tool, args));
+            assert_eq!(res.decision, "DENY", "{tool}");
+            assert_eq!(res.rule.as_deref(), Some("missing_flow_context"), "{tool}");
+            assert!(res.effective.is_none(), "{tool}");
+            assert!(res.context.flow.is_none(), "{tool}");
+        }
+        // An uncontracted action in the same world needs no sidecar.
+        assert_eq!(
+            gate(&world, &call("note", serde_json::json!({}))).decision,
+            "ALLOW"
+        );
+    }
+
+    #[test]
+    fn a_malformed_flow_sidecar_is_denied() {
+        let world = flow_world();
+        let res = gate(
+            &world,
+            &flow_req("note", "clean", serde_json::json!({}), None, &[]),
+        );
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("invalid_flow_context"));
+        let res = gate(
+            &world,
+            &flow_req(
+                "note",
+                "clean",
+                serde_json::json!({}),
+                Some(label("trusted", "public")),
+                &[("x", label("trustworthy", "public"))],
+            ),
+        );
+        assert_eq!(res.rule.as_deref(), Some("invalid_flow_context"));
+        assert!(res.context.flow.is_none());
+    }
+
+    #[test]
+    fn a_private_body_is_denied_as_a_disclosure_before_the_floor() {
+        let world = flow_world();
+        // Ambient tainted too: the floor would refuse this, but the disclosure is
+        // the reason reported, and nothing is said about a result.
+        let res = gate(
+            &world,
+            &flow_req(
+                "publish_report",
+                "tainted",
+                publish_args(),
+                Some(label("trusted", "public")),
+                &[("body", label("trusted", "private"))],
+            ),
+        );
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("confidentiality_violation"));
+        assert!(res.effective.is_none());
+        let flow = res.context.flow.expect("the sidecar is echoed back");
+        assert_eq!(flow.result, None);
+        assert_eq!(flow.ambient, label("untrusted", "public"));
+    }
+
+    #[test]
+    fn an_untrusted_authority_argument_reaches_the_taint_floor_through_the_wire() {
+        let world = flow_world();
+        let res = gate(
+            &world,
+            &flow_req(
+                "publish_report",
+                "clean",
+                publish_args(),
+                Some(label("trusted", "public")),
+                &[("to", label("untrusted", "public"))],
+            ),
+        );
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("taint_invariant"));
+    }
+
+    #[test]
+    fn an_allowed_source_returns_its_declared_result_floor() {
+        let world = flow_world();
+        let res = gate(
+            &world,
+            &flow_req(
+                "read_document",
+                "clean",
+                serde_json::json!({ "name": "q3" }),
+                Some(label("trusted", "public")),
+                &[],
+            ),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        let flow = res.context.flow.expect("flow");
+        assert_eq!(flow.result, Some(label("trusted", "private")));
+        assert_eq!(flow.ambient, label("trusted", "private"));
+        assert_eq!(res.context.taint, "clean");
+
+        // A transform with a Private parent stays Private.
+        let res = gate(
+            &world,
+            &flow_req(
+                "summarize_fixture",
+                "clean",
+                serde_json::json!({ "body": "secret" }),
+                Some(label("trusted", "public")),
+                &[("body", label("trusted", "private"))],
+            ),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(
+            res.context.flow.unwrap().result,
+            Some(label("trusted", "private"))
+        );
+    }
+
+    #[test]
+    fn a_remote_tools_result_is_untrusted_whatever_it_inherits() {
+        let world = flow_world();
+        let res = gate(
+            &world,
+            &flow_req(
+                "lookup",
+                "clean",
+                serde_json::json!({ "q": "alice" }),
+                Some(label("trusted", "public")),
+                &[("q", label("trusted", "public"))],
+            ),
+        );
+        assert_eq!(res.decision, "ALLOW");
+        assert_eq!(res.context.taint, "tainted");
+        let flow = res.context.flow.unwrap();
+        assert_eq!(flow.result, Some(label("untrusted", "public")));
+        assert_eq!(flow.ambient, label("untrusted", "public"));
+    }
+
+    #[test]
+    fn an_ask_returns_no_result_and_the_authorized_resume_allows() {
+        let world = flow_world();
+        let r = flow_req(
+            "publish_report",
+            "clean",
+            publish_args(),
+            Some(label("trusted", "public")),
+            &[("body", label("trusted", "public"))],
+        );
+        let res = gate(&world, &r);
+        assert_eq!(res.decision, "ASK");
+        assert!(res.effective.is_some());
+        let flow = res.context.flow.unwrap();
+        assert_eq!(flow.result, None);
+        assert_eq!(flow.ambient, label("trusted", "public"));
+
+        let (res, spec) = gate_and_lower_authorized(&world, &r);
+        assert_eq!(res.decision, "ALLOW");
+        assert!(spec.is_some());
+        // Sink-only contract: the result is unknown; the publish is remote, so
+        // the session (and its ambient) is untrusted afterwards.
+        let flow = res.context.flow.unwrap();
+        assert_eq!(flow.result, None);
+        assert_eq!(flow.ambient, label("untrusted", "public"));
+
+        // The authorized resume cannot override a flow DENY.
+        let mut private = r.clone();
+        private
+            .context
+            .flow
+            .as_mut()
+            .unwrap()
+            .args
+            .insert("body".to_string(), label("trusted", "private"));
+        let (res, spec) = gate_and_lower_authorized(&world, &private);
+        assert_eq!(res.decision, "DENY");
+        assert_eq!(res.rule.as_deref(), Some("confidentiality_violation"));
+        assert!(spec.is_none());
+    }
+
+    #[test]
+    fn response_serializes_flow_only_when_carried() {
+        let world = flow_world();
+        // No sidecar on the request: no `flow` key on the response — the wire
+        // shape of every pre-D95 exchange is unchanged.
+        let plain =
+            serde_json::to_value(gate(&world, &call("note", serde_json::json!({})))).unwrap();
+        assert!(plain["context"].get("flow").is_none(), "{plain}");
+        let carried = serde_json::to_value(gate(
+            &world,
+            &flow_req(
+                "read_document",
+                "clean",
+                serde_json::json!({ "name": "q3" }),
+                Some(label("trusted", "public")),
+                &[],
+            ),
+        ))
+        .unwrap();
+        assert_eq!(
+            carried["context"]["flow"],
+            serde_json::json!({
+                "ambient": { "integrity": "trusted", "confidentiality": "private" },
+                "result": { "integrity": "trusted", "confidentiality": "private" }
+            })
+        );
+        // The request shape parses from wire JSON.
+        let r: GateRequest = serde_json::from_str(
+            r#"{"tool":"note","context":{"flow":{"ambient":{"integrity":"trusted","confidentiality":"public"},"args":{"x":{"integrity":"untrusted","confidentiality":"private"}}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            r.context.flow.unwrap().args["x"],
+            label("untrusted", "private")
+        );
+    }
+
+    #[test]
+    fn flow_gate_is_deterministic() {
+        let world = flow_world();
+        for (tool, args, body) in [
+            ("publish_report", publish_args(), "private"),
+            ("publish_report", publish_args(), "public"),
+            (
+                "read_document",
+                serde_json::json!({ "name": "q3" }),
+                "public",
+            ),
+        ] {
+            let r = flow_req(
+                tool,
+                "clean",
+                args,
+                Some(label("trusted", "public")),
+                &[("body", label("trusted", body))],
+            );
+            let a = serde_json::to_value(gate(&world, &r)).unwrap();
+            let b = serde_json::to_value(gate(&world, &r)).unwrap();
+            assert_eq!(a, b, "{tool}/{body}");
+        }
     }
 }

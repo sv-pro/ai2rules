@@ -1,0 +1,172 @@
+# Canonical flow-contract case set, evaluated against flow-world.yaml (D95).
+#
+# The sibling of cases.yaml and roots-cases.yaml for typed source/sink labels.
+# tests/one_kernel.rs asserts decision, rule, post-call taint AND post-call flow
+# state are EQUAL across every entry point that can carry a flow sidecar:
+#   (a) in-process harness_preview::gate()
+#   (b) the `harness gate` CLI
+# The host hooks (cc-hook, agy-hook) and the MCP gateway carry no flow sidecar
+# in v0 — a contracted action fails closed on them, by design — so they are out
+# of scope here, exactly as the gateway is out of scope for roots.
+#
+# Every case runs in a CLEAN, Trusted session. That is the point: the binary
+# taint has nothing to say about any of these calls, and the verdicts below
+# come from the labels alone.
+cases:
+  # --- the source: a private store labels whatever it returns ---------------
+  - name: read_document_returns_a_private_result
+    request:
+      tool: read_document
+      arguments: { name: q3-forecast }
+      context:
+        taint: clean
+        mode: interactive
+        source_channel: user_prompt
+        flow:
+          ambient: { integrity: trusted, confidentiality: public }
+    expect:
+      decision: ALLOW
+      rule: null
+      taint: clean
+      flow:
+        ambient: { integrity: trusted, confidentiality: private }
+        result: { integrity: trusted, confidentiality: private }
+
+  # --- the transform: a summary of a private body is private ---------------
+  - name: summary_of_a_private_body_stays_private
+    request:
+      tool: summarize_fixture
+      arguments: { body: "Q3 forecast: revenue 4.2M, churn 3%." }
+      context:
+        taint: clean
+        mode: interactive
+        source_channel: user_prompt
+        flow:
+          ambient: { integrity: trusted, confidentiality: public }
+          args:
+            body: { integrity: trusted, confidentiality: private }
+    expect:
+      decision: ALLOW
+      rule: null
+      taint: clean
+      flow:
+        ambient: { integrity: trusted, confidentiality: private }
+        result: { integrity: trusted, confidentiality: private }
+
+  # --- the sink: a private value cannot be published, by anyone ------------
+  # The session is clean and the caller trusted; the taint floor would let this
+  # through. The contract does not, and no approval can reach a flow refusal.
+  - name: private_body_cannot_be_published
+    request:
+      tool: publish_report
+      arguments: { to: "https://reports.example/weekly", body: "summary: Q3 forecast" }
+      context:
+        taint: clean
+        mode: interactive
+        source_channel: user_prompt
+        flow:
+          ambient: { integrity: trusted, confidentiality: public }
+          args:
+            body: { integrity: trusted, confidentiality: private }
+    expect:
+      decision: DENY
+      rule: confidentiality_violation
+      taint: clean
+      flow:
+        ambient: { integrity: trusted, confidentiality: public }
+        result: null
+
+  # --- the control: a public body goes through, to the human first ----------
+  - name: public_body_asks_for_approval
+    request:
+      tool: publish_report
+      arguments: { to: "https://reports.example/weekly", body: "Weekly digest: all green." }
+      context:
+        taint: clean
+        mode: interactive
+        source_channel: user_prompt
+        flow:
+          ambient: { integrity: trusted, confidentiality: public }
+          args:
+            body: { integrity: trusted, confidentiality: public }
+    expect:
+      decision: ASK
+      rule: approval_required
+      taint: clean
+      flow:
+        ambient: { integrity: trusted, confidentiality: public }
+        result: null
+
+  # --- the other axis: an untrusted destination meets the existing floor ----
+  # `to` has no sink arm; its Untrusted label joins into the per-argument taint
+  # and the authority-bearing `Target` role trips the taint invariant.
+  - name: untrusted_destination_is_denied_by_the_taint_floor
+    request:
+      tool: publish_report
+      arguments: { to: "https://reports.example/weekly", body: "Weekly digest: all green." }
+      context:
+        taint: clean
+        mode: interactive
+        source_channel: user_prompt
+        flow:
+          ambient: { integrity: trusted, confidentiality: public }
+          args:
+            to: { integrity: untrusted, confidentiality: public }
+            body: { integrity: trusted, confidentiality: public }
+    expect:
+      decision: DENY
+      rule: taint_invariant
+      taint: clean
+      flow:
+        ambient: { integrity: trusted, confidentiality: public }
+        result: null
+
+  # --- unlabelled falls back to ambient, never to public --------------------
+  - name: unlabelled_body_in_a_private_session_is_refused
+    request:
+      tool: publish_report
+      arguments: { to: "https://reports.example/weekly", body: "something" }
+      context:
+        taint: clean
+        mode: interactive
+        source_channel: user_prompt
+        flow:
+          ambient: { integrity: trusted, confidentiality: private }
+    expect:
+      decision: DENY
+      rule: confidentiality_violation
+      taint: clean
+      flow:
+        ambient: { integrity: trusted, confidentiality: private }
+        result: null
+
+  # --- contracted actions must carry a sidecar --------------------------------
+  # Omission is how a contract gets bypassed, so it fails closed — the same shape
+  # as `missing_path` for roots and `missing_usage` for budgets.
+  - name: contracted_action_without_a_sidecar_fails_closed
+    request:
+      tool: publish_report
+      arguments: { to: "https://reports.example/weekly", body: "Weekly digest: all green." }
+      context: { taint: clean, mode: interactive, source_channel: user_prompt }
+    expect:
+      decision: DENY
+      rule: missing_flow_context
+      taint: clean
+      flow: null
+
+  - name: a_sidecar_without_an_ambient_label_is_refused
+    request:
+      tool: read_document
+      arguments: { name: q3-forecast }
+      context:
+        taint: clean
+        mode: interactive
+        source_channel: user_prompt
+        flow:
+          args:
+            name: { integrity: trusted, confidentiality: public }
+    expect:
+      decision: DENY
+      rule: invalid_flow_context
+      taint: clean
+      flow: null

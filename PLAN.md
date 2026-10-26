@@ -217,6 +217,15 @@ warnings` + fmt clean offline.
   `REPLAN`. The kernel reads usage; it never accumulates state.
 - [x] **E2.6** Determinism guarantee: `build`/`evaluate`/`decide` are pure fns of
   `(intent, context, world)`; a matrix test asserts repeated `decide` is stable.
+- [x] **E2.7** Typed source/sink flow contracts (AI2-70 / #151, D95): per-value
+  `FlowLabel` on an integrity × confidentiality product lattice, opt-in per-action
+  `flow_contract` carried on the descriptor, host-owned `FlowContext` inside
+  `TaintContext`, and `check_flow` as step 5b of `build` — an independent
+  confidentiality admission before the taint floor, not overridable by approval.
+  Worlds without contracts keep identical decisions and hashes (pinned).
+  Vertical slice `read_document → summarize_fixture → publish_report` with
+  counted effects in `harness-preview/tests/flow_slice.rs`; wire parity in
+  `one_kernel.rs`; WASM parity in `check-wasm-freshness.mjs`.
 
 **Exit:** kernel returns a deterministic outcome for any
 `CompiledWorld` + `ToolCall` + context via `decide()`; representability/
@@ -848,7 +857,7 @@ delivers each (and the epic that hardens it).
 | 4 | Model cannot invoke an executor directly | E3 | E10 |
 | 5 | Only `ExecutionSpec` crosses into execution | E3 | E10 |
 | 6 | Taint never decreases (incl. across sessions) | E2 | E10 |
-| 7 | Tainted file/web/MCP/shell can't drive egress/cred/memory/external | E2 | E7 |
+| 7 | Tainted file/web/MCP/shell can't drive egress/cred/memory/external | E2 | E7; E2.7 adds the confidentiality axis (a private value can't reach a public sink, D95) |
 | 8 | Writes can't escape writable roots | E3 | E8 |
 | 9 | Destructive commands require approval | E6 | E10 |
 | 10 | Approval-required in background denies | E6 | E10 |

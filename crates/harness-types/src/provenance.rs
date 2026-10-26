@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::flow::{FlowContext, Integrity};
 use crate::ids::{ContentHash, SessionId};
 
 /// Trust is a property of the *channel*, never of the content.
@@ -186,6 +187,9 @@ impl<T> TaintedValue<T> {
 pub struct TaintContext {
     taint: Taint,
     arg_taint: std::collections::BTreeMap<String, Taint>,
+    /// Host-owned per-value flow labels (AI2-70, D95). `None` for every caller
+    /// that does not opt in; the kernel then judges exactly as before.
+    flow: Option<FlowContext>,
 }
 
 impl TaintContext {
@@ -231,5 +235,34 @@ impl TaintContext {
     /// `None` means unknown — callers must fail closed (fall back to ambient).
     pub fn arg_taint(&self, arg: &str) -> Option<Taint> {
         self.arg_taint.get(arg).copied()
+    }
+
+    /// Attach the host's flow labels (AI2-70) and fold their *integrity* axis
+    /// into the binary taint, so the existing floor sees them: an Untrusted
+    /// ambient taints the session; an Untrusted argument taints that argument;
+    /// a Trusted argument is recorded Clean only where the caller said nothing.
+    /// The join is one-way — a label can make the taint more conservative,
+    /// never less — so a caller that does not opt in loses nothing and one that
+    /// does cannot weaken a decision it would have got without labels.
+    pub fn with_flow(mut self, flow: FlowContext) -> Self {
+        let derived = |integrity: Integrity| match integrity {
+            Integrity::Untrusted => Taint::Tainted,
+            Integrity::Trusted => Taint::Clean,
+        };
+        self.taint = self.taint.join(derived(flow.ambient().integrity));
+        for (arg, label) in flow.arg_labels() {
+            let taint = derived(label.integrity);
+            self.arg_taint
+                .entry(arg.clone())
+                .and_modify(|t| *t = t.join(taint))
+                .or_insert(taint);
+        }
+        self.flow = Some(flow);
+        self
+    }
+
+    /// The host's flow labels, if it supplied any.
+    pub fn flow(&self) -> Option<&FlowContext> {
+        self.flow.as_ref()
     }
 }

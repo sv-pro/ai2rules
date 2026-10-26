@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use harness_types::{
     ActionName, ActionType, ArgRole, ArgSource, BuildError, CompiledWorld, DescriptorHash,
-    Provenance, ScopedCapabilityDef, SideEffectClass, Taint, TaintContext, ToolCall,
+    FlowLabel, Provenance, ScopedCapabilityDef, SideEffectClass, Taint, TaintContext, ToolCall,
 };
 use serde_json::{Map, Value};
 
@@ -31,6 +31,11 @@ pub struct IntentIR {
     /// ambient `taint` still rides forward for monotonic propagation.
     floor_taint: Taint,
     expected_descriptor_hash: DescriptorHash,
+    /// The floor on the label of this action's result (AI2-70, D95): declared
+    /// `output` ⊔ inherited argument labels. `None` unless the action carries a
+    /// flow contract that says something about its result — explicit unknown,
+    /// never an implicit Trusted/Public.
+    result_label: Option<FlowLabel>,
 }
 
 impl IntentIR {
@@ -58,6 +63,11 @@ impl IntentIR {
     }
     pub fn expected_descriptor_hash(&self) -> &DescriptorHash {
         &self.expected_descriptor_hash
+    }
+    /// The result-label floor the host must bind to this call's result once it
+    /// runs (AI2-70). The host may only raise it.
+    pub fn result_label(&self) -> Option<FlowLabel> {
+        self.result_label
     }
 }
 
@@ -154,18 +164,30 @@ impl<'w> IRBuilder<'w> {
         // authority-bearing arguments contribute; it never lifts the ambient floor
         // for an action it has no role information about.
         let empty_roles: BTreeMap<String, ArgRole> = BTreeMap::new();
-        let empty_literals: BTreeMap<String, ArgSource> = BTreeMap::new();
         let roles = self
             .world
             .descriptor(&action)
             .map(|d| &d.arg_roles)
             .unwrap_or(&empty_roles);
-        let literal_args = self
-            .world
-            .scoped_capability(&action)
-            .map(|c| &c.args)
-            .unwrap_or(&empty_literals);
-        let floor_taint = invariants::effective_floor_taint(roles, literal_args, taint_context);
+        // How each base argument is bound (actor input, literal, context ref),
+        // `None` for a plain action. The floor and flow admission read a
+        // per-argument label only for a value the actor actually supplies.
+        let scoped_args = self.world.scoped_capability(&action).map(|c| &c.args);
+        let floor_taint = invariants::effective_floor_taint(roles, scoped_args, taint_context);
+
+        // 5b. Flow admission (AI2-70, D95) — only for actions that declare a
+        //     contract; every other action takes the `None` path and is judged
+        //     exactly as before. Runs before the taint floor so a disclosure is
+        //     refused as a disclosure, and lives here in `build` so a refusal is
+        //     `NotRepresentable`: no manifest policy and no approval can reach it.
+        let result_label = match self.world.flow_contract(&action) {
+            None => None,
+            Some(contract) => {
+                let flow = taint_context.flow();
+                invariants::check_flow(&action, contract, scoped_args, flow)?;
+                flow.and_then(|f| invariants::result_label_floor(contract, scoped_args, f))
+            }
+        };
 
         // 6. Hard taint invariant — physics floor, before any manifest policy and
         //    non-overridable. A tainted value cannot drive an externally
@@ -181,6 +203,7 @@ impl<'w> IRBuilder<'w> {
             taint,
             floor_taint,
             expected_descriptor_hash,
+            result_label,
         })
     }
 }
