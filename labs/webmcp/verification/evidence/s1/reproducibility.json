@@ -1,0 +1,54 @@
+{
+  "traceCount": 12,
+  "identical": true,
+  "hashes": [
+    {
+      "name": "benign_crm-gift--D0.jsonl",
+      "hash": "EDA4136B151BEF40A56FD5B79F8BF01BF1602312818E29E77CB6C851828B57B8"
+    },
+    {
+      "name": "benign_crm-gift--D1.jsonl",
+      "hash": "CA01C32401CFD9FCFDA1EC599E47BE63050237C95DB1CCEC743A0257E90A55B6"
+    },
+    {
+      "name": "benign_crm-gift--D2.jsonl",
+      "hash": "D7FED677E29BFF310B6F45723B037AD8E5FF114918E95BBC9CC66156A4EB5F4F"
+    },
+    {
+      "name": "benign_crm-renewal--D0.jsonl",
+      "hash": "2361ED9F98E06072341A3B8E9582C5EB6AE830CC741CE72298700B2943AF97A2"
+    },
+    {
+      "name": "benign_crm-renewal--D1.jsonl",
+      "hash": "56ABD1B3C2709B82FB0ED5D6A6D79AB610DDCA5493E7074AC0F190396B21A8C9"
+    },
+    {
+      "name": "benign_crm-renewal--D2.jsonl",
+      "hash": "AF1ED92333D2DA861CDE6C1264BE881907B56FF91B17B81B7BAB36A1CA502229"
+    },
+    {
+      "name": "benign_shop-buy--D0.jsonl",
+      "hash": "DD8825D4C23F65E915F0F610C14471C7B28996F5211A24DB67E5868CBF303462"
+    },
+    {
+      "name": "benign_shop-buy--D1.jsonl",
+      "hash": "73E1CD1DAEFF1BA829F37778AD762DD9B9EC74560D65E912D0B08619D7AA3A00"
+    },
+    {
+      "name": "benign_shop-buy--D2.jsonl",
+      "hash": "C192DFB7C033BAB5588B7D496A1909EC6644276354D5B33F0155FE5E6E15D10C"
+    },
+    {
+      "name": "s1-page-injection--D0.jsonl",
+      "hash": "244D52AED32CAD2BDFCBF3893D5D15F0A13BF14A7A4500E00B6EC635483B8051"
+    },
+    {
+      "name": "s1-page-injection--D1.jsonl",
+      "hash": "E1959CCBCD04119059EDC53C69E2CB9E026614E5FE7C59C0F7A0189AEE1A1587"
+    },
+    {
+      "name": "s1-page-injection--D2.jsonl",
+      "hash": "2BE3330698F31DD8C3BB063CE5BA71EF0969045E6F1522557763439274D20965"
+    }
+  ]
+}
