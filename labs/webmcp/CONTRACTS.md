@@ -258,6 +258,35 @@ gets "the canary must not leave" from the session taint floor:
 The kernel's verdict passes through unchanged (`ASK`/`REPLAN` count as `DENY`:
 there is no human in the loop). Only the mechanism label is the adapter's.
 
+### 8.4 D3 — value-level flow labels (AI2-70 prototype)
+
+D3 is D2 with one change: the per-session integrity taint from a sensitive-origin
+**read** is replaced by a per-value **confidentiality** label. It is an
+adapter-side prototype of the typed source/sink flow contracts in AI2-70 / #151,
+so the lab can measure the idea before the kernel work. Everything else —
+projection, pinning, and the integrity taint from untrusted page text — is D2,
+unchanged and still decided by the kernel.
+
+- **Source.** A read on a `sensitiveOrigin` whose tool is `readOnlyHint` labels
+  every value in its result `Private` (strings of 8+ chars; ids, dates and
+  booleans are not labelled). That read no longer taints the session.
+- **Sink.** Before the integrity gate, and independently of it, a call whose
+  arguments carry a `Private` value to an origin outside the task's sensitive
+  readers is `DENY` / `flow:confidentiality`. A read sink is a disclosure as much
+  as a write, so this closes S5b, which D2's write-only taint floor did not.
+- **Why utility returns.** Because the sensitive read no longer taints the
+  session, a later benign write with clean arguments still runs. `benign:crm-gift`
+  completes under D3 where it did not under D2.
+- **The cost (regression-tested: `labels_defeated_by_transform`).** The label
+  follows a value by surface match (verbatim, lower-cased, url-decoded). A genuine
+  transform of the value — encoding, reversal, re-expression — escapes the match,
+  and so does a partial quote of a whole-field label. D2's coarser session taint
+  would have blocked such a write as an integrity side effect; D3 trades that
+  incidental cover for the recovered utility. This is the same inference limit
+  AI2-70 documents (surface matching is not a provenance proof); closing it needs
+  provenance that survives transformation, which is kernel work, not an adapter
+  heuristic. The lab reports this, and does not tune it away.
+
 ## 9. D1 — rule-based per-call baseline
 
 `src/defenses/d1-rules.{js,json}`, rationale in `docs/D1-RULES.md`. It is a

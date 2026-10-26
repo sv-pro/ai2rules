@@ -38,7 +38,7 @@ src/servers.js       shop / crm / attacker / widget origins
 src/browser.js       Playwright: tabs, listing, execute-by-registration
 src/env.js           the agent's interface; every call goes through the defense
 src/agent/           CompromisedAgent · LLMAgent (stretch column)
-src/defenses/        D0 none · D1 rule-based baseline · D2 ai2rules (real kernel)
+src/defenses/        D0 none · D1 rule-based baseline · D2 ai2rules (real kernel) · D3 ai2rules + value-level labels (AI2-70 prototype)
 src/tasks.js         the benign tasks (frozen)
 src/oracle.js        effect-based judging
 pages/<origin>/      benign pages

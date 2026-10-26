@@ -81,12 +81,26 @@ function run(bin, args, input) {
   });
 }
 
-export function createD2({ workDir }) {
+// String leaves of a tool result, the values a label can attach to.
+function leaves(v, out = []) {
+  if (typeof v === 'string') out.push(v);
+  else if (Array.isArray(v)) v.forEach((x) => leaves(x, out));
+  else if (v && typeof v === 'object') Object.values(v).forEach((x) => leaves(x, out));
+  return out;
+}
+
+// D3 (`labels: true`) is D2 with the per-session CRM taint replaced by
+// value-level confidentiality labels, an adapter-side prototype of AI2-70 /
+// #151 (CONTRACTS.md §8.4). Projection, pinning and the integrity taint from
+// untrusted page text are unchanged and still decided by the kernel.
+export function createD2({ workDir, labels = false }) {
   const bin = harnessBin();
   let worldPath = null;
   let task = null;
   let taint = 'clean';
   const pins = new Map(); // action name -> { regId, descriptorHash }
+  const privateValues = new Set(); // D3: values read from a sensitive origin
+  const MIN_LABELLED = 8; // shorter strings (ids, booleans, dates) are not labelled
 
   const channel = () => (taint === 'tainted' ? 'mcp_output' : 'user_prompt');
 
@@ -95,9 +109,28 @@ export function createD2({ workDir }) {
     return pin && pin.regId === tool.regId && pin.descriptorHash === tool.descriptorHash;
   }
 
+  // D3: does a call's arguments carry a value labelled Private? Conservative
+  // containment (lower-cased and url-decoded too), the same kind of surface
+  // match the kernel's arg-provenance uses today. AI2-70 is explicit that this
+  // is inference, not proof: a genuine transform of the value escapes it, which
+  // variant S5c measures.
+  function carriesPrivate(args) {
+    if (!privateValues.size) return false;
+    const text = typeof args === 'string' ? args : JSON.stringify(args ?? {});
+    let decoded = text;
+    try { decoded = decodeURIComponent(text); } catch { /* keep raw */ }
+    const low = text.toLowerCase();
+    for (const v of privateValues) {
+      if (text.includes(v) || decoded.includes(v) || low.includes(v.toLowerCase())) return true;
+    }
+    return false;
+  }
+
   return {
-    id: 'D2',
-    label: 'ai2rules (compiled world + pinning + taint)',
+    id: labels ? 'D3' : 'D2',
+    label: labels
+      ? 'ai2rules + value-level flow labels (AI2-70 prototype)'
+      : 'ai2rules (compiled world + pinning + taint)',
 
     async init({ task: t, trace }) {
       task = t;
@@ -106,7 +139,8 @@ export function createD2({ workDir }) {
       writeFileSync(worldPath, worldYaml(task));
       taint = 'clean';
       pins.clear();
-      trace.write('defense_init', { defense: 'D2', world: path.basename(worldPath), capabilities: task.capabilities.length });
+      privateValues.clear();
+      trace.write('defense_init', { defense: labels ? 'D3' : 'D2', world: path.basename(worldPath), capabilities: task.capabilities.length, labels });
     },
 
     // Page text from an origin the task did not name is untrusted ingress, the
@@ -156,6 +190,12 @@ export function createD2({ workDir }) {
       if (pins.has(a) && !pinned(tool)) {
         return { decision: 'ABSENT', mechanism: 'pinning', reason: `${a}: live registration ${tool.regId} is not the pinned identity ${pins.get(a).regId}` };
       }
+      // D3 confidentiality check, before and independent of the integrity gate
+      // (AI2-70 §4): a Private value may not flow to an origin outside the
+      // task's declared sensitive readers. A write OR a read is a disclosure.
+      if (labels && !(task.sensitiveOrigins ?? []).includes(tool.origin) && carriesPrivate(args)) {
+        return { decision: 'DENY', mechanism: 'flow:confidentiality', reason: `${tool.origin}/${tool.name}: a Private value may not flow to this origin` };
+      }
       const res = await run(bin, ['gate', '--world', worldPath], {
         v: 1,
         tool: a,
@@ -176,8 +216,23 @@ export function createD2({ workDir }) {
 
     // The kernel's post-call taint is persisted for every ALLOWed call, whether
     // or not the tool then succeeded: an error message is ingested text too.
-    async afterCall(_call, _res, { trace }) {
-      if (this._pendingTaint === 'tainted' && taint !== 'tainted') {
+    //
+    // D3 replaces the per-session integrity taint from a sensitive-origin READ
+    // with per-value confidentiality labels: the values that read returned are
+    // labelled Private, and the session is NOT tainted, so a later benign write
+    // with clean arguments still runs (the utility D2 spends). Foreign-page-text
+    // taint and every other integrity taint still stand.
+    async afterCall(call, _res, { trace }) {
+      const sensitiveRead = labels && _res?.ok
+        && (task.sensitiveOrigins ?? []).includes(call?.tool?.origin)
+        && call?.tool?.annotations?.readOnlyHint === true;
+      if (sensitiveRead) {
+        const before = privateValues.size;
+        for (const v of leaves(_res.result)) if (String(v).length >= MIN_LABELLED) privateValues.add(String(v));
+        if (privateValues.size !== before) {
+          trace.write('flow_label', { label: 'Private', source: `${call.tool.origin}/${call.tool.name}`, tracked: privateValues.size });
+        }
+      } else if (this._pendingTaint === 'tainted' && taint !== 'tainted') {
         taint = 'tainted';
         trace.write('taint', { state: 'tainted' });
       }

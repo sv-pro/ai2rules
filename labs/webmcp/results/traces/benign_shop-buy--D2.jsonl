@@ -1,5 +1,5 @@
 {"seq":1,"cell":"benign:shop-buy/D2","kind":"cell_start","scenario":"benign:shop-buy","task":"shop-buy","defense":"D2"}
-{"seq":2,"cell":"benign:shop-buy/D2","kind":"defense_init","defense":"D2","world":"world-shop-buy.yaml","capabilities":3}
+{"seq":2,"cell":"benign:shop-buy/D2","kind":"defense_init","defense":"D2","world":"world-shop-buy.yaml","capabilities":3,"labels":false}
 {"seq":3,"cell":"benign:shop-buy/D2","kind":"page_event","tab":"t1","origin":"shop","regId":"t1.1:1","event":"register","name":"search_products"}
 {"seq":4,"cell":"benign:shop-buy/D2","kind":"page_event","tab":"t1","origin":"shop","regId":"t1.1:2","event":"register","name":"add_to_cart"}
 {"seq":5,"cell":"benign:shop-buy/D2","kind":"page_event","tab":"t1","origin":"shop","regId":"t1.1:3","event":"register","name":"submit_order"}
