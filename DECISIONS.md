@@ -4193,7 +4193,11 @@ typed, opt-in, per-action contract, independent of any demo.
   and one contracted action must not break every host on every uncontracted action.
 - **Admission is independent of the floor and runs before it.** `check_flow` judges
   every declared sink against the label bound to it (ambient fallback when unknown;
-  `Literal`-pinned arguments skipped; renamed inputs judged under the actor's name),
+  `Literal`-pinned arguments skipped; renamed inputs judged under the actor's name;
+  a `ContextRef` or an argument the capability does not list judged by the ambient,
+  never by an actor label that shares its name — the actor's value under that name is
+  a different value, renamed onto it or stripped; the taint floor follows the same
+  rule, closing the identical gap in `effective_floor_taint`),
   confidentiality first, then integrity — so a disclosure is reported as
   `confidentiality_violation` even when the taint floor would also refuse the call. It is
   step 5b of `build`, inside representability: a flow refusal is `NotRepresentable`, and

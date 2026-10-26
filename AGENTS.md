@@ -77,9 +77,9 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all active tests passing, native Linux):**
-harness-types 17 · world-kernel 88 · compiler 46 · executor 28 · trace-store 66 ·
+harness-types 17 · world-kernel 93 · compiler 46 · executor 28 · trace-store 66 ·
 provider-adapters 5 · agent-core 18 · harness-preview 86 · cli-harness 283 ·
-harness-wasm 0 · govbench 9 · **total 646** (plus the harness-wasm Node smoke
+harness-wasm 0 · govbench 9 · **total 651** (plus the harness-wasm Node smoke
 tests, run via wasm-pack). The Unix-only doctor fixture suite includes
 40 passing tests and 3 ignored #87 specification gaps.
 

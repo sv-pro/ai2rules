@@ -147,6 +147,7 @@ const ENGINE_SOURCES = [
   'crates/harness-types/src',
   'crates/compiler/src',
   'crates/compiler/assets',
+  'crates/world-kernel/src',
   'crates/harness-preview/src',
   'crates/harness-wasm/src',
 ];

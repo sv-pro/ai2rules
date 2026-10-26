@@ -332,3 +332,135 @@ fn decide_is_deterministic_with_flow_context() {
     };
     assert_eq!(run(), run());
 }
+
+// ---- binding provenance (PR #169 review) ----
+//
+// A label describes the value the actor supplied under a name. A value the host
+// fills from its own context (`ContextRef`), or an argument a scoped capability
+// does not list, is a different value — even when an actor argument travels under
+// the same name, renamed onto it or stripped during lowering. Such a value is
+// judged by the ambient, never by that actor label.
+
+const CONTEXT_WORLD: &str = r#"
+world_id: context-flow-review
+capabilities:
+  - { trust: Trusted, actions: [Read, Mcp] }
+base_actions:
+  - name: publish
+    action_type: Mcp
+    side_effect: External
+    projected: false
+    backing: !McpServer { server: reports, tool: publish }
+    schema:
+      type: object
+      properties: { body: { type: string }, subject: { type: string } }
+    flow_contract:
+      sinks: { body: { confidentiality: Public } }
+  - name: digest
+    action_type: Read
+    side_effect: None
+    projected: false
+    schema:
+      type: object
+      properties: { body: { type: string }, subject: { type: string } }
+    flow_contract:
+      inherits: [body]
+scoped_capabilities:
+  # The reviewer's manifest: the actor's `body` is the subject.
+  - name: report
+    base_action: publish
+    args:
+      body: !ContextRef secret
+      subject: !Input { as: body }
+  # An actor `body` sent alongside, and stripped during lowering.
+  - name: report_stripped
+    base_action: publish
+    args:
+      body: !ContextRef secret
+      subject: !ActorInput
+  # The same rename collision on a transform's inherited argument.
+  - name: digest_context
+    base_action: digest
+    args:
+      body: !ContextRef secret
+      subject: !Input { as: body }
+"#;
+
+fn context_world() -> CompiledWorld {
+    compile(&load_yaml(CONTEXT_WORLD).expect("manifest parses")).expect("manifest compiles")
+}
+
+#[test]
+fn an_actor_label_never_describes_a_context_value_under_the_same_name() {
+    let w = context_world();
+    // Private ambient (the host holds the secret it will fill in); the actor's
+    // own `body` — which lowers to `subject` — is correctly labelled Public.
+    let taint = TaintContext::clean().with_flow(flow(TPRIV, &[("body", TP)]));
+    let (decision, rule, error) = not_representable(decide(
+        &w,
+        &call("report", json!({ "body": "public subject" })),
+        provenance(),
+        &ctx(taint, false),
+    ));
+    assert_eq!(decision, Decision::Deny);
+    assert_eq!(rule, "confidentiality_violation");
+    assert!(matches!(
+        error,
+        BuildError::FlowViolation {
+            axis: FlowAxis::Confidentiality,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_stripped_actor_argument_lends_its_label_to_nothing() {
+    let w = context_world();
+    let taint = TaintContext::clean().with_flow(flow(TPRIV, &[("body", TP), ("subject", TP)]));
+    let (_, rule, _) = not_representable(decide(
+        &w,
+        &call(
+            "report_stripped",
+            json!({ "subject": "public subject", "body": "public, and stripped" }),
+        ),
+        provenance(),
+        &ctx(taint, false),
+    ));
+    assert_eq!(rule, "confidentiality_violation");
+}
+
+#[test]
+fn a_context_value_takes_the_ambient_label_whatever_the_actor_sends() {
+    // With a Public ambient the context value is admitted — the host vouches for
+    // its own context through the ambient — and an actor label cannot make it
+    // stricter or looser.
+    let w = context_world();
+    for args in [vec![], vec![("body", TP)], vec![("body", TPRIV)]] {
+        let taint = TaintContext::clean().with_flow(flow(TP, &args));
+        assert!(
+            matches!(
+                decide(
+                    &w,
+                    &call("report", json!({ "body": "public subject" })),
+                    provenance(),
+                    &ctx(taint, false),
+                ),
+                KernelOutcome::Evaluated { .. }
+            ),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn an_inherited_context_value_keeps_the_ambient_label() {
+    let w = context_world();
+    let ir = IRBuilder::new(&w)
+        .build(
+            &call("digest_context", json!({ "body": "public subject" })),
+            provenance(),
+            &TaintContext::clean().with_flow(flow(TPRIV, &[("body", TP)])),
+        )
+        .expect("a transform builds");
+    assert_eq!(ir.result_label(), Some(TPRIV));
+}

@@ -19,13 +19,35 @@ use harness_types::{
 
 use crate::taint::externally_effectful;
 
-/// The name a contract argument's value travels under: a renamed input (D79)
-/// is bound under the name the actor used, so its label is recorded there.
-fn actor_key<'a>(arg: &'a str, literal_args: &'a BTreeMap<String, ArgSource>) -> &'a str {
-    literal_args
-        .get(arg)
-        .and_then(|source| source.actor_name(arg))
-        .unwrap_or(arg)
+/// Where the value a base-action argument carries at execution comes from, and
+/// so which per-argument label or taint may describe it.
+enum Binding<'a> {
+    /// The actor supplies it, under this name (a D79 rename included).
+    Actor(&'a str),
+    /// A design-time literal: clean by construction, never actor-influenced.
+    Literal,
+    /// Anything else: a context ref the host fills from its own state, or an
+    /// argument a scoped capability does not list. No actor-supplied label or
+    /// taint describes it — an actor argument that happens to share its name is
+    /// a *different* value, renamed onto that name or stripped during lowering —
+    /// so it is judged by the ambient (PR #169 review: an actor's Public label
+    /// on a renamed `subject` admitted a private `ContextRef` body).
+    Ambient,
+}
+
+/// How `arg` is bound. `scoped` is the scoped capability's argument map, `None`
+/// for a plain action, whose every argument the actor supplies under its own name.
+fn binding<'a>(arg: &'a str, scoped: Option<&'a BTreeMap<String, ArgSource>>) -> Binding<'a> {
+    let Some(args) = scoped else {
+        return Binding::Actor(arg);
+    };
+    match args.get(arg) {
+        Some(ArgSource::Literal(_)) => Binding::Literal,
+        Some(source) => source
+            .actor_name(arg)
+            .map_or(Binding::Ambient, Binding::Actor),
+        None => Binding::Ambient,
+    }
 }
 
 /// Flow admission (AI2-70, D95): every sink the contract declares must admit
@@ -49,7 +71,7 @@ fn actor_key<'a>(arg: &'a str, literal_args: &'a BTreeMap<String, ArgSource>) ->
 pub fn check_flow(
     action: &ActionName,
     contract: &FlowContract,
-    literal_args: &BTreeMap<String, ArgSource>,
+    scoped: Option<&BTreeMap<String, ArgSource>>,
     flow: Option<&FlowContext>,
 ) -> Result<(), BuildError> {
     let Some(flow) = flow else {
@@ -58,11 +80,11 @@ pub fn check_flow(
         });
     };
     for (arg, sink) in &contract.sinks {
-        if matches!(literal_args.get(arg), Some(ArgSource::Literal(_))) {
-            continue;
-        }
-        let key = actor_key(arg, literal_args);
-        let label = flow.arg_label(key).unwrap_or(flow.ambient());
+        let (key, label) = match binding(arg, scoped) {
+            Binding::Literal => continue,
+            Binding::Actor(key) => (key, flow.arg_label(key).unwrap_or(flow.ambient())),
+            Binding::Ambient => (arg.as_str(), flow.ambient()),
+        };
         if let Err(axis) = sink.admits(label) {
             return Err(BuildError::FlowViolation {
                 action: action.clone(),
@@ -85,7 +107,7 @@ pub fn check_flow(
 /// host may only ever raise this floor when it binds the real value.
 pub fn result_label_floor(
     contract: &FlowContract,
-    literal_args: &BTreeMap<String, ArgSource>,
+    scoped: Option<&BTreeMap<String, ArgSource>>,
     flow: &FlowContext,
 ) -> Option<FlowLabel> {
     if !contract.declares_result() {
@@ -94,10 +116,10 @@ pub fn result_label_floor(
     let inherited = contract
         .inherits
         .iter()
-        .filter(|arg| !matches!(literal_args.get(*arg), Some(ArgSource::Literal(_))))
-        .map(|arg| {
-            flow.arg_label(actor_key(arg, literal_args))
-                .unwrap_or(flow.ambient())
+        .filter_map(|arg| match binding(arg, scoped) {
+            Binding::Literal => None,
+            Binding::Actor(key) => Some(flow.arg_label(key).unwrap_or(flow.ambient())),
+            Binding::Ambient => Some(flow.ambient()),
         });
     let mut label: Option<FlowLabel> = contract.output;
     for next in inherited {
@@ -125,7 +147,7 @@ pub fn result_label_floor(
 /// role information about.
 pub fn effective_floor_taint(
     roles: &BTreeMap<String, ArgRole>,
-    literal_args: &BTreeMap<String, ArgSource>,
+    scoped: Option<&BTreeMap<String, ArgSource>>,
     ctx: &TaintContext,
 ) -> Taint {
     if roles.is_empty() {
@@ -136,16 +158,15 @@ pub fn effective_floor_taint(
         if !role.is_authority_bearing() {
             continue; // content / selector / control never trips the floor
         }
-        if matches!(literal_args.get(arg), Some(ArgSource::Literal(_))) {
-            continue; // design-time literal → clean by construction
-        }
         // Known per-argument taint refines; unknown fails closed to ambient. A
-        // renamed input (D79) carries its taint under the name the actor used.
-        let key = literal_args
-            .get(arg)
-            .and_then(|source| source.actor_name(arg))
-            .unwrap_or(arg);
-        let arg_taint = ctx.arg_taint(key).unwrap_or_else(|| ctx.taint());
+        // renamed input (D79) carries its taint under the name the actor used; a
+        // context ref or an unlisted argument is never described by an actor's
+        // taint, whatever name that argument was sent under.
+        let arg_taint = match binding(arg, scoped) {
+            Binding::Literal => continue, // design-time literal → clean by construction
+            Binding::Actor(key) => ctx.arg_taint(key).unwrap_or_else(|| ctx.taint()),
+            Binding::Ambient => ctx.taint(),
+        };
         effective = effective.join(arg_taint);
     }
     effective
@@ -209,7 +230,7 @@ mod tests {
         // The backward-compatibility contract: an action with no argument roles
         // is judged by the ambient scalar, exactly as before L2 existed.
         let ctx = TaintContext::from_taint(Taint::Tainted);
-        let eff = effective_floor_taint(&BTreeMap::new(), &BTreeMap::new(), &ctx);
+        let eff = effective_floor_taint(&BTreeMap::new(), None, &ctx);
         assert_eq!(eff, Taint::Tainted);
     }
 
@@ -220,8 +241,7 @@ mod tests {
         // ambient context → the floor sees Clean → the benign fetch is allowed.
         let ctx = TaintContext::from_taint(Taint::Tainted)
             .with_arg_taint([("url".to_string(), Taint::Clean)]);
-        let eff =
-            effective_floor_taint(&roles(&[("url", ArgRole::Target)]), &BTreeMap::new(), &ctx);
+        let eff = effective_floor_taint(&roles(&[("url", ArgRole::Target)]), None, &ctx);
         assert_eq!(eff, Taint::Clean);
         assert!(check_taint(&ActionName::new("fetch_web"), eff, SideEffectClass::Network).is_ok());
     }
@@ -232,8 +252,7 @@ mod tests {
         // just as the flat floor did.
         let ctx = TaintContext::from_taint(Taint::Tainted)
             .with_arg_taint([("url".to_string(), Taint::Tainted)]);
-        let eff =
-            effective_floor_taint(&roles(&[("url", ArgRole::Target)]), &BTreeMap::new(), &ctx);
+        let eff = effective_floor_taint(&roles(&[("url", ArgRole::Target)]), None, &ctx);
         assert_eq!(eff, Taint::Tainted);
         assert!(check_taint(&ActionName::new("fetch_web"), eff, SideEffectClass::Network).is_err());
     }
@@ -248,7 +267,7 @@ mod tests {
         ]);
         let eff = effective_floor_taint(
             &roles(&[("to", ArgRole::Target), ("body", ArgRole::Content)]),
-            &BTreeMap::new(),
+            None,
             &ctx,
         );
         assert_eq!(eff, Taint::Clean);
@@ -259,8 +278,7 @@ mod tests {
         // Fail-closed: an authority-bearing argument whose per-argument taint is
         // unknown must not be assumed clean — it falls back to the ambient scalar.
         let ctx = TaintContext::from_taint(Taint::Tainted); // no arg_taint provided
-        let eff =
-            effective_floor_taint(&roles(&[("url", ArgRole::Target)]), &BTreeMap::new(), &ctx);
+        let eff = effective_floor_taint(&roles(&[("url", ArgRole::Target)]), None, &ctx);
         assert_eq!(eff, Taint::Tainted);
     }
 
@@ -275,7 +293,11 @@ mod tests {
         .into_iter()
         .collect();
         let ctx = TaintContext::from_taint(Taint::Tainted);
-        let eff = effective_floor_taint(&roles(&[("endpoint", ArgRole::Target)]), &literals, &ctx);
+        let eff = effective_floor_taint(
+            &roles(&[("endpoint", ArgRole::Target)]),
+            Some(&literals),
+            &ctx,
+        );
         assert_eq!(eff, Taint::Clean);
     }
 
@@ -297,7 +319,43 @@ mod tests {
             ("issue".to_string(), Taint::Tainted),
             ("key".to_string(), Taint::Clean),
         ]);
-        let eff = effective_floor_taint(&roles(&[("key", ArgRole::Target)]), &inputs, &ctx);
+        let eff = effective_floor_taint(&roles(&[("key", ArgRole::Target)]), Some(&inputs), &ctx);
+        assert_eq!(eff, Taint::Tainted);
+    }
+
+    #[test]
+    fn a_context_bound_authority_arg_is_judged_by_the_ambient() {
+        // PR #169 review, the floor's half: `to` is filled from host context and
+        // `note` is exposed to the actor under the name `to`. The actor's clean
+        // `to` describes the note, not the destination, so the destination is
+        // judged by the tainted ambient. The same holds for an actor `to` that is
+        // simply stripped during lowering.
+        let renamed: BTreeMap<String, ArgSource> = [
+            ("to".to_string(), ArgSource::ContextRef("dest".to_string())),
+            (
+                "note".to_string(),
+                ArgSource::Input(InputRule {
+                    exposed_as: Some("to".to_string()),
+                    ..InputRule::default()
+                }),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let stripped: BTreeMap<String, ArgSource> =
+            [("to".to_string(), ArgSource::ContextRef("dest".to_string()))]
+                .into_iter()
+                .collect();
+        let ctx = TaintContext::from_taint(Taint::Tainted)
+            .with_arg_taint([("to".to_string(), Taint::Clean)]);
+        for scoped in [&renamed, &stripped] {
+            let eff = effective_floor_taint(&roles(&[("to", ArgRole::Target)]), Some(scoped), &ctx);
+            assert_eq!(eff, Taint::Tainted);
+        }
+        // An argument the capability does not list is never described by an
+        // actor's taint either.
+        let unlisted: BTreeMap<String, ArgSource> = BTreeMap::new();
+        let eff = effective_floor_taint(&roles(&[("to", ArgRole::Target)]), Some(&unlisted), &ctx);
         assert_eq!(eff, Taint::Tainted);
     }
 
@@ -367,13 +425,8 @@ mod tests {
 
     #[test]
     fn contracted_action_without_flow_context_fails_closed() {
-        let err = check_flow(
-            &ActionName::new("publish"),
-            &public_body_sink(),
-            &BTreeMap::new(),
-            None,
-        )
-        .unwrap_err();
+        let err =
+            check_flow(&ActionName::new("publish"), &public_body_sink(), None, None).unwrap_err();
         assert!(matches!(err, BuildError::MissingFlowContext { .. }));
         // Even a contract with no sinks needs the context: its result label
         // depends on the ambient.
@@ -381,7 +434,7 @@ mod tests {
             output: Some(TPRIV),
             ..Default::default()
         };
-        assert!(check_flow(&ActionName::new("read"), &source, &BTreeMap::new(), None).is_err());
+        assert!(check_flow(&ActionName::new("read"), &source, None, None).is_err());
     }
 
     #[test]
@@ -390,7 +443,7 @@ mod tests {
         let err = check_flow(
             &ActionName::new("publish"),
             &public_body_sink(),
-            &BTreeMap::new(),
+            None,
             Some(&ctx),
         )
         .unwrap_err();
@@ -405,7 +458,7 @@ mod tests {
         assert!(check_flow(
             &ActionName::new("publish"),
             &public_body_sink(),
-            &BTreeMap::new(),
+            None,
             Some(&ctx)
         )
         .is_ok());
@@ -418,7 +471,7 @@ mod tests {
         assert!(check_flow(
             &ActionName::new("publish"),
             &public_body_sink(),
-            &BTreeMap::new(),
+            None,
             Some(&ctx)
         )
         .is_err());
@@ -427,7 +480,7 @@ mod tests {
         assert!(check_flow(
             &ActionName::new("publish"),
             &public_body_sink(),
-            &BTreeMap::new(),
+            None,
             Some(&ctx)
         )
         .is_ok());
@@ -449,12 +502,7 @@ mod tests {
             ..Default::default()
         };
         let ctx = flow(TP, &[("body", UP)]);
-        match check_flow(
-            &ActionName::new("publish"),
-            &contract,
-            &BTreeMap::new(),
-            Some(&ctx),
-        ) {
+        match check_flow(&ActionName::new("publish"), &contract, None, Some(&ctx)) {
             Err(BuildError::FlowViolation { axis, .. }) => assert_eq!(axis, FlowAxis::Integrity),
             other => panic!("{other:?}"),
         }
@@ -464,12 +512,7 @@ mod tests {
             confidentiality: Confidentiality::Private,
         };
         let ctx = flow(TP, &[("body", both)]);
-        match check_flow(
-            &ActionName::new("publish"),
-            &contract,
-            &BTreeMap::new(),
-            Some(&ctx),
-        ) {
+        match check_flow(&ActionName::new("publish"), &contract, None, Some(&ctx)) {
             Err(BuildError::FlowViolation { axis, .. }) => {
                 assert_eq!(axis, FlowAxis::Confidentiality)
             }
@@ -522,7 +565,7 @@ mod tests {
         match check_flow(
             &ActionName::new("publish_report"),
             &contract,
-            &args,
+            Some(&args),
             Some(&ctx),
         ) {
             Err(BuildError::FlowViolation { argument, axis, .. }) => {
@@ -540,10 +583,7 @@ mod tests {
             ..Default::default()
         };
         let ctx = flow(TP, &[]);
-        assert_eq!(
-            result_label_floor(&source, &BTreeMap::new(), &ctx),
-            Some(TPRIV)
-        );
+        assert_eq!(result_label_floor(&source, None, &ctx), Some(TPRIV));
 
         // A transform inherits: a Private parent stays Private; an Untrusted
         // parent makes the result Untrusted; an unlabelled parent is ambient.
@@ -552,15 +592,9 @@ mod tests {
             ..Default::default()
         };
         let ctx = flow(TP, &[("body", TPRIV)]);
-        assert_eq!(
-            result_label_floor(&transform, &BTreeMap::new(), &ctx),
-            Some(TPRIV)
-        );
+        assert_eq!(result_label_floor(&transform, None, &ctx), Some(TPRIV));
         let ctx = flow(UP, &[]);
-        assert_eq!(
-            result_label_floor(&transform, &BTreeMap::new(), &ctx),
-            Some(UP)
-        );
+        assert_eq!(result_label_floor(&transform, None, &ctx), Some(UP));
         let both = FlowContract {
             output: Some(TPRIV),
             inherits: vec!["body".to_string()],
@@ -568,7 +602,7 @@ mod tests {
         };
         let ctx = flow(TP, &[("body", UP)]);
         assert_eq!(
-            result_label_floor(&both, &BTreeMap::new(), &ctx),
+            result_label_floor(&both, None, &ctx),
             Some(FlowLabel {
                 integrity: Integrity::Untrusted,
                 confidentiality: Confidentiality::Private
@@ -576,10 +610,7 @@ mod tests {
         );
         // Sinks only: the result label is unknown, not Trusted/Public.
         let ctx = flow(TP, &[]);
-        assert_eq!(
-            result_label_floor(&public_body_sink(), &BTreeMap::new(), &ctx),
-            None
-        );
+        assert_eq!(result_label_floor(&public_body_sink(), None, &ctx), None);
     }
 
     #[test]
