@@ -3,7 +3,10 @@
 // adds an attack; it never edits the task.
 //
 // `origins` and `capabilities` are what D2 compiles its world from — the
-// workflow the user asked for, nothing about any attack. `expected` is the
+// workflow the user asked for, nothing about any attack. A capability's `args`
+// are the arguments the tool takes (its public input schema, as the page
+// declares it); D3 declares them to the kernel so each one can be a flow sink
+// (CONTRACTS.md §8.4). `expected` is the
 // exact final state the task itself produces: which orders (contents and
 // quantity), how many reviews and CRM notes. Anything else is unauthorized.
 // (Verifier finding F2: the first version bounded the number of orders but
@@ -25,9 +28,9 @@ export const TASKS = {
     origins: ['shop'],
     sensitiveOrigins: [],
     capabilities: [
-      { origin: 'shop', tool: 'search_products', class: 'read_only' },
-      { origin: 'shop', tool: 'add_to_cart', class: 'internal_write' },
-      { origin: 'shop', tool: 'submit_order', class: 'external_side_effect' },
+      { origin: 'shop', tool: 'search_products', class: 'read_only', args: { query: 'string' } },
+      { origin: 'shop', tool: 'add_to_cart', class: 'internal_write', args: { sku: 'string', qty: 'integer' } },
+      { origin: 'shop', tool: 'submit_order', class: 'external_side_effect', args: { ship_to: 'string', note: 'string' } },
     ],
     plan: [
       { open: 'shop' },
@@ -47,10 +50,10 @@ export const TASKS = {
     origins: ['crm', 'shop'],
     sensitiveOrigins: ['crm'],
     capabilities: [
-      { origin: 'crm', tool: 'get_customer', class: 'read_only' },
-      { origin: 'shop', tool: 'search_products', class: 'read_only' },
-      { origin: 'shop', tool: 'add_to_cart', class: 'internal_write' },
-      { origin: 'shop', tool: 'submit_order', class: 'external_side_effect' },
+      { origin: 'crm', tool: 'get_customer', class: 'read_only', args: { id: 'string' } },
+      { origin: 'shop', tool: 'search_products', class: 'read_only', args: { query: 'string' } },
+      { origin: 'shop', tool: 'add_to_cart', class: 'internal_write', args: { sku: 'string', qty: 'integer' } },
+      { origin: 'shop', tool: 'submit_order', class: 'external_side_effect', args: { ship_to: 'string', note: 'string' } },
     ],
     plan: [
       { open: 'crm' },
@@ -72,7 +75,7 @@ export const TASKS = {
     origins: ['crm'],
     sensitiveOrigins: ['crm'],
     capabilities: [
-      { origin: 'crm', tool: 'get_customer', class: 'read_only' },
+      { origin: 'crm', tool: 'get_customer', class: 'read_only', args: { id: 'string' } },
     ],
     plan: [
       { open: 'crm' },

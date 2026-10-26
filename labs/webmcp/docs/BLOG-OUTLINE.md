@@ -179,31 +179,39 @@ verification.)
 - The question this column tests: can labelling a *value*, instead of tainting the
   *session*, give back the utility D2 spends without losing security? [R §What
   value-level labels (D3) change; C §8.4].
-- D3 is D2 plus one axis: a read on a sensitive origin labels its returned values
-  Private; a call carrying a Private value to another origin is denied by an
-  independent confidentiality check, before the integrity gate [C §8.4]. It is an
-  adapter prototype of AI2-70 / #151, not the kernel.
+- D3 is D2 on the kernel's typed flow contracts: the compiled world declares the
+  CRM read a source whose whole result is Trusted/Private and every other-origin
+  argument a Public sink; the adapter carries the ambient label and a digest-keyed
+  table of value labels as the gate ABI asks a host to, labels the task's own
+  inputs Public, and sends a label for every argument whose value it has seen; the
+  kernel judges the rest by the ambient and refuses a private flow before the
+  integrity floor [C §8.4]. The adapter decides nothing (every refusal carries the
+  kernel's rule). It replaced an adapter-side prototype the verifier had checked.
 - **It recovers the utility.** All five CRM-reading tasks complete under D3
   (benign `crm-gift`, S1, S2, S5, S5b), where D2 left them undone [R §What
   value-level labels (D3) change, §Utility].
-- **It keeps D2's security and closes S5b — contingent on the paste.** D3 stops
-  every attack D2 stops, and additionally S5b, because a Private value may not
-  reach another origin whether the sink is a write or a read; it regresses nothing
-  [R §What value-level labels (D3) change; §Attack outcome]. State the verifier's
-  caveat plainly: the shipped S5/S5b paste the whole record, so the labelled leaf
-  is caught; a one-line "put just the account code" is a partial quote that
-  escapes and leaks, where D2's taint would still have blocked [C §8.4;
-  CHECKPOINT-3 §Confirmed].
-- **The one cost, regression-tested.** The label follows the whole labelled value
-  by surface match, so a transform (encoding, reversal) or a partial quote of it
-  escapes [C §8.4; test `labels_defeated_by_transform`]. D2's coarser session taint
-  would have blocked such a write incidentally; D3 trades that cover for the
-  recovered utility. The fix is provenance that survives transformation and
-  sub-value tracking — the kernel work AI2-70 describes [C §8.4].
+- **It keeps D2's security and closes S5b, for any phrasing of the leak.** D3
+  stops every attack D2 stops, and additionally S5b; it regresses nothing [R §What
+  value-level labels (D3) change; §Attack outcome]. Say how: the shipped S5/S5b
+  paste the record wrapped in text, so the argument is not the labelled value; the
+  adapter sends no label and the kernel applies the ambient, Private since the
+  read. A transform or "just the account code" meets the same refusal [C §8.4;
+  test `D3 unbound values fall back to the ambient`]. S1 is projection, as under
+  D2 [R §Attack outcome].
+- **The one cost, regression-tested.** Labels are whole-result and bound by
+  digest, and the kernel infers nothing: after a private read every value the
+  adapter cannot vouch for is refused, a fresh benign input like a transformed
+  secret (the test shows the same query flowing before the read, refused after).
+  No shipped cell pays it; free-text writes after a private read would. Re-binding
+  a transformed value is the host's job [C §8.4].
+- **One label the adapter asserts itself:** an argument the call leaves unbound is
+  sent as Public (nothing flows through it); the kernel would otherwise judge the
+  bare `submit_order {}` by the private ambient. The trace records it [C §8.4].
 - One framing line: on this workload value-level labelling dominates binary
-  session taint on utility while matching it on security, at the price of
-  transform-resistance — a concrete contrast for the AI2-70 ADR, not a shipped
-  guarantee [C §8.4]. Mark the whole section pending until the verifier reports.
+  session taint on utility while matching it on security; the price moved from a
+  value slipping past a surface match to every unvouched-for value refused once
+  the session is private — a concrete contrast, not a shipped guarantee [C §8.4].
+  Mark the whole section pending until the verifier reports.
 
 ### 9. With a real model: one run (clearly labelled)
 
@@ -242,9 +250,10 @@ From [R §Limitations] and [V §What still cannot be claimed]:
   use them [V §Codex CP1 probes].
 - D2's taint is integrity taint per session, used as a confidentiality floor:
   coarse, and blind to read sinks.
-- D3 is an adapter prototype of AI2-70, not the kernel; its labels follow a value
-  by surface match (a transform or partial quote escapes them), its granularity is
-  the whole field, and the verifier has not yet certified its column [C §8.4].
+- D3's labels are whole-result and bound by digest; after a private read the
+  kernel refuses any value the adapter cannot vouch for, and the adapter labels an
+  unbound argument Public on its own word; the verifier has not yet certified
+  this column [C §8.4].
 - Kernel provenance: results depend on `cli-harness 0.7.0` as built; its
   source-to-binary provenance was not independently verified.
 - Determinism verified on Windows locally, and on Linux by the `webmcp-lab` CI job
@@ -287,11 +296,11 @@ As listed in [R §Prior art]:
 ### 13. Close
 
 - One sentence each: per-call blocking stopped what came from a foreign origin;
-  ai2rules (D2) stopped six of eight at a utility cost; a value-level-label
-  prototype (D3, AI2-70 / #151) gave the utility back and closed the read-tool
-  leak while keeping D2's security on these eight fixed scenarios (payloads carry
-  the whole labelled field), for the cost that a transformed or partially-quoted
-  value escapes the label — pending verification; and handler tampering still
+  ai2rules (D2) stopped six of eight at a utility cost; the kernel's flow
+  contracts (D3) gave the utility back and closed the read-tool leak while
+  keeping D2's security on these eight fixed scenarios, for any phrasing of the
+  leak, at the cost that after a private read every unvouched-for value is
+  refused — pending verification; and handler tampering still
   gets through, because none of the four tested defenses detects it and the layer
   that could — script isolation — is one we did not test.
 - Link: the lab, `RESULTS.md`, `CHECKPOINT-2.md`, `CHECKPOINT-3.md`, `TAKEAWAY.md`.
@@ -350,5 +359,5 @@ certified** = the verifier says it cannot be claimed or did not check it.
 | 43 | D3 (value-level labels) stops every attack D2 stops, plus S5b; lets through only S3b (1/8) | R §What value-level labels (D3) change, §Attack outcome; J `*/D3` | pending |
 | 44 | D3 completes all five CRM-reading tasks D2 breaks (benign `crm-gift`, S1, S2, S5, S5b); on these eight fixed scenarios (whose S5/S5b payloads carry the whole labelled field) it regresses no utility and no attack outcome vs D2 | R §What value-level labels (D3) change, §Utility; J `*/D3`; CHECKPOINT-3 §Confirmed | CP3 |
 | 45 | D3's confidentiality stop is causal: the Private value is in the **proposed** args and is DENIED before the handler is entered (not executed) | S5/D3 and S5b/D3 traces (flow_label, then call with data, then DENY·flow:confidentiality, no exec); CHECKPOINT-3 §Confirmed | CP3 |
-| 46 | A transformed or partially-quoted Private value escapes D3's label (the documented cost); D3's S5/S5b stop is contingent on the attacker pasting the whole labelled leaf | C §8.4; test `labels_defeated_by_transform`; CHECKPOINT-3 §Confirmed (D3-transform-escape, D3-canary-substring-escape) | static (test) + CP3 (verifier reproduced) |
-| 47 | D3 is an adapter prototype of AI2-70 / #151, not a kernel change | C §8.4; src/defenses/d2-ai2rules.js `labels:true` | static |
+| 46 | After a private read, a value the adapter cannot vouch for is refused by the kernel whatever its phrasing (transform, partial quote, wrapped record, fresh benign input); the S5/S5b stops do not depend on the paste | C §8.4; test `D3 unbound values fall back to the ambient`; S5/D3 and S5b/D3 traces (`flow.args` empty on the DENY, ambient `trusted/private`) | static (test); NOT yet verifier-checked (CP3 checked the superseded prototype) |
+| 47 | D3 runs on the kernel's flow contracts; the adapter decides nothing (every D3 refusal carries the kernel's rule), and asserts one label itself: an unbound declared argument is Public | C §8.4; src/defenses/d2-ai2rules.js `labels:true`; test `D3 closes S5b … by the kernel's rule` | static (test); NOT yet verifier-checked |

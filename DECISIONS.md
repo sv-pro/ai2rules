@@ -4140,6 +4140,12 @@ Both are the case AI2-70 / #151 is written to fix. The lab is independently veri
 (`labs/webmcp/verification/`), and its `webmcp-lab` CI job reruns the matrix and fails on
 any drift from the committed results.
 
+*Update (2026-10-26, after D95):* the adapter prototype is gone. D3 now runs on the kernel's
+own `flow_contract`s and the gate ABI's `context.flow` sidecar; the lab's `labels: true`
+path carries labels and decides nothing (`labs/webmcp/CONTRACTS.md` §8.4). Same counts;
+the partial-quote escape is closed (an unbound value in a private session is private), and
+the cost moved to "every value the host cannot vouch for is refused after a private read".
+
 ## D95 — Typed source/sink flow contracts and independent confidentiality admission (v0)
 
 **Date:** 2026-10-26. **Task:** AI2-70 (#151). **Crates:** `harness-types`, `compiler`,

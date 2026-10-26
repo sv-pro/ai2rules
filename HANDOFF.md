@@ -1,3 +1,16 @@
+# 2026-10-26 — Codex re-review and PR #170 integration
+
+- Re-reviewed #169 at 9970b7a: ContextRef, unlisted arguments, inherited labels,
+  and taint-floor all respect binding provenance. Original reproducer now refuses.
+  Clean isolated Cargo build: 179 world-kernel + harness-preview tests passed.
+  All 16 CI checks green; review thread resolved; #169 merged to main at 37fc6f0.
+- Retargeted #170 to main explicitly. Merged main into this branch without conflicts;
+  no lab implementation changes. README retains the fixed kernel's 651 test count.
+- Independently reran this lab with the freshly built fixed kernel: 35/35 tests,
+  44/44 matrix cells OK (13.4 s). All 47 committed artifacts match after CRLF/LF
+  normalization; S5/S5b stop with utility true. Scope and S3b limitation unchanged.
+- Next: fresh CI on this integration head, then user-authorized #170 merge if green.
+  Main checkout and its untracked PROMO.md were not changed by this integration.
 # 2026-10-26 — #169 P1 fixed (Claude)
 
 - Codex's P1 on #169 is fixed: `world-kernel/src/invariants.rs` replaces `actor_key`
@@ -46,6 +59,20 @@ then rerun CI and merge in dependency order. No fixes were requested in this rev
 # Earlier handoff — AI2-83 / #160 WebMCP attack lab
 
 Branch `claude/ai2-84-webmcp-lab`. Lab in `labs/webmcp/`; read `CONTRACTS.md` first.
+
+## 2026-10-26 — D3 on the kernel's flow contracts (branch `claude/ai2-70-webmcp-d3-kernel-flows`)
+
+- Cut from `claude/ai2-70-flow-contracts` (PR #169, not yet on `main`); PR targets that branch.
+- `labels: true` now derives a world with `schema` + `flow_contract` (source on the CRM read,
+  Public sinks on every other-origin argument), carries `context.flow` per the gate ABI §6, and
+  reports the kernel's `confidentiality_violation` as `flow:confidentiality`. No JS verdicts.
+- Tasks declare each capability's `args` (needed for sinks; closed schemas). D2 world/traces
+  byte-identical. Matrix 44/44 OK; S1/D3 `flow:confidentiality` → `projection` (explained in
+  CONTRACTS §8.4 / RESULTS). `npm test` 35/35 on Windows with `HARNESS_BIN` pointing at the
+  main checkout's release binary (the worktree has no `target/`).
+- Open kernel question (in the task record): absent declared sink args are judged by the
+  ambient; the adapter labels them Public itself and records `absent` in the trace.
+- Verifier has NOT re-checked the new D3 column; TAKEAWAY/BLOG keep it "pending".
 
 ## 2026-10-26 — AI2-87 results + LLMAgent merged (@ 0a39e1c)
 
