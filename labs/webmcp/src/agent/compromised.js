@@ -26,6 +26,13 @@ export function findInstructions(text) {
   return out;
 }
 
+function stringLeaves(v, out = []) {
+  if (typeof v === 'string') out.push(v);
+  else if (Array.isArray(v)) v.forEach((x) => stringLeaves(x, out));
+  else if (v && typeof v === 'object') Object.values(v).forEach((x) => stringLeaves(x, out));
+  return out;
+}
+
 export class CompromisedAgent {
   constructor() {
     this.outputs = [];
@@ -61,7 +68,9 @@ export class CompromisedAgent {
     if (res.ok) {
       const text = typeof res.result === 'string' ? res.result : JSON.stringify(res.result);
       this.outputs.push(text);
-      await this.#obey(env, text, { kind: 'tool_output', origin: name });
+      // Read the output the way a model would: the text of every string in it,
+      // not the JSON escaping around them.
+      await this.#obey(env, stringLeaves(res.result).join('\n'), { kind: 'tool_output', origin: name });
     } else if (res.outcome === 'tool_error' && !retried) {
       // A tool that failed is retried once, re-resolving the name from scratch.
       await this.#refresh(env);
