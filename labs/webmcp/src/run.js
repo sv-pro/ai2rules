@@ -110,12 +110,14 @@ async function main(rawArgv) {
   mkdirSync(traceDir, { recursive: true });
 
   let cells;
+  let partial = false; // a filtered run must not overwrite the canonical results
   if (argv[0] === '--cell') {
     const [scenario, defense] = argv.slice(1);
     if (!scenario || !defense) throw new Error('usage: --cell <scenario|benign:task> <D0|D1|D2>');
     cells = [[scenario, defense]];
   } else {
     const only = argv.includes('--scenarios') ? argv[argv.indexOf('--scenarios') + 1].split(',') : null;
+    partial = Boolean(only);
     const tasks = llm ? LLM_TASKS : Object.keys(TASKS);
     const scenarios = [...tasks.map((t) => `benign:${t}`), ...attackScenarios()]
       .filter((s) => !only || only.includes(s));
@@ -141,7 +143,11 @@ async function main(rawArgv) {
     await servers.close();
   }
 
-  if (argv[0] !== '--cell' && llm) {
+  if (partial) {
+    // A `--scenarios` subset ran; leave the committed results.json / RESULTS.md
+    // untouched so a partial run can never overwrite the canonical table.
+    console.log('(partial run: canonical results not rewritten)');
+  } else if (argv[0] !== '--cell' && llm) {
     writeFileSync(path.join(outDir, 'results-llm.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'LLMAgent', rows }, null, 2) + '\n');
     writeFileSync(path.join(outDir, 'RESULTS-LLM.md'), renderLlmResults(rows));
   } else if (argv[0] !== '--cell') {
