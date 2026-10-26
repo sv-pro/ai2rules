@@ -588,4 +588,145 @@ base_actions:
         let yaml = SURFACE.replace("prefix: \"PLAT-\"", "prefix: \"PLAT-\", max_len: 8");
         assert!(matches!(load_yaml(&yaml), Err(CompileError::Parse(_))));
     }
+
+    // --- Flow contracts (AI2-70, D95) ---
+
+    /// Two actions; `publish` carries the contract under test, `note` none.
+    fn flow_world(contract: &str) -> String {
+        format!(
+            r#"
+world_id: flow
+base_actions:
+  - name: publish
+    action_type: Mcp
+    side_effect: External
+    backing: !McpServer {{ server: reports, tool: publish }}
+    schema:
+      type: object
+      properties:
+        to: {{ type: string }}
+        body: {{ type: string }}
+    flow_contract: {contract}
+  - name: note
+    action_type: Read
+    side_effect: None
+scoped_capabilities:
+  - name: publish_report
+    base_action: publish
+    args:
+      to: !Literal "https://reports.example/weekly"
+      body: !ActorInput
+"#
+        )
+    }
+
+    const SINKS: &str = "{ sinks: { body: { confidentiality: Public } } }";
+
+    #[test]
+    fn absent_flow_contract_keeps_pre_d95_hashes_stable() {
+        let plain = load_yaml(&flow_world("").replace("    flow_contract: \n", "")).unwrap();
+        assert!(plain.base_actions.iter().all(|a| a.flow_contract.is_none()));
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(!json.contains("flow_contract"), "{json}");
+        let world = compile(&plain).unwrap();
+        for action in ["publish", "note", "publish_report"] {
+            let d = world.descriptor(&ActionName::new(action)).unwrap();
+            assert!(!d.canonical_input().contains("flow_contract"), "{action}");
+        }
+        assert!(!serde_json::to_string(&world)
+            .unwrap()
+            .contains("flow_contract"));
+
+        // Declaring a contract on `publish` changes the manifest hash and that
+        // descriptor's hash (and its capability's, which inherits it), but not
+        // the hash of an action that declares none.
+        let with = compile(&load_yaml(&flow_world(SINKS)).unwrap()).unwrap();
+        assert_ne!(world.manifest_hash(), with.manifest_hash());
+        let publish = ActionName::new("publish");
+        let note = ActionName::new("note");
+        assert_ne!(
+            world.descriptor_hash(&publish),
+            with.descriptor_hash(&publish)
+        );
+        assert_eq!(world.descriptor_hash(&note), with.descriptor_hash(&note));
+    }
+
+    #[test]
+    fn default_world_declares_no_flow_contract() {
+        // v0 rolls no contract out to the default world (a stated non-goal).
+        let manifest = default_cli_world();
+        assert!(manifest
+            .base_actions
+            .iter()
+            .all(|a| a.flow_contract.is_none()));
+        let canonical = serde_json::to_string(&manifest).unwrap();
+        assert!(!canonical.contains("flow_contract"));
+    }
+
+    #[test]
+    fn scoped_capability_inherits_its_base_contract() {
+        let world = compile(&load_yaml(&flow_world(SINKS)).unwrap()).unwrap();
+        let base = world.flow_contract(&ActionName::new("publish")).unwrap();
+        let cap = world
+            .flow_contract(&ActionName::new("publish_report"))
+            .unwrap();
+        assert_eq!(base, cap);
+        assert!(cap.sinks.contains_key("body"));
+        assert!(world.flow_contract(&ActionName::new("note")).is_none());
+    }
+
+    #[test]
+    fn validate_rejects_a_contract_that_names_undeclared_arguments() {
+        let detail = invalid(&flow_world("{ sinks: { dest: { integrity: Trusted } } }"));
+        assert!(detail.contains("sink dest"), "{detail}");
+        let detail = invalid(&flow_world("{ inherits: [subject] }"));
+        assert!(detail.contains("inherits argument subject"), "{detail}");
+    }
+
+    #[test]
+    fn validate_rejects_a_sink_that_bounds_nothing() {
+        let detail = invalid(&flow_world("{ sinks: { body: {} } }"));
+        assert!(detail.contains("sink body names neither"), "{detail}");
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_inherits() {
+        let detail = invalid(&flow_world("{ inherits: [body, body] }"));
+        assert!(detail.contains("inherits argument body twice"), "{detail}");
+    }
+
+    #[test]
+    fn validate_rejects_a_trusted_output_on_a_remote_tool() {
+        let detail = invalid(&flow_world(
+            "{ output: { integrity: Trusted, confidentiality: Public } }",
+        ));
+        assert!(
+            detail.contains("Trusted output on an MCP-backed action"),
+            "{detail}"
+        );
+        // An Untrusted output floor on a remote tool is exactly right.
+        compile(
+            &load_yaml(&flow_world(
+                "{ output: { integrity: Untrusted, confidentiality: Public } }",
+            ))
+            .unwrap(),
+        )
+        .expect("compiles");
+    }
+
+    #[test]
+    fn validate_rejects_a_contract_that_declares_nothing() {
+        let detail = invalid(&flow_world("{}"));
+        assert!(detail.contains("declares neither"), "{detail}");
+    }
+
+    #[test]
+    fn a_misspelt_flow_contract_key_is_a_parse_error() {
+        let yaml = flow_world("{ sink: { body: { confidentiality: Public } } }");
+        assert!(matches!(load_yaml(&yaml), Err(CompileError::Parse(_))));
+        let yaml = flow_world("{ sinks: { body: { confidential: Public } } }");
+        assert!(matches!(load_yaml(&yaml), Err(CompileError::Parse(_))));
+        let yaml = flow_world("{ output: { integrity: Trusted, confidentiality: Secret } }");
+        assert!(matches!(load_yaml(&yaml), Err(CompileError::Parse(_))));
+    }
 }

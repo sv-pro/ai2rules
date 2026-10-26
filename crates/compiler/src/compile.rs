@@ -52,6 +52,7 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
             backing,
             metadata: Value::Null,
             arg_roles: action.arg_roles.clone(),
+            flow_contract: action.flow_contract.clone(),
         };
         parts
             .descriptor_hashes
@@ -99,6 +100,10 @@ pub fn compile(manifest: &WorldManifest) -> Result<CompiledWorld, CompileError> 
             // arguments pinned to a Literal are design-time-clean and are
             // filtered out at the L2 check, not here.
             arg_roles: base.arg_roles.clone(),
+            // Likewise the flow contract (D95): a capability narrows its base's
+            // arguments, it does not get a different source/sink story. Literal-
+            // pinned sinks are skipped at check time, as for `arg_roles`.
+            flow_contract: base.flow_contract.clone(),
         };
         parts
             .descriptor_hashes

@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 
 use harness_types::{
-    check_action_schema, ArgSource, BackingIdentity, SchemaProblem, ScopedCapabilityDef,
-    SourceChannel, WorldManifest,
+    check_action_schema, ArgSource, BackingIdentity, BaseActionDef, Integrity, SchemaProblem,
+    ScopedCapabilityDef, SourceChannel, WorldManifest,
 };
 
 use crate::error::CompileError;
@@ -60,6 +60,7 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
                 CompileError::Invalid(format!("action {}: {malformed}", action.name))
             }
         })?;
+        validate_flow_contract(action)?;
     }
 
     let mut cap_names: BTreeSet<&str> = BTreeSet::new();
@@ -224,6 +225,69 @@ pub fn validate(manifest: &WorldManifest) -> Result<(), CompileError> {
         path_classified.extend(in_class);
     }
 
+    Ok(())
+}
+
+/// Check one base action's flow contract (AI2-70, D95), when it declares one.
+/// A contract names only arguments the schema declares, says something on
+/// every sink it lists and about the result or at least one sink, and never
+/// vouches for the integrity of a remote tool's output: an MCP server's result
+/// is untrusted by construction (finding #13), and a declared `Trusted` output
+/// floor would be a promise the kernel cannot keep.
+fn validate_flow_contract(action: &BaseActionDef) -> Result<(), CompileError> {
+    let Some(contract) = &action.flow_contract else {
+        return Ok(());
+    };
+    let invalid = |detail: String| {
+        CompileError::Invalid(format!("action {}: flow_contract {detail}", action.name))
+    };
+    if contract.is_empty() {
+        return Err(invalid(
+            "declares neither an output label, inherited arguments nor a sink".to_string(),
+        ));
+    }
+    let declared = |arg: &str| {
+        action
+            .schema
+            .get("properties")
+            .and_then(|p| p.get(arg))
+            .is_some()
+    };
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for arg in &contract.inherits {
+        if !declared(arg) {
+            return Err(invalid(format!(
+                "inherits argument {arg}, which the schema does not declare"
+            )));
+        }
+        if !seen.insert(arg.as_str()) {
+            return Err(invalid(format!("inherits argument {arg} twice")));
+        }
+    }
+    for (arg, sink) in &contract.sinks {
+        if !declared(arg) {
+            return Err(invalid(format!(
+                "constrains sink {arg}, which the schema does not declare"
+            )));
+        }
+        if sink.is_empty() {
+            return Err(invalid(format!(
+                "sink {arg} names neither an integrity nor a confidentiality bound"
+            )));
+        }
+    }
+    let remote = matches!(action.backing, Some(BackingIdentity::McpServer { .. }));
+    if remote
+        && contract
+            .output
+            .is_some_and(|o| o.integrity == Integrity::Trusted)
+    {
+        return Err(invalid(
+            "declares a Trusted output on an MCP-backed action; a remote tool's \
+             result is untrusted by construction"
+                .to_string(),
+        ));
+    }
     Ok(())
 }
 
