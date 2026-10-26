@@ -1,3 +1,23 @@
+# Current handoff — AI2-83 / #160 WebMCP attack lab
+
+Branch `claude/ai2-84-webmcp-lab`. Lab in `labs/webmcp/`; read `CONTRACTS.md` first.
+
+## 2026-10-26 — W0 + S1 done
+
+- W0 (AI2-84 / #161) @ 2c83bee: scaffold, contracts, frozen tasks/canary/D1 rules/D2
+  derivation, all committed before any attack content.
+- S1 (AI2-85 / #162) @ 3890564: D0 succeeded; D1 stopped (R1); D2 stopped (projection)
+  but utility no — same as benign:crm-gift (per-session kernel taint, CONTRACTS §8.3).
+- `npm test` 11/11; matrix is deterministic (byte-identical traces across runs).
+- Verifier (Codex, AI2-88 / #165): review point 1 = SHA 3890564.
+- Next: S2–S5 (AI2-86 / #163), then matrix + RESULTS (AI2-87 / #164).
+- Design notes for the lanes: S3 swaps submit_order after the first use of
+  search_products (the frozen tasks call submit_order once); S4 uses the server
+  fault hook plus attacker pre-registration (the name wins once legit unregisters);
+  S5 sinks the canary into a legit manifest tool on another origin.
+
+---
+
 # Current handoff — PR #100 managed comparison
 
 ## 2026-10-24 — managed live comparison complete
