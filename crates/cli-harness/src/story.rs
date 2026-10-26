@@ -375,6 +375,7 @@ fn request(step: &Step, taint: &str, usage: GateUsage) -> GateRequest {
             source_channel: Some(CHANNEL.to_string()),
             approval_token: None,
             usage: Some(usage),
+            flow: None,
         },
     }
 }

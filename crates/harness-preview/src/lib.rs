@@ -24,15 +24,17 @@ pub mod project;
 
 pub use gate::{
     gate, gate_and_lower, gate_and_lower_authorized, GateApproval, GateBacking, GateContext,
-    GateEffective, GateRequest, GateResponse, GateUsage, ABI_VERSION,
+    GateEffective, GateFlowContext, GateFlowResponse, GateLabel, GateRequest, GateResponse,
+    GateUsage, ABI_VERSION,
 };
 pub use host::{host_outcome, BlockKind, HostOutcome};
 pub use project::{project, PROJECTION_VERSION};
 
 use compiler::{compile, loader::load_yaml};
 use harness_types::{
-    ActionName, ArgSource, CallId, CompiledWorld, ContentHash, ExecutionMode, Provenance, Provider,
-    SessionId, SourceChannel, Taint, TaintContext, ToolCall,
+    ActionName, ArgSource, CallId, CompiledWorld, Confidentiality, ContentHash, ExecutionMode,
+    FlowContext, FlowLabel, Integrity, Provenance, Provider, SessionId, SourceChannel, Taint,
+    TaintContext, ToolCall,
 };
 use serde_json::{json, Value};
 use world_kernel::schema::model_facing_schema;
@@ -133,8 +135,20 @@ fn verdict(world: &CompiledWorld, action: &ActionName, taint: Taint) -> Value {
         SessionId::new("wat"),
         ContentHash::new("wat"),
     );
+    // The matrix's two columns as flow labels (AI2-70): the clean column is a
+    // Trusted/Public session, the tainted one Untrusted/Public, so an action
+    // with a flow contract shows its real verdict rather than
+    // `missing_flow_context` in both. Joining these into the taint is a no-op
+    // for each column, so worlds without contracts preview byte-identically.
+    let ambient = FlowLabel {
+        integrity: match taint {
+            Taint::Clean => Integrity::Trusted,
+            Taint::Tainted => Integrity::Untrusted,
+        },
+        confidentiality: Confidentiality::Public,
+    };
     let ctx = EvalContext {
-        taint: TaintContext::from_taint(taint),
+        taint: TaintContext::from_taint(taint).with_flow(FlowContext::new(ambient)),
         mode: ExecutionMode::Interactive,
         usage: BudgetUsage::default(),
         approval_granted: false,

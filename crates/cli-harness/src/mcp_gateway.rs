@@ -209,6 +209,9 @@ fn govern_with_approval(
             // The gateway is one long-lived process, so it carries budget counters in
             // memory rather than through a sidecar (finding #16).
             usage: Some(usage),
+            // The gateway carries no per-value flow labels (AI2-70 v0): a world
+            // that contracts an action fails closed here, by design.
+            flow: None,
         },
     };
     if approved {
