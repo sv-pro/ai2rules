@@ -164,18 +164,16 @@ impl<'w> IRBuilder<'w> {
         // authority-bearing arguments contribute; it never lifts the ambient floor
         // for an action it has no role information about.
         let empty_roles: BTreeMap<String, ArgRole> = BTreeMap::new();
-        let empty_literals: BTreeMap<String, ArgSource> = BTreeMap::new();
         let roles = self
             .world
             .descriptor(&action)
             .map(|d| &d.arg_roles)
             .unwrap_or(&empty_roles);
-        let literal_args = self
-            .world
-            .scoped_capability(&action)
-            .map(|c| &c.args)
-            .unwrap_or(&empty_literals);
-        let floor_taint = invariants::effective_floor_taint(roles, literal_args, taint_context);
+        // How each base argument is bound (actor input, literal, context ref),
+        // `None` for a plain action. The floor and flow admission read a
+        // per-argument label only for a value the actor actually supplies.
+        let scoped_args = self.world.scoped_capability(&action).map(|c| &c.args);
+        let floor_taint = invariants::effective_floor_taint(roles, scoped_args, taint_context);
 
         // 5b. Flow admission (AI2-70, D95) — only for actions that declare a
         //     contract; every other action takes the `None` path and is judged
@@ -186,8 +184,8 @@ impl<'w> IRBuilder<'w> {
             None => None,
             Some(contract) => {
                 let flow = taint_context.flow();
-                invariants::check_flow(&action, contract, literal_args, flow)?;
-                flow.and_then(|f| invariants::result_label_floor(contract, literal_args, f))
+                invariants::check_flow(&action, contract, scoped_args, flow)?;
+                flow.and_then(|f| invariants::result_label_floor(contract, scoped_args, f))
             }
         };
 

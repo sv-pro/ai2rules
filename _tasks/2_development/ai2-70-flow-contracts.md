@@ -5,7 +5,7 @@ the build end of the WebMCP lab's D3 result ([D94](../../DECISIONS.md), `labs/we
 §8.4). Per-value `FlowLabel` (integrity × confidentiality) → opt-in per-action `flow_contract` on
 the `Descriptor` → `check_flow` / `result_label_floor` as step 5b of `IRBuilder::build`, before the
 taint floor → `context.flow` on the gate ABI, additive in v1 → a scripted flow-capable host proving
-the slice with counted effects. 48 new tests (646 workspace, green on Windows and Linux); the
+the slice with counted effects. 53 new tests (651 workspace, green on Windows and Linux); the
 benchmark results, the demo markers and every pre-D95 hash are byte-identical.
 
 ## Why
@@ -57,7 +57,8 @@ action carries a contract (`missing_flow_context`), as `missing_path` and `missi
 ### 4. Kernel — admission before the floor, result label after
 
 `check_flow` judges every sink against the label bound to it (ambient fallback; `Literal`-pinned
-skipped; renamed inputs under the actor's name), confidentiality first, then integrity, as step
+skipped; renamed inputs under the actor's name; a `ContextRef` or unlisted argument under the
+ambient, never an actor label of the same name — PR #169 review), confidentiality first, then integrity, as step
 5b of `build` — inside representability, so a refusal is `NotRepresentable` and no manifest
 policy or approval reaches it. `result_label_floor` = `output` ⊔ inherited labels, `None` when
 the contract declares no result. The gate joins `Untrusted` into the result for a remote backing
