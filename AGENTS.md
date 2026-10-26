@@ -30,7 +30,7 @@ ai2rules/
 │   ├── safe-mcp-proxy/
 │   └── mcp-tool-projection/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
-├── DECISIONS.md              # ADR-lite decision log (D1–D94)
+├── DECISIONS.md              # ADR-lite decision log (D1–D95)
 ├── README.md                 # Project overview, milestone status, build instructions
 ├── rustfmt.toml              # max_width 100, edition 2021
 └── rust-toolchain.toml       # the pinned compiler — same one locally and in CI
@@ -71,15 +71,15 @@ harness-types (foundation — language-neutral contracts, pure data)
 | **provider-adapters** | `anthropic::parse_tool_use`, `parse_tool_definitions`, `format_tool_result` |
 | **trace-store** | `TraceStore`, `record_decision`, `replay`, `drift_report`, `export_bundle`, `ApprovalStore`, `StagedEffectStore::stage/commit` |
 | **agent-core** | `run(SessionConfig)`, `tool_surface`, `ModelClient` trait, `ScriptedModel` |
-| **harness-preview** | `gate(request) → GateResponse`, `preview(yaml) → PreviewResponse` |
+| **harness-preview** | `gate(request) → GateResponse` (with the D95 `GateFlowContext` / `GateFlowResponse` sidecar), `preview(yaml) → PreviewResponse` |
 | **harness-wasm** | `preview(yaml)`, `default_world()`, `version()` (wasm-bindgen exports) |
 | **cli-harness** | `harness init [--user \| --managed]`, `harness [--world] [--simulate] [--background]`, `harness serve`, `harness gate`, `harness project`, `harness cc-hook`, `harness agy-hook`, `harness mcp-gateway`, `harness mcp-author`, `harness console`, `harness replay-transcripts`, `harness export-otlp` |
 | **govbench** | `Pack::load`, `run_scenario`, `oracle::judge`, `Target` (discover/authorize/invoke), `targets::{WeakGateway, Ai2rules}` |
 
 **Test counts (all active tests passing, native Linux):**
-harness-types 11 · world-kernel 73 · compiler 37 · executor 28 · trace-store 66 ·
-provider-adapters 5 · agent-core 18 · harness-preview 69 · cli-harness 282 ·
-harness-wasm 0 · govbench 9 · **total 598** (plus the harness-wasm Node smoke
+harness-types 17 · world-kernel 88 · compiler 46 · executor 28 · trace-store 66 ·
+provider-adapters 5 · agent-core 18 · harness-preview 86 · cli-harness 283 ·
+harness-wasm 0 · govbench 9 · **total 646** (plus the harness-wasm Node smoke
 tests, run via wasm-pack). The Unix-only doctor fixture suite includes
 40 passing tests and 3 ignored #87 specification gaps.
 
@@ -159,14 +159,14 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
   harness paths explicitly.
 - **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
   a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
-  can be revisited later. Currently D1–D94.
+  can be revisited later. Currently D1–D95.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
   contains 11 base actions + 7 scoped capabilities. Changes to it affect
   `compile_default()` and the embedded WASM artifact.
 - **WASM artifact** is committed to `blog/public/vendor/harness-wasm/` as a
-  release build (576 KB optimised). Rebuild with `wasm-pack build --target web
+  release build (643 KB optimised). Rebuild with `wasm-pack build --target web
   --release` inside `crates/harness-wasm/` after any change to `harness-preview`
   or `compiler`, then copy `pkg/harness_wasm{_bg.wasm,.js}` over the committed
   pair. **This is enforced now** (finding #18): the `wasm` CI job rebuilds the
@@ -264,7 +264,7 @@ blog/public/demo/law-firm.html`.
 | `README.md` | Project overview, milestone table, build/run instructions |
 | `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D94; consult before choosing alternatives |
+| `DECISIONS.md` | ADR-lite log D1–D95; consult before choosing alternatives |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |
@@ -286,7 +286,7 @@ blog/public/demo/law-firm.html`.
 | `docs/benchmarks/deepseek-harness/` | Governor-integrity benchmark of DeepSeek Harness (issue #54): where final authority lives, monotonic-guard integrity, approval integrity, execution-seam matrix, ai2rules comparison — with reproducible probes |
 | `docs/demos/deepseek-harness/` | DeepSeek Harness discovery + invocation adapter (issue #55): `system-prompt/assemble` → `harness project`, `tools/pre-execute` → `harness gate`. Fail-closed when engaged (D71/D72); revocation and stale-call tests against real dsh services |
 | `.github/workflows/deepseek-integration.yml` | Path-filtered 13-case adapter test against immutable DeepSeek Harness commit `141eb6fef83422698aef7a981029e843e8161534` |
-| `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source). Path-scope lives in the `roots-world.yaml` / `roots-cases.yaml` pair — a second world because enabling `roots` changes every pathless file action's verdict (D61) |
+| `docs/demos/one-kernel/` | Canonical demo world + shared case set (conformance source). Path-scope lives in the `roots-world.yaml` / `roots-cases.yaml` pair — a second world because enabling `roots` changes every pathless file action's verdict (D61). Flow contracts live in the `flow-world.yaml` / `flow-cases.yaml` pair for the same reason: a contracted action fails closed without a flow sidecar (D95) |
 | `scripts/demo-one-kernel-many-hosts.sh` | Offline cross-host parity demo |
 | `scripts/assemble-npm-packages.sh` | Fills the four platform packages from `dist/`. Shared by `release.yml` and CI's `release-dry-run` so they cannot diverge (D70) |
 | `scripts/check-npm-pack.mjs` | Asserts the tarballs npm *would* publish contain their binary and licenses — `verify-packages.js` reads manifests, this reads the packed output |

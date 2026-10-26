@@ -181,10 +181,11 @@ the stochastic–deterministic border* — that unifies it with sibling projects
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; **E18 governance benchmark seed delivered**; E8, E10 planned |
-| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (576 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
+| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (643 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
 
 **Done so far:**
 
+- **Typed flow contracts in the kernel (#151 / AI2-70, D95):** the taint is one integrity bit per session; it cannot say "private, but from a trusted place", so a world that reads a secret had to choose between losing every later benign write and leaking through a permitted read. Now a value carries a `FlowLabel` on two axes (integrity × confidentiality, a product lattice with join as its only operation — no declassify, no implicit Trusted/Public), an action may declare an opt-in `flow_contract` (an output floor, inherited arguments, per-argument sinks) that is part of its descriptor identity, and the kernel runs an independent confidentiality admission *before* the taint floor that no approval can override. The host carries the labels (`context.flow` on the gate ABI, additive in v1) and binds the returned `result` floor to the value it gets back. Proven on a vertical slice with counted effects: a private summary cannot be published by a trusted caller in a clean session (0 effects, before and after the human says yes) while a public body is published exactly once. Worlds without contracts keep identical decisions and identical manifest/descriptor/world hashes — pinned by test, by the benchmark diff gate and by the demo guard.
 - **WebMCP attack lab (#160 / AI2-83, `labs/webmcp/`):** 5 epic attacks plus 3 variants against no defense (D0), a rule-based per-call baseline (D1) and ai2rules (D2, the real kernel via `harness project` / `harness gate`), under a deterministic compromised agent. Attacks are judged from effects only, and D1 and the tasks were frozen before any attack. Result: D1 lets 6 of 8 through; D2 lets 2 through (S3b, handler tampering in a shared realm; S5b, exfiltration through a permitted read tool) and loses utility wherever per-session taint fires. A fourth column, D3, prototypes the value-level flow labels of AI2-70 / #151 in the adapter: it recovers all the utility D2 loses, closes S5b, and regresses nothing — its one cost is that a transform of a labelled value escapes the surface match, the limit AI2-70 itself calls out. Independently verified (`labs/webmcp/verification/`), plus a real-model column. `cd labs/webmcp && npm run matrix`; CI job `webmcp-lab` fails on result drift.
 - **E0 — Foundations & Core Contracts:** the Cargo workspace, the language-neutral
   contracts in `harness-types`, the sealed `IntentIR` / `IRBuilder` in
@@ -307,7 +308,7 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   (D22). A spike compiles the whole stack to `wasm32` and a Node smoke test proves
   the kernel decides client-side (clean `fetch_web` → Allow, tainted → Deny by
   `taint_invariant`). This is the engine under the visualization suite (M5 / E15):
-  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **576 KB**) ships on the
+  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **643 KB**) ships on the
   blog at **`/playground`**, where a structured `KernelPlayground` editor — preset +
   Clean/Tainted switch + per-tool toggles — sorts every tool live into
   ALLOWED / ASK / DENIED / ABSENT buckets, all decided by the real kernel in-browser.
@@ -438,7 +439,7 @@ Consent is exact-bound, expires after five minutes, and is durably consumed befo
 forwarding; uncertain upstream outcomes require operator reconciliation. See the
 [approval workflow](docs/approval-capable-hosts.md).
 
-Builds clean offline with `clippy -D warnings`; **598 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
+Builds clean offline with `clippy -D warnings`; **646 tests** green on Linux (3 specification tests explicitly ignored). Unix machine-hook
 tests feed prepared events through stdin so a disabled hook's early exit cannot
 race the fixture writer.
 The Unix-only doctor integration suite includes **40 passing tests and 3 explicitly

@@ -75,7 +75,11 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
     "taint": "clean",
     "source_channel": "user_prompt",
     "approval_token": null,
-    "usage": { "commands_run": 2, "network_calls": 0, "file_writes": 1, "tokens_used": 0 }
+    "usage": { "commands_run": 2, "network_calls": 0, "file_writes": 1, "tokens_used": 0 },
+    "flow": {
+      "ambient": { "integrity": "trusted", "confidentiality": "public" },
+      "args": { "body": { "integrity": "trusted", "confidentiality": "private" } }
+    }
   }
 }
 ```
@@ -92,6 +96,7 @@ harness gate --world .claude/cc-world.yaml   # one GateRequest on stdin → one 
 | `context.source_channel` | ✓ | Provenance of this call's trigger: `user_prompt` \| `cli` \| `web` \| `workspace_file` \| `workspace_files` \| `mcp_output` \| …, resolved against the compiled manifest `channels:` table. Manifest trust drives capability checks; manifest taint is joined into `context.taint`. |
 | `context.approval_token` |  | Optional correlation id from a prior `ASK`. The pure gate ignores request-supplied tokens; it never maps this field to `EvalContext.approval_granted`. |
 | `context.usage` |  | Budget counters consumed so far this session. **Required when the world declares a counted budget** (`max_tokens_per_session`, `max_commands_per_task`, `max_network_calls`, `max_file_writes`); omitted then, the gate returns `DENY` / `missing_usage`. Absent counters within the object are zero, so a caller may send only what it tracks. `command_timeout_ms` alone does not oblige a caller to carry usage — it bounds one execution and the executor enforces it. |
+| `context.flow` |  | Host-owned per-value flow labels (D95). `ambient` is the session's monotonic label and is **required whenever `flow` is present**; `args` maps **actor-facing** argument names to the labels of the values bound to them, and an argument left out falls back to `ambient` — never to trusted/public. Labels are `{ "integrity": "trusted" \| "untrusted", "confidentiality": "public" \| "private" }`. **Required when the effective action declares a `flow_contract`**; omitted then, the gate returns `DENY` / `missing_flow_context`; present but malformed, `DENY` / `invalid_flow_context`. A label is the host's word: it binds to values the host has seen the kernel label (the returned `context.flow.result`) and to what the user typed. The model's arguments and a tool's `_meta` are data, not labels. |
 
 Unknown fields are ignored (forward-compatible). `context.usage` is the v1.x
 budget addition anticipated here — it is now implemented, so v1 no longer assumes
@@ -100,8 +105,9 @@ budget was ever reachable** (finding #16).
 
 The gate fails closed on missing or malformed security context: omitted/invalid
 taint, omitted/undeclared/invalid source channel, an omitted `path` for a
-roots-scoped file action, or omitted `usage` for a world that counts calls returns
-`DENY` with a specific rule. The pattern is the same in each case — a control a
+roots-scoped file action, omitted `usage` for a world that counts calls, or an
+omitted/malformed `flow` sidecar for an action that declares a flow contract
+returns `DENY` with a specific rule. The pattern is the same in each case — a control a
 thin adapter can disable by leaving a field out is not a control. This is an
 evaluated verdict (exit `0`), not a malformed-process error, so every host
 handles it through the same verdict channel.
@@ -127,7 +133,11 @@ still returns `ASK` for approval-required actions.
   "reason": "tainted context cannot reach an externally-effectful action",
   "context": {
     "taint": "tainted",
-    "usage": { "commands_run": 2, "network_calls": 0, "file_writes": 1, "tokens_used": 0 }
+    "usage": { "commands_run": 2, "network_calls": 0, "file_writes": 1, "tokens_used": 0 },
+    "flow": {
+      "ambient": { "integrity": "untrusted", "confidentiality": "public" },
+      "result": null
+    }
   },
   "approval": null,
   "manifest_hash": "ab12cd34ef56"
@@ -150,10 +160,11 @@ On `ALLOW` / `ASK` the response also carries the call to execute (D80):
 |---|---|
 | `decision` | `ABSENT` \| `ALLOW` \| `DENY` \| `ASK` \| `REPLAN`. (`UnknownToOntology` is surfaced as `ABSENT` with `rule:"unknown_to_ontology"`, per `KernelOutcome::decision()`.) |
 | `action` | The **effective action** the kernel decided on: the request's `tool` after the world's `command_classes` classifiers ran (D36/D44) — e.g. `bash` with a `curl …` command resolves to `bash_network`, and unmatched shell can resolve to a manifest-declared unclassified fallback. Equal to `tool` only when no classifier applies. Backward-compatible v1 addition; adapters use it in taint-cause notes and it seeds the approval token. |
-| `rule` | The rule/invariant that fired (`absent`, `capability`, `taint_invariant`, `approval_required`, `budget_exceeded`, …), or `null` for a plain `ALLOW`. |
+| `rule` | The rule/invariant that fired (`absent`, `capability`, `taint_invariant`, `approval_required`, `budget_exceeded`, …), or `null` for a plain `ALLOW`. Flow contracts (D95) add four stable rules: `missing_flow_context` and `invalid_flow_context` (the sidecar), `confidentiality_violation` (a private value into a public sink — reported before anything is said about integrity, and before the taint floor) and `integrity_violation` (an untrusted value into a sink that requires a trusted one). None of them can be overridden by approval. |
 | `reason` | Human-readable, for the host's UI / the trace. |
 | `context.taint` | **Post-call** monotonic taint the adapter must persist for the next call. `clean` only if it was clean *and* this call is not a declared taint source; otherwise `tainted`. |
 | `context.usage` | **Post-call** budget counters the adapter must persist for the next call. Charged only on an `ALLOW` that will actually run — a blocked call consumes nothing, so a refusal never pushes a session toward its limit. Tokens are carried through unchanged; only a caller that has seen a model response can count them. |
+| `context.flow` | Present **only when the request carried `context.flow`** (D95), so every other exchange keeps its shape. `ambient` is the **post-call** session label to persist, monotonic (it is the inbound ambient joined with the result, and never says less than `context.taint` beside it). `result` is the floor the host must bind to the value this call returns: the action's declared `output` joined with the labels of its `inherits` arguments, with `untrusted` joined in when the backing is an MCP server or the `path` is a `taint_source` root — the same two ingress rules as the taint. `null` on anything but `ALLOW` (a call that did not run invents no result) and for an action whose contract says nothing about its result (a sink-only contract). A host may raise the floor when it binds the real value; it may never lower it, and a tool's own claim about its output does not count. |
 | `approval` | On `ASK`: `{ "token": "<id>", "required": true }`. Else `null`. The token is a correlation id for the adapter's approval UI/store, not a grant credential. |
 | `manifest_hash` | First 12 hex of the compiled manifest hash — drift correlation + trace join. |
 | `effective` | On `ALLOW` / `ASK` only (D80): the lowered call. `base_action` and `backing` (`local` handler or `mcp` server/tool) say what runs; `arguments` are the proposal after a scoped capability stripped locked/unknown arguments, mapped renamed ones back to the base action's names (D79) and injected literals; `context_refs` (omitted when empty) names arguments the host must fill from its own trusted context; `stripped` (omitted when empty) lists the names the proposal sent that the scoping dropped — something the world fixes, or a renamed argument under its base name — record it. **Execute this, not the proposal**: the gate decided on the proposal, but for a scoped capability only this call carries the world's scoping. *Which tool name to call:* in a world with an `mcp_surface` (D79) the backing is authoritative — call `backing.tool`. Otherwise, for a scoped capability (`base_action` ≠ `action`) call the base action; for anything else keep the tool the host proposed, since `action` may be a `command_classes` rename, which is a policy name, not a tool. This is what the reference `mcp-gateway` does. Backward-compatible v1 addition; in-process Rust hosts can take the full `ExecutionSpec` from `harness_preview::gate_and_lower` instead. |
@@ -178,12 +189,19 @@ Every host adapter, regardless of language, does exactly this:
 2. Restore monotonic taint for `session_id` from the sidecar (default `clean`),
    **and the session's budget counters** (default all-zero). Counters that cannot
    be read are counters that cannot be enforced: fail closed rather than restart a
-   budget at zero.
+   budget at zero. A flow-capable host (D95) also restores the session's ambient
+   label and its table of value labels.
 3. Build a `GateRequest` (map the host tool/args, set `mode`, attach explicit
    `taint` + `source_channel` + `usage`, and attach a symlink-aware canonical
-   absolute `path` for path-scoped file actions).
+   absolute `path` for path-scoped file actions). A flow-capable host attaches
+   `flow`: the ambient, plus a label for every argument whose value it has a label
+   for — by content identity, so a value the model copies verbatim keeps its label
+   and a value the host has never seen falls back to the ambient.
 4. Run `harness gate --world <W>` with the request on stdin; read the response.
 5. Persist `response.context.taint` back to the sidecar (monotonic; never lowers).
+   A flow-capable host persists `response.context.flow.ambient` the same way, and
+   after executing an `ALLOW` binds `response.context.flow.result` to the value
+   the tool returned (joined with any label it already had — never lowered).
 6. **Persist `response.context.usage`** back to the sidecar. If it cannot be
    written, refuse the call it would have charged — a counter that silently fails
    to persist is a budget that silently stops counting (D59's rule, applied to
@@ -252,8 +270,9 @@ nothing in it is read back by the gate.
 ignored if unknown). A breaking change bumps `v` and the adapter negotiates.
 
 **The fail-closed hardenings are the exception, and they have not bumped `v`.**
-Requiring `taint`, `source_channel`, `path` (under roots) and now `usage` (under a
-counted budget) each turned a previously-tolerated omission into a `DENY`. That is
+Requiring `taint`, `source_channel`, `path` (under roots), `usage` (under a
+counted budget) and now `flow` (under a flow contract, D95) each turned a
+previously-tolerated omission into a `DENY`. That is
 breaking for a caller relying on the omission — but such a caller was silently
 running ungoverned, which is the condition being removed, and a version bump would
 let it keep doing so by pinning v1. A caller that sends the full context is

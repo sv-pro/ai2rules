@@ -48,6 +48,26 @@ Knowledge · Intent · Substrate) or its **source** repo.
   tainted data may never reach an externally-effectful surface
   (`no_tainted_network`/`_external`/`_credential`/`_memory`/`_persistent_write`).
   The mechanism behind the cross-layer demo.
+- **Flow label** *(Action; D95)* — a per-**value** label on two axes, integrity
+  (`Trusted`/`Untrusted`) and confidentiality (`Public`/`Private`). A product
+  lattice, not a total order; the only operation is a pointwise monotonic join, and
+  an unknown label is `None`, never an implicit Trusted/Public. The taint is one
+  integrity bit per session; a flow label says what the bit cannot — "private, but
+  from a trusted place".
+- **Flow contract** *(Action; D95)* — an action's opt-in declaration of how labels
+  flow through it: an `output` floor (a *source*), the arguments its result
+  `inherits` (a *transform*), and per-argument `sinks` (a *sink*). Part of the
+  descriptor's identity; absent, the action is judged exactly as before.
+- **Sink constraint** *(Action; D95)* — what a contract's argument will accept: a
+  required minimum integrity and/or an allowed maximum confidentiality. Judged by
+  the kernel against the host-bound label of the value, confidentiality first and
+  before the taint floor, as `confidentiality_violation` / `integrity_violation`.
+  Not overridable by approval.
+- **Result-label floor** *(Action; D95)* — the label the kernel returns for an
+  allowed call's result (`output` ⊔ inherited labels, with `Untrusted` joined in
+  for a remote backing or a taint-source path). The host binds it to the returned
+  value and may only ever raise it; a tool's own claim about its output does not
+  count.
 - **Provenance** *(Action+Knowledge)* — origin, trust, lineage, and content
   identity carried by every value (Action) or the `doc_id`+line-span on every fact
   or rule (Knowledge). The thing that *propagates* trust decisions.

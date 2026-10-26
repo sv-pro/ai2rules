@@ -4139,3 +4139,98 @@ read-sink leak), and D3's adapter labels follow a value only by whole-leaf surfa
 Both are the case AI2-70 / #151 is written to fix. The lab is independently verified
 (`labs/webmcp/verification/`), and its `webmcp-lab` CI job reruns the matrix and fails on
 any drift from the committed results.
+
+## D95 — Typed source/sink flow contracts and independent confidentiality admission (v0)
+
+**Date:** 2026-10-26. **Task:** AI2-70 (#151). **Crates:** `harness-types`, `compiler`,
+`world-kernel`, `harness-preview`. **Slice:** `docs/demos/one-kernel/flow-world.yaml`,
+`crates/harness-preview/tests/flow_slice.rs`.
+
+**Context.** The kernel's taint is one integrity bit per session. D94's lab measured what
+that costs: after the agent reads anything sensitive, every write and external action
+becomes ABSENT — which stops the exfiltration (S5) but also breaks the benign task
+(`crm-gift` places no order) and still misses a leak through a *permitted read* sink
+(S5b). The bit cannot say "this value is private but came from a trusted place", so a
+world that reads a secret has to choose between losing every later benign write and
+letting the secret out through a read. D94's D3 column showed that labelling *values*
+instead recovers all of that utility and closes S5b with no security regression — in the
+adapter, as a JavaScript heuristic. This decision makes it real in the kernel, as a
+typed, opt-in, per-action contract, independent of any demo.
+
+**Decision.**
+
+- **A second axis, per value.** `FlowLabel {integrity: Trusted|Untrusted, confidentiality:
+  Public|Private}`. The lattice is a product, not a total order (`Trusted/Private` and
+  `Untrusted/Public` are incomparable), so the types implement no `Ord`; the only operation
+  is a pointwise monotonic `join`. There is no declassify, no endorse, no clear, and no
+  `Default`: an unknown label is `Option::None` and every consumer falls back to the
+  conservative *ambient* label, never to Trusted/Public.
+- **Contracts are opt-in, per base action, and are descriptor identity.** `flow_contract:
+  { output, inherits, sinks }` declares a floor on the result's label (a *source*), the
+  arguments whose labels the result inherits (a *transform*), and per-argument sink
+  constraints (a *sink*). It rides on the `Descriptor`, so a changed contract is descriptor
+  drift; and every field is skipped when absent, so a manifest that declares none has the
+  same manifest, descriptor and compiled-world hashes it had before — pinned by
+  `absent_flow_contract_keeps_pre_d95_hashes_stable`. The default world declares none; a
+  scoped capability inherits its base's contract, as it inherits `arg_roles`.
+- **Labels are the host's word, carried in the existing taint context.** `FlowContext
+  {ambient, arg_labels}` rides inside `TaintContext` (`with_flow`), so `IRBuilder::build`'s
+  signature and its fifteen struct-literal `EvalContext` constructors are untouched.
+  `with_flow` joins the labels' integrity axis into the binary taint one-way — an
+  Untrusted ambient taints the session, an Untrusted argument taints that argument — so
+  a label can make a decision more conservative, never less, and an Untrusted
+  authority-bearing argument reaches the floor that already exists.
+- **Required context is per action, not per world.** The kernel demands a `FlowContext`
+  exactly when the effective action carries a contract; without one it refuses with
+  `missing_flow_context`. This mirrors `missing_path` (roots) and `missing_usage`
+  (budgets): a control a thin host can disable by leaving a field out is not a control,
+  and one contracted action must not break every host on every uncontracted action.
+- **Admission is independent of the floor and runs before it.** `check_flow` judges
+  every declared sink against the label bound to it (ambient fallback when unknown;
+  `Literal`-pinned arguments skipped; renamed inputs judged under the actor's name),
+  confidentiality first, then integrity — so a disclosure is reported as
+  `confidentiality_violation` even when the taint floor would also refuse the call. It is
+  step 5b of `build`, inside representability: a flow refusal is `NotRepresentable`, and
+  neither manifest policy nor human approval can reach it. ASK therefore cannot erase a
+  label and an authorized resume meets the same DENY.
+- **The result label is a floor the host may only raise.** `result_label_floor` is the
+  declared `output` joined with the inherited arguments' labels, `None` when the contract
+  declares no result. Confidentiality is never derived from `DataClass` or inferred from a
+  side effect; `output.integrity: Trusted` on an MCP-backed action is a compile error; and
+  the gate joins `Untrusted` into the returned result when the backing is remote or the
+  path is a `taint_source` — the same two ingress rules the binary taint already applies
+  (finding #13).
+- **The ABI stays v1, additive.** `GateContext.flow {ambient, args}` in, `GateResponseContext.flow
+  {ambient, result}` out, both absent from the wire unless carried; a malformed sidecar is
+  `invalid_flow_context`, an absent one is the kernel's per-action call. Host hooks and the
+  gateway send none in v0, so a contracted world fails closed on them by design.
+
+**Alternatives rejected.**
+
+- *Keep the binary taint and add nothing* — it cannot say "private but trusted", so a
+  private read either taints the session (D94's utility loss) or leaks through a permitted
+  read sink (S5b). Measured, not argued.
+- *The narrow explicit taint-source flag* (AI2-68's shape): still one bit, still per
+  session; it moves where the bit is set, not what it can express.
+- *A full CaMeL/IFC interpreter* with sub-value provenance: needs a kernel-owned data
+  plane the model's values flow through. This kernel is a pure gate over host-bound
+  values; v0 keeps it one, and labels whole results.
+- *Labels in the adapter only* (D3 as shipped): every host re-implements the algebra,
+  nothing is descriptor identity, nothing is drift-checked, and the native/WASM parity
+  guard cannot see it.
+- *Flow context required world-wide once any action declares a contract*: breaks every
+  host on every uncontracted action the moment one contract appears; per-action is the
+  narrower, honest scope.
+
+**Consequences.** A contract is part of an action's identity, so changing one is a drift
+event, as it should be. Hosts that carry no flow sidecar cannot run a contracted action —
+the slice's `FlowHost` is the minimum a real adapter has to do: bind labels to the values
+the kernel returns (by digest), persist the ambient, and label what the user typed as
+Trusted/Public itself, because once a session has read something private an unlabelled
+value is private too. v0 labels are **whole-result** and **host-bound**: D94's
+transform/partial-quote limit does not go away, it moves to where it belongs — a value
+the model transforms is a new value, and re-binding it is the host's problem, not an
+inference the kernel pretends to make. The default world is unchanged (no rollout), the
+governance benchmark and every demo marker are byte-identical, and the WASM artifact is
+rebuilt because `deny_unknown_fields` means a pre-D95 engine cannot even parse a
+contracted manifest.
