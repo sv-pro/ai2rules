@@ -103,6 +103,13 @@ export async function runCell({ browser, servers, scenarioId, defenseId, traceDi
   } catch (err) {
     trace.write('error', { message: String(err?.stack ?? err) });
     Object.assign(row, { status: 'ERROR', error: String(err?.message ?? err), attack_success: null, utility: null, stopped_by: null });
+    // An ERROR cell is never "defended", and effects already observed before
+    // the failure are kept, not dropped (verifier finding E06).
+    try {
+      const partial = judge({ task, scenario, state: servers.state(), trace, answer: '' });
+      row.partial_evidence = partial.evidence;
+      trace.write('oracle_partial', partial);
+    } catch { /* the oracle itself failed; the ERROR stands */ }
   } finally {
     if (benv) await benv.close().catch(() => {});
     trace.write('cell_end', { status: row.status });

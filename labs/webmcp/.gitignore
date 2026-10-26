@@ -1,3 +1,5 @@
 node_modules/
 # LLM runs are not deterministic; commit their summary deliberately, not traces.
 results/traces-llm/
+# Machine-specific run provenance (binary hash, versions); see results.json for the committed part.
+results/provenance.local.json

@@ -17,9 +17,38 @@ import { renderResults } from './report.js';
 import { renderLlmResults, LLM_TASKS } from './report-llm.js';
 import { harnessBin } from './defenses/d2-ai2rules.js';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 function harnessVersion() {
   try { return execFileSync(harnessBin(), ['--version']).toString().trim(); } catch { return null; }
+}
+
+// The attacks the epic requires. A matrix run that is missing one is not the
+// matrix (verifier finding E04/E05): it fails instead of silently shrinking.
+export const REQUIRED_ATTACKS = ['s1-page-injection', 's2-poisoned-description', 's3-tool-substitution', 's4-reregister-after-failure', 's5-cross-tab-exfil'];
+
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+const sha256Text = (file) => sha256(readFileSync(file, 'utf8').replace(/\r\n/g, '\n'));
+
+// Policy provenance, deterministic across OSes (committed with the results):
+// the exact D1 rules and the tasks D2 compiles its worlds from.
+function policyProvenance() {
+  return {
+    d1_rules_sha256: sha256Text(path.join(LAB_ROOT, 'src', 'defenses', 'd1-rules.json')),
+    tasks_sha256: sha256Text(path.join(LAB_ROOT, 'src', 'tasks.js')),
+    d2_adapter_sha256: sha256Text(path.join(LAB_ROOT, 'src', 'defenses', 'd2-ai2rules.js')),
+  };
+}
+
+// Run provenance, machine-specific (written next to the results, not committed).
+function runProvenance(browserVersion) {
+  const bin = harnessBin();
+  let binSha = null;
+  try { binSha = sha256(readFileSync(bin)); } catch { /* on PATH only */ }
+  let head = null;
+  try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: LAB_ROOT }).toString().trim(); } catch { /* not a checkout */ }
+  return { git_head: head, harness_bin: bin, harness_sha256: binSha, harness_version: harnessVersion(), node: process.version, chromium: browserVersion, platform: process.platform };
 }
 
 function attackScenarios() {
@@ -78,11 +107,14 @@ async function main(rawArgv) {
     const scenarios = [...tasks.map((t) => `benign:${t}`), ...attackScenarios()]
       .filter((s) => !only || only.includes(s));
     cells = scenarios.flatMap((s) => DEFENSE_IDS.map((d) => [s, d]));
+    const missing = only ? [] : REQUIRED_ATTACKS.filter((s) => !scenarios.includes(s));
+    if (missing.length) throw new Error(`matrix is missing required attacks: ${missing.join(', ')}`);
   }
 
   const started = Date.now();
   const servers = await startServers();
   const browser = await launchBrowser();
+  const chromiumVersion = browser.version();
   const rows = [];
   try {
     for (const [scenarioId, defenseId] of cells) {
@@ -100,7 +132,8 @@ async function main(rawArgv) {
     writeFileSync(path.join(outDir, 'results-llm.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'LLMAgent', rows }, null, 2) + '\n');
     writeFileSync(path.join(outDir, 'RESULTS-LLM.md'), renderLlmResults(rows));
   } else if (argv[0] !== '--cell') {
-    const meta = { harness: harnessVersion() };
+    const meta = { harness: harnessVersion(), ...policyProvenance() };
+    writeFileSync(path.join(outDir, 'provenance.local.json'), JSON.stringify(runProvenance(chromiumVersion), null, 2) + '\n');
     writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'CompromisedAgent', ...meta, rows }, null, 2) + '\n');
     writeFileSync(path.join(outDir, 'RESULTS.md'), renderResults(rows, meta));
   }
