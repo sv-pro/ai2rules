@@ -1,2 +1,3 @@
 node_modules/
-results/
+# LLM runs are not deterministic; commit their summary deliberately, not traces.
+results/traces-llm/

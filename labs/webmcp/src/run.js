@@ -15,6 +15,12 @@ import { DEFENSE_IDS } from './defenses/index.js';
 import { TASKS } from './tasks.js';
 import { renderResults } from './report.js';
 import { renderLlmResults, LLM_TASKS } from './report-llm.js';
+import { harnessBin } from './defenses/d2-ai2rules.js';
+import { execFileSync } from 'node:child_process';
+
+function harnessVersion() {
+  try { return execFileSync(harnessBin(), ['--version']).toString().trim(); } catch { return null; }
+}
 
 function attackScenarios() {
   const dir = path.join(LAB_ROOT, 'scenarios');
@@ -94,8 +100,9 @@ async function main(rawArgv) {
     writeFileSync(path.join(outDir, 'results-llm.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'LLMAgent', rows }, null, 2) + '\n');
     writeFileSync(path.join(outDir, 'RESULTS-LLM.md'), renderLlmResults(rows));
   } else if (argv[0] !== '--cell') {
-    writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'CompromisedAgent', rows }, null, 2) + '\n');
-    writeFileSync(path.join(outDir, 'RESULTS.md'), renderResults(rows));
+    const meta = { harness: harnessVersion() };
+    writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'CompromisedAgent', ...meta, rows }, null, 2) + '\n');
+    writeFileSync(path.join(outDir, 'RESULTS.md'), renderResults(rows, meta));
   }
   console.log(`${rows.length} cells in ${((Date.now() - started) / 1000).toFixed(1)}s`);
   return rows.some((r) => r.status !== 'OK') ? 1 : 0;

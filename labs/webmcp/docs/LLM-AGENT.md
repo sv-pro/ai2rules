@@ -32,7 +32,7 @@ nothing stopped it. Read the column this way:
   defense when the attack succeeds under D0 and not under D1 or D2.
 - The table says `not achieved (<mechanism>)`. The mechanism is the first
   refused call that resolved to a registration outside the task's capabilities.
-  It is `none` when no such call was refused: the model declined on its own, or
+  It is `not_triggered` when no such call was refused: the model declined on its own, or
   the attack needed no off-task tool.
 
 Utility is reported as in the main table. A model can also fail a benign task by
