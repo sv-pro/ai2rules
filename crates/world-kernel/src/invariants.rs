@@ -13,11 +13,98 @@
 use std::collections::BTreeMap;
 
 use harness_types::{
-    ActionName, ArgRole, ArgSource, BuildError, DescriptorHash, SideEffectClass, Taint,
-    TaintContext,
+    ActionName, ArgRole, ArgSource, BuildError, DescriptorHash, FlowContext, FlowContract,
+    FlowLabel, SideEffectClass, Taint, TaintContext,
 };
 
 use crate::taint::externally_effectful;
+
+/// The name a contract argument's value travels under: a renamed input (D79)
+/// is bound under the name the actor used, so its label is recorded there.
+fn actor_key<'a>(arg: &'a str, literal_args: &'a BTreeMap<String, ArgSource>) -> &'a str {
+    literal_args
+        .get(arg)
+        .and_then(|source| source.actor_name(arg))
+        .unwrap_or(arg)
+}
+
+/// Flow admission (AI2-70, D95): every sink the contract declares must admit
+/// the label of the value bound to it. Runs *before* [`check_taint`] and is
+/// independent of it — a confidentiality refusal is a disclosure, not an
+/// integrity gap, and is reported as such even when the floor would also
+/// refuse the call.
+///
+/// Fail-closed rules:
+///
+///   * a contracted action built without host flow context is refused outright
+///     (`MissingFlowContext`): the kernel never guesses a label, and a source
+///     with no sinks still needs the explicit ambient to label its result;
+///   * an argument whose label the host did not bind falls back to the ambient
+///     label, never to Trusted/Public;
+///   * a `Literal`-pinned scoped-capability argument is design-time data and is
+///     skipped, exactly as in [`effective_floor_taint`].
+///
+/// Sinks are judged in `BTreeMap` order, each on confidentiality first, so the
+/// refusal is deterministic and the two reasons never mask each other.
+pub fn check_flow(
+    action: &ActionName,
+    contract: &FlowContract,
+    literal_args: &BTreeMap<String, ArgSource>,
+    flow: Option<&FlowContext>,
+) -> Result<(), BuildError> {
+    let Some(flow) = flow else {
+        return Err(BuildError::MissingFlowContext {
+            action: action.clone(),
+        });
+    };
+    for (arg, sink) in &contract.sinks {
+        if matches!(literal_args.get(arg), Some(ArgSource::Literal(_))) {
+            continue;
+        }
+        let key = actor_key(arg, literal_args);
+        let label = flow.arg_label(key).unwrap_or(flow.ambient());
+        if let Err(axis) = sink.admits(label) {
+            return Err(BuildError::FlowViolation {
+                action: action.clone(),
+                argument: key.to_string(),
+                axis,
+                detail: format!(
+                    "a {:?}/{:?} value may not flow into sink {key} of {action}",
+                    label.integrity, label.confidentiality
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The floor on the label of this action's result (AI2-70, D95): the declared
+/// `output` joined with the labels of every `inherits` argument (ambient
+/// fallback, `Literal` skipped). `None` when the contract says nothing about
+/// its result — an explicit unknown, never an implicit Trusted/Public. The
+/// host may only ever raise this floor when it binds the real value.
+pub fn result_label_floor(
+    contract: &FlowContract,
+    literal_args: &BTreeMap<String, ArgSource>,
+    flow: &FlowContext,
+) -> Option<FlowLabel> {
+    if !contract.declares_result() {
+        return None;
+    }
+    let inherited = contract
+        .inherits
+        .iter()
+        .filter(|arg| !matches!(literal_args.get(*arg), Some(ArgSource::Literal(_))))
+        .map(|arg| {
+            flow.arg_label(actor_key(arg, literal_args))
+                .unwrap_or(flow.ambient())
+        });
+    let mut label: Option<FlowLabel> = contract.output;
+    for next in inherited {
+        label = Some(label.map_or(next, |l| l.join(next)));
+    }
+    label
+}
 
 /// The taint the floor should judge this intent by (PACT L2, arXiv:2605.11039).
 ///
@@ -243,6 +330,256 @@ mod tests {
             SideEffectClass::Read,
         )
         .is_ok());
+    }
+
+    // ── Flow admission (AI2-70, D95) ──
+
+    use harness_types::{Confidentiality, FlowAxis, Integrity, SinkConstraint};
+
+    const TP: FlowLabel = FlowLabel::TRUSTED_PUBLIC;
+    const TPRIV: FlowLabel = FlowLabel {
+        integrity: Integrity::Trusted,
+        confidentiality: Confidentiality::Private,
+    };
+    const UP: FlowLabel = FlowLabel {
+        integrity: Integrity::Untrusted,
+        confidentiality: Confidentiality::Public,
+    };
+
+    fn public_body_sink() -> FlowContract {
+        FlowContract {
+            sinks: [(
+                "body".to_string(),
+                SinkConstraint {
+                    confidentiality: Some(Confidentiality::Public),
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn flow(ambient: FlowLabel, args: &[(&str, FlowLabel)]) -> FlowContext {
+        FlowContext::new(ambient).with_arg_labels(args.iter().map(|(k, l)| (k.to_string(), *l)))
+    }
+
+    #[test]
+    fn contracted_action_without_flow_context_fails_closed() {
+        let err = check_flow(
+            &ActionName::new("publish"),
+            &public_body_sink(),
+            &BTreeMap::new(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, BuildError::MissingFlowContext { .. }));
+        // Even a contract with no sinks needs the context: its result label
+        // depends on the ambient.
+        let source = FlowContract {
+            output: Some(TPRIV),
+            ..Default::default()
+        };
+        assert!(check_flow(&ActionName::new("read"), &source, &BTreeMap::new(), None).is_err());
+    }
+
+    #[test]
+    fn private_value_cannot_enter_a_public_sink() {
+        let ctx = flow(TP, &[("body", TPRIV)]);
+        let err = check_flow(
+            &ActionName::new("publish"),
+            &public_body_sink(),
+            &BTreeMap::new(),
+            Some(&ctx),
+        )
+        .unwrap_err();
+        match err {
+            BuildError::FlowViolation { argument, axis, .. } => {
+                assert_eq!(argument, "body");
+                assert_eq!(axis, FlowAxis::Confidentiality);
+            }
+            other => panic!("{other:?}"),
+        }
+        let ctx = flow(TP, &[("body", TP)]);
+        assert!(check_flow(
+            &ActionName::new("publish"),
+            &public_body_sink(),
+            &BTreeMap::new(),
+            Some(&ctx)
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn unlabelled_argument_falls_back_to_the_ambient_label() {
+        // Ambient Private, nothing bound for `body`: refused.
+        let ctx = flow(TPRIV, &[]);
+        assert!(check_flow(
+            &ActionName::new("publish"),
+            &public_body_sink(),
+            &BTreeMap::new(),
+            Some(&ctx)
+        )
+        .is_err());
+        // Ambient Public: admitted.
+        let ctx = flow(TP, &[]);
+        assert!(check_flow(
+            &ActionName::new("publish"),
+            &public_body_sink(),
+            &BTreeMap::new(),
+            Some(&ctx)
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn integrity_sink_on_a_content_argument_is_enforced() {
+        // `arg_roles` cannot say "this content must be trusted"; a sink can.
+        let contract = FlowContract {
+            sinks: [(
+                "body".to_string(),
+                SinkConstraint {
+                    integrity: Some(Integrity::Trusted),
+                    confidentiality: Some(Confidentiality::Public),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let ctx = flow(TP, &[("body", UP)]);
+        match check_flow(
+            &ActionName::new("publish"),
+            &contract,
+            &BTreeMap::new(),
+            Some(&ctx),
+        ) {
+            Err(BuildError::FlowViolation { axis, .. }) => assert_eq!(axis, FlowAxis::Integrity),
+            other => panic!("{other:?}"),
+        }
+        // Both axes violated: confidentiality is reported first.
+        let both = FlowLabel {
+            integrity: Integrity::Untrusted,
+            confidentiality: Confidentiality::Private,
+        };
+        let ctx = flow(TP, &[("body", both)]);
+        match check_flow(
+            &ActionName::new("publish"),
+            &contract,
+            &BTreeMap::new(),
+            Some(&ctx),
+        ) {
+            Err(BuildError::FlowViolation { axis, .. }) => {
+                assert_eq!(axis, FlowAxis::Confidentiality)
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn literal_pinned_sink_is_skipped_and_renamed_input_judged_under_actor_name() {
+        let args: BTreeMap<String, ArgSource> = [
+            (
+                "to".to_string(),
+                ArgSource::Literal("https://reports.example".into()),
+            ),
+            (
+                "body".to_string(),
+                ArgSource::Input(InputRule {
+                    exposed_as: Some("text".to_string()),
+                    ..InputRule::default()
+                }),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let contract = FlowContract {
+            sinks: [
+                (
+                    "to".to_string(),
+                    SinkConstraint {
+                        integrity: Some(Integrity::Trusted),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "body".to_string(),
+                    SinkConstraint {
+                        confidentiality: Some(Confidentiality::Public),
+                        ..Default::default()
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        // Ambient Untrusted would refuse `to` — but it is a Literal, so skipped.
+        // `body` is labelled Public under the base name, Private under the actor
+        // name; the actor name wins.
+        let ctx = flow(UP, &[("body", TP), ("text", TPRIV)]);
+        match check_flow(
+            &ActionName::new("publish_report"),
+            &contract,
+            &args,
+            Some(&ctx),
+        ) {
+            Err(BuildError::FlowViolation { argument, axis, .. }) => {
+                assert_eq!(argument, "text");
+                assert_eq!(axis, FlowAxis::Confidentiality);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn result_label_floor_joins_output_and_inherited_arguments() {
+        let source = FlowContract {
+            output: Some(TPRIV),
+            ..Default::default()
+        };
+        let ctx = flow(TP, &[]);
+        assert_eq!(
+            result_label_floor(&source, &BTreeMap::new(), &ctx),
+            Some(TPRIV)
+        );
+
+        // A transform inherits: a Private parent stays Private; an Untrusted
+        // parent makes the result Untrusted; an unlabelled parent is ambient.
+        let transform = FlowContract {
+            inherits: vec!["body".to_string()],
+            ..Default::default()
+        };
+        let ctx = flow(TP, &[("body", TPRIV)]);
+        assert_eq!(
+            result_label_floor(&transform, &BTreeMap::new(), &ctx),
+            Some(TPRIV)
+        );
+        let ctx = flow(UP, &[]);
+        assert_eq!(
+            result_label_floor(&transform, &BTreeMap::new(), &ctx),
+            Some(UP)
+        );
+        let both = FlowContract {
+            output: Some(TPRIV),
+            inherits: vec!["body".to_string()],
+            ..Default::default()
+        };
+        let ctx = flow(TP, &[("body", UP)]);
+        assert_eq!(
+            result_label_floor(&both, &BTreeMap::new(), &ctx),
+            Some(FlowLabel {
+                integrity: Integrity::Untrusted,
+                confidentiality: Confidentiality::Private
+            })
+        );
+        // Sinks only: the result label is unknown, not Trusted/Public.
+        let ctx = flow(TP, &[]);
+        assert_eq!(
+            result_label_floor(&public_body_sink(), &BTreeMap::new(), &ctx),
+            None
+        );
     }
 
     #[test]
