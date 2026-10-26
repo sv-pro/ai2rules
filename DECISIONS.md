@@ -4084,3 +4084,58 @@ unchanged. The lock is released when its handle closes.
   an unopenable file at that path still makes the lock unobtainable, and the call fails
   closed. Two `mcp_approvals` tests and their fixture rely on this, so they now replace
   the persistent file with a directory instead of creating one.
+
+## D94 — The WebMCP attack lab proves the defenses on the real kernel, and prototypes value-level labels in the adapter
+
+**Date:** 2026-10-26. **Task:** AI2-83 (#160). **Lab:** `labs/webmcp/` (Node sub-project).
+
+**Context.** AI2-83 asked for a deterministic measurement of which WebMCP attacks get
+past per-call rule-based controls versus ai2rules. Three design choices closed real
+alternatives and are worth pinning, because the lab's credibility rests on them.
+
+**Decision.**
+
+- **D2 calls the real kernel, not a copy.** The ai2rules column reaches `cli-harness`
+  through the published wire ABIs — `harness project` for discovery (D72) and `harness
+  gate` per call (D24) — so the lab measures the shipped engine, not a reimplementation
+  of its logic in JavaScript. Only the two things the kernel has no concept of for
+  WebMCP live in the adapter: mapping a browser registration to an action name, and
+  pinning a registration's identity (origin + name + sha256(descriptor) + registration
+  id, trust-on-first-use).
+- **The oracle reads effects, never verdicts.** An attack counts as success only from
+  observed effects (the attacker endpoint's log, the arguments a handler was actually
+  entered with, server state), never from a defense's own decision. A defense cannot
+  mark its own homework. The verifier's probe V01 confirmed flipping every verdict
+  record leaves the oracle unchanged.
+- **Rules and tasks are frozen before any attack exists.** The D1 baseline rules, the
+  benign tasks and the D2 world derivation were committed in a tree with no `scenarios/`
+  (`2c83bee`), so git history proves they were not tuned to the attacks. Their sha256 is
+  recorded in the committed `results.json`.
+- **D3 prototypes AI2-70's value-level flow labels in the adapter, not the kernel.** To
+  test the hypothesis that labelling values instead of tainting the session recovers
+  utility without losing security, D3 adds a confidentiality axis at the adapter: a read
+  on a sensitive origin labels its returned values Private, and a call carrying a Private
+  value to another origin is denied before the integrity gate, so the sensitive read no
+  longer taints the whole session. On the lab's workload it recovers every bit of utility
+  D2 loses and closes the read-sink leak (S5b) with no security regression.
+
+**Alternatives rejected.**
+
+- *Reimplement the kernel's decision in the lab* (simpler, no binary dependency): then the
+  lab would measure the model of the product, not the product — the whole point of the
+  exercise is the shipped engine's verdicts.
+- *Score attacks from the defense's verdict* (no effect instrumentation needed): a stop is
+  not a non-leak; the lab's `ERROR` and `not_triggered` cases exist precisely because a
+  verdict and an effect are different things.
+- *Wait for AI2-70's kernel work before showing labels* (cleaner layering): the adapter
+  prototype is an honest first data point for the AI2-70 ADR — it shows the labels-vs-taint
+  tradeoff on a real workload now, while being explicit that it is a stand-in with the same
+  transformation limit the kernel work has to solve (a surface-matched label is defeated by
+  a transform or a partial quote; regression-tested).
+
+**Consequences.** The lab's limits are the kernel's current limits, stated plainly:
+D2's integrity taint is per session (it breaks a benign CRM-then-write task and misses a
+read-sink leak), and D3's adapter labels follow a value only by whole-leaf surface match.
+Both are the case AI2-70 / #151 is written to fix. The lab is independently verified
+(`labs/webmcp/verification/`), and its `webmcp-lab` CI job reruns the matrix and fails on
+any drift from the committed results.
