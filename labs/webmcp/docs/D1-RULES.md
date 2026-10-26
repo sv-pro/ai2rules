@@ -39,15 +39,24 @@ rule matches, the call runs and is logged. Otherwise it is allowed.
 widget has no entry: it runs inside the shop page, so its tools carry the shop's
 origin, and an origin rule cannot see it.
 
-**Default:** allow. A default-deny that also covers allowlisted sites would make
-D1 a projection by another name. That is not the class of control being
-reconstructed.
+**Default:** allow (see the lab assumptions below).
 
-**What D1 knows that an attacker can lie about.** `readOnlyHint` and
-`untrustedContentHint` are declared by the page that registers the tool. D1
-believes them, as the reconstructed controls do.
+**Lab assumptions, not established facts about any product.** Two choices
+here are assumptions of this lab. Public descriptions do not document them:
+
+- **Trusting the hints.** `readOnlyHint` and `untrustedContentHint` are declared
+  by the page that registers the tool. D1 believes them.
+- **Default allow.** Calls that no rule matches are allowed.
+
+A per-call policy can also run default-deny with an allowlist of tool names.
+That is still per-call, not discovery projection, but it is a different
+configuration from the one measured here. These results are about D1 as written
+in this file, not about every rule-based control.
 
 ## Change log
 
 - v1 (2026-10-26): initial rules, committed with the lab scaffold before any
   attack content.
+- 2026-10-26, wording only: hint trust and default-allow are now stated as lab
+  assumptions (verifier note H02). `d1-rules.json` is unchanged; its sha256 is
+  recorded in `results/results.json`.
