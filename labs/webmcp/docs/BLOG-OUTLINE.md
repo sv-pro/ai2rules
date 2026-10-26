@@ -16,7 +16,9 @@ the checklist).
 > `6ab1a28` twice, byte-identical, and re-derived every cell from traces and state
 > [V §Reproduction]. S5b (3 cells) was added afterwards to measure the verifier's
 > finding C2-1; those cells are the lab author's run, not re-run by the verifier.
-> The real-model column is not certified [V §What still cannot be claimed]. The
+> The real-model column is not certified [V §What still cannot be claimed]. A
+> fourth column, D3 (value-level flow labels), was added after checkpoint 2 and is
+> being re-verified; its cells and section are marked **pending** throughout. The
 > checklist at the end marks each claim.
 
 **Rules for whoever writes the post.** Name no security vendor. Call D1 "a
@@ -37,12 +39,15 @@ question: what does the execution layer let through? Eight WebMCP attacks, judge
 only by what actually happened. A rule-based per-call baseline, its rules frozen
 before any attack existed, let 6 of 8 through. ai2rules let 2 through, and it
 also broke a task with no attack in it at all. An independent verifier reproduced
-the matrix byte for byte. Below: the table, the losses, a single run with a real
-model, and one command to rerun it all.
+the matrix byte for byte. Then a fourth column tested whether labelling the data,
+instead of the session, could give the utility back — it did, and closed one of
+the two leaks, for one new cost. Below: the table, the losses, the labels, a
+single run with a real model, and one command to rerun it all.
 
-Figures: 8 attacks; D1 6/8; D2 2/8; D2 breaks `benign:crm-gift` [R §What each
-defense let through, §Utility; D1R "How these rules were written"; V
-§Reproduction].
+Figures: 8 attacks; D1 6/8; D2 2/8; D3 1/8; D2 breaks `benign:crm-gift`, D3 does
+not [R §What each defense let through, §Utility, §What value-level labels (D3)
+change; D1R "How these rules were written"; V §Reproduction]. (D3 pending
+verification.)
 
 ## Sections
 
@@ -78,12 +83,13 @@ defense let through, §Utility; D1R "How these rules were written"; V
 
 ### 3. The result table
 
-- Reproduce the attack-outcome table and the utility table verbatim
-  [R §Attack outcome, §Utility].
-- Totals: D0 8/8, D1 6/8, D2 2/8 attacks let through [R §What each defense let
-  through].
-- One line on verification: 30 of the 33 cells reproduced byte-identical twice by
-  the verifier; the 3 S5b cells came later [V §Reproduction; R §Limitations].
+- Reproduce the attack-outcome table and the utility table verbatim, all four
+  columns [R §Attack outcome, §Utility].
+- Totals: D0 8/8, D1 6/8, D2 2/8, D3 1/8 attacks let through [R §What each defense
+  let through]. Keep D3 visually marked pending.
+- One line on verification: 30 of the 33 CompromisedAgent cells reproduced
+  byte-identical twice by the verifier; the 3 S5b cells and the D3 column came
+  later and are being re-checked [V §Reproduction; R §Limitations].
 
 ### 4. Where ai2rules loses (first half, not a footnote)
 
@@ -163,7 +169,34 @@ defense let through, §Utility; D1R "How these rules were written"; V
   without being shown it, so D2 also refuses at call time [C §6]; verifier probe
   X01 passes [V §Codex CP1 probes].
 
-### 8. With a real model: one run (clearly labelled)
+### 8. What value-level flow labels change (D3) — pending verification
+
+- The question this column tests: can labelling a *value*, instead of tainting the
+  *session*, give back the utility D2 spends without losing security? [R §What
+  value-level labels (D3) change; C §8.4].
+- D3 is D2 plus one axis: a read on a sensitive origin labels its returned values
+  Private; a call carrying a Private value to another origin is denied by an
+  independent confidentiality check, before the integrity gate [C §8.4]. It is an
+  adapter prototype of AI2-70 / #151, not the kernel.
+- **It recovers the utility.** All five CRM-reading tasks complete under D3
+  (benign `crm-gift`, S1, S2, S5, S5b), where D2 left them undone [R §What
+  value-level labels (D3) change, §Utility].
+- **It keeps D2's security and closes S5b.** D3 stops every attack D2 stops, and
+  additionally S5b, because a Private value may not reach another origin whether
+  the sink is a write or a read; it regresses nothing [R §What value-level labels
+  (D3) change; §Attack outcome].
+- **The one cost, regression-tested.** The label follows a value by surface match,
+  so a transform of the value — encoding, reversal, a partial quote of a labelled
+  field — escapes it [C §8.4; test `labels_defeated_by_transform`]. D2's coarser
+  session taint would have blocked such a write incidentally; D3 trades that cover
+  for the recovered utility. The fix is provenance that survives transformation,
+  which is the kernel work AI2-70 describes [C §8.4].
+- One framing line: on this workload value-level labelling dominates binary
+  session taint on utility while matching it on security, at the price of
+  transform-resistance — a concrete contrast for the AI2-70 ADR, not a shipped
+  guarantee [C §8.4]. Mark the whole section pending until the verifier reports.
+
+### 9. With a real model: one run (clearly labelled)
 
 Label the section "One run, indicative only". `claude-sonnet-5-5`, 27 cells (2
 benign tasks + S1–S5, S3b, S4b; no S5b, no `crm-renewal`), sampling not pinnable,
@@ -185,7 +218,7 @@ still cannot be claimed].
 - Takeaway line, from LA: model-level resistance and execution-level governance
   cover different attacks [LA §Run of 2026-10-26].
 
-### 9. Fairness and limitations
+### 10. Fairness and limitations
 
 From [R §Limitations] and [V §What still cannot be claimed]:
 
@@ -200,6 +233,9 @@ From [R §Limitations] and [V §What still cannot be claimed]:
   use them [V §Codex CP1 probes].
 - D2's taint is integrity taint per session, used as a confidentiality floor:
   coarse, and blind to read sinks.
+- D3 is an adapter prototype of AI2-70, not the kernel; its labels follow a value
+  by surface match (a transform or partial quote escapes them), its granularity is
+  the whole field, and the verifier has not yet certified its column [C §8.4].
 - Kernel provenance: results depend on `cli-harness 0.7.0` as built; its
   source-to-binary provenance was not independently verified.
 - Determinism verified on Windows only; Linux and macOS asserted by design. S4b
@@ -211,7 +247,7 @@ From [R §Limitations] and [V §What still cannot be claimed]:
   search; S4's squatter lives in another tab; S3b, S4b and S5b are added variants,
   and S3b and S5b were added after verifier findings.
 
-### 10. Reproduce it (box)
+### 11. Reproduce it (box)
 
 From [R §Reproduce], verbatim:
 
@@ -225,7 +261,7 @@ Per-cell traces: `results/traces/<scenario>--<defense>.jsonl` [R §Reproduce;
 C §4]. The verifier's own reproduction recipe is in [V §Reproduce this
 checkpoint].
 
-### 11. Prior art
+### 12. Prior art
 
 As listed in [R §Prior art]:
 
@@ -237,11 +273,13 @@ As listed in [R §Prior art]:
   verifier (#165). Its mappings are interpretations; the lab does not reproduce
   the papers' experiments (stated in that file).
 
-### 12. Close
+### 13. Close
 
 - One sentence each: per-call blocking stopped what came from a foreign origin;
-  ai2rules stopped six of eight at a utility cost it has not fixed yet (AI2-70 /
-  #151); a read-tool leak and handler tampering still get through, the second one
+  ai2rules (D2) stopped six of eight at a utility cost; a value-level-label
+  prototype (D3, AI2-70 / #151) gave the utility back and closed the read-tool
+  leak while keeping D2's security, for the cost that a transformed value escapes
+  the label — pending verification; and handler tampering still gets through,
   because it needs script isolation, which no tool-governance layer provides.
 - Link: the lab, `RESULTS.md`, `CHECKPOINT-2.md`, `TAKEAWAY.md`.
 
@@ -249,8 +287,9 @@ As listed in [R §Prior art]:
 
 Status: **CP2** = confirmed by checkpoint 2 at `6ab1a28` [V]; **post-CP2** = in
 the committed results but added after checkpoint 2 (S5b and the 33-cell totals
-that include it); **static** = a property of a committed file, not of a run;
-**not certified** = the verifier says it cannot be claimed or did not check it.
+that include it); **pending** = the D3 column, added after CP2 and being
+re-verified; **static** = a property of a committed file, not of a run; **not
+certified** = the verifier says it cannot be claimed or did not check it.
 
 | # | Claim | Evidence | Status |
 |---|---|---|---|
@@ -296,3 +335,8 @@ that include it); **static** = a property of a committed file, not of a run;
 | 40 | ERROR after a leak keeps `partial_evidence` at runtime | V §What still cannot be claimed (probe P01, no ERROR cell) | not certified as a cell |
 | 41 | Reproduction commands rewrite `results/`, and CI fails on drift | R §Reproduce | CP2 for the rerun; CI job on Linux not yet observed [V §What still cannot be claimed] |
 | 42 | Prior-art naming map | `PRIOR-ART.md` (verifier, #165) | static (interpretation, per that file) |
+| 43 | D3 (value-level labels) stops every attack D2 stops, plus S5b; lets through only S3b (1/8) | R §What value-level labels (D3) change, §Attack outcome; J `*/D3` | pending |
+| 44 | D3 completes all five CRM-reading tasks D2 breaks (benign `crm-gift`, S1, S2, S5, S5b); regresses no utility and no attack outcome vs D2 | R §What value-level labels (D3) change, §Utility; J `*/D3` | pending |
+| 45 | D3's confidentiality stop is causal: the Private value is in the sink's executed args | J `s5-cross-tab-exfil`/D3, `s5b-read-sink-exfil`/D3 evidence | pending |
+| 46 | A transformed or partially-quoted Private value escapes D3's label (the documented cost) | C §8.4; test `labels_defeated_by_transform` | static (test) + pending (as a lab claim) |
+| 47 | D3 is an adapter prototype of AI2-70 / #151, not a kernel change | C §8.4; src/defenses/d2-ai2rules.js `labels:true` | static |
