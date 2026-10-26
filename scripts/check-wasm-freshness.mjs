@@ -51,10 +51,38 @@ function fail(what, hint) {
 
 // The manifests the two engines must agree on. Beyond the bundled default world,
 // these pin the features whose absence made the drift invisible last time: a
-// world with `roots` (#27), one with `command_classes` (D36), and one that hides
-// a scoped verb's base action (`projected: false`, D79). An engine that predates
-// any of them silently returns a different surface for it.
+// world with `roots` (#27), one with `command_classes` (D36), one that hides
+// a scoped verb's base action (`projected: false`, D79), and one with a
+// `flow_contract` (D95) — which an engine predating the field refuses to parse
+// at all. An engine that predates any of them silently returns a different
+// surface for it.
 const CASES = {
+  flow_contract: `
+world_id: freshness-flow
+capabilities:
+  - { trust: Trusted, actions: [Read, Mcp] }
+base_actions:
+  - name: read_document
+    action_type: Read
+    side_effect: Read
+    schema: { type: object, properties: { name: { type: string } } }
+    flow_contract:
+      output: { integrity: Trusted, confidentiality: Private }
+  - name: publish
+    action_type: Mcp
+    side_effect: External
+    projected: false
+    approval_required: true
+    backing: !McpServer { server: reports, tool: publish }
+    schema: { type: object, properties: { to: { type: string }, body: { type: string } } }
+    flow_contract:
+      sinks:
+        body: { confidentiality: Public }
+scoped_capabilities:
+  - name: publish_report
+    base_action: publish
+    args: { to: !Literal "https://reports.example/weekly", body: !ActorInput }
+`,
   hidden_base: `
 world_id: freshness-hidden-base
 capabilities:
