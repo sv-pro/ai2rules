@@ -25,7 +25,13 @@ import { readFileSync } from 'node:fs';
 // environment wins over the file. WEBMCP_NO_DOTENV=1 skips the file, so tests
 // stay hermetic on a machine that has a real key in it.
 const DOTENV = path.join(LAB_ROOT, '.env');
-if (process.env.WEBMCP_NO_DOTENV !== '1' && existsSync(DOTENV)) process.loadEnvFile(DOTENV);
+if (process.env.WEBMCP_NO_DOTENV !== '1' && existsSync(DOTENV)) {
+  const before = new Set(Object.keys(process.env));
+  process.loadEnvFile(DOTENV);
+  // A name left blank in the template (`WEBMCP_BASE_PORT=`) means "not set",
+  // not "the empty string": drop it so the default applies.
+  for (const [k, v] of Object.entries(process.env)) if (v === '' && !before.has(k)) delete process.env[k];
+}
 
 function harnessVersion() {
   try { return execFileSync(harnessBin(), ['--version']).toString().trim(); } catch { return null; }

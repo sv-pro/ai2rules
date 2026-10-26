@@ -7,21 +7,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { launchBrowser } from '../src/browser.js';
-import { startServers } from '../src/servers.js';
+import { startServersOnFreePorts } from '../src/servers.js';
 import { Trace } from '../src/trace.js';
 import { LLMAgent, apiName, fetchTransport, MAX_STEPS } from '../src/agent/llm.js';
 import { runCell, LAB_ROOT } from '../src/cell.js';
 import { renderLlmResults } from '../src/report-llm.js';
 import { CANARY } from '../src/canary.js';
 
-const BASE = 4200 + (process.pid % 50) * 10;
 const workDir = path.join(os.tmpdir(), `webmcp-llm-test-${process.pid}`);
 const traceDir = path.join(workDir, 'traces');
 let servers;
 let browser;
 
 before(async () => {
-  servers = await startServers({ basePort: BASE });
+  servers = await startServersOnFreePorts();
   browser = await launchBrowser();
 });
 after(async () => {

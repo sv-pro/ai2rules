@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { launchBrowser, BrowserEnv } from '../src/browser.js';
-import { startServers } from '../src/servers.js';
+import { startServersOnFreePorts } from '../src/servers.js';
 import { Trace } from '../src/trace.js';
 import { AgentEnv, NOT_FOUND } from '../src/env.js';
 import { createDefense } from '../src/defenses/index.js';
@@ -17,15 +17,13 @@ import { readdirSync, existsSync } from 'node:fs';
 import { TASKS } from '../src/tasks.js';
 import { judge } from '../src/oracle.js';
 
-// Its own ports, so the suite can run while a matrix runs elsewhere.
-const BASE = 4700 + (process.pid % 50) * 10;
 const workDir = path.join(os.tmpdir(), `webmcp-test-${process.pid}`);
 const traceDir = path.join(workDir, 'traces');
 let servers;
 let browser;
 
 before(async () => {
-  servers = await startServers({ basePort: BASE });
+  servers = await startServersOnFreePorts();
   browser = await launchBrowser();
 });
 after(async () => {

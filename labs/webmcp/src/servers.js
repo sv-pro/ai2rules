@@ -180,7 +180,7 @@ export async function startServers({ basePort } = {}) {
     res.end(body);
   }
 
-  const servers = await Promise.all(ORIGIN_NAMES.map((origin) => new Promise((resolve, reject) => {
+  const settled = await Promise.allSettled(ORIGIN_NAMES.map((origin) => new Promise((resolve, reject) => {
     const srv = http.createServer(async (req, res) => {
       try {
         const url = new URL(req.url, origins[origin]);
@@ -199,6 +199,13 @@ export async function startServers({ basePort } = {}) {
     srv.once('error', reject);
     srv.listen(Number(new URL(origins[origin]).port), '127.0.0.1', () => resolve(srv));
   })));
+  const servers = settled.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  const failed = settled.find((r) => r.status === 'rejected');
+  if (failed) {
+    // Don't leave the ports that did bind listening; the caller may retry.
+    await Promise.all(servers.map((srv) => new Promise((r) => srv.close(r))));
+    throw failed.reason;
+  }
 
   return {
     origins,
@@ -206,4 +213,17 @@ export async function startServers({ basePort } = {}) {
     state() { return JSON.parse(JSON.stringify(state)); },
     async close() { await Promise.all(servers.map((s) => new Promise((r) => s.close(r)))); },
   };
+}
+
+// For tests and parallel runs: start on a random free base port, retrying on
+// EADDRINUSE, so concurrent checkouts and sessions cannot collide.
+export async function startServersOnFreePorts({ attempts = 20 } = {}) {
+  for (let i = 0; ; i++) {
+    const basePort = 20000 + 10 * Math.floor(Math.random() * 4000);
+    try {
+      return await startServers({ basePort });
+    } catch (err) {
+      if (err?.code !== 'EADDRINUSE' || i + 1 >= attempts) throw err;
+    }
+  }
 }
