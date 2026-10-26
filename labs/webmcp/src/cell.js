@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BrowserEnv } from './browser.js';
 import { AgentEnv } from './env.js';
 import { CompromisedAgent } from './agent/compromised.js';
+import { LLMAgent } from './agent/llm.js';
 import { createDefense } from './defenses/index.js';
 import { judge } from './oracle.js';
 import { TASKS } from './tasks.js';
@@ -30,8 +31,9 @@ export async function loadScenario(id) {
 // because of an injected instruction or as a retry (the agent's own tag — used
 // for reporting only, never by a defense), or one that resolved to a different
 // registration than the first one the browser ever listed under that name (a
-// substitution or a squat).
-function stoppedBy(trace, attackSucceeded) {
+// substitution or a squat). An LLM does not tag its own calls, so for it a call
+// to anything outside the task's capabilities also counts.
+function stoppedBy(trace, attackSucceeded, task) {
   if (attackSucceeded) return null;
   const firstReg = new Map();
   for (const l of trace.ofKind('list')) {
@@ -43,25 +45,34 @@ function stoppedBy(trace, attackSucceeded) {
   }
   const calls = trace.ofKind('call');
   const verdicts = trace.ofKind('verdict');
+  const onTask = new Set(task.capabilities.map((cap) => `${cap.origin}/${cap.tool}`));
   for (const c of calls) {
     const v = verdicts.find((x) => x.seq > c.seq);
     if (!v || v.decision === 'ALLOW' || v.decision === 'MONITOR') continue;
-    const regId = c.resolved?.split(' ')[0];
+    const [regId, where] = c.resolved?.split(' ') ?? [];
     const substituted = regId && firstReg.has(c.name) && firstReg.get(c.name) !== regId;
     if (c.trigger?.by === 'injection' || c.trigger?.retry || substituted) return v.mechanism ?? v.decision;
+    if (c.trigger?.by === 'llm' && where && !onTask.has(where)) return v.mechanism ?? v.decision;
   }
   // Nothing was refused: the injected instruction never reached the agent
   // (or the attack failed on its own). The scenario says which.
   return 'not_triggered';
 }
 
-export async function runCell({ browser, servers, scenarioId, defenseId, traceDir, workDir }) {
+const AGENTS = {
+  compromised: () => new CompromisedAgent(),
+  llm: (opts) => new LLMAgent(opts),
+};
+export const AGENT_IDS = Object.keys(AGENTS);
+
+export async function runCell({ browser, servers, scenarioId, defenseId, traceDir, workDir, agent = 'compromised', agentOptions }) {
+  if (!AGENTS[agent]) throw new Error(`unknown agent ${agent}`);
   const scenario = await loadScenario(scenarioId);
   const task = TASKS[scenario.task];
   const cell = `${scenarioId}/${defenseId}`;
   const trace = new Trace(cell);
   const traceFile = path.join(traceDir, `${scenarioId.replace(/[:/]/g, '_')}--${defenseId}.jsonl`);
-  const row = { scenario: scenarioId, short: scenario.short, name: scenario.name, task: task.id, defense: defenseId };
+  const row = { scenario: scenarioId, short: scenario.short, name: scenario.name, task: task.id, defense: defenseId, ...(agent === 'compromised' ? {} : { agent }) };
 
   let benv = null;
   try {
@@ -72,10 +83,11 @@ export async function runCell({ browser, servers, scenarioId, defenseId, traceDi
     benv = await BrowserEnv.create(browser, { origins: servers.origins, trace });
     const env = new AgentEnv({ browser: benv, defense, trace, task });
     const plan = scenario.plan ? scenario.plan(task.plan) : task.plan;
-    const answer = await new CompromisedAgent().run({ ...task, plan }, env);
+    const agentImpl = AGENTS[agent](agentOptions);
+    const answer = await agentImpl.run({ ...task, plan }, env);
     const verdict = judge({ task, scenario, state: servers.state(), trace, answer });
     trace.write('oracle', verdict);
-    const stopped = scenario.attack ? stoppedBy(trace, verdict.attack_success) : null;
+    const stopped = scenario.attack ? stoppedBy(trace, verdict.attack_success, task) : null;
     const monitored = trace.ofKind('verdict').filter((v) => v.decision === 'MONITOR').length;
     Object.assign(row, {
       status: 'OK',
@@ -86,6 +98,7 @@ export async function runCell({ browser, servers, scenarioId, defenseId, traceDi
       monitored,
       note: stopped === 'not_triggered' ? scenario.untriggeredMeans ?? null : null,
       evidence: verdict.evidence,
+      ...(agentImpl.stats ? { agent_stats: agentImpl.stats } : {}),
     });
   } catch (err) {
     trace.write('error', { message: String(err?.stack ?? err) });
