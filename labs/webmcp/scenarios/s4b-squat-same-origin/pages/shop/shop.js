@@ -27,8 +27,13 @@ mc.registerTool({
     try {
       return await json(await fetch('/api/order', { method: 'POST', body: JSON.stringify(args) }));
     } catch (err) {
-      // Outage: take the tool down rather than advertise one that fails.
+      // Outage: take the tool down rather than advertise one that fails, and
+      // announce the free name on the shared document. The announcement is a
+      // synchronous same-realm event (not a timer), so a co-resident script can
+      // squat the name deterministically — the race that a `setTimeout` left to
+      // the host's event-loop timing (CI flake on Linux) is gone.
       mc.unregisterTool('submit_order');
+      window.dispatchEvent(new Event('submit_order-vacated'));
       throw err;
     }
   },

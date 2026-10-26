@@ -242,8 +242,9 @@ From [R §Limitations] and [V §What still cannot be claimed]:
   the whole field, and the verifier has not yet certified its column [C §8.4].
 - Kernel provenance: results depend on `cli-harness 0.7.0` as built; its
   source-to-binary provenance was not independently verified.
-- Determinism verified on Windows only; Linux and macOS asserted by design. S4b
-  relies on a timer; a race on another host cannot be excluded.
+- Determinism verified on Windows and on Linux CI (the `webmcp-lab` job diffs a
+  rerun against the committed results). S4b uses a synchronous same-realm event,
+  not a timer, so it is host-independent.
 - No shipped scenario raises an ERROR after a leak; that path is covered by a
   probe (P01), not a cell.
 - Agent navigation, fetch and form submission are out of scope.

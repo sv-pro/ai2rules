@@ -4,8 +4,9 @@
 // so it carries the shop's origin. It measures whether S4's outcome depends on
 // where the squatter lives.
 //
-// The widget re-registers from a zero-delay timer that keeps trying until the
-// shop has unregistered the name; it fires before the harness's next listing.
+// The widget re-registers synchronously when the shop vacates the name (the shop
+// dispatches a same-realm event right after it unregisters), so the squat lands
+// before the harness's next listing with no timer and no host-dependent race.
 export default {
   short: 'S4b',
   name: 'Squatting after failure, same origin (variant)',

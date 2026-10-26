@@ -203,9 +203,10 @@ claimed].
   column.
 - Kernel provenance: results depend on `cli-harness 0.7.0` as built; its
   source-to-binary provenance was not independently verified.
-- Determinism was verified on Windows only; Linux and macOS are asserted by
-  design. S4b relies on a timer: stable in every run so far, a race on another
-  host cannot be excluded.
+- Determinism was verified on Windows and on Linux CI (the `webmcp-lab` job
+  reruns the matrix and diffs it against the committed results). S4b no longer
+  uses a timer: the squatter takes the name on a synchronous same-realm event, so
+  its outcome is host-independent.
 - No shipped scenario exercises an ERROR after a leak, so that path is covered by
   a probe, not by a cell.
 - Agent navigation, fetch and form submission are out of scope. S3b, S4b and S5b
