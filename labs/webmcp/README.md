@@ -12,6 +12,7 @@ execution layer lets through, and judges it only by observed effects.
 - Contracts — what the lab promises, and what the tests pin: [`CONTRACTS.md`](CONTRACTS.md)
 - D1 rules and why an admin would write them: [`docs/D1-RULES.md`](docs/D1-RULES.md)
 - LLMAgent stretch column (a real model on a subset, `--agent llm`): [`docs/LLM-AGENT.md`](docs/LLM-AGENT.md)
+- Write-ups (pending verification): one-page takeaway [`docs/TAKEAWAY.md`](docs/TAKEAWAY.md) · blog outline with a claims checklist [`docs/BLOG-OUTLINE.md`](docs/BLOG-OUTLINE.md)
 - Results (generated): `results/RESULTS.md`, `results/results.json`, `results/traces/`
 
 ## Run
