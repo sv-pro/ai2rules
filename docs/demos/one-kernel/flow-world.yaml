@@ -1,0 +1,82 @@
+# One-kernel-many-hosts FLOW-CONTRACT world (typed source/sink labels, D95).
+#
+# A third demo world, for the same mechanical reason `roots-world.yaml` is a
+# second one: an action that declares a `flow_contract` demands host-carried
+# flow labels and fails closed (`missing_flow_context`) without them, so adding
+# a contract to `demo-world.yaml` would change the verdict of every case that
+# sends none. The slice lives on its own.
+#
+# The story is the AI2-70 vertical slice, `read_document → summarize_fixture →
+# publish_report`, and what it pins is the one thing a per-session taint bit
+# cannot say: "this value is private but came from a trusted place". The
+# session is never tainted here. Every value is Trusted. And still the
+# summary of a private document cannot be published — while a public body,
+# through the same capability, is published exactly once.
+#
+# Labels are per VALUE and host-owned. The kernel reads `context.flow` and
+# judges it against each action's contract; it never infers a label from the
+# arguments the model wrote or from metadata a tool returned. An argument the
+# host did not label falls back to `ambient`, never to Trusted/Public.
+world_id: one-kernel-flow
+
+channels:
+  - { name: user_prompt, trust: Trusted, taint: false }
+
+capabilities:
+  - { trust: Trusted, actions: [Read, Mcp] }
+
+base_actions:
+  # The SOURCE. Its whole store is private: the contract declares a result
+  # floor the host must bind to whatever this returns. A world with public and
+  # private stores declares two source actions; v0 labels a whole result.
+  - name: read_document
+    action_type: Read
+    side_effect: Read
+    schema:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: "Document name in the store." }
+    flow_contract:
+      output: { integrity: Trusted, confidentiality: Private }
+
+  # A TRANSFORM. Its result inherits the label of `body`: a summary of a
+  # private document is private. No declassification exists to say otherwise.
+  - name: summarize_fixture
+    action_type: Read
+    side_effect: None
+    schema:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, description: "Text to summarize." }
+    flow_contract:
+      inherits: [body]
+
+  # The SINK, hidden behind the scoped capability below (D79). `body` must be
+  # Public to enter it. `to` carries no integrity sink arm on purpose: it is a
+  # `Target` role, so an Untrusted destination is refused by the taint floor
+  # that already exists — the two mechanisms are independent and both bind.
+  - name: publish
+    action_type: Mcp
+    side_effect: External
+    projected: false
+    approval_required: true
+    backing: !McpServer { server: reports, tool: publish }
+    arg_roles: { to: Target, body: Content }
+    schema:
+      type: object
+      required: [to, body]
+      properties:
+        to: { type: string }
+        body: { type: string }
+    flow_contract:
+      sinks:
+        body: { confidentiality: Public }
+
+scoped_capabilities:
+  - name: publish_report
+    base_action: publish
+    args:
+      to: !Input { one_of: ["https://reports.example/weekly"] }
+      body: !ActorInput
