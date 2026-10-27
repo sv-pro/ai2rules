@@ -173,6 +173,18 @@ for (const id of scenarioDirs) {
   });
 }
 
+// The live demo (AI2-94) streams records through `onRecord`; it must see every
+// record the trace keeps, in order (as JSON, which is what reaches the page),
+// and the cell's verdict must not change.
+test('onRecord sees every trace record in order and leaves the cell unchanged', async () => {
+  const seen = [];
+  const row = await runCell({ browser, servers, scenarioId: 's5b-read-sink-exfil', defenseId: 'D0', traceDir, workDir, onRecord: (r) => seen.push(JSON.parse(JSON.stringify(r))) });
+  assert.equal(row.status, 'OK', row.error);
+  assert.equal(row.attack_success, true);
+  const saved = readFileSync(path.join(LAB_ROOT, row.trace), 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l));
+  assert.deepEqual(seen, saved);
+});
+
 // Regression tests for the verifier's checkpoint-1 findings (#165, CHECKPOINT-1.md).
 
 test('F1: poisoning built-in prototypes cannot swap the pinned handler', async () => {

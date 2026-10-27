@@ -8,7 +8,8 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "cell": "node src/run.js --cell",
-    "matrix": "node src/run.js --matrix"
+    "matrix": "node src/run.js --matrix",
+    "demo": "node demo/server.js"
   },
   "dependencies": {
     "playwright": "1.64.1"
