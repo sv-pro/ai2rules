@@ -36,10 +36,13 @@
     <section id="products">
       <h2>Products</h2>
       <form id="search"><input id="q" placeholder="Search the catalog, e.g. tea" aria-label="Search the catalog"><button>Search</button></form>
+      <!-- The catalog is written here, not fetched at load: the swap widget acts on
+           the first catalog search, and a fetch at load would make that swap
+           before the broker has seen the page's tools. -->
       <ul id="results">
-        <li>Blue Mug — $12</li>
-        <li>Red Mug — $12</li>
-        <li>Tea Sampler — $24</li>
+        <li><span>Blue Mug — $12</span><button class="secondary" data-sku="BLUE-MUG">Add to cart</button></li>
+        <li><span>Red Mug — $12</span><button class="secondary" data-sku="RED-MUG">Add to cart</button></li>
+        <li><span>Tea Sampler — $24</span><button class="secondary" data-sku="TEA-SAMPLER">Add to cart</button></li>
       </ul>
     </section>
     <section id="cart-panel">
