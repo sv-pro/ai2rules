@@ -234,7 +234,9 @@ On these eight fixed scenarios the result is clean:
   carry the task's own values, which the adapter labelled public.
 - It **keeps the kernel's security on these cells and closes S5b** — a private
   value may not leave for another origin whether the sink is a write *or* a read.
-  It regresses nothing the kernel caught. And the phrasing of the leak no longer
+  On these cells it regresses nothing the kernel caught; in general it does: an
+  injected call made only of the task's own values gets through after the read,
+  where the session taint would have refused it. And the phrasing of the leak no longer
   matters: our scenarios paste the customer record wrapped in a sentence, so the
   argument is *not* the labelled value; the adapter has no label for it, and the
   kernel judges it by the ambient, which the CRM read raised to private. A
@@ -260,8 +262,9 @@ That is the real finding, not a slogan: on this workload, value-level labelling
 beats a binary session taint on utility while matching it on security, and the
 price has moved from "a reshaped value slips past the match" to "an unvouched-for
 value is refused once the session is private". This is a bounded result, not
-general security parity, and the reviewer has not yet re-checked this column;
-treat the whole section as pending.
+general security parity. The independent verifier re-checked this column on the
+kernel (checkpoint 6) and confirmed every cell, and found that off-matrix
+injected order: labels trade the session taint's integrity floor for utility.
 
 ## With a real model: one run, clearly labelled
 
