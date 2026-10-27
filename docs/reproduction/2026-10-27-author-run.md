@@ -96,7 +96,11 @@ Smaller notes, not friction for a tester:
 ## Suggested fix before the tester's run
 
 Friction 1 first: make `harness doctor` find `bash` and `claude` on Windows
-(`PATHEXT`, `.cmd` shims), or have `harness demo` not point Windows users to it
-until it does. Then friction 2: strip the `\\?\` prefix in project `init`'s
+(`PATHEXT`, `.cmd` shims). That is
+[#178](https://github.com/sv-pro/ai2rules/pull/178). Its review found a second
+half: on Windows, the bash that matters is the Git Bash Claude Code finds itself
+(`CLAUDE_CODE_GIT_BASH_PATH`, else the Git install), not any `bash` on PATH,
+which from PowerShell is often the WSL launcher. #178 does both. Until a release
+carries it, 0.7.0 testers skip `doctor`. Then friction 2: strip the `\\?\` prefix in project `init`'s
 printed commands, as `init_machine.rs` already does, and print the kill switch
 with the `mkdir -p` it needs.

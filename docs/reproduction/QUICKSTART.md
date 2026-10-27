@@ -25,11 +25,15 @@ can be compared with the expected output below.
 
 - Node.js 18 or newer, with npm.
 - git.
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI, logged in.
+- [Claude Code](https://code.claude.com/docs/en/setup) CLI, logged in.
   `claude --version` should print a version.
 - bash. macOS and Linux have it. On Windows, install
   [Git for Windows](https://git-scm.com/download/win) and run every command
-  below in **Git Bash**.
+  below in **Git Bash**. Claude Code also needs to find Git Bash for its Bash
+  tool. If it cannot, it uses its PowerShell tool instead, and step 4 shows
+  no Bash call at all. In that case set `CLAUDE_CODE_GIT_BASH_PATH` as the
+  [setup page](https://code.claude.com/docs/en/setup) describes, for example to
+  `C:\Program Files\Gitinash.exe`.
 - Network access, for `npm install` and for one web fetch.
 
 ## 1. Install
@@ -154,7 +158,8 @@ else, that is exactly what we want to hear about.
 
 - **Windows: `harness doctor` reports `INSTALLATION BROKEN`** on a working
   install. It does not find `bash` or `claude` on `PATH`, although both are
-  there and the hook runs.
+  there and the hook runs. Fixed on `main` by
+  [#178](https://github.com/sv-pro/ai2rules/pull/178), but not in 0.7.0.
 - **Windows: commands that `init` prints do not paste.** The proof command and
   the kill-switch lines carry `\\?\C:\…` paths and backslashes that Git Bash
   drops.
