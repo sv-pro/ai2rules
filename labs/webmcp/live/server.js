@@ -20,6 +20,7 @@ import { harnessBin } from '../src/defenses/d2-ai2rules.js';
 import { CANARY } from '../src/canary.js';
 import { LiveSession, POLICIES, WIDGETS } from './session.js';
 import { createReplay, STATIC, harnessVersionOnce as harnessVersion } from '../demo/server.js';
+import { narrate } from './narrator.js';
 import { loadLabEnv } from '../src/local.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -58,7 +59,9 @@ async function launchVisible(headless) {
   throw last;
 }
 
-export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMCP_LIVE_HEADLESS === '1', basePort, approvalTimeoutMs } = {}) {
+// `narrators` (tests): the narrator's backends, in order; the default is the
+// installed Claude Code, then the Claude API (narrator.js).
+export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMCP_LIVE_HEADLESS === '1', basePort, approvalTimeoutMs, narrators } = {}) {
   // The pages in live/pages (the shop and the CRM with a UI a person can use)
   // are served before the lab's own; what that UI does for the person reaches
   // the session, which shows it in the feed as theirs.
@@ -81,6 +84,7 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
     return relaunching;
   };
   const clients = new Set();
+  let explaining = false;
   // The current session's events, replayed to a control room that connects
   // late. A world snapshot replaces the previous one (each is the whole world),
   // and the rest is capped: a late control room needs the story, not every byte.
@@ -173,6 +177,17 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
       const { prompt } = await body(req);
       session.addPrompt(prompt);
       json(res, 200, { prompts: session.prompts.length });
+    },
+    // The narrator (AI2-100): only on request, one at a time.
+    'POST /api/explain': async (req, res) => {
+      const { lang } = await body(req);
+      if (explaining) return json(res, 409, { ok: false, error: 'The narrator is already answering.' });
+      explaining = true;
+      try {
+        json(res, 200, await narrate(session.snapshot(), { lang: lang === 'ru' ? 'ru' : 'en', ...(narrators ? { backends: narrators } : {}) }));
+      } finally {
+        explaining = false;
+      }
     },
     'POST /api/hijacked': async (_req, res) => {
       session.runHijacked().catch((err) => emit('record', { kind: 'error', message: String(err?.message ?? err) }));

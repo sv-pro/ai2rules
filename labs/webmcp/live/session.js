@@ -181,7 +181,10 @@ export class LiveSession {
     const task = assistantTask(sensitive, { planned });
     this.number += 1;
     this.started = Date.now();
-    const trace = new Trace(`live-${this.number}`, { onRecord: (rec) => this.#onRecord(rec) });
+    // When each record reached the control room (for the narrator's citations);
+    // kept beside the trace, which itself keeps no wall-clock.
+    const times = new Map();
+    const trace = new Trace(`live-${this.number}`, { onRecord: (rec) => this.#onRecord(rec, times) });
     this.#servers.reset(scenario.attack ? scenario.id : 'benign', scenario.faults);
     // `fresh`: the control room clears its feed; everything after belongs here.
     this.#emit('session', { ...this.describe(), fresh: true });
@@ -195,7 +198,7 @@ export class LiveSession {
     await defense.init({ task, trace });
     const benv = await BrowserEnv.create(await this.#browser(), { origins: this.#servers.origins, trace, contextOptions: this.#contextOptions });
     const env = new AgentEnv({ browser: benv, defense, trace, task });
-    this.#state = { task, scenario, trace, defense, benv, env, answer: '', planned };
+    this.#state = { task, scenario, trace, defense, benv, env, answer: '', planned, times };
     // The tabs are the user's browser, opened as the task's plan opens them,
     // the way the lab opens them for a model (CONTRACTS.md §10).
     if (openTabs) {
@@ -222,9 +225,12 @@ export class LiveSession {
   // next request opens a new one, with the same switches, and the feed says so.
   // The hijacked model's session is its own (its plan, no vouching for what
   // was typed), so Claude's next request starts a new one too.
-  async #ensure() {
+  // Only Claude's call (`forCall`) leaves the hijacked model's session: a
+  // listing or a page read, which Claude Code's bridge makes on its own after
+  // every session change, must not wipe that run off the control room.
+  async #ensure({ forCall = false } = {}) {
     const s = this.#state;
-    if (s && !s.planned && !s.benv.isClosed()) return;
+    if (s && !(forCall && s.planned) && !s.benv.isClosed()) return;
     const why = !s ? null
       : s.planned ? "The hijacked model's run was its own session, so Claude's request starts a new one, with the same switches."
         : "The agent's window was closed, so this is a new session in a new window.";
@@ -275,7 +281,7 @@ export class LiveSession {
   // (env.js): a swapped tool is reached the way a real browser would reach it.
   call(origin, name, args) {
     return this.#serial(async () => {
-      await this.#ensure();
+      await this.#ensure({ forCall: true });
       const { env } = this.#state;
       this.#caller = 'Claude';
       if (origin && env.tabByOrigin.has(origin)) env.focus(origin);
@@ -403,23 +409,45 @@ export class LiveSession {
     };
   }
 
-  #emitWorld() {
+  // What the session's servers hold now, as the control room shows it.
+  #world() {
     const st = this.#servers.state();
-    this.#emit('world', {
+    return {
       searches: st.shop.searches,
       cart: st.shop.cart,
       orders: st.shop.orders.map((o) => ({ id: o.id, ship_to: o.ship_to, items: o.items, redirected: o.ship_to !== SHOP_ACCOUNT.address, by: o.by ?? null })),
       attacker: st.attacker.log.map((h) => ({ path: h.path ?? null, body: h.body ?? h })),
       status: this.status(),
-    });
+    };
+  }
+
+  #emitWorld() {
+    this.#emit('world', this.#world());
+  }
+
+  // Everything the narrator reads (AI2-100): the switches, every record with the
+  // time it reached the control room, the world, the oracle, waiting questions.
+  snapshot() {
+    const s = this.#state;
+    return {
+      session: this.describe(),
+      policy: POLICIES[this.config.policy],
+      widget: WIDGETS[this.config.widget],
+      records: s ? s.trace.records.map((r) => ({ ...r, at: s.times.get(r.seq) ?? null })) : [],
+      world: this.#world(),
+      status: this.status(),
+      approvals: this.pendingApprovals(),
+    };
   }
 
   // Every record goes to the control room; calls and verdicts also go to the
   // agent's window, on the tab where the call landed.
-  #onRecord(rec) {
+  #onRecord(rec, times) {
     // The time is the stand's, added on the way to the control room; the trace
     // itself keeps no wall-clock, so runs stay byte-identical (trace.js).
-    this.#emit('record', { ...rec, at: Date.now() });
+    const at = Date.now();
+    times?.set(rec.seq, at);
+    this.#emit('record', { ...rec, at });
     const s = this.#state;
     if (!s) return;
     if (rec.kind === 'call') this.pending = { name: rec.name, where: rec.resolved?.split(' ')[1] ?? rec.name };

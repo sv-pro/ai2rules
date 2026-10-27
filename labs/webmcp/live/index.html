@@ -20,6 +20,14 @@
   .agent p { margin: 0 0 8px; }
   .feedhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .feedhead h2 { margin: 0; }
+  .headbuttons { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #lang { font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--card, transparent); color: inherit; }
+  #narration { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px; }
+  #narration ul { margin: 6px 0 0; padding-left: 20px; }
+  #narration li { margin: 4px 0; }
+  #narration .by { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  #narration a.t { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  .step.flash { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px; transition: outline-color 1.5s; }
   #newest { position: fixed; right: 24px; bottom: 24px; display: none; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
   .approval { margin-top: 12px; border: 2px solid var(--warn); border-radius: 10px; padding: 10px 12px; }
   .approval pre { margin: 6px 0 0; }
@@ -80,7 +88,8 @@
   </section>
   <section>
     <div class="panel">
-      <div class="feedhead"><h2>What the agent does</h2><button id="restart" class="secondary" title="A new session with the same switches: the feed, the labels and the result start over">Clear and start over</button></div>
+      <div class="feedhead"><h2>What the agent does</h2><span class="headbuttons"><button id="explain" title="A model reads this session and explains what happened and what to look at">Explain what happened</button><select id="lang" aria-label="Language of the explanation"><option value="en">EN</option><option value="ru">RU</option></select><button id="restart" class="secondary" title="A new session with the same switches: the feed, the labels and the result start over">Clear and start over</button></span></div>
+      <div id="narration" hidden></div>
       <p class="hint">Oldest first, newest at the bottom. A new chat in Claude Code (or <code>/clear</code>) starts a new session, and the feed starts clean.</p>
       <p id="empty" class="empty">Waiting for the agent. Ask Claude something, or run the hijacked model.</p>
       <ol id="steps"></ol>
@@ -125,6 +134,52 @@ const timeline = createTimeline({
   onDrawn: () => { $('empty').style.display = 'none'; },
   onBehind: () => { $('newest').style.display = 'block'; },
 });
+// The narrator (AI2-100): on request only. Its text is a model's summary of
+// this session; the verdicts in the feed stay the kernel's.
+function renderNarration(text) {
+  const inline = (s) => esc(s)
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\[(\d\d:\d\d:\d\d)\]/g, '<a href="#" class="t" data-t="$1">$1</a>');
+  const out = [];
+  let list = null;
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*[-*•]\s+(.*)$/);
+    if (m) { list ??= []; list.push(`<li>${inline(m[1])}</li>`); continue; }
+    if (list) { out.push(`<ul>${list.join('')}</ul>`); list = null; }
+    if (line.trim()) out.push(`<p>${inline(line)}</p>`);
+  }
+  if (list) out.push(`<ul>${list.join('')}</ul>`);
+  return out.join('');
+}
+$('explain').onclick = async () => {
+  const box = $('narration');
+  box.hidden = false;
+  box.innerHTML = '<p class="hint">Reading the session…</p>';
+  $('explain').disabled = true;
+  try {
+    const res = await (await fetch('/api/explain', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lang: $('lang').value }) })).json();
+    box.innerHTML = res.ok
+      ? `${renderNarration(res.text)}<p class="by">A summary written by ${esc(res.by)} from this session's records (${Math.round(res.ms / 100) / 10} s). The verdicts in the feed are the kernel's; the result is the oracle's.</p>`
+      : `<p>${esc(res.error ?? 'The narrator failed.')}</p>`;
+  } catch (err) {
+    box.innerHTML = `<p>${esc(String(err?.message ?? err))}</p>`;
+  } finally {
+    $('explain').disabled = false;
+  }
+};
+// A cited time marks every step drawn in that second (a fast agent makes
+// several) and scrolls to the first.
+$('narration').addEventListener('click', (e) => {
+  const t = e.target?.dataset?.t;
+  if (!t) return;
+  e.preventDefault();
+  const steps = [...new Set([...document.querySelectorAll('#steps time.at')].filter((el) => el.textContent === t).map((el) => el.closest('#steps > li')))].filter(Boolean);
+  if (!steps.length) return;
+  steps[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  for (const step of steps) step.classList.add('flash');
+  setTimeout(() => steps.forEach((step) => step.classList.remove('flash')), 2500);
+});
+
 // "Jump to newest": shown when a step arrives while the reader is scrolled up.
 $('newest').onclick = () => { $('steps').lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' }); $('newest').style.display = 'none'; };
 window.addEventListener('scroll', () => {
@@ -214,6 +269,8 @@ events.addEventListener('session', (e) => {
   const s = JSON.parse(e.data);
   if (s.fresh) {
     timeline.reset();
+    $('narration').hidden = true;
+    $('narration').innerHTML = '';
     assigned = []; ambient = null; tainted = false;
     $('empty').style.display = '';
     $('world').innerHTML = '<p class="empty">Nothing yet.</p>';
