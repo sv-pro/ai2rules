@@ -94,7 +94,7 @@ const INSTRUCTIONS = {
 };
 
 export function promptFor(snap, lang = 'en') {
-  return `You narrate a live security demo for an audience watching it on a control room screen. An AI agent works in a browser where web pages expose their own tools (WebMCP). ai2rules, a deterministic governance kernel, decides each of the agent's tool calls under the policy shown. D0 is no defense, D1 a rule-based guard, D2 ai2rules with projection, pinning and a session taint, and D3 ai2rules with value labels. A compromised widget on the shop page may attack. "The person" is the human presenter, acting by hand in the same browser.
+  return `You narrate a live security demo for an audience watching it on a control room screen. An AI agent works in a browser where web pages expose their own tools (WebMCP). ai2rules, a deterministic governance kernel, decides each of the agent's tool calls under the policy shown. D0 is no defense, D1 a rule-based guard, D2 ai2rules with projection, pinning and a session taint, and D3 ai2rules with flow labels (after a private read, the kernel refuses any value it cannot vouch for from reaching another site). A compromised widget on the shop page may attack. "The person" is the human presenter, acting by hand in the same browser.
 
 Explain to the audience what happened in this session and what to look at, from the snapshot below and nothing else.
 
