@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 harness-preview = { workspace = true }
 compiler = { workspace = true }
+harness-types = { workspace = true }
+serde_json = { workspace = true }
 wasm-bindgen = { workspace = true }
 
 [package.metadata.wasm-pack.profile.release]

@@ -123,6 +123,34 @@ command_classes:
 `,
 };
 
+// Runtime calls the two engines must also agree on: `gate` (D24) and `project`
+// (D72), the exports the WebMCP browser extension runs its kernel through. A
+// clean read of a private source, the same session trying to publish the
+// result (a flow refusal), a call to an action the world never declared, and
+// one projection over the flow world's surface.
+const CLEAN = { taint: 'clean', mode: 'interactive', source_channel: 'user_prompt' };
+const TRUSTED_PUBLIC = { integrity: 'trusted', confidentiality: 'public' };
+const PRIVATE = { integrity: 'trusted', confidentiality: 'private' };
+const GATE_CASES = {
+  private_read: ['flow_contract', {
+    v: 1, tool: 'read_document', arguments: { name: 'q3' },
+    context: { ...CLEAN, flow: { ambient: TRUSTED_PUBLIC } },
+  }],
+  private_publish: ['flow_contract', {
+    v: 1, tool: 'publish_report', arguments: { body: 'Q3: 4.2M' },
+    context: { ...CLEAN, flow: { ambient: PRIVATE, args: { body: PRIVATE } } },
+  }],
+  unknown_action: ['hidden_base', {
+    v: 1, tool: 'frobnicate', arguments: {}, context: CLEAN,
+  }],
+};
+const PROJECT_CASES = {
+  flow_surface: ['flow_contract', {
+    v: 1, context: { source_channel: 'user_prompt' },
+    tools: [{ name: 'read_document' }, { name: 'publish' }, { name: 'publish_report' }, { name: 'nope' }],
+  }],
+};
+
 const committed = await load(COMMITTED, 'committed');
 const fresh = await load(FRESH, 'fresh');
 
@@ -213,7 +241,29 @@ for (const [name, yaml] of Object.entries(cases)) {
   }
 }
 
+for (const fn of ['gate', 'project']) {
+  if (typeof committed[fn] !== 'function') {
+    fail(`the committed artifact has no \`${fn}\` export (the browser extension's kernel)`, REBUILD);
+  }
+}
+const calls = [
+  ...Object.entries(GATE_CASES).map(([n, [w, req]]) => ['gate', n, w, req]),
+  ...Object.entries(PROJECT_CASES).map(([n, [w, req]]) => ['project', n, w, req]),
+];
+for (const [fn, name, world, req] of calls) {
+  const a = committed[fn](CASES[world], JSON.stringify(req));
+  const b = fresh[fn](CASES[world], JSON.stringify(req));
+  if (JSON.parse(b).ok === false) fail(`${fn} case "${name}" is malformed: ${b}`);
+  if (a !== b) {
+    console.error(`
+  ${fn} case "${name}" — committed vs source:`);
+    console.error(`    committed: ${a.slice(0, 240)}`);
+    console.error(`    source:    ${b.slice(0, 240)}`);
+    fail(`the committed artifact answers ${fn} "${name}" differently from the current kernel`, REBUILD);
+  }
+}
+
 console.log(
   `✓ WASM freshness: committed artifact matches the kernel ` +
-    `(v${fresh.version()}, ${Object.keys(cases).length} cases)`,
+    `(v${fresh.version()}, ${Object.keys(cases).length} preview cases, ${calls.length} gate/project calls)`,
 );
