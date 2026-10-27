@@ -5,9 +5,9 @@
 //! Profile: claude-code-cli/static-v1
 
 use crate::doctor_collector::{
-    check_bash_available, check_script_readable, find_on_path, inspect_settings,
-    observe_kill_switches, recognize_shim, reduce_kill_switches, resolve_path, InspectionContext,
-    KillSwitchKind, KillSwitchState, ShimProfile,
+    check_script_readable, find_bash, find_on_path, inspect_settings, observe_kill_switches,
+    recognize_shim, reduce_kill_switches, resolve_path, InspectionContext, KillSwitchKind,
+    KillSwitchState, ShimProfile,
 };
 use compiler::loader::load_yaml;
 use serde::{Deserialize, Serialize};
@@ -600,7 +600,12 @@ impl DoctorReport {
         }
 
         // Check bash interpreter
-        let bash_available = check_bash_available(ctx.path.as_deref(), ctx.pathext.as_deref());
+        let bash = find_bash(
+            ctx.path.as_deref(),
+            ctx.pathext.as_deref(),
+            ctx.git_bash_path.as_deref(),
+        );
+        let bash_available = bash.is_some();
         if !bash_available {
             findings.push(Finding {
                 code: "CC_INTERPRETER_MISSING".into(),
@@ -1158,7 +1163,7 @@ impl DoctorReport {
                     } else {
                         None
                     },
-                    resolved_path: None,
+                    resolved_path: bash.map(|p| p.to_string_lossy().into()),
                     executable: Some(bash_available),
                     version: None,
                     version_source: VersionSource::NotProbed,
