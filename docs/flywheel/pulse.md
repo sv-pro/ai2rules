@@ -29,8 +29,12 @@ From the repository (`cd C:\Users\imser\workspace\ai2rules`, then `git fetch -q 
 
 - **Board.** For each column `_tasks/1_discovery`, `2_development`, `3_advocacy`,
   `4_done`: `git ls-tree --name-only origin/main _tasks/<column>/`. For every item outside
-  `4_done`, its age = days since `git log -1 --format=%cs origin/main -- <path>`, and its
-  first heading (`git show origin/main:<path>`, first `# ` line).
+  `4_done`, its first heading (`git show origin/main:<path>`, first `# ` line) and its
+  age = days since the latest commit touching that file name on **any** remote branch:
+  `git log -1 --format=%cs --remotes -- '_tasks/*/<file>'`. Task files are updated on
+  working branches and reach `main` only on merge, so an item under active work must not
+  look stale just because its PR is still open. When the newest touch is on a branch
+  other than `main`, note the branch beside the item.
 - **Done this week.** Items whose last move into `4_done/` falls in the last 7 days, and
   `git log --since="7 days ago" --merges --oneline origin/main` for merged PRs.
 - **Open PRs.** `gh pr list --repo sv-pro/ai2rules --state open --limit 30 --json
@@ -39,8 +43,10 @@ From the repository (`cd C:\Users\imser\workspace\ai2rules`, then `git fetch -q 
 
 From Linear (team **AI2**):
 
-- **Untriaged findings:** label `radar`, state Backlog (with age since creation).
-- **Accepted, not started:** label `radar`, state Todo.
+- **Untriaged findings:** label `radar`, state Backlog, title starting `[Radar] ` (with
+  age since creation).
+- **Accepted, not started:** label `radar`, state Todo, title starting `[Radar] `. The
+  title check keeps a digest out even if one was ever labelled `radar` by mistake.
 - **In flight:** state In Progress or In Review.
 - **Waiting on a decision:** open issues with label `decision`.
 - The latest `[Radar digest] …` issue (date and link).
@@ -83,10 +89,13 @@ two runner-up steps.
 
 ### The dashboard page
 
-Load the `artifact-design` skill first. Use the Artifact tool's `list` to find the page
-titled **Flywheel Pulse**. If it exists, `read` it, then republish to its `url` from a
-local HTML file in your scratchpad; if it does not, publish it new (icon `chart`). Do not
-pin it.
+Load the `artifact-design` skill first. The page's `<title>` is exactly
+`Flywheel Pulse`, every week, with no date or week number in it (put those in the page
+body): the title is how next week's run finds this page, and one stable link is the whole
+point of a dashboard. Use the Artifact tool's `list` to find the page titled exactly
+**Flywheel Pulse** (if several match, take the most recently updated). If it exists,
+`read` it, then republish to its `url` from a local HTML file in your scratchpad; if it
+does not, publish it new (icon `chart`). Do not pin it.
 
 The page, in Russian, in this order:
 

@@ -213,12 +213,20 @@ flows:
       primary: tasks-folder
       # A GitHub issue only when the finding is public-facing (AGENTS.md, 2026-10-22).
       mirrors: [{ carrier: linear-status, sync: manual }, { carrier: gh-issue, sync: manual }]
+    # A Radar finding starts in Linear (triage) and gets its _tasks file only when accepted,
+    # so declined findings never touch the repo (docs/FLYWHEEL.md, Cadence). Findings filed
+    # by hand still start at discovery, as a file.
     states:
+      - { id: triage, values: { linear-status: "Backlog, label radar" } }
+      - { id: declined, terminal: true, values: { linear-status: Canceled } }
       - { id: discovery, values: { tasks-folder: _tasks/1_discovery } }
       - { id: development, values: { tasks-folder: _tasks/2_development } }
       - { id: advocacy, values: { tasks-folder: _tasks/3_advocacy } }
       - { id: done, terminal: true, values: { tasks-folder: _tasks/4_done } }
     transitions:
+      - { from: triage, to: discovery, by: maintainer, effects: [Linear issue to Todo, commit its discovery-file draft to _tasks/1_discovery] }
+      - { from: triage, to: development, by: maintainer, effects: [Linear issue to Todo, commit its discovery-file draft to _tasks/2_development] }
+      - { from: triage, to: declined, by: maintainer, effects: [Linear issue to Canceled] }
       - { from: discovery, to: development, by: maintainer, effects: [triage, mv the file] }
       - { from: development, to: advocacy, by: engine, checks: [rust-checks], effects: [append a technical summary to the item, mv the file] }
       - { from: advocacy, to: done, by: critic, checks: [blog-checks, correcting-review], effects: [append a Review note, mv the file] }
