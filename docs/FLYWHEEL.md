@@ -88,11 +88,17 @@ as files.
 - **Human-only stays human.** Triage, merges, tags and social posting are the
   maintainer's (`.uh/brief.md`); the engine prepares and asks, it never publishes.
 
-**How it reaches the maintainer.** Cloud routines run with the computer off but cannot
-notify; Linear does, through the due date on the digest and Pulse issues (issues you
-create for yourself raise no other notification). The Pulse task runs only while the
-desktop app is open (a missed Sunday runs on the next launch), and is the one that sends a
-desktop notification and refreshes the dashboard page.
+**How it reaches the maintainer.** Three channels, so one silent channel is not a silent
+engine. Each run ends with a one-line push notification (cloud routines can send one to
+the phone; the first Radar run confirmed it). Linear adds a reminder through the due date
+on the digest and Pulse issues (issues you create for yourself raise no other
+notification). And the *Flywheel Pulse* page is the standing dashboard. Cloud routines
+run with the computer off; the Pulse task runs only while the desktop app is open (a
+missed Sunday runs on the next launch).
+
+**Network.** Cloud routines reach only the hosts allowlisted in their environment. Radar
+lists any source it could not resolve in its digest under *Broken sources*; allowing those
+hosts in the environment's network settings is a one-time maintainer step.
 
 The scheduled Radar runs as Claude Code, the role's fallback (`radar: codex →
 claude-code`), because cloud routines are what can run on a clock today; Codex can still

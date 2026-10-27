@@ -56,10 +56,18 @@ small: ask for compact one-line-per-item output.
 | arXiv | `https://export.arxiv.org/api/query?search_query=(cat:cs.CR OR cat:cs.AI OR cat:cs.SE) AND (abs:"prompt injection" OR abs:"tool use" OR abs:"LLM agent" OR abs:MCP OR abs:"coding agent")&sortBy=submittedDate&sortOrder=descending&max_results=60` (URL-encode it), keep entries inside the window |
 | GitHub | `https://api.github.com/search/repositories?q=(mcp OR agent) (security OR injection OR sandbox OR guard) pushed:>{start}&sort=stars&order=desc&per_page=20`; also `https://api.github.com/search/repositories?q=topic:mcp-security created:>{start}` |
 | Blogs (RSS/Atom) | `https://simonwillison.net/tags/prompt-injection.atom`, `https://embracethered.com/blog/index.xml`, `https://blog.trailofbits.com/feed/`, `https://www.anthropic.com/engineering` (page), `https://genai.owasp.org/feed/` |
-| Fallback | one WebSearch: `MCP OR "AI agent" vulnerability OR "prompt injection" disclosed` restricted to the window |
+| Search | WebSearch, always, not only as a fallback: `MCP vulnerability`, `prompt injection agent`, `AI coding agent security`, `agent sandbox escape`, `tool poisoning MCP`, each restricted to the window |
 
-A source that errors or returns nothing usable goes into the digest under *Broken
-sources*, then move on. Do not spend more than two attempts on one source.
+**Network.** The cloud environment reaches only allowlisted hosts. A host that fails with
+`ENOTFOUND` is not allowlisted: do not retry it, list it under *Broken sources* (the
+maintainer allows it in the environment's network settings), and lean on WebSearch,
+which works regardless. Any other error or an empty answer also goes under *Broken
+sources*; do not spend more than two attempts on one source.
+
+**Primary sources.** When a candidate reaches you through an aggregator (a tracker
+issue, a newsletter, a repost), open the primary (the paper, the advisory, the
+author's post). If you cannot reach it, say *secondary source* in the finding and cap
+its score at 7.
 
 ## 4. Score
 
@@ -159,7 +167,12 @@ Create branch `radar/<YYYY-MM-DD>`, write each finding's discovery-file draft to
 **draft** pull request titled `[Radar] digest <YYYY-MM-DD>`. Say plainly in your final
 message that Linear was unavailable.
 
-## 6. Finish
+## 6. Notify and finish
+
+Load `PushNotification` with ToolSearch and send one line in Russian, under 200
+characters, e.g. `Radar: 2 находки, разобрать в AI2-120` or `Radar: тихо, 0 находок;
+сломано источников: 3`. Skip it only if Linear was unavailable and you opened a PR
+instead (then say so in the line).
 
 End with one paragraph: the window, how many items were scanned, which findings you filed
 (keys), and anything that went wrong.
