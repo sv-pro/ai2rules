@@ -5,9 +5,9 @@
 //! Profile: claude-code-cli/static-v1
 
 use crate::doctor_collector::{
-    check_bash_available, check_script_readable, inspect_settings, observe_kill_switches,
-    recognize_shim, reduce_kill_switches, resolve_path, InspectionContext, KillSwitchKind,
-    KillSwitchState, ShimProfile,
+    check_bash_available, check_script_readable, find_on_path, inspect_settings,
+    observe_kill_switches, recognize_shim, reduce_kill_switches, resolve_path, InspectionContext,
+    KillSwitchKind, KillSwitchState, ShimProfile,
 };
 use compiler::loader::load_yaml;
 use serde::{Deserialize, Serialize};
@@ -600,7 +600,7 @@ impl DoctorReport {
         }
 
         // Check bash interpreter
-        let bash_available = check_bash_available(ctx.path.as_deref());
+        let bash_available = check_bash_available(ctx.path.as_deref(), ctx.pathext.as_deref());
         if !bash_available {
             findings.push(Finding {
                 code: "CC_INTERPRETER_MISSING".into(),
@@ -769,7 +769,7 @@ impl DoctorReport {
         let claude_path = ctx
             .path
             .as_ref()
-            .and_then(|path| find_executable_on_path("claude", path));
+            .and_then(|path| find_on_path("claude", path, ctx.pathext.as_deref()));
         let claude_status = if claude_path.is_some() {
             BinaryStatus::Found
         } else {
@@ -1315,17 +1315,6 @@ fn extract_shim_path(command: &str) -> Option<String> {
 
     let path_part = after_bash.strip_prefix('\'')?.split('\'').next()?;
     Some(path_part.to_string())
-}
-
-/// Find an executable on PATH
-fn find_executable_on_path(name: &str, path_env: &str) -> Option<PathBuf> {
-    for dir in path_env.split(':') {
-        let exe_path = Path::new(dir).join(name);
-        if exe_path.exists() && exe_path.is_file() {
-            return Some(exe_path);
-        }
-    }
-    None
 }
 
 /// Exit code reduction: priority error > broken > disabled > partial > unknown > ok
