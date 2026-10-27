@@ -4332,3 +4332,57 @@ the rule it meets. Where it does not, the missing piece is the world's vocabular
 (sinks), not an ABI field, and the host's refusal is the fallback. That refusal has
 to be recorded by the host, because the kernel never saw it. `context.signals` is not
 needed for this add-on.
+
+## D97 — The scheduled Radar is limited by its host's permissions, not by the kernel
+
+**Date:** 2026-10-28. **Task:** AI2-105. **Scope:** the flywheel Radar routine only; no
+kernel change. The governed variant is AI2-108.
+
+**Context.** Radar (`docs/flywheel/radar.md`) is a Claude Code cloud routine that reads
+untrusted web content and files findings in Linear. Its first run went through the
+repository's PreToolUse hook 23 times and was governed by none of them: the environment
+has no setup script, so the shim found no `harness` binary and failed open (D37). Simply
+installing the binary does not help. With `.claude/cc-world.yaml`, `cc-hook` allows the
+first WebFetch and then denies every later WebFetch, WebSearch and Bash call as
+`taint_invariant`. Before that it asks for approval on every Bash line, which a routine
+with nobody watching cannot give. Radar's job is egress after reading untrusted content, and that
+is exactly what the taint floor forbids. The floor is code, not world data
+(`world-kernel/src/invariants.rs`), and any Network or External result taints the session
+(`side_effect_taint`), so a Radar world cannot carve out an exception.
+
+**Decision.**
+
+- **Radar is narrowed by the routine itself and says so.** The routine allows only Read,
+  Glob, Grep, WebFetch and WebSearch: no Bash, no Write, no Edit. Its Linear connector
+  permits five tools (`list_issues`, `get_issue`, `save_issue`, `save_comment`,
+  `list_issue_labels`). The prompt has no path that writes to the repository: the
+  pull-request fallback is gone, and when Linear is down the findings go to the run log.
+- **A canary checks it on every run.** Radar first tries one Bash call and one Write; if
+  either succeeds it files nothing and pushes an alarm. A widened routine is caught by
+  the next run, not by an audit months later.
+- **The documentation does not claim the kernel governs Radar.** The Cadence section says
+  in one line what limits it and links here.
+
+**Alternatives.**
+
+- *Install `harness` with the repository's world.* Radar would stop after its first
+  fetch. That is the kernel working as designed, and it is useless for this job.
+- *Declare WebFetch and WebSearch with `side_effect: Read` in a Radar world.* It runs,
+  and the audit log would then record network egress as local reads. A governance
+  project cannot ship a world that mislabels its own effects.
+- *Let a world name an exception to the floor.* That weakens acceptance invariant 7, the
+  project's central claim, for the sake of one internal routine. Rejected.
+- *Literal-pinned source tools behind `harness mcp-gateway`.* A design-time literal is
+  clean by construction (D79), Radar's sources are a fixed list, and with them the floor
+  stays whole. It costs free search and link-following after the first taint, a fetch
+  server inside the environment and a separate environment for Radar. This is the right
+  end state, tracked as AI2-108, not a blocker for a routine that is already running.
+
+**Consequences.** Radar is as safe as its routine settings, and a person editing those
+settings can widen it without a PR. The canary turns that into a visible failure on the
+next run. The remaining risk is the one the routine cannot narrow: Radar reads all of
+team AI2 in Linear and can reach the web, so private work in Linear could be sent out by
+an injected instruction through an allowlisted host. The environment's network
+allowlist bounds where it could go; AI2-108 is where the kernel takes this over, and it
+should check whether D95 confidentiality labels ("Linear content may not reach a web
+sink") say it better than taint alone.

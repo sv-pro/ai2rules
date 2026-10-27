@@ -96,6 +96,13 @@ notification). And the *Flywheel Pulse* page is the standing dashboard. Cloud ro
 run with the computer off; the Pulse task runs only while the desktop app is open (a
 missed Sunday runs on the next launch).
 
+**What limits Radar: the routine, not the kernel.** Radar reads untrusted web pages and
+then keeps fetching, which the kernel's taint floor forbids by design, so it is not run
+under `harness`. The routine allows only Read, Glob, Grep, WebFetch and WebSearch (no
+shell, no file writes), its Linear connector permits five tools, and a canary at the
+start of every run stops it if Bash or Write works ([D97](../DECISIONS.md)). Running it
+under the kernel is AI2-108.
+
 **Network.** Cloud routines reach only the hosts allowlisted in their environment. Radar
 lists any source it could not resolve in its digest under *Broken sources*; allowing those
 hosts in the environment's network settings is a one-time maintainer step.
