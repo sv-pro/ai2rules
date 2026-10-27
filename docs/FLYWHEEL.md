@@ -10,7 +10,7 @@ The goal of this phase is to automate the ingestion of the state-of-the-art in A
 *   **The Setup:** An autonomous agent (built dogfooding the harness or `safe-mcp-proxy`) running on a daily `cron` schedule.
 *   **The Action:** The agent fetches top posts from the Hacker News API, new papers from the `cs.CR` (Cryptography and Security) category on arXiv, and specific security blogs via RSS.
 *   **The Filter:** The LLM evaluates the feed against a strict prompt: *"Does this relate to prompt injection, agent sandboxing, capability security, or LLM vulnerabilities? Score 1-10."*
-*   **The Output:** A daily summary appended to `_research/DISCOVERY_LOG.md`.
+*   **The Output:** A daily summary appended to `_research/DISCOVERY_LOG.md`. *(As built: twice a week, scored findings filed as Linear issues plus a digest; see [Cadence](#cadence-the-clock).)*
 *   **The Reciprocal Link:** When an article highlights a brand new attack vector (e.g., a novel MCP supply chain vulnerability), it bypasses the backlog and instantly becomes a **Development** ticket.
 
 ### 2. System Development (The "Engine")
@@ -35,7 +35,7 @@ Translate the engineering victory into an easily digestible, visually appealing 
 
 To get this flywheel spinning quickly, implement these three automation steps:
 
-1.  [ ] **Automate Discovery (Cron Script):** Write a 50-line script that hits the Hacker News/arXiv APIs for target keywords, pipes the JSON to an LLM for summarization, and appends it to a Markdown file.
+1.  [x] **Automate Discovery (Cron Script):** Write a 50-line script that hits the Hacker News/arXiv APIs for target keywords, pipes the JSON to an LLM for summarization, and appends it to a Markdown file. *Built differently (2026-10-27): a scheduled cloud routine that files findings in Linear rather than a log file; see [Cadence](#cadence-the-clock).*
 2.  [ ] **Standardize the Demo Pipeline:** Create a template `.tape` file. Ensure that whenever a new security test case is written, running `make demo` automatically spits out a polished, high-res GIF of the terminal output.
 3.  [ ] **Template the Blog:** Create a `DeepDive.md` template in the Astro setup with pre-filled headers: *The Threat*, *Why Current Defenses Fail*, *The Deterministic Solution*, and *The Demo*.
 
@@ -45,6 +45,74 @@ To get this flywheel spinning quickly, implement these three automation steps:
 3. Claude builds the defense, tests it, and moves it to `_tasks/3_advocacy/`.
 4. Claude Code, as the Megaphone, monitors `3_advocacy/`, generates the `.tape` proof and writes the `DeepDive.md` blog (hero images still come from Antigravity, the only agent with image generation); a correcting-review pass then audits the result for accuracy/SEO and fixes it in place before the task lands in `_tasks/4_done/`.
 5. Review social feedback to seed tomorrow's `1_discovery/`.
+
+## Cadence (the clock)
+
+Everything above says *what* each phase does. This section says *when* it runs, so the
+question "what should I do now?" never has to be asked. Each phase has a clock (a
+schedule or an event), a runner, and an output that lands where the maintainer already
+looks.
+
+**The inbox rule.** Every automated phase ends in a pull request or in a Linear issue
+assigned to the maintainer, labelled `flywheel`. "A file appeared in a folder" is not an
+output: nobody watches folders, which is how findings sat in `1_discovery/` for three
+months. One exception: when Linear itself is down, Radar has nowhere else to write
+(D97), so its findings stay in the run log and the push names them.
+
+**Prompts live in the repository.** Each scheduled job is a one-line pointer: "follow
+`docs/flywheel/<phase>.md`". The prompt is in [`docs/flywheel/`](flywheel/), versioned and
+reviewed like code; changing how a phase behaves is a PR, not an edit in a web console.
+
+| Clock | Phase | Runner | Output | Status |
+|---|---|---|---|---|
+| Mon + Thu, 08:10 Asia/Jerusalem | **Radar** ([`radar.md`](flywheel/radar.md)) | Claude Code cloud routine *Flywheel Radar* | ≤ 3 scored findings as Linear issues (label `radar`, state Backlog) + a `[Radar digest]` issue due next day | live |
+| any time, ~5 min | **Triage** | maintainer | finding → Todo (accept) or Canceled (decline; Radar won't bring it back) | live |
+| Sun, around 19:00 Asia/Jerusalem (the app adds a few minutes to the 18:50 cron) | **Pulse** ([`pulse.md`](flywheel/pulse.md)) | local scheduled task in the Claude desktop app | the *Flywheel Pulse* dashboard page, a `[Pulse]` Linear issue, one desktop notification naming **the one next step** | live |
+| Tue + Fri, if WIP < 2 | **Engine** | cloud routine | top accepted finding → branch, failing test, defense, draft PR; the spec is the finding's `_tasks/` discovery file, committed first in the PR if it is not on `main` yet, never the live Linear description (D97) | planned |
+| a `flywheel` PR merges | **Megaphone** | routine on a GitHub webhook | `.tape` demo + post + `blog/social/<slug>.md` as a draft PR | planned |
+| a post is published | **Seed** | routine | `[Seed]` issue with ready copy and a due date (posting stays human-only) | planned |
+| 3 and 7 days after seeding | **Harvest** | routine | objections from HN/Reddit comments → new `radar` findings | planned |
+
+**Where a finding lives.** A Radar finding starts in Linear (Backlog = untriaged), not as
+a file, so declined findings never touch the repository. On acceptance the issue carries
+a ready discovery-file draft; whoever picks it up commits it to `_tasks/1_discovery/`
+(needs more research) or straight to `_tasks/2_development/` (ready to build), and from
+there the Filesystem Kanban above applies unchanged. Findings filed by hand keep starting
+as files.
+
+**Rules that keep it moving** (Pulse checks them every week):
+
+- **WIP limit 2.** No more than two items in `2_development/` or two open non-draft PRs.
+- **Aging 14 days.** An item unchanged in one column for two weeks needs a decision: do
+  it now, park it in `docs/RESEARCH-BACKLOG.md`, or close it.
+- **Noise cap.** Radar files at most three findings per run, only those scoring ≥ 7.
+- **Human-only stays human.** Triage, merges, tags and social posting are the
+  maintainer's (`.uh/brief.md`); the engine prepares and asks, it never publishes.
+
+**How it reaches the maintainer.** Three channels, so one silent channel is not a silent
+engine. Each run ends with a one-line push notification (cloud routines can send one to
+the phone; the first Radar run confirmed it). Linear adds a reminder through the due date
+on the digest and Pulse issues (issues you create for yourself raise no other
+notification). And the *Flywheel Pulse* page is the standing dashboard. Cloud routines
+run with the computer off; the Pulse task runs only while the desktop app is open (a
+missed Sunday runs on the next launch).
+
+**What limits Radar: the routine, not the kernel.** Radar reads untrusted web pages and
+then keeps fetching, which the kernel's taint floor forbids by design, so it is not run
+under `harness`. The routine denies Bash, Write, Edit, MultiEdit and NotebookEdit (its
+`disallowed_tools`; the allow list alone forbids nothing), its Linear connector permits
+five tools, and a canary at the start of every run stops it if Bash, Write or Edit works
+([D97](../DECISIONS.md)). `save_issue` can still edit any AI2 issue, so a finding's text
+is data to whoever picks it up. Running it
+under the kernel is AI2-108.
+
+**Network.** Cloud routines reach only the hosts allowlisted in their environment. Radar
+lists any source it could not resolve in its digest under *Broken sources*; allowing those
+hosts in the environment's network settings is a one-time maintainer step.
+
+The scheduled Radar runs as Claude Code, the role's fallback (`radar: codex →
+claude-code`), because cloud routines are what can run on a clock today; Codex can still
+make ad-hoc Radar passes into the same Linear inbox.
 
 ---
 

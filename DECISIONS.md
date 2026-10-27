@@ -4332,3 +4332,80 @@ the rule it meets. Where it does not, the missing piece is the world's vocabular
 (sinks), not an ABI field, and the host's refusal is the fallback. That refusal has
 to be recorded by the host, because the kernel never saw it. `context.signals` is not
 needed for this add-on.
+
+## D97 — The scheduled Radar is limited by its host's permissions, not by the kernel
+
+**Date:** 2026-10-28. **Task:** AI2-105. **Scope:** the flywheel Radar routine only; no
+kernel change. The governed variant is AI2-108.
+
+**Context.** Radar (`docs/flywheel/radar.md`) is a Claude Code cloud routine that reads
+untrusted web content and files findings in Linear. Its first run went through the
+repository's PreToolUse hook 23 times, and almost certainly none of those calls was
+governed. The run log shows no setup script for the environment, and the shim looks for
+`harness` only at installer-owned paths a fresh cloud image has no reason to fill, so it
+fails open (D37). That is inferred from the log, not read from the hook answers. Simply
+installing the binary does not help. With `.claude/cc-world.yaml`, `cc-hook` allows the
+first WebFetch and then denies every later WebFetch, WebSearch and Bash call as
+`taint_invariant`. Before that it asks for approval on every Bash line, which a routine
+with nobody watching cannot give. Radar's job is egress after reading untrusted content, and that
+is exactly what the taint floor forbids. The floor is code, not world data
+(`world-kernel/src/invariants.rs`), and any Network or External result taints the session
+(`side_effect_taint`), so a Radar world cannot carve out an exception.
+
+**Decision.**
+
+- **Radar is narrowed by the routine itself and says so.** The routine's deny list
+  (`disallowed_tools`) names Bash, Write, Edit, MultiEdit and NotebookEdit. Its allow
+  list (`allowed_tools`: Read, Glob, Grep, WebFetch, WebSearch) pre-approves tools and is
+  not relied on to forbid any. Whether it would block an unlisted tool that needs
+  permission was not observed: the tools that ran without being on it (Linear,
+  ToolSearch, PushNotification) are gated elsewhere or need no permission. Its Linear connector
+  permits five tools (`list_issues`, `get_issue`, `save_issue`, `save_comment`,
+  `list_issue_labels`). The prompt has no path that writes to the repository: the
+  pull-request fallback is gone, and when Linear is down the findings go to the run log.
+- **A canary checks it on every run.** Radar first tries one Bash call, one Write and one
+  Edit; if any succeeds it files nothing and pushes an alarm. (MultiEdit and NotebookEdit
+  are denied beside them but not probed.) A widened routine is caught by
+  the next run, not by an audit months later.
+- **The documentation does not claim the kernel governs Radar.** The Cadence section says
+  in one line what limits it and links here.
+
+**Alternatives.**
+
+- *Install `harness` with the repository's world.* Radar would stop after its first
+  fetch. That is the kernel working as designed, and it is useless for this job.
+- *Declare WebFetch and WebSearch with `side_effect: Read` in a Radar world.* It runs,
+  and the audit log would then record network egress as local reads. A governance
+  project cannot ship a world that mislabels its own effects.
+- *Let a world name an exception to the floor.* That weakens acceptance invariant 7, the
+  project's central claim, for the sake of one internal routine. Rejected.
+- *Literal-pinned source tools behind `harness mcp-gateway`.* A design-time literal is
+  clean by construction (D79), Radar's sources are a fixed list, and with them the floor
+  stays whole. It costs free search and link-following after the first taint, a fetch
+  server inside the environment and a separate environment for Radar. This is the right
+  end state, tracked as AI2-108, not a blocker for a routine that is already running.
+
+**Consequences.** Radar is as safe as its routine settings, and a person editing those
+settings can widen it without a PR. The canary turns that into a visible failure on the
+next run, and Pulse's "Radar down" check reads the digest, not the run status, because a
+Radar that stops on purpose still ends its session normally. Two risks remain that the
+routine cannot narrow.
+
+The first is integrity. Only the prompt keeps Radar to creating Backlog findings:
+`save_issue` can edit the state, assignee, labels and description of any issue in team
+AI2. An injected page could rewrite an accepted finding, and that description later
+becomes the Engine's task. So the Engine's task spec is the finding's
+discovery file in `_tasks/`, never the live Linear description. If the file is already
+committed, that copy rules. If not, the Engine's first commit in its draft PR is the
+draft copied verbatim, and the PR body says the spec came from Linear and whether the
+issue was edited after it moved to Todo, so the maintainer's review of the PR covers the
+spec as well as the code. This is a requirement on the Engine's prompt (the Cadence
+Engine row carries it), and AI2-108 should replace `save_issue` with a scoped
+create-only capability.
+
+The second is confidentiality. Radar reads all of
+team AI2 in Linear and can reach the web, so private work in Linear could be sent out by
+an injected instruction through an allowlisted host. The environment's network
+allowlist bounds where it could go; AI2-108 is where the kernel takes this over, and it
+should check whether D95 confidentiality labels ("Linear content may not reach a web
+sink") say it better than taint alone.
