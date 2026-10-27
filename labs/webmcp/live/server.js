@@ -11,9 +11,7 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { launchBrowser } from '../src/browser.js';
 import { startServers } from '../src/servers.js';
@@ -21,29 +19,21 @@ import { LAB_ROOT } from '../src/cell.js';
 import { harnessBin } from '../src/defenses/d2-ai2rules.js';
 import { CANARY } from '../src/canary.js';
 import { LiveSession, POLICIES, WIDGETS } from './session.js';
-import { createReplay, STATIC } from '../demo/server.js';
+import { createReplay, STATIC, harnessVersionOnce as harnessVersion } from '../demo/server.js';
+import { loadLabEnv } from '../src/local.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = path.join(HERE, '..', 'demo');
 
 // Local settings (HARNESS_BIN, ports): WEBMCP_DOTENV, else the lab's .env. A
 // variable already set wins; a name left blank means "not set".
-const DOTENV = process.env.WEBMCP_DOTENV ?? path.join(LAB_ROOT, '.env');
-if (process.env.WEBMCP_NO_DOTENV !== '1' && existsSync(DOTENV)) {
-  const before = new Set(Object.keys(process.env));
-  process.loadEnvFile(DOTENV);
-  for (const [k, v] of Object.entries(process.env)) if (v === '' && !before.has(k)) delete process.env[k];
-}
+loadLabEnv(process.env.WEBMCP_DOTENV ?? path.join(LAB_ROOT, '.env'));
 
 // Not 4190: that is on the Fetch standard's list of blocked ports, so Node's
 // fetch (the bridge, the hook) and Chrome would refuse to connect to it.
 export const LIVE_PORT = Number(process.env.WEBMCP_LIVE_PORT ?? 4290);
 const SITES = ['crm', 'shop'];
 const BODY_LIMIT = 64 * 1024;
-
-function harnessVersion() {
-  try { return execFileSync(harnessBin(), ['--version']).toString().trim(); } catch { return null; }
-}
 
 // The MCP name of a page tool: its origin and its own name. The bridge sends
 // both back, so the session can focus the right tab; the call itself still

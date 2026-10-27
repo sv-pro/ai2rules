@@ -100,6 +100,11 @@ function renderCompare() {
 
 function showResult(row) {
   const el = $('result');
+  if (row.status === 'BUSY' || row.status === 'LOST') {
+    el.className = '';
+    el.innerHTML = `<p class="big">${row.status === 'BUSY' ? 'Not run' : 'No result'}</p><p>${esc(row.error ?? '')}</p>`;
+    return;
+  }
   if (row.status !== 'OK') {
     el.className = 'bad';
     el.innerHTML = `<p class="big">The lab failed</p><p>${esc(row.error ?? '')}</p><p class="reason">An error is never counted as a defense holding.</p>`;
@@ -126,7 +131,11 @@ function runOne(defense) {
   timeline.reset();
   $('result').className = '';
   return new Promise((resolve) => {
-    const finish = (row) => timeline.then(() => { showResult(row); results.set(`${scenario}|${defense}`, row); renderCompare(); }).then(resolve);
+    const finish = (row) => timeline.then(() => {
+      showResult(row);
+      if (row.status === 'OK' || row.status === 'ERROR') results.set(`${scenario}|${defense}`, row);
+      renderCompare();
+    }).then(resolve);
     const es = new EventSource(`${API}/run?defense=${defense}&scenario=${encodeURIComponent(scenario)}`);
     es.addEventListener('record', (e) => timeline.push(JSON.parse(e.data)));
     es.addEventListener('result', (e) => {
@@ -136,7 +145,10 @@ function runOne(defense) {
       finish(row);
     });
     es.addEventListener('failure', (e) => { es.close(); finish({ status: 'ERROR', error: JSON.parse(e.data).message }); });
-    es.onerror = () => { es.close(); finish({ status: 'ERROR', error: 'lost the connection to the demo server' }); };
+    // Neither of these is a result of the defense: say so, and keep it out of
+    // the comparison table.
+    es.addEventListener('busy', (e) => { es.close(); finish({ status: 'BUSY', error: JSON.parse(e.data).message }); });
+    es.onerror = () => { es.close(); finish({ status: 'LOST', error: 'Lost the connection to the demo server.' }); };
   });
 }
 

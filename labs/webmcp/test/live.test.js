@@ -230,6 +230,20 @@ test('the host vouches only for what was typed, in a standard form', () => {
   for (const no of ['Tea!. Sampler', 'TeA SaMpLeR', 'Tea-Sampler gift', 'Tea  Sampler', 'gift for ACCT-7Q4M', 'a', 22, 91, 2.5]) assert.equal(v(no), false, JSON.stringify(no));
 });
 
+test('the replay streams a run, refuses unknown input, and says when it is busy', async () => {
+  const events = async (query) => {
+    const res = await fetch(`${live.url}/replay/api/run?${query}`);
+    return { status: res.status, kinds: [...(await res.text()).matchAll(/^event: (\w+)$/gm)].map((m) => m[1]) };
+  };
+  assert.equal((await events('defense=D9&scenario=s5b-read-sink-exfil')).status, 400);
+  const [first, second] = await Promise.all([
+    events('defense=D3&scenario=s5b-read-sink-exfil'),
+    new Promise((r) => setTimeout(r, 100)).then(() => events('defense=D0&scenario=s5b-read-sink-exfil')),
+  ]);
+  assert.ok(first.kinds.includes('record') && first.kinds.at(-1) === 'result', first.kinds.join(','));
+  assert.deepEqual(second.kinds, ['busy']);
+});
+
 test('the stand\'s default port is one Node\'s fetch (and Chrome) will connect to', async () => {
   const { LIVE_PORT } = await import('../live/server.js');
   // 4190 was the first default, and it is on the Fetch standard's blocked-port

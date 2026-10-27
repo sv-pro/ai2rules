@@ -135,7 +135,7 @@ export function createTimeline({ list, canary, paced = () => false, onDrawn = ()
           const own = Object.keys(rec.flow.args ?? {});
           flow += `<div class="reason">Session label <b>${esc(rec.flow.ambient)}</b>; arguments with a label of their own: ${own.length ? own.map((k) => `<code>${esc(k)}</code> ${esc(rec.flow.args[k])}`).join(', ') : 'none'}. An argument without one takes the session label.</div>`;
         }
-        current.insertAdjacentHTML('beforeend', `<div class="verdict">${stamp(at)}<span class="chip ${esc(d)}">${esc(d)}</span>${text}${why ? ` <span class="reason">— ${why}</span>` : ''}${flow}</div>`);
+        current.insertAdjacentHTML('beforeend', `<div class="verdict">${stamp(at)}<span class="chip ${esc(d)}">${esc(d)}</span>${esc(text)}${why ? ` <span class="reason">— ${why}</span>` : ''}${flow}</div>`);
         return 700;
       }
       case 'exec': {
