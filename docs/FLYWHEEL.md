@@ -68,7 +68,7 @@ reviewed like code; changing how a phase behaves is a PR, not an edit in a web c
 | Mon + Thu, 08:10 Asia/Jerusalem | **Radar** ([`radar.md`](flywheel/radar.md)) | Claude Code cloud routine *Flywheel Radar* | ≤ 3 scored findings as Linear issues (label `radar`, state Backlog) + a `[Radar digest]` issue due next day | live |
 | any time, ~5 min | **Triage** | maintainer | finding → Todo (accept) or Canceled (decline; Radar won't bring it back) | live |
 | Sun, around 19:00 Asia/Jerusalem (the app adds a few minutes to the 18:50 cron) | **Pulse** ([`pulse.md`](flywheel/pulse.md)) | local scheduled task in the Claude desktop app | the *Flywheel Pulse* dashboard page, a `[Pulse]` Linear issue, one desktop notification naming **the one next step** | live |
-| Tue + Fri, if WIP < 2 | **Engine** | cloud routine | top accepted finding → branch, failing test, defense, draft PR | planned |
+| Tue + Fri, if WIP < 2 | **Engine** | cloud routine | top accepted finding → branch, failing test, defense, draft PR; the spec is the finding's `_tasks/` discovery file, committed first in the PR if it is not on `main` yet, never the live Linear description (D97) | planned |
 | a `flywheel` PR merges | **Megaphone** | routine on a GitHub webhook | `.tape` demo + post + `blog/social/<slug>.md` as a draft PR | planned |
 | a post is published | **Seed** | routine | `[Seed]` issue with ready copy and a due date (posting stays human-only) | planned |
 | 3 and 7 days after seeding | **Harvest** | routine | objections from HN/Reddit comments → new `radar` findings | planned |

@@ -4356,9 +4356,10 @@ is exactly what the taint floor forbids. The floor is code, not world data
 
 - **Radar is narrowed by the routine itself and says so.** The routine's deny list
   (`disallowed_tools`) names Bash, Write, Edit, MultiEdit and NotebookEdit. Its allow
-  list (`allowed_tools`: Read, Glob, Grep, WebFetch, WebSearch) only pre-approves tools
-  and forbids nothing on its own: Linear, ToolSearch and PushNotification ran in the
-  first run without being on it. Its Linear connector
+  list (`allowed_tools`: Read, Glob, Grep, WebFetch, WebSearch) pre-approves tools and is
+  not relied on to forbid any. Whether it would block an unlisted tool that needs
+  permission was not observed: the tools that ran without being on it (Linear,
+  ToolSearch, PushNotification) are gated elsewhere or need no permission. Its Linear connector
   permits five tools (`list_issues`, `get_issue`, `save_issue`, `save_comment`,
   `list_issue_labels`). The prompt has no path that writes to the repository: the
   pull-request fallback is gone, and when Linear is down the findings go to the run log.
@@ -4393,9 +4394,14 @@ routine cannot narrow.
 The first is integrity. Only the prompt keeps Radar to creating Backlog findings:
 `save_issue` can edit the state, assignee, labels and description of any issue in team
 AI2. An injected page could rewrite an accepted finding, and that description later
-becomes the Engine's task. Until a create-only tool exists, the Engine treats a finding's
-text as data and works from what the maintainer confirmed when accepting it; AI2-108
-should replace `save_issue` with a scoped create-only capability.
+becomes the Engine's task. So the Engine's task spec is the finding's
+discovery file in `_tasks/`, never the live Linear description. If the file is already
+committed, that copy rules. If not, the Engine's first commit in its draft PR is the
+draft copied verbatim, and the PR body says the spec came from Linear and whether the
+issue was edited after it moved to Todo, so the maintainer's review of the PR covers the
+spec as well as the code. This is a requirement on the Engine's prompt (the Cadence
+Engine row carries it), and AI2-108 should replace `save_issue` with a scoped
+create-only capability.
 
 The second is confidentiality. Radar reads all of
 team AI2 in Linear and can reach the web, so private work in Linear could be sent out by

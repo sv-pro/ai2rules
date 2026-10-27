@@ -76,7 +76,7 @@ example 2026-10-23 = `1792713600`). `{start}` is the same date as `YYYY-MM-DD`.
 
 | Source | How |
 |---|---|
-| Hacker News | `https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{unix_start}&query={q}` for q in: `prompt injection`, `MCP`, `AI agent security`, `Claude Code`, `coding agent`, `sandbox agent`, `tool poisoning`, URL-encoded (`prompt%20injection`) |
+| Hacker News | `https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{unix_start}&query={q}`, with `{q}` URL-encoded (`prompt%20injection`), for each q in: `prompt injection`, `MCP`, `AI agent security`, `Claude Code`, `coding agent`, `sandbox agent`, `tool poisoning` |
 | arXiv | `https://export.arxiv.org/api/query?search_query=(cat:cs.CR OR cat:cs.AI OR cat:cs.SE) AND (abs:"prompt injection" OR abs:"tool use" OR abs:"LLM agent" OR abs:MCP OR abs:"coding agent")&sortBy=submittedDate&sortOrder=descending&max_results=60` (URL-encode it), keep entries inside the window |
 | GitHub | new projects only, matched on what they say about themselves: `https://api.github.com/search/repositories?q=(mcp OR agent OR llm) (security OR injection OR sandbox OR guardrail OR firewall OR policy) in:name,description,topics created:>{start}&sort=stars&order=desc&per_page=20`; also `https://api.github.com/search/repositories?q=topic:mcp-security created:>{start}`. Never `pushed:>` sorted by stars: that returns the biggest active repos that merely mention "agent". |
 | Blogs (RSS/Atom) | `https://simonwillison.net/tags/prompt-injection.atom`, `https://embracethered.com/blog/index.xml`, `https://blog.trailofbits.com/feed/`, `https://www.anthropic.com/engineering` (page), `https://genai.owasp.org/feed/` |

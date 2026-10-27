@@ -49,7 +49,9 @@ From Linear (team **AI2**):
   title check keeps a digest out even if one was ever labelled `radar` by mistake.
 - **In flight:** state In Progress or In Review.
 - **Waiting on a decision:** open issues with label `decision`.
-- The latest `[Radar digest] …` issue (date and link).
+- The latest `[Radar digest] …` issue **in any state**, Done and Canceled included (date
+  and link). Radar closes the previous digest on every pass and the maintainer may close
+  one too, so searching open issues only would report a healthy Radar as down.
 
 From the Radar routine (load `RemoteTrigger` with ToolSearch; skip this step if it is not
 available): `list` → the routine named **Flywheel Radar** → whether it is enabled, then
