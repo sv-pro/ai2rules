@@ -20,6 +20,10 @@ pub struct InspectionContext {
     pub current_exe: Option<PathBuf>,
     pub home: Option<String>,
     pub path: Option<String>,
+    /// Windows' executable extensions; used only on Windows (see `find_on_path`).
+    pub pathext: Option<String>,
+    /// Where Claude Code is told its Git Bash is, on Windows (see `find_bash`).
+    pub git_bash_path: Option<String>,
     pub claude_project_dir: Option<String>,
     pub harness_bin: Option<String>,
 }
@@ -32,6 +36,8 @@ impl InspectionContext {
             current_exe: std::env::current_exe().ok(),
             home: std::env::var("HOME").ok(),
             path: std::env::var("PATH").ok(),
+            pathext: std::env::var("PATHEXT").ok(),
+            git_bash_path: std::env::var("CLAUDE_CODE_GIT_BASH_PATH").ok(),
             claude_project_dir: std::env::var("CLAUDE_PROJECT_DIR").ok(),
             harness_bin: std::env::var("HARNESS_BIN").ok(),
         }
@@ -465,17 +471,113 @@ fn is_executable(_metadata: &fs::Metadata) -> bool {
     false
 }
 
-/// Check if bash interpreter is available
-pub fn check_bash_available(path_env: Option<&str>) -> bool {
-    if let Some(path) = path_env {
-        for dir in path.split(':') {
-            let bash_path = Path::new(dir).join("bash");
-            if bash_path.exists() {
-                return true;
-            }
+/// The bash a Claude Code hook runs under, if there is one.
+///
+/// On Unix it is `bash` on PATH. On native Windows, Claude Code runs Bash through
+/// Git Bash and finds it itself: from `CLAUDE_CODE_GIT_BASH_PATH` when that is set,
+/// otherwise from the Git for Windows install. Git's default PATH entry is only
+/// `<Git>\cmd`, so a `bash` lookup on PATH misses it; and the `bash.exe` PowerShell
+/// does find is often the WSL launcher (`WindowsApps`, `System32`), which is not the
+/// shell a hook runs in. So on Windows the order is the override, then the Git
+/// install of the `git` on PATH, then a `bash` on PATH that is not a WSL launcher.
+pub fn find_bash(
+    path_env: Option<&str>,
+    pathext: Option<&str>,
+    git_bash_path: Option<&str>,
+) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        if let Some(p) = git_bash_path.map(PathBuf::from).filter(|p| p.is_file()) {
+            return Some(p);
         }
+        let path = path_env?;
+        if let Some(bash) = find_on_path("git", path, pathext).and_then(|git| git_bash_beside(&git))
+        {
+            return Some(bash);
+        }
+        let without_launchers = std::env::join_paths(
+            std::env::split_paths(path).filter(|dir| !is_wsl_launcher_dir(dir)),
+        )
+        .ok()?;
+        find_on_path("bash", without_launchers.to_str()?, pathext)
     }
-    false
+    #[cfg(not(windows))]
+    {
+        let _ = git_bash_path;
+        find_on_path("bash", path_env?, pathext)
+    }
+}
+
+/// Git for Windows' `bash.exe` for a `git.exe` found on PATH: Git puts `git.exe`
+/// in `<root>\cmd`, `<root>\bin` or `<root>\mingw64\bin`, and `bash.exe` in
+/// `<root>\bin` (and `<root>\usr\bin`).
+#[cfg(windows)]
+fn git_bash_beside(git: &Path) -> Option<PathBuf> {
+    let dir = git.parent()?;
+    let name = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().to_ascii_lowercase())
+    };
+    let root = match name(dir).as_deref() {
+        Some("cmd") => dir.parent()?,
+        Some("bin") if name(dir.parent()?).as_deref() == Some("mingw64") => {
+            dir.parent()?.parent()?
+        }
+        Some("bin") => dir.parent()?,
+        _ => return None,
+    };
+    [
+        root.join("bin").join("bash.exe"),
+        root.join("usr").join("bin").join("bash.exe"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
+}
+
+/// The directories Windows' WSL launcher `bash.exe` lives in.
+#[cfg(windows)]
+fn is_wsl_launcher_dir(dir: &Path) -> bool {
+    dir.components()
+        .any(|c| c.as_os_str().eq_ignore_ascii_case("WindowsApps"))
+        || dir
+            .file_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("System32"))
+}
+
+/// Find `name` on a PATH value the way the platform's shell would.
+///
+/// PATH is split with the platform's own separator: `;` on Windows, where every
+/// entry also carries a drive colon, so splitting on `:` finds nothing there. On
+/// Windows a bare name also matches `name` plus each `PATHEXT` extension, tried
+/// first (Git Bash's `bash.exe`, npm's `claude.cmd`); `pathext` is ignored
+/// elsewhere.
+pub fn find_on_path(name: &str, path_env: &str, pathext: Option<&str>) -> Option<PathBuf> {
+    let exts = executable_extensions(pathext);
+    std::env::split_paths(path_env)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .find_map(|dir| {
+            exts.iter()
+                .map(|ext| dir.join(format!("{name}{ext}")))
+                .chain(std::iter::once(dir.join(name)))
+                .find(|candidate| candidate.is_file())
+        })
+}
+
+#[cfg(windows)]
+fn executable_extensions(pathext: Option<&str>) -> Vec<String> {
+    pathext
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(".COM;.EXE;.BAT;.CMD")
+        .split(';')
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn executable_extensions(_pathext: Option<&str>) -> Vec<String> {
+    Vec::new()
 }
 
 /// Check if a script is readable (don't require +x for readable 0644 script)
@@ -579,6 +681,119 @@ mod tests {
     fn test_inspection_context_capture() {
         let ctx = InspectionContext::capture();
         assert!(ctx.cwd.exists());
+    }
+
+    fn joined(dirs: &[&Path]) -> String {
+        std::env::join_paths(dirs).unwrap().into_string().unwrap()
+    }
+
+    #[test]
+    fn find_on_path_uses_the_platform_separator_and_skips_empty_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        fs::write(b.join("tool"), b"").unwrap();
+
+        let path = joined(&[&a, &b]);
+        assert_eq!(find_on_path("tool", &path, None), Some(b.join("tool")));
+        // An empty entry (a trailing separator) is not the current directory.
+        let trailing = format!("{path}{}", if cfg!(windows) { ';' } else { ':' });
+        assert_eq!(find_on_path("tool", &trailing, None), Some(b.join("tool")));
+        assert_eq!(find_on_path("absent", &path, None), None);
+        // A directory with the name is not an executable.
+        fs::create_dir_all(a.join("dir-tool")).unwrap();
+        assert_eq!(find_on_path("dir-tool", &path, None), None);
+    }
+
+    #[test]
+    fn find_on_path_takes_the_first_path_entry_that_has_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        for d in [&a, &b] {
+            fs::create_dir_all(d).unwrap();
+            fs::write(d.join("tool"), b"").unwrap();
+        }
+        assert_eq!(
+            find_on_path("tool", &joined(&[&a, &b]), None),
+            Some(a.join("tool"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn find_on_path_on_windows_tries_pathext_before_the_bare_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        // npm puts both a POSIX shim `claude` and `claude.cmd` side by side.
+        fs::write(dir.join("claude"), b"").unwrap();
+        fs::write(dir.join("claude.cmd"), b"").unwrap();
+        fs::write(dir.join("bash.exe"), b"").unwrap();
+        let path = joined(&[dir]);
+
+        assert_eq!(
+            find_on_path("claude", &path, None),
+            Some(dir.join("claude.cmd"))
+        );
+        // Default PATHEXT when the variable is unset or blank.
+        assert_eq!(
+            find_on_path("bash", &path, None),
+            Some(dir.join("bash.exe"))
+        );
+        assert_eq!(
+            find_on_path("bash", &path, Some("  ")),
+            Some(dir.join("bash.exe"))
+        );
+        // A PATHEXT without .EXE does not find bash.exe.
+        assert_eq!(find_on_path("bash", &path, Some(".CMD")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn find_bash_on_windows_finds_git_bash_the_way_claude_code_does() {
+        let tmp = tempfile::tempdir().unwrap();
+        let git = tmp.path().join("Git");
+        let launcher = tmp.path().join("Microsoft").join("WindowsApps");
+        for d in [git.join("cmd"), git.join("bin"), launcher.clone()] {
+            fs::create_dir_all(d).unwrap();
+        }
+        fs::write(git.join("cmd").join("git.exe"), b"").unwrap();
+        fs::write(git.join("bin").join("bash.exe"), b"").unwrap();
+        fs::write(launcher.join("bash.exe"), b"").unwrap();
+
+        // Git's default PATH entry is only <Git>\cmd: bash is found beside git,
+        // and the WSL launcher earlier on PATH is not taken for it.
+        let path = joined(&[&launcher, &git.join("cmd")]);
+        assert_eq!(
+            find_bash(Some(&path), None, None),
+            Some(git.join("bin").join("bash.exe"))
+        );
+        // With no Git on PATH, the WSL launcher alone is not a hook's bash.
+        assert_eq!(find_bash(Some(&joined(&[&launcher])), None, None), None);
+        // CLAUDE_CODE_GIT_BASH_PATH wins, when it names a file.
+        let elsewhere = tmp.path().join("custom-bash.exe");
+        fs::write(&elsewhere, b"").unwrap();
+        assert_eq!(
+            find_bash(Some(&path), None, elsewhere.to_str()),
+            Some(elsewhere.clone())
+        );
+        let missing = tmp.path().join("nope.exe");
+        assert_eq!(
+            find_bash(Some(&path), None, missing.to_str()),
+            Some(git.join("bin").join("bash.exe")),
+            "an override that names no file falls back to the Git install"
+        );
+    }
+
+    #[test]
+    fn find_bash_reports_the_file_it_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = tmp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let file = bin.join(if cfg!(windows) { "bash.exe" } else { "bash" });
+        fs::write(&file, b"").unwrap();
+        assert_eq!(find_bash(Some(&joined(&[&bin])), None, None), Some(file));
+        assert_eq!(find_bash(None, None, None), None);
     }
 
     #[test]

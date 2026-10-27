@@ -14,6 +14,18 @@ there is one, so anything here can be traced to the reasoning in
 
 ### Fixed
 
+- **`harness doctor` on Windows: a working install is no longer reported broken
+  (AI2-9 / #62).** Doctor split `PATH` on `:` and looked for a file named exactly
+  `bash` or `claude`. On Windows the separator is `;`, every entry carries a drive
+  colon, and the files are `bash.exe` (Git Bash) and `claude.cmd` (npm), so it found
+  neither and reported `INSTALLATION BROKEN` (`CC_INTERPRETER_MISSING`), right after
+  `harness demo` had suggested running it. It now splits `PATH` the platform's way
+  and, on Windows, tries each `PATHEXT` extension before the bare name. On Windows it
+  also looks for bash where Claude Code does: `CLAUDE_CODE_GIT_BASH_PATH`, then the
+  Git for Windows install of the `git` on PATH (Git's default entry is only
+  `<Git>\cmd`). A WSL launcher (`WindowsApps`, `System32`) no longer counts as the
+  hook's bash. The report's `interpreter.resolved_path` names the file found.
+
 - **Approval and staged-commit stores on Windows: a waiter no longer fails while the
   lock changes hands (D93, AI2-75).** The store lock was a file that was created to
   take the lock and deleted to release it. Inside Windows' delete call there is a
