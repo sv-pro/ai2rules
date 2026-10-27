@@ -14,6 +14,7 @@ export const MECHANISM = {
   'flow:integrity': 'value label: an untrusted value cannot reach this argument',
   not_registered: 'no such tool',
   not_triggered: 'the injected instruction never reached the agent',
+  'addon:exfiltration': 'exfiltration add-on: this call carries private data the session read',
   'approval:denied': 'you said no',
   'approval:timeout': 'nobody answered in time, so it counts as a no',
   'approval:cancelled': 'the session ended before anyone answered',
@@ -148,6 +149,9 @@ export function createTimeline({ list, canary, paced = () => false, onDrawn = ()
         if (rec.flow?.vouched?.length) {
           flow += `<div class="reason">The host vouches for ${rec.flow.vouched.map((k) => `<code>${esc(k)}</code>`).join(', ')}: found in what you typed, so labelled public.</div>`;
         }
+        for (const f of rec.addon ?? []) {
+          flow += `<div class="reason">The exfiltration add-on found a private value from <code>${esc(f.source)}</code> in <code>${esc(f.argument)}</code> (${esc(f.form.replaceAll('_', ' '))})${rec.mechanism === 'addon:exfiltration' ? ', so the host refuses the call' : ': the argument is labelled private, and the kernel judges it'}.</div>`;
+        }
         if (rec.flow && d !== 'ALLOW' && rec.mechanism?.startsWith('flow:')) {
           const own = Object.keys(rec.flow.args ?? {});
           flow += `<div class="reason">Session label <b>${esc(rec.flow.ambient)}</b>; arguments with a label of their own: ${own.length ? own.map((k) => `<code>${esc(k)}</code> ${esc(rec.flow.args[k])}`).join(', ') : 'none'}. An argument without one takes the session label.</div>`;
@@ -164,6 +168,8 @@ export function createTimeline({ list, canary, paced = () => false, onDrawn = ()
         return 600;
       }
       // What the ai2rules adapter records about its own state (D2, D3).
+      case 'addon_observe': addStep('minor kernel', `The exfiltration add-on remembers what <code>${esc(rec.source)}</code> returned (${rec.fingerprints} value${rec.fingerprints === 1 ? '' : 's'} to watch for)`); return 200;
+      case 'addon_finding': return 0; // shown on the verdict it led to
       case 'pin': addStep('minor kernel', `ai2rules remembers which registration <code>${esc(rec.action.replace('__', '/'))}</code> is (${esc(rec.regId)})`); return 120;
       case 'taint': addStep('minor kernel', 'ai2rules marks the session <b>tainted</b>: it now holds data from an untrusted or sensitive source'); return 500;
       case 'flow_label': {

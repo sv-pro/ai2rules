@@ -34,6 +34,7 @@ npm run live:setup && npm run live          # the live stand: see live/README.md
 ```
 
 **The demo** (`demo/`) is a page for showing the lab to people: pick a defense,
+optionally with the exfiltration add-on beside it (AI2-104),
 run S5b (or S5, or the no-attack baseline) and watch the agent's steps arrive:
 the tabs it opens, the tools it calls and why, each verdict, what actually ran,
 and the oracle's result. It runs the same `runCell` as the matrix, against the

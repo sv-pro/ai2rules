@@ -75,6 +75,8 @@
     <div class="panel">
       <h2>Policy</h2>
       <div id="policies"></div>
+      <h2>Add-ons</h2>
+      <div id="addons"></div>
     </div>
     <div class="panel sites">
       <h2>Sites that hold private data</h2>
@@ -120,7 +122,7 @@ import { clock, createTimeline, esc, mech, show, where } from './timeline.js';
 const $ = (id) => document.getElementById(id);
 const INFO = await (await fetch('/api/info')).json();
 const CANARY = INFO.canary;
-let config = { policy: INFO.session.policy, widget: INFO.session.widget, sensitive: INFO.session.sensitive };
+let config = { policy: INFO.session.policy, widget: INFO.session.widget, sensitive: INFO.session.sensitive, addons: INFO.session.addons ?? [] };
 let current = INFO.session;
 let assigned = [];
 let ambient = null;
@@ -194,7 +196,9 @@ function renderControls() {
   radios($('widgets'), 'widget', INFO.widgets, config.widget);
   radios($('policies'), 'policy', INFO.policies, config.policy);
   $('sites').innerHTML = INFO.sites.map((s) => `<label><input type="checkbox" value="${s}" ${config.sensitive.includes(s) ? 'checked' : ''}> ${esc(where(s))}</label>`).join('');
-  for (const input of document.querySelectorAll('input[name=widget], input[name=policy], #sites input')) input.onchange = apply;
+  $('addons').innerHTML = (INFO.addons ?? []).map((a) => `<label class="choice"><input type="checkbox" name="addon" value="${a.id}" ${config.addons.includes(a.id) ? 'checked' : ''}>
+    <span class="name">${esc(a.name)}</span><span class="blurb">${esc(a.blurb)}</span></label>`).join('');
+  for (const input of document.querySelectorAll('input[name=widget], input[name=policy], input[name=addon], #sites input')) input.onchange = apply;
   $('footer').textContent = `Kernel: ${INFO.harness ?? 'not found'} · the page tools come from document.modelContext, provided by the lab's shim until browsers ship WebMCP · outcomes judged from observed effects only`;
 }
 
@@ -203,6 +207,7 @@ async function apply() {
     widget: document.querySelector('input[name=widget]:checked').value,
     policy: document.querySelector('input[name=policy]:checked').value,
     sensitive: [...document.querySelectorAll('#sites input:checked')].map((i) => i.value),
+    addons: [...document.querySelectorAll('input[name=addon]:checked')].map((i) => i.value),
   };
   await fetch('/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(config) });
 }
@@ -217,7 +222,7 @@ function renderSession(s) {
   current = s;
   const w = INFO.widgets.find((x) => x.id === s.widget)?.name ?? s.widget;
   const p = INFO.policies.find((x) => x.id === s.policy);
-  $('sessionLine').innerHTML = `Session <b>${s.number}</b> · <b>${esc(s.policy)}</b> ${esc(p?.name ?? '')} · widget: <b>${esc(w)}</b> · private: <b>${esc(s.sensitive.map(where).join(', ') || 'none')}</b>${s.started ? ` · started <b>${clock(s.started)}</b>` : ''}`;
+  $('sessionLine').innerHTML = `Session <b>${s.number}</b> · <b>${esc(s.policy)}</b> ${esc(p?.name ?? '')} · widget: <b>${esc(w)}</b> · private: <b>${esc(s.sensitive.map(where).join(', ') || 'none')}</b>${s.addons?.length ? ` · add-ons: <b>${esc(s.addons.map((a) => INFO.addons?.find((x) => x.id === a)?.name ?? a).join(', '))}</b>` : ''}${s.started ? ` · started <b>${clock(s.started)}</b>` : ''}`;
   renderDeclared();
 }
 
@@ -276,7 +281,7 @@ events.addEventListener('session', (e) => {
     $('world').innerHTML = '<p class="empty">Nothing yet.</p>';
     $('status').innerHTML = '<h2>So far</h2><p class="empty">Nothing has happened yet.</p>';
     // The first line of every session's feed says which session it is.
-    timeline.push({ kind: 'note', tone: 'kernel', at: s.started, html: `Session <b>${s.number}</b> starts: <b>${esc(s.policy)}</b>, widget <b>${esc(INFO.widgets.find((x) => x.id === s.widget)?.name ?? s.widget)}</b>` });
+    timeline.push({ kind: 'note', tone: 'kernel', at: s.started, html: `Session <b>${s.number}</b> starts: <b>${esc(s.policy)}</b>${s.addons?.length ? ` + <b>${esc(s.addons.map((a) => INFO.addons?.find((x) => x.id === a)?.name ?? a).join(', '))}</b>` : ''}, widget <b>${esc(INFO.widgets.find((x) => x.id === s.widget)?.name ?? s.widget)}</b>` });
   }
   renderSession(s);
   renderAssigned();
@@ -288,6 +293,12 @@ events.addEventListener('record', (e) => {
     assigned.push({ from: rec.source === 'user_task' ? "the user's request" : `<code>${esc(rec.source)}</code>`, label: rec.label, bound: rec.bound });
     if (rec.label.endsWith('private')) ambient = rec.label;
     timeline.then(() => { renderAssigned(); renderDeclared(); });
+  }
+  // Under D3 the exfiltration add-on's finding is a label the host raises on the
+  // argument before the kernel judges it: it belongs in the panel too.
+  if (rec.kind === 'verdict' && rec.flow && rec.addon?.length) {
+    assigned.push({ from: `the exfiltration add-on, for <code>${esc(rec.name)}</code> ${rec.addon.map((f) => `<code>${esc(f.argument)}</code>`).join(', ')}`, label: 'trusted/private', bound: rec.addon.length });
+    timeline.then(renderAssigned);
   }
   if (rec.kind === 'verdict' && rec.flow?.vouched?.length) {
     const call = rec.name;

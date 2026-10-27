@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { launchBrowser } from '../src/browser.js';
 import { startServersOnFreePorts } from '../src/servers.js';
 import { runCell, loadScenario } from '../src/cell.js';
-import { DEFENSE_IDS, DEFENSE_INFO } from '../src/defenses/index.js';
+import { ADDON_INFO, DEFENSE_IDS, DEFENSE_INFO } from '../src/defenses/index.js';
 import { harnessBin } from '../src/defenses/d2-ai2rules.js';
 import { CANARY } from '../src/canary.js';
 import { TASKS } from '../src/tasks.js';
@@ -54,12 +54,15 @@ export function createReplay() {
       scenarios.push({ id, short: s.short, name: s.name, task: s.task, attack: s.attack });
     }
     const tasks = Object.fromEntries(Object.values(TASKS).map((t) => [t.id, { prompt: t.prompt }]));
-    return { scenarios, tasks, defenses: DEFENSE_IDS.map((id) => ({ id, ...DEFENSE_INFO[id] })), canary: CANARY, harness: harnessVersionOnce() };
+    const addons = Object.entries(ADDON_INFO).map(([id, a]) => ({ id, ...a }));
+    return { scenarios, tasks, defenses: DEFENSE_IDS.map((id) => ({ id, ...DEFENSE_INFO[id] })), addons, canary: CANARY, harness: harnessVersionOnce() };
   }
 
   async function run(url, res) {
     const defenseId = url.searchParams.get('defense');
     const scenarioId = url.searchParams.get('scenario') ?? SCENARIOS[0];
+    // `exfil=1`: the same defense with the exfiltration add-on on beside it.
+    const exfil = url.searchParams.get('exfil') === '1';
     if (!DEFENSE_IDS.includes(defenseId) || !SCENARIOS.includes(scenarioId)) {
       res.writeHead(400, { 'content-type': 'text/plain' });
       return res.end('unknown defense or scenario');
@@ -79,7 +82,7 @@ export function createReplay() {
         browser,
         servers,
         scenarioId,
-        defenseId,
+        defenseId: exfil ? `${defenseId}+exfil` : defenseId,
         traceDir: path.join(os.tmpdir(), `webmcp-demo-traces-${process.pid}`),
         workDir: path.join(os.tmpdir(), `webmcp-demo-${process.pid}`),
         onRecord: (rec) => send('record', { ...rec, at: Date.now() }), // the time is for the page, not the trace

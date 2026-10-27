@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { BrowserEnv } from '../src/browser.js';
 import { AgentEnv } from '../src/env.js';
 import { CompromisedAgent } from '../src/agent/compromised.js';
-import { createDefense, DEFENSE_INFO as POLICIES } from '../src/defenses/index.js';
+import { ADDON_INFO as ADDONS, createDefense, DEFENSE_INFO as POLICIES } from '../src/defenses/index.js';
 import { worldYaml } from '../src/defenses/d2-ai2rules.js';
 import { judge } from '../src/oracle.js';
 import { TASKS } from '../src/tasks.js';
@@ -32,7 +32,7 @@ export const WIDGETS = {
   inject: { scenario: 's5b-read-sink-exfil', name: 'Hides an instruction', blurb: 'It rewrites the search results to tell the agent to search again for "gift for <everything you have read>".' },
 };
 
-export { POLICIES };
+export { ADDONS, POLICIES };
 
 // The assistant the demo deploys: the CRM-gift task's tools, with the sensitive
 // sites from the switch. The hijacked model follows the task's plan, so D3 binds
@@ -102,7 +102,7 @@ export class LiveSession {
   #lock = Promise.resolve();
   number = 0;
   started = null; // wall-clock start of the current session, for the control room
-  config = { policy: 'D3', widget: 'honest', sensitive: ['crm'] };
+  config = { policy: 'D3', widget: 'honest', sensitive: ['crm'], addons: [] };
   // What the presenter typed into Claude Code, from the demo folder's
   // UserPromptSubmit hook. Kept across sessions: a switch does not unsay it.
   prompts = [];
@@ -174,9 +174,10 @@ export class LiveSession {
     const next = { ...this.config, ...config };
     if (!POLICIES[next.policy]) throw Object.assign(new Error(`unknown policy ${next.policy}`), { status: 400 });
     if (!WIDGETS[next.widget]) throw Object.assign(new Error(`unknown widget ${next.widget}`), { status: 400 });
+    for (const a of next.addons) if (!ADDONS[a]) throw Object.assign(new Error(`unknown add-on ${a}`), { status: 400 });
     await this.#close();
     this.config = next;
-    const { policy, widget, sensitive } = this.config;
+    const { policy, widget, sensitive, addons } = this.config;
     const scenario = await loadScenario(WIDGETS[widget].scenario);
     const task = assistantTask(sensitive, { planned });
     this.number += 1;
@@ -188,8 +189,9 @@ export class LiveSession {
     this.#servers.reset(scenario.attack ? scenario.id : 'benign', scenario.faults);
     // `fresh`: the control room clears its feed; everything after belongs here.
     this.#emit('session', { ...this.describe(), fresh: true });
-    trace.write('cell_start', { scenario: scenario.id, task: task.id, defense: policy });
+    trace.write('cell_start', { scenario: scenario.id, task: task.id, defense: policy, addons });
     const defense = createDefense(policy, {
+      addons,
       workDir: this.#workDir,
       vouch: planned ? null : vouchFor(this.prompts),
       approvals: APPROVALS,

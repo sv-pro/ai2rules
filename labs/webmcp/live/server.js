@@ -18,7 +18,7 @@ import { startServers } from '../src/servers.js';
 import { LAB_ROOT } from '../src/cell.js';
 import { harnessBin } from '../src/defenses/d2-ai2rules.js';
 import { CANARY } from '../src/canary.js';
-import { LiveSession, POLICIES, WIDGETS } from './session.js';
+import { ADDONS, LiveSession, POLICIES, WIDGETS } from './session.js';
 import { createReplay, STATIC, harnessVersionOnce as harnessVersion } from '../demo/server.js';
 import { narrate } from './narrator.js';
 import { loadLabEnv } from '../src/local.js';
@@ -151,6 +151,7 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
     }])),
     'GET /api/info': (_req, res) => json(res, 200, {
       policies: Object.entries(POLICIES).map(([id, p]) => ({ id, ...p })),
+      addons: Object.entries(ADDONS).map(([id, a]) => ({ id, ...a })),
       widgets: Object.entries(WIDGETS).map(([id, w]) => ({ id, name: w.name, blurb: w.blurb })),
       sites: SITES,
       canary: CANARY,
@@ -165,9 +166,10 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
       req.on('close', () => clients.delete(res));
     },
     'POST /api/session': async (req, res) => {
-      const { policy, widget, sensitive } = await body(req);
+      const { policy, widget, sensitive, addons } = await body(req);
       const config = {};
       if (policy) config.policy = policy;
+      if (Array.isArray(addons)) config.addons = addons.filter((a) => typeof a === 'string');
       if (widget) config.widget = widget;
       if (Array.isArray(sensitive)) config.sensitive = sensitive.filter((s) => SITES.includes(s));
       await session.start(config);
