@@ -111,11 +111,15 @@ export class LiveSession {
   #caller = 'The agent';
   #standUrl;
   #approvalTimeout;
+  #contextOptions;
 
   // `browser`: a Playwright browser, or a function returning one (the stand's,
   // which relaunches the window when it was closed). `standUrl`: where the
   // stand serves its approval page, opened as a tab of the browser's own.
-  constructor({ browser, servers, workDir, emit, standUrl = () => null, approvalTimeoutMs = APPROVAL_TIMEOUT_MS }) {
+  // `contextOptions`: for the browser context of each session (the visible
+  // window takes its pages' size from the window itself).
+  constructor({ browser, servers, workDir, emit, standUrl = () => null, approvalTimeoutMs = APPROVAL_TIMEOUT_MS, contextOptions = {} }) {
+    this.#contextOptions = contextOptions;
     this.#browser = typeof browser === 'function' ? browser : () => browser;
     this.#servers = servers;
     this.#workDir = workDir;
@@ -188,7 +192,7 @@ export class LiveSession {
       approve: (req) => this.#approve(req),
     });
     await defense.init({ task, trace });
-    const benv = await BrowserEnv.create(await this.#browser(), { origins: this.#servers.origins, trace });
+    const benv = await BrowserEnv.create(await this.#browser(), { origins: this.#servers.origins, trace, contextOptions: this.#contextOptions });
     const env = new AgentEnv({ browser: benv, defense, trace, task });
     this.#state = { task, scenario, trace, defense, benv, env, answer: '', planned };
     // The tabs are the user's browser, opened as the task's plan opens them,

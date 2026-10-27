@@ -30,8 +30,11 @@ export function descriptorHash({ description, inputSchema, annotations }) {
 }
 
 export class BrowserEnv {
-  static async create(browser, { origins, trace }) {
-    const context = await browser.newContext();
+  // `contextOptions` go to Playwright's newContext. The live demo's visible
+  // window passes `{ viewport: null }`, so pages take the window's real size
+  // instead of Playwright's fixed 1280×720; the matrix passes nothing.
+  static async create(browser, { origins, trace, contextOptions = {} }) {
+    const context = await browser.newContext(contextOptions);
     const env = new BrowserEnv(context, origins, trace);
     // Binding first, then the shim, so the shim can capture the binding.
     await context.exposeBinding('__webmcpTrace', (source, ev) => env.#onPageEvent(source.page, ev));

@@ -102,6 +102,8 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
     emit,
     standUrl: () => (server.listening ? `http://127.0.0.1:${server.address().port}` : null),
     ...(approvalTimeoutMs ? { approvalTimeoutMs } : {}),
+    // A visible window: pages follow its size when you resize it.
+    contextOptions: headless ? {} : { viewport: null },
   });
 
   // A request body: JSON, at most BODY_LIMIT bytes. Anything else is the
