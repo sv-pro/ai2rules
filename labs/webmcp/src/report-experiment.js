@@ -2,14 +2,7 @@
 // each defense. Computed from the rows, like RESULTS.md, and deterministic (no
 // timestamps), so a rerun diffs clean.
 
-const yes = (b) => (b ? 'yes' : '**no**');
-
-function attackCell(r) {
-  if (!r) return '';
-  if (r.status !== 'OK') return '**ERROR**';
-  if (r.attack_success) return '**succeeded**';
-  return r.stopped_by === 'not_triggered' ? 'no effect · `not_triggered`' : `stopped · \`${r.stopped_by}\``;
-}
+import { attackCell, yes } from './report.js';
 
 export const PAIRS = [['D0', 'D0+exfil'], ['D2', 'D2+exfil'], ['D3', 'D3+exfil']];
 

@@ -1,9 +1,15 @@
 // Experiment 1 of AI2-104: the host's mapping of the exfiltration add-on's
-// facts. The refusal carrier composes the add-on beside a defense, and D96
-// requires that composition only tightens.
+// facts, on both carriers. The refusal carrier composes the add-on beside a
+// defense, and D96 requires that composition only tightens. The label carrier
+// raises the argument's flow label, and the kernel decides.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
 import { withExfiltrationRefusal } from '../src/defenses/addon-exfiltration.js';
+import { createDefense } from '../src/defenses/index.js';
+import { Trace } from '../src/trace.js';
+import { TASKS } from '../src/tasks.js';
 
 const TASK = { sensitiveOrigins: ['crm'] };
 const SECRET = 'ZQ-5512-RTK-08';
@@ -71,4 +77,32 @@ test('the add-on learns only from what the sensitive origin returned, and the in
   await d.afterCall({ tool: { origin: 'shop', name: 'search_products' }, args: {} }, { ok: true, result: { hit: SECRET } }, { trace: t });
   assert.equal((await d.beforeCall(shopCall({ query: SECRET }), { trace: t })).decision, 'ALLOW', 'a shop result is not private');
   assert.deepEqual(inner.seen.map((c) => c.after ?? c.tool.name), ['search_products', 'search_products']);
+});
+
+// The label carrier, through the real kernel (`harness gate`): in the D3 world a
+// finding becomes the argument's flow label, which plain D3 never sends.
+test('D3+exfil carries the finding as a Private label on the argument; plain D3 leaves it to the ambient', async () => {
+  const task = TASKS['crm-gift'];
+  const workDir = path.join(os.tmpdir(), `webmcp-addon-test-${process.pid}`);
+  const read = { tool: { origin: 'crm', name: 'get_customer', regId: 't.0:2', descriptorHash: 'h' }, args: { id: 'C-1001' } };
+  const search = (query) => ({ tool: { origin: 'shop', name: 'search_products', regId: 't.1:1', descriptorHash: 'h' }, args: { query } });
+  const leak = [...SECRET].reverse().join('');
+  const verdicts = {};
+  for (const id of ['D3', 'D3+exfil']) {
+    const t = new Trace(`addon-${id}`);
+    const ctx = { task, trace: t };
+    const d = createDefense(id, { workDir });
+    await d.init({ task, trace: t });
+    assert.equal((await d.beforeCall(read, ctx)).decision, 'ALLOW');
+    await d.afterCall(read, { ok: true, result: { id: 'C-1001', notes: `code ${SECRET} only` } }, ctx);
+    verdicts[id] = await d.beforeCall(search(leak), ctx);
+  }
+  for (const v of Object.values(verdicts)) {
+    assert.equal(v.decision, 'DENY');
+    assert.equal(v.mechanism, 'flow:confidentiality');
+  }
+  assert.equal(verdicts.D3.flow.args.query, undefined, 'D3: the host has no label for this value, the ambient decides');
+  assert.equal(verdicts.D3.addon, undefined);
+  assert.equal(verdicts['D3+exfil'].flow.args.query, 'trusted/private', "the add-on's fact rode the label carrier");
+  assert.equal(verdicts['D3+exfil'].addon[0].form, 'reversed');
 });

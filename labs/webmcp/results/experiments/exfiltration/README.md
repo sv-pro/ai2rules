@@ -10,9 +10,10 @@ is the world's vocabulary (sinks), not a new ABI field.
 
 Run on `main` + this branch with `cli-harness 0.7.0`, 72 cells, 0 errors. Table:
 [`RESULTS.md`](RESULTS.md); rows: [`results.json`](results.json); traces: `traces/`.
-Rerun: `cd labs/webmcp && npm run experiment:exfil`. This is a snapshot: unlike
-`results/RESULTS.md`, CI does not rerun it. The add-on's own tests and the
-composition tests do run in CI.
+Rerun: `cd labs/webmcp && npm run experiment:exfil`. CI's `webmcp-lab` job reruns it
+beside the matrix and fails when these committed results drift, as it does for
+`results/RESULTS.md`. The add-on's own tests and the lab's carrier tests run there
+too.
 
 ## The setup
 

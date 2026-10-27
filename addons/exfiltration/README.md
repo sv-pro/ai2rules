@@ -30,9 +30,12 @@ is not a finding.
 - with separators removed;
 - reversed;
 - base64-encoded;
-- percent-encoded.
+- inside a percent-encoded or form-encoded argument, reported with the encoding in
+  front of the form (`percent_encoded+case_folded`).
 
-A paraphrase, a summary, a hash or any other transform is not recognised.
+A derived form shorter than 8 characters is dropped: the separator-stripped form of
+`1-2-3-4-5-6-7` would otherwise match any seven digits. A paraphrase, a summary, a
+hash or any other transform is not recognised.
 
 **Where its findings go.** The host maps each finding. In a world that declares flow
 sinks, a finding raises the argument's label to Private and the kernel's flow

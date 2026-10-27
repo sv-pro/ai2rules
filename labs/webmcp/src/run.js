@@ -106,7 +106,7 @@ async function main(rawArgv) {
   let partial = false; // a filtered run must not overwrite the canonical results
   if (argv[0] === '--cell') {
     const [scenario, defense] = argv.slice(1);
-    if (!scenario || !defense) throw new Error('usage: --cell <scenario|benign:task> <D0|D1|D2>');
+    if (!scenario || !defense) throw new Error(`usage: --cell <scenario|benign:task> <${[...DEFENSE_IDS, ...EXPERIMENT_DEFENSE_IDS].join('|')}>`);
     cells = [[scenario, defense]];
   } else {
     const only = argv.includes('--scenarios') ? argv[argv.indexOf('--scenarios') + 1].split(',') : null;
@@ -141,14 +141,14 @@ async function main(rawArgv) {
     // A `--scenarios` subset ran; leave the committed results.json / RESULTS.md
     // untouched so a partial run can never overwrite the canonical table.
     console.log('(partial run: canonical results not rewritten)');
-  } else if (experiment) {
+  } else if (experiment && argv[0] !== '--cell') {
     const meta = { harness: harnessVersion() };
     writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ lab: 'webmcp-attack-lab', experiment: 'AI2-104 exfiltration add-on', agent: 'CompromisedAgent', ...meta, rows }, null, 2) + '\n');
     writeFileSync(path.join(outDir, 'RESULTS.md'), renderExperiment(rows, meta));
-  } else if (argv[0] !== '--cell' && llm) {
+  } else if (argv[0] !== '--cell' && !experiment && llm) {
     writeFileSync(path.join(outDir, 'results-llm.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'LLMAgent', rows }, null, 2) + '\n');
     writeFileSync(path.join(outDir, 'RESULTS-LLM.md'), renderLlmResults(rows));
-  } else if (argv[0] !== '--cell') {
+  } else if (argv[0] !== '--cell' && !experiment) {
     const meta = { harness: harnessVersion(), ...policyProvenance() };
     writeFileSync(path.join(outDir, 'provenance.local.json'), JSON.stringify(runProvenance(chromiumVersion), null, 2) + '\n');
     writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'CompromisedAgent', ...meta, rows }, null, 2) + '\n');

@@ -50,6 +50,16 @@ test('a private value is found in every form the add-on documents', () => {
   }
   const b64NoPad = Buffer.from(secret).toString('base64').replace(/=+$/, '');
   assert.equal(g.inspect({ note: b64NoPad })[0]?.form, 'base64');
+  // Inside an encoded argument the encoding is reported in front of the form.
+  assert.equal(g.inspect({ q: secret.toLowerCase().replace(/-/g, '%2D') })[0]?.form, 'percent_encoded+case_folded');
+  assert.equal(g.inspect({ q: 'to=Blue+Heron+Freight' })[0]?.form, 'form_encoded');
+});
+
+test('a derived form shorter than minLength is dropped, so a dashed value does not match stray digits', () => {
+  const g = createExfiltrationGuard();
+  g.observe({ code: '1-2-3-4-5-6-7' }, { source: 'crm' });
+  assert.deepEqual(g.inspect({ note: 'order 1234567 please' }), [], 'the stripped form has 7 characters, under 8');
+  assert.equal(g.inspect({ note: 'code 1-2-3-4-5-6-7' })[0]?.form, 'exact');
 });
 
 test('values nested in an argument are inspected, one finding per argument', () => {

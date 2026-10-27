@@ -20,7 +20,11 @@
 //   text that merely shares a word with a private record.
 // - Forms. A fingerprint matches as is, case-folded, with separators removed,
 //   reversed, base64-encoded (with or without padding), or inside a
-//   percent-encoded argument. These are cheap transforms a model or an injected
+//   percent-encoded or form-encoded (`+` for a space) argument. A match inside
+//   an encoded argument is reported with the encoding in front of the form
+//   (`percent_encoded+case_folded`). A derived form shorter than `minLength`,
+//   such as the separator-stripped form of a heavily dashed value, is dropped.
+//   These are cheap transforms a model or an injected
 //   instruction applies to slip past an exact match. A transform not listed
 //   here, such as a paraphrase, a summary or a hash, is not recognised.
 
@@ -57,8 +61,9 @@ export function fingerprintsOf(value, { minLength = 8 } = {}) {
 }
 
 // The forms a fingerprint is looked for in, each checked against the view of
-// the argument text it belongs to.
-function formsOf(f) {
+// the argument text it belongs to. A form shorter than `minLength` would match
+// unrelated text (`1-2-3-4-5-6-7` strips to seven digits), so it is dropped.
+function formsOf(f, minLength) {
   const b64 = base64(f);
   return [
     { form: 'exact', view: 'raw', needle: f },
@@ -67,15 +72,23 @@ function formsOf(f) {
     { form: 'reversed', view: 'raw', needle: reverse(f) },
     { form: 'reversed', view: 'folded', needle: fold(reverse(f)) },
     { form: 'base64', view: 'raw', needle: b64.replace(/=+$/, '') },
-  ].filter((x) => x.needle.length > 0);
+  ].filter((x) => x.needle.length >= minLength);
 }
 
+const decode = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+
+// The argument as sent, then percent-decoded, then form-decoded (`+` is a
+// space in application/x-www-form-urlencoded). Each distinct one is a view.
 function viewsOf(text) {
-  let decoded = text;
-  try { decoded = decodeURIComponent(text); } catch { /* not percent-encoded */ }
-  const raws = decoded === text ? [text] : [text, decoded];
-  return raws.map((raw) => ({ raw, folded: fold(raw), stripped: strip(raw), percentEncoded: raw !== text }));
+  const views = [{ raw: text, encoding: null }];
+  const percent = decode(text);
+  if (percent !== text) views.push({ raw: percent, encoding: 'percent' });
+  const form = text.includes('+') ? decode(text.replace(/\+/g, ' ')) : text;
+  if (form !== text && form !== percent) views.push({ raw: form, encoding: 'form' });
+  return views.map((v) => ({ ...v, folded: fold(v.raw), stripped: strip(v.raw) }));
 }
+
+const formName = (encoding, form) => (!encoding ? form : form === 'exact' ? `${encoding}_encoded` : `${encoding}_encoded+${form}`);
 
 export function createExfiltrationGuard({ minLength = 8 } = {}) {
   // fingerprint -> { source, forms }
@@ -91,7 +104,7 @@ export function createExfiltrationGuard({ minLength = 8 } = {}) {
       let added = 0;
       for (const f of fingerprintsOf(value, { minLength })) {
         if (known.has(f)) continue;
-        known.set(f, { source, forms: formsOf(f) });
+        known.set(f, { source, forms: formsOf(f, minLength) });
         added += 1;
       }
       return added;
@@ -114,9 +127,7 @@ export function createExfiltrationGuard({ minLength = 8 } = {}) {
       for (const view of viewsOf(text)) {
         for (const [, entry] of known) {
           for (const { form, view: which, needle } of entry.forms) {
-            if (view[which].includes(needle)) {
-              return { form: view.percentEncoded && form === 'exact' ? 'percent_encoded' : form, source: entry.source };
-            }
+            if (view[which].includes(needle)) return { form: formName(view.encoding, form), source: entry.source };
           }
         }
       }
