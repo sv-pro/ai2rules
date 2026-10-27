@@ -52,14 +52,19 @@ From Linear (team **AI2**):
 - The latest `[Radar digest] …` issue (date and link).
 
 From the Radar routine (load `RemoteTrigger` with ToolSearch; skip this step if it is not
-available): `list` → the routine named **Flywheel Radar** → `list_runs` → the latest
-run's time and status.
+available): `list` → the routine named **Flywheel Radar** → whether it is enabled, then
+`list_runs` → the latest run's time and status. The run status alone says little: a Radar
+that stops on purpose (its canary tripped, `radar.md` missing, Linear down) still ends its
+session normally. The digest is the evidence that a pass happened.
 
 ## 2. Apply the rules
 
 Flag, in this order of severity:
 
-1. **Radar down:** no successful Radar run in the last 5 days, or the routine is disabled.
+1. **Radar down:** no `[Radar digest] …` issue created in the last 5 days (Radar files
+   one on every pass that reaches Linear), or the routine is disabled, or its latest run
+   failed. Name which, and when the digest is missing but runs succeed, say the routine
+   is running and stopping: its run log says why.
 2. **Waiting on the maintainer only:** a non-draft PR with green checks and no review
    decision; an issue labelled `decision`.
 3. **Untriaged:** `radar` findings in Backlog older than 7 days.

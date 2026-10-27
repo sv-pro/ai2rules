@@ -4340,8 +4340,10 @@ kernel change. The governed variant is AI2-108.
 
 **Context.** Radar (`docs/flywheel/radar.md`) is a Claude Code cloud routine that reads
 untrusted web content and files findings in Linear. Its first run went through the
-repository's PreToolUse hook 23 times and was governed by none of them: the environment
-has no setup script, so the shim found no `harness` binary and failed open (D37). Simply
+repository's PreToolUse hook 23 times, and almost certainly none of those calls was
+governed. The run log shows no setup script for the environment, and the shim looks for
+`harness` only at installer-owned paths a fresh cloud image has no reason to fill, so it
+fails open (D37). That is inferred from the log, not read from the hook answers. Simply
 installing the binary does not help. With `.claude/cc-world.yaml`, `cc-hook` allows the
 first WebFetch and then denies every later WebFetch, WebSearch and Bash call as
 `taint_invariant`. Before that it asks for approval on every Bash line, which a routine
@@ -4352,13 +4354,17 @@ is exactly what the taint floor forbids. The floor is code, not world data
 
 **Decision.**
 
-- **Radar is narrowed by the routine itself and says so.** The routine allows only Read,
-  Glob, Grep, WebFetch and WebSearch: no Bash, no Write, no Edit. Its Linear connector
+- **Radar is narrowed by the routine itself and says so.** The routine's deny list
+  (`disallowed_tools`) names Bash, Write, Edit, MultiEdit and NotebookEdit. Its allow
+  list (`allowed_tools`: Read, Glob, Grep, WebFetch, WebSearch) only pre-approves tools
+  and forbids nothing on its own: Linear, ToolSearch and PushNotification ran in the
+  first run without being on it. Its Linear connector
   permits five tools (`list_issues`, `get_issue`, `save_issue`, `save_comment`,
   `list_issue_labels`). The prompt has no path that writes to the repository: the
   pull-request fallback is gone, and when Linear is down the findings go to the run log.
-- **A canary checks it on every run.** Radar first tries one Bash call and one Write; if
-  either succeeds it files nothing and pushes an alarm. A widened routine is caught by
+- **A canary checks it on every run.** Radar first tries one Bash call, one Write and one
+  Edit; if any succeeds it files nothing and pushes an alarm. (MultiEdit and NotebookEdit
+  are denied beside them but not probed.) A widened routine is caught by
   the next run, not by an audit months later.
 - **The documentation does not claim the kernel governs Radar.** The Cadence section says
   in one line what limits it and links here.
@@ -4380,7 +4386,18 @@ is exactly what the taint floor forbids. The floor is code, not world data
 
 **Consequences.** Radar is as safe as its routine settings, and a person editing those
 settings can widen it without a PR. The canary turns that into a visible failure on the
-next run. The remaining risk is the one the routine cannot narrow: Radar reads all of
+next run, and Pulse's "Radar down" check reads the digest, not the run status, because a
+Radar that stops on purpose still ends its session normally. Two risks remain that the
+routine cannot narrow.
+
+The first is integrity. Only the prompt keeps Radar to creating Backlog findings:
+`save_issue` can edit the state, assignee, labels and description of any issue in team
+AI2. An injected page could rewrite an accepted finding, and that description later
+becomes the Engine's task. Until a create-only tool exists, the Engine treats a finding's
+text as data and works from what the maintainer confirmed when accepting it; AI2-108
+should replace `save_issue` with a scoped create-only capability.
+
+The second is confidentiality. Radar reads all of
 team AI2 in Linear and can reach the web, so private work in Linear could be sent out by
 an injected instruction through an allowlisted host. The environment's network
 allowlist bounds where it could go; AI2-108 is where the kernel takes this over, and it

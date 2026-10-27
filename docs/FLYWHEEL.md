@@ -56,7 +56,8 @@ looks.
 **The inbox rule.** Every automated phase ends in a pull request or in a Linear issue
 assigned to the maintainer, labelled `flywheel`. "A file appeared in a folder" is not an
 output: nobody watches folders, which is how findings sat in `1_discovery/` for three
-months.
+months. One exception: when Linear itself is down, Radar has nowhere else to write
+(D97), so its findings stay in the run log and the push names them.
 
 **Prompts live in the repository.** Each scheduled job is a one-line pointer: "follow
 `docs/flywheel/<phase>.md`". The prompt is in [`docs/flywheel/`](flywheel/), versioned and
@@ -98,9 +99,11 @@ missed Sunday runs on the next launch).
 
 **What limits Radar: the routine, not the kernel.** Radar reads untrusted web pages and
 then keeps fetching, which the kernel's taint floor forbids by design, so it is not run
-under `harness`. The routine allows only Read, Glob, Grep, WebFetch and WebSearch (no
-shell, no file writes), its Linear connector permits five tools, and a canary at the
-start of every run stops it if Bash or Write works ([D97](../DECISIONS.md)). Running it
+under `harness`. The routine denies Bash, Write, Edit, MultiEdit and NotebookEdit (its
+`disallowed_tools`; the allow list alone forbids nothing), its Linear connector permits
+five tools, and a canary at the start of every run stops it if Bash, Write or Edit works
+([D97](../DECISIONS.md)). `save_issue` can still edit any AI2 issue, so a finding's text
+is data to whoever picks it up. Running it
 under the kernel is AI2-108.
 
 **Network.** Cloud routines reach only the hosts allowlisted in their environment. Radar

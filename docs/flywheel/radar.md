@@ -35,11 +35,14 @@ routine's own settings enforces that (D97):
 
 1. Call the **Bash** tool with the command `echo RADAR-CANARY`.
 2. Call the **Write** tool to create `/tmp/radar-canary` containing `canary`.
+3. Read `README.md`, then call the **Edit** tool on it, replacing its first line with the
+   same line followed by ` <!-- radar-canary -->`.
 
-Both calls must be refused, or the tool must not be offered to you at all. Either counts
-as a pass; say which in your final message. If **either call succeeds**, stop: create
-nothing in Linear, send the push from step 6 as `Radar остановлен: рутине доступны Bash
-или Write, проверь allowed_tools (D97)`, and end by naming the tool that worked.
+All three calls must be refused, or the tool must not be offered to you at all. Either
+counts as a pass; say which in your final message. If **any call succeeds**, stop: create
+nothing in Linear, send the push from step 6 as `Radar остановлен: рутине доступны Bash,
+Write или Edit, проверь disallowed_tools (D97)`, and end by naming the tool that worked.
+(An edited `README.md` stays in this throwaway clone; nothing can push it.)
 
 ## 1. Know the project (5 minutes, not more)
 
@@ -73,7 +76,7 @@ example 2026-10-23 = `1792713600`). `{start}` is the same date as `YYYY-MM-DD`.
 
 | Source | How |
 |---|---|
-| Hacker News | `https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{unix_start}&query={q}` for q in: `prompt injection`, `MCP`, `AI agent security`, `Claude Code`, `coding agent`, `sandbox agent`, `tool poisoning` |
+| Hacker News | `https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{unix_start}&query={q}` for q in: `prompt injection`, `MCP`, `AI agent security`, `Claude Code`, `coding agent`, `sandbox agent`, `tool poisoning`, URL-encoded (`prompt%20injection`) |
 | arXiv | `https://export.arxiv.org/api/query?search_query=(cat:cs.CR OR cat:cs.AI OR cat:cs.SE) AND (abs:"prompt injection" OR abs:"tool use" OR abs:"LLM agent" OR abs:MCP OR abs:"coding agent")&sortBy=submittedDate&sortOrder=descending&max_results=60` (URL-encode it), keep entries inside the window |
 | GitHub | new projects only, matched on what they say about themselves: `https://api.github.com/search/repositories?q=(mcp OR agent OR llm) (security OR injection OR sandbox OR guardrail OR firewall OR policy) in:name,description,topics created:>{start}&sort=stars&order=desc&per_page=20`; also `https://api.github.com/search/repositories?q=topic:mcp-security created:>{start}`. Never `pushed:>` sorted by stars: that returns the biggest active repos that merely mention "agent". |
 | Blogs (RSS/Atom) | `https://simonwillison.net/tags/prompt-injection.atom`, `https://embracethered.com/blog/index.xml`, `https://blog.trailofbits.com/feed/`, `https://www.anthropic.com/engineering` (page), `https://genai.owasp.org/feed/` |
@@ -187,8 +190,9 @@ Close any open `[Radar digest] …` issue (state Done, one comment: "superseded 
 
 There is no other place to write: no shell, no files, no pull request (D97), and you do
 not improvise one. Put each finding's full issue body and the digest body in your final
-message, where the run log keeps them, send the push from step 6 as `Radar: Linear
-недоступен, находки в логе прогона`, and stop.
+message, where the run log keeps them, send the push from step 6 naming them, e.g.
+`Radar: Linear недоступен; в логе 2 находки: <short title>, <short title>`, and stop.
+This is the one place a Radar finding lives outside Linear (Cadence, the inbox rule).
 
 ## 6. Notify and finish
 
