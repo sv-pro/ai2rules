@@ -33,7 +33,7 @@ can be compared with the expected output below.
   tool. If it cannot, it uses its PowerShell tool instead, and step 4 shows
   no Bash call at all. In that case set `CLAUDE_CODE_GIT_BASH_PATH` as the
   [setup page](https://code.claude.com/docs/en/setup) describes, for example to
-  `C:\Program Files\Gitinash.exe`.
+  `C:\Program Files\Git\bin\bash.exe`.
 - Network access, for `npm install` and for one web fetch.
 
 ## 1. Install
