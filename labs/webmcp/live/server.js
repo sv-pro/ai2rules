@@ -39,6 +39,7 @@ if (process.env.WEBMCP_NO_DOTENV !== '1' && existsSync(DOTENV)) {
 // fetch (the bridge, the hook) and Chrome would refuse to connect to it.
 export const LIVE_PORT = Number(process.env.WEBMCP_LIVE_PORT ?? 4290);
 const SITES = ['crm', 'shop'];
+const BODY_LIMIT = 64 * 1024;
 
 function harnessVersion() {
   try { return execFileSync(harnessBin(), ['--version']).toString().trim(); } catch { return null; }
@@ -74,25 +75,42 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
   let relaunching = null;
   const currentBrowser = async () => {
     if (browser.isConnected()) return browser;
-    relaunching ??= launchVisible(headless).then((b) => { browser = b; relaunching = null; return b; });
+    // A failed launch is not remembered: the next request tries again.
+    relaunching ??= launchVisible(headless).then(
+      (b) => { browser = b; relaunching = null; return b; },
+      (err) => { relaunching = null; throw err; },
+    );
     return relaunching;
   };
   const clients = new Set();
-  let history = []; // the current session's events, replayed to a control room that connects late
+  // The current session's events, replayed to a control room that connects
+  // late. A world snapshot replaces the previous one (each is the whole world),
+  // and the rest is capped: a late control room needs the story, not every byte.
+  let history = [];
+  const HISTORY_LIMIT = 2000;
 
   const emit = (event, data) => {
     if (event === 'session' && data.fresh) history = [];
+    if (event === 'world') history = history.filter(([e]) => e !== 'world');
     history.push([event, data]);
+    if (history.length > HISTORY_LIMIT) history.splice(1, history.length - HISTORY_LIMIT);
     const line = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const res of clients) res.write(line);
   };
   const session = new LiveSession({ browser: currentBrowser, servers, workDir: path.join(os.tmpdir(), `webmcp-live-${process.pid}`), emit });
 
+  // A request body: JSON, at most BODY_LIMIT bytes. Anything else is the
+  // caller's error (400/413), not the stand's.
   const body = async (req) => {
     const chunks = [];
-    for await (const c of req) chunks.push(c);
+    let size = 0;
+    for await (const c of req) {
+      size += c.length;
+      if (size > BODY_LIMIT) throw Object.assign(new Error('request body too large'), { status: 413 });
+      chunks.push(c);
+    }
     const raw = Buffer.concat(chunks).toString('utf8');
-    return raw ? JSON.parse(raw) : {};
+    try { return raw ? JSON.parse(raw) : {}; } catch { throw Object.assign(new Error('request body is not JSON'), { status: 400 }); }
   };
   const json = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
   const page = (file) => async (_req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(await readFile(file)); };
@@ -177,12 +195,29 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
     },
   };
 
+  // Only the control room, the bridge and the hook may drive the stand. The
+  // agent's window is full of pages, the shop's compromised widget among them,
+  // and any page can send a "simple" cross-origin POST (text/plain, no
+  // preflight) to localhost. So: the Host must be this stand (no DNS
+  // rebinding), a POST must be application/json (a cross-origin page cannot send
+  // that without a preflight, which is never answered), and a browser's Origin,
+  // when sent, must be this stand's own.
+  const own = () => [`127.0.0.1:${server.address().port}`, `localhost:${server.address().port}`];
+  function refuse(req) {
+    if (!own().includes(req.headers.host)) return [403, 'unknown host'];
+    if (req.headers.origin && !own().map((h) => `http://${h}`).includes(req.headers.origin)) return [403, 'cross-origin request'];
+    if (req.method === 'POST' && !/^application\/json\s*(;|$)/i.test(req.headers['content-type'] ?? '')) return [415, 'POST bodies must be application/json'];
+    return null;
+  }
+
   const server = http.createServer(async (req, res) => {
+    const refused = refuse(req);
+    if (refused) return json(res, refused[0], { error: refused[1] });
     const url = new URL(req.url, `http://${req.headers.host}`);
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('not found'); }
     try { await route(req, res); } catch (err) {
-      if (!res.headersSent) json(res, 500, { error: String(err?.message ?? err) });
+      if (!res.headersSent) json(res, err?.status ?? 500, { error: String(err?.message ?? err) });
       else res.end();
     }
   });

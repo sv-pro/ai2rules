@@ -135,7 +135,7 @@ $('restart').onclick = () => fetch('/api/session', { method: 'POST', headers: { 
 $('hijacked').onclick = async () => {
   hijackedRunning = true;
   $('hijacked').disabled = true;
-  await fetch('/api/hijacked', { method: 'POST' });
+  await fetch('/api/hijacked', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
 };
 
 function renderSession(s) {

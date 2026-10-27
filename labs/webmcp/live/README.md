@@ -71,10 +71,21 @@ build. `WEBMCP_LIVE_CHANNEL=chrome|msedge` picks one outright.
 **What the host vouches for.** Under D3, after the agent reads the CRM, a value
 nobody vouched for takes the session's label, which is now private. The host
 vouches for what you typed: the hook hands each request to the stand, and an
-argument found in it (compared without case or punctuation) is labelled public,
-as is a small whole number. So Claude's search for "Tea Sampler" runs, and a query
-with the CRM record pasted into it does not. The panel lists your requests and
-the feed says when a value was vouched for.
+argument that is the same words as a run of words in it, in the same order, is
+labelled public. It must be written in a standard way: as typed, all lower case
+or all upper case, the words separated by single spaces or single hyphens
+throughout. So "Tea Sampler" and the shop's `TEA-SAMPLER` pass, and a query with
+the CRM record pasted into it does not; nor does a value padded with punctuation
+or written in mixed case, which could smuggle data in the characters a looser
+match ignores. A whole number is vouched for when it is 1 or appears in your
+request. The panel lists your requests and the feed says when a value was
+vouched for.
+
+**Who can drive the stand.** Only the control room, the bridge and the hook. The
+agent's window is full of pages, the compromised widget among them, so the stand
+refuses a request for another host, a browser request from another origin, and a
+POST that is not `application/json` (which a page cannot send cross-origin
+without a preflight the stand never answers).
 
 **The hijacked model** is the lab's CompromisedAgent: a script that drives the
 same tabs and obeys every instruction it reads. It follows a fixed plan for the

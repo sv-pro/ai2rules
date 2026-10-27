@@ -51,17 +51,27 @@ export function assistantTask(sensitive, { planned = false } = {}) {
 
 // The host's word on what the person typed into Claude Code (D95: the host
 // labels what the user typed as Trusted/Public itself). A string argument is
-// vouched for when it appears in one of their requests, compared without case,
-// spaces or punctuation; a small whole number (a quantity) is vouched for, since
-// it cannot carry a record. Everything else keeps whatever label it has, and an
+// vouched for when it is the same words as a run of words in one of their
+// requests, in the same order, written in one of a few standard ways: exactly
+// as typed, all lower case or all upper case, with the words separated by single
+// spaces or single hyphens throughout ("Tea Sampler", "TEA-SAMPLER"). A whole
+// number is vouched for when it is 1 (the default quantity) or appears in a
+// request. Each of those choices can carry a few bits at most, never a record;
+// extra punctuation, mixed separators or mixed case would carry more, so such a
+// value is not vouched for. Everything else keeps whatever label it has, and an
 // unlabelled value falls back to the session's label in the kernel.
-const squash = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const words = (s) => String(s).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+const STANDARD = /^[\p{L}\p{N}]+(?:([ -])[\p{L}\p{N}]+)*$/u;
+const runOf = (needle, hay) => hay.some((_, i) => needle.every((w, j) => hay[i + j] === w));
 export function vouchFor(prompts) {
   return (value) => {
-    if (typeof value === 'number') return Number.isInteger(value) && value >= 0 && value < 100;
-    if (typeof value !== 'string') return false;
-    const v = squash(value);
-    return v.length >= 2 && prompts.some((p) => squash(p).includes(v));
+    if (typeof value === 'number') return Number.isInteger(value) && (value === 1 || prompts.some((p) => words(p).includes(String(value))));
+    if (typeof value !== 'string' || !STANDARD.test(value)) return false;
+    if (new Set(value.match(/[ -]/g) ?? []).size > 1) return false;
+    const w = words(value);
+    if (w.join('').length < 2) return false;
+    return prompts.some((p) => runOf(w, words(p))
+      && (value === value.toLowerCase() || value === value.toUpperCase() || p.includes(value)));
   };
 }
 
@@ -79,6 +89,8 @@ export function declaredContracts(task) {
   }
   return out;
 }
+
+const PROMPT_LIMIT = 100;
 
 export class LiveSession {
   #browser;
@@ -131,16 +143,23 @@ export class LiveSession {
   addPrompt(prompt) {
     const text = String(prompt ?? '').trim();
     if (!text) return;
+    // The latest requests only: a demo is a few dozen, and the list goes to
+    // every control room with each new one. Trimmed in place, so a running
+    // session's vouching sees the same list.
     this.prompts.push(text);
+    if (this.prompts.length > PROMPT_LIMIT) this.prompts.splice(0, this.prompts.length - PROMPT_LIMIT);
     this.#emit('prompt', { prompts: this.prompts });
   }
 
   async #start(config, { openTabs, planned = false }) {
+    // Checked before anything changes: a bad switch is refused and the running
+    // session, and the stored settings, stay as they were.
+    const next = { ...this.config, ...config };
+    if (!POLICIES[next.policy]) throw Object.assign(new Error(`unknown policy ${next.policy}`), { status: 400 });
+    if (!WIDGETS[next.widget]) throw Object.assign(new Error(`unknown widget ${next.widget}`), { status: 400 });
     await this.#close();
-    this.config = { ...this.config, ...config };
+    this.config = next;
     const { policy, widget, sensitive } = this.config;
-    if (!POLICIES[policy]) throw new Error(`unknown policy ${policy}`);
-    if (!WIDGETS[widget]) throw new Error(`unknown widget ${widget}`);
     const scenario = await loadScenario(WIDGETS[widget].scenario);
     const task = assistantTask(sensitive, { planned });
     this.number += 1;
@@ -154,7 +173,7 @@ export class LiveSession {
     await defense.init({ task, trace });
     const benv = await BrowserEnv.create(await this.#browser(), { origins: this.#servers.origins, trace });
     const env = new AgentEnv({ browser: benv, defense, trace, task });
-    this.#state = { task, scenario, trace, defense, benv, env, answer: '' };
+    this.#state = { task, scenario, trace, defense, benv, env, answer: '', planned };
     // The tabs are the user's browser, opened as the task's plan opens them,
     // the way the lab opens them for a model (CONTRACTS.md §10).
     if (openTabs) {
@@ -178,11 +197,16 @@ export class LiveSession {
   // Before each of Claude's requests: a session to run it in, with its window
   // open. Closing the agent's window (a tab or the browser) ends the session; the
   // next request opens a new one, with the same switches, and the feed says so.
+  // The hijacked model's session is its own (its plan, no vouching for what
+  // was typed), so Claude's next request starts a new one too.
   async #ensure() {
-    if (this.#state && !this.#state.benv.isClosed()) return;
-    const reopened = Boolean(this.#state);
+    const s = this.#state;
+    if (s && !s.planned && !s.benv.isClosed()) return;
+    const why = !s ? null
+      : s.planned ? "The hijacked model's run was its own session, so Claude's request starts a new one, with the same switches."
+        : "The agent's window was closed, so this is a new session in a new window.";
     await this.#start({}, { openTabs: true });
-    if (reopened) this.#state.trace.write('note', { tone: 'warn', html: "The agent's window was closed, so this is a new session in a new window." });
+    if (why) this.#state.trace.write('note', { tone: 'warn', html: why });
   }
 
   // Test hook: the Playwright page of an origin's tab.
