@@ -79,7 +79,7 @@ resources:
   - id: feeds
     kind: feed
     provider: hacker-news-api, arxiv-cs.CR, rss
-    locator: docs/FLYWHEEL.md §1 (the cron radar is planned, not built)
+    locator: docs/FLYWHEEL.md Cadence; prompt docs/flywheel/radar.md (cloud routine, Mon + Thu)
     access: [{ via: web }]
 
 # ---------------------------------------------------------------- §2 knowledge
