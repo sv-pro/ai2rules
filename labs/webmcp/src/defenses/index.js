@@ -18,7 +18,6 @@ export const ADDON_INFO = {
     blurb: 'A separate package, outside the kernel. It remembers what a private site returned and spots it in a call to another site, as is or lightly disguised (other case, no dashes, reversed, base64, URL-encoded). With D3 its finding becomes a private label the kernel judges; with the others the host refuses the call.',
   },
 };
-export const ADDON_IDS = Object.keys(ADDON_INFO);
 
 // How the demo pages describe each defense, kept beside the code that builds it.
 export const DEFENSE_INFO = {

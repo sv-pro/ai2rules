@@ -294,6 +294,12 @@ events.addEventListener('record', (e) => {
     if (rec.label.endsWith('private')) ambient = rec.label;
     timeline.then(() => { renderAssigned(); renderDeclared(); });
   }
+  // Under D3 the exfiltration add-on's finding is a label the host raises on the
+  // argument before the kernel judges it: it belongs in the panel too.
+  if (rec.kind === 'verdict' && rec.flow && rec.addon?.length) {
+    assigned.push({ from: `the exfiltration add-on, for <code>${esc(rec.name)}</code> ${rec.addon.map((f) => `<code>${esc(f.argument)}</code>`).join(', ')}`, label: 'trusted/private', bound: rec.addon.length });
+    timeline.then(renderAssigned);
+  }
   if (rec.kind === 'verdict' && rec.flow?.vouched?.length) {
     const call = rec.name;
     assigned.push({ from: `your request, for <code>${esc(call)}</code> ${rec.flow.vouched.map((k) => `<code>${esc(k)}</code>`).join(', ')}`, label: 'trusted/public', bound: rec.flow.vouched.length });
