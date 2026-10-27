@@ -120,6 +120,11 @@ jobs:
         run: npm run matrix
       - name: The committed results still speak for the lab
         run: git diff --exit-code -- results
+      # The browser-extension spike (AI2-96): the kernel's WASM build, loaded as an
+      # unpacked MV3 extension in Chromium, must give the verdicts the native
+      # binary gave in the committed S5b traces above.
+      - name: Extension spike (WASM kernel in the browser)
+        run: npm run test:extension
 
   wasm:
     # `blog/public/vendor/harness-wasm/` is a build output committed to git so the

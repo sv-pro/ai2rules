@@ -1,0 +1,53 @@
+:root {
+  --bg: #f7f7f5;
+  --card: #ffffff;
+  --ink: #1d1f23;
+  --muted: #646a73;
+  --line: #e2e3e0;
+  --allow: #1f7a4d;
+  --allow-bg: #e6f4ec;
+  --deny: #b42318;
+  --deny-bg: #fdecea;
+  --absent: #5b5f66;
+  --absent-bg: #eceef1;
+  --accent: #2f5bd3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --card: #1e2125;
+    --ink: #e8e9eb;
+    --muted: #9aa0a8;
+    --line: #2e3237;
+    --allow: #5fd39a;
+    --allow-bg: #173327;
+    --deny: #ff8a80;
+    --deny-bg: #3a1b19;
+    --absent: #b3b8bf;
+    --absent-bg: #2a2e33;
+    --accent: #8aa8ff;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 12px; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, sans-serif; }
+h1 { font-size: 16px; margin: 0; }
+h1 span { font-weight: 400; color: var(--muted); }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
+header { margin-bottom: 10px; }
+.muted { color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.task { font-style: italic; margin: 0 0 6px; }
+.policy { display: block; padding: 3px 0; cursor: pointer; }
+button { margin-top: 8px; width: 100%; padding: 8px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: .6; cursor: progress; }
+ol { margin: 0; padding-left: 20px; }
+li { margin: 4px 0; word-break: break-word; }
+code { font: 12px ui-monospace, monospace; }
+.badge { display: inline-block; padding: 0 6px; border-radius: 4px; font: 600 11px/18px ui-monospace, monospace; margin-right: 4px; }
+.ALLOW { color: var(--allow); background: var(--allow-bg); }
+.DENY { color: var(--deny); background: var(--deny-bg); }
+.ABSENT { color: var(--absent); background: var(--absent-bg); }
+.injected { border-left: 3px solid var(--deny); padding-left: 6px; }
+.why { display: block; color: var(--muted); font-size: 12px; }
+.verdict-leak { color: var(--deny); font-weight: 600; }
+.verdict-safe { color: var(--allow); font-weight: 600; }

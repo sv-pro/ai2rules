@@ -181,12 +181,12 @@ the stochastic–deterministic border* — that unifies it with sibling projects
 | **M2** Live Agent | a real model drives the loop | ✅ done (E5–E6) |
 | **M3** Full Tool Surface | MCP, web, scoped capabilities, CLI/TUI | ✅ done (E7, E9) |
 | M4 Isolation & Hardening | sandbox + acceptance + benchmarks + authoring UI + tech blog + dogfooding | 🚧 E11, E12, E13 started; **E18 governance benchmark seed delivered**; E8, E10 planned |
-| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (643 KB wasm); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
+| M5 Interactive Advocacy | the real kernel in the reader's browser (WASM) + a TF-Playground-class visualization suite | 🚧 E14 engine done (790 KB wasm, `preview` + the runtime `gate` / `project`); structured `/playground` live on the blog; E15 suite (timeline / attack / graph visualizations) planned |
 
 **Done so far:**
 
 - **Typed flow contracts in the kernel (#151 / AI2-70, D95):** the taint is one integrity bit per session; it cannot say "private, but from a trusted place", so a world that reads a secret had to choose between losing every later benign write and leaking through a permitted read. Now a value carries a `FlowLabel` on two axes (integrity × confidentiality, a product lattice with join as its only operation — no declassify, no implicit Trusted/Public), an action may declare an opt-in `flow_contract` (an output floor, inherited arguments, per-argument sinks) that is part of its descriptor identity, and the kernel runs an independent confidentiality admission *before* the taint floor that no approval can override. The host carries the labels (`context.flow` on the gate ABI, additive in v1) and binds the returned `result` floor to the value it gets back. Proven on a vertical slice with counted effects: a private summary cannot be published by a trusted caller in a clean session (0 effects, before and after the human says yes) while a public body is published exactly once. Worlds without contracts keep identical decisions and identical manifest/descriptor/world hashes — pinned by test, by the benchmark diff gate and by the demo guard.
-- **WebMCP attack lab (#160 / AI2-83, `labs/webmcp/`):** 5 epic attacks plus 3 variants against no defense (D0), a rule-based per-call baseline (D1) and ai2rules (D2, the real kernel via `harness project` / `harness gate`), under a deterministic compromised agent. Attacks are judged from effects only, and D1 and the tasks were frozen before any attack. Result: D1 lets 6 of 8 through; D2 lets 2 through (S3b, handler tampering in a shared realm; S5b, exfiltration through a permitted read tool) and loses utility wherever per-session taint fires. A fourth column, D3, runs on the kernel's typed flow contracts (D95; AI2-70 / #151): the compiled world declares the CRM read a Trusted/Private source and every other-origin argument a Public sink, the adapter carries the gate ABI's `context.flow` sidecar, and the kernel's `confidentiality_violation` does the refusing. It recovers all the utility D2 loses, closes S5b, and regresses nothing — its cost is that labels are whole-result and bound by digest, so after a private read any value the adapter cannot vouch for is refused, a transformed secret and a fresh benign input alike. Independently verified (`labs/webmcp/verification/`), plus a real-model column. `cd labs/webmcp && npm run matrix`; CI job `webmcp-lab` fails on result drift.
+- **WebMCP attack lab (#160 / AI2-83, `labs/webmcp/`):** 5 epic attacks plus 3 variants against no defense (D0), a rule-based per-call baseline (D1) and ai2rules (D2, the real kernel via `harness project` / `harness gate`), under a deterministic compromised agent. Attacks are judged from effects only, and D1 and the tasks were frozen before any attack. Result: D1 lets 6 of 8 through; D2 lets 2 through (S3b, handler tampering in a shared realm; S5b, exfiltration through a permitted read tool) and loses utility wherever per-session taint fires. A fourth column, D3, runs on the kernel's typed flow contracts (D95; AI2-70 / #151): the compiled world declares the CRM read a Trusted/Private source and every other-origin argument a Public sink, the adapter carries the gate ABI's `context.flow` sidecar, and the kernel's `confidentiality_violation` does the refusing. It recovers all the utility D2 loses, closes S5b, and regresses nothing — its cost is that labels are whole-result and bound by digest, so after a private read any value the adapter cannot vouch for is refused, a transformed secret and a fresh benign input alike. Independently verified (`labs/webmcp/verification/`), plus a real-model column. `cd labs/webmcp && npm run matrix`; CI job `webmcp-lab` fails on result drift. A browser-extension spike (AI2-96, `labs/webmcp/extension/`) runs the same S5b cell in a real browser with the kernel compiled to WASM: an MV3 content script owns `document.modelContext`, the service worker holds the kernel and the D3 adapter state, and the verdicts equal the native traces (`npm run test:extension`).
 - **E0 — Foundations & Core Contracts:** the Cargo workspace, the language-neutral
   contracts in `harness-types`, the sealed `IntentIR` / `IRBuilder` in
   `world-kernel`, the `BuildError` taxonomy, and CI.
@@ -308,11 +308,16 @@ the stochastic–deterministic border* — that unifies it with sibling projects
   (D22). A spike compiles the whole stack to `wasm32` and a Node smoke test proves
   the kernel decides client-side (clean `fetch_web` → Allow, tainted → Deny by
   `taint_invariant`). This is the engine under the visualization suite (M5 / E15):
-  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **643 KB**) ships on the
+  a size-optimized `--target web` bundle (`wasm-opt -Oz`, **790 KB**) ships on the
   blog at **`/playground`**, where a structured `KernelPlayground` editor — preset +
   Clean/Tainted switch + per-tool toggles — sorts every tool live into
   ALLOWED / ASK / DENIED / ABSENT buckets, all decided by the real kernel in-browser.
-  Remaining E14 work: the native↔wasm fidelity CI guard (E14.4).
+  The engine also exports the runtime `gate` and `project` (the `harness gate` /
+  `harness project` wire operations, D96), which the WebMCP browser-extension spike
+  runs as its kernel. The one-kernel parity suite now holds the WASM `gate` to the
+  CLI on every pathless case, and the freshness check pins the committed artifact's
+  `gate` / `project` answers. Remaining E14 work: the full golden-vector suite run
+  against the wasm32 build itself in CI (E14.4).
 
 - **Gate ABI — the host-neutral integration port (D24):** `harness gate --world
   <manifest>` reads a `GateRequest` JSON on stdin and writes the kernel's verdict
@@ -475,7 +480,7 @@ docs/                 architecture (harness-architecture.md is canonical; one-ke
   benchmarks/ecc/             planned external target: ECC + AgentShield on the host-hook path (E18.14)
 scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
-labs/webmcp/          WebMCP attack lab: 5 attacks × D0/D1/D2, CompromisedAgent, Playwright (#160 / AI2-83; Node sub-project)
+labs/webmcp/          WebMCP attack lab: 5 attacks × D0/D1/D2, CompromisedAgent, Playwright (#160 / AI2-83; Node sub-project); extension/ = the MV3 spike (AI2-96)
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
 CLAUDE.md             Claude Code pointer → AGENTS.md

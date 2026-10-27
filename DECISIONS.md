@@ -4244,3 +4244,56 @@ inference the kernel pretends to make. The default world is unchanged (no rollou
 governance benchmark and every demo marker are byte-identical, and the WASM artifact is
 rebuilt because `deny_unknown_fields` means a pre-D95 engine cannot even parse a
 contracted manifest.
+
+## D96 — The kernel in a browser extension: the WASM engine exports the runtime gate, and the governor lives in the service worker
+
+**Date:** 2026-10-27. **Task:** AI2-96. **Crates:** `harness-wasm` (exports), `cli-harness`
+(tests only). **Spike:** `labs/webmcp/extension/` (design note `DESIGN.md`).
+
+**Decision.**
+
+- **One WASM artifact exports the runtime operations.** `harness-wasm` adds
+  `gate(world_yaml, request_json)` and `project(world_yaml, request_json)` beside
+  `preview`. They are thin shims over `harness_preview::{gate, project}`, the functions the
+  `harness gate` / `harness project` CLI calls, compiling the manifest on every call as
+  `--world` is read on every invocation. A malformed input returns `{ok:false, error}` where
+  the CLI exits non-zero. The engine does not resolve `roots` against a filesystem it does
+  not have, so its parity scope is the pathless worlds.
+- **Parity is enforced three ways.** The one-kernel suite gains entry point (g), the WASM
+  `gate` compiled for the host, held to the CLI's *full* response on `cases.yaml` and
+  `flow-cases.yaml`; `tests/project.rs` does the same for `project`. The freshness check
+  pins the committed wasm32 artifact's `gate` / `project` answers and fails if the exports
+  are missing. The extension spike's test compares the verdicts of the wasm32 kernel, in
+  Chromium, with the native lab traces for the same cell.
+- **In the extension, the governor is the service worker.** A MAIN-world content script at
+  document_start owns `document.modelContext` and runs each page handler only after the
+  worker's verdict; the worker holds the kernel and all adapter state (registry, pins,
+  taint, flow ambient, value labels), persisted to `chrome.storage.session` because MV3
+  stops idle workers. The agent (the side panel's hijacked model today) is a client of that
+  worker, not part of it.
+
+**Alternatives rejected.**
+
+- *A second, extension-only WASM build:* keeps the playground's download at 660 KB, but
+  doubles the artifacts to keep fresh and gives the two front ends room to diverge — the
+  failure D22 and finding #18 exist to prevent. The cost of one artifact is +130 KB (+52 KB
+  gzipped) on the playground.
+- *Running the native `harness` binary behind native messaging for every mode:* one kernel
+  binary everywhere, but no zero-setup demo — the point of the extension is that nothing is
+  installed besides it. Native messaging stays the transport for the Claude Code mode, as a
+  relay; the decision still happens in the extension.
+- *Gating in the agent's broker only (before asking the page to execute):* simpler, but only
+  the extension's own agent would be governed. Wrapping `registerTool` puts the gate in
+  front of the handler, so a browser-provided agent calling through native WebMCP meets it
+  too, for every tool registered through the hook.
+- *Keeping the adapter state in the side panel:* the panel can be closed mid-session, and
+  calls from an agent other than the panel's would then have no governor.
+- *Re-implementing the lab's worlds in the extension:* the build evaluates the lab's own
+  `worldYaml(task)` and ships the YAML as data; a test holds them equal.
+
+**Consequences.** The playground's artifact grows to 790 KB. The extension is only as strong
+as an in-page hook can be. It cannot protect a handler's environment from same-origin script
+(S3b), it cannot see tools a hostile same-origin script registers around it under native
+WebMCP, and it sees no non-WebMCP action: clicks, typing, Claude in Chrome. Worlds ship
+inside the package (Chrome Web Store's remote-code rule), so a policy change is an extension
+update.
