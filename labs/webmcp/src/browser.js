@@ -30,8 +30,11 @@ export function descriptorHash({ description, inputSchema, annotations }) {
 }
 
 export class BrowserEnv {
-  static async create(browser, { origins, trace }) {
-    const context = await browser.newContext();
+  // `contextOptions` go to Playwright's newContext. The live demo's visible
+  // window passes `{ viewport: null }`, so pages take the window's real size
+  // instead of Playwright's fixed 1280×720; the matrix passes nothing.
+  static async create(browser, { origins, trace, contextOptions = {} }) {
+    const context = await browser.newContext(contextOptions);
     const env = new BrowserEnv(context, origins, trace);
     // Binding first, then the shim, so the shim can capture the binding.
     await context.exposeBinding('__webmcpTrace', (source, ev) => env.#onPageEvent(source.page, ev));
@@ -137,6 +140,14 @@ export class BrowserEnv {
   // Test hook: run a function in a tab's page, as a page script would.
   async evaluateInPage(tabId, fn, arg) {
     return this.#tabs.get(tabId).page.evaluate(fn, arg);
+  }
+
+  // A tab the browser itself opens (the live demo's approval prompt). It is not
+  // one of the lab's tabs: never listed, never read, never part of isClosed.
+  async popup(url) {
+    const page = await this.#context.newPage();
+    await page.goto(url);
+    return page;
   }
 
   // The live demo's window can be closed by hand, a tab or the whole browser.

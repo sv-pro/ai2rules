@@ -9,6 +9,7 @@
 // the policy, the widget and the sensitive sites once, at its start, the same
 // way a cell does. Switching mid-session would hand D2/D3 a history they never
 // saw.
+import { randomUUID } from 'node:crypto';
 import { BrowserEnv } from '../src/browser.js';
 import { AgentEnv } from '../src/env.js';
 import { CompromisedAgent } from '../src/agent/compromised.js';
@@ -87,6 +88,12 @@ export function declaredContracts(task) {
 
 const PROMPT_LIMIT = 100;
 
+// The agent's sensitive actions (AI2-99): under D2/D3 the world marks them
+// `approval_required`, the kernel answers ASK, and the person decides. Only an
+// ASK reaches the person; every refusal stays the kernel's.
+export const APPROVALS = ['shop__submit_order'];
+const APPROVAL_TIMEOUT_MS = 120_000;
+
 export class LiveSession {
   #browser;
   #servers;
@@ -100,14 +107,26 @@ export class LiveSession {
   // UserPromptSubmit hook. Kept across sessions: a switch does not unsay it.
   prompts = [];
   #state = null; // { task, scenario, trace, defense, benv, env, answer }
+  #approvals = new Map(); // id -> a question waiting for the person
+  #nextApproval = 0;
+  #caller = 'The agent';
+  #standUrl;
+  #approvalTimeout;
+  #contextOptions;
 
   // `browser`: a Playwright browser, or a function returning one (the stand's,
-  // which relaunches the window when it was closed).
-  constructor({ browser, servers, workDir, emit }) {
+  // which relaunches the window when it was closed). `standUrl`: where the
+  // stand serves its approval page, opened as a tab of the browser's own.
+  // `contextOptions`: for the browser context of each session (the visible
+  // window takes its pages' size from the window itself).
+  constructor({ browser, servers, workDir, emit, standUrl = () => null, approvalTimeoutMs = APPROVAL_TIMEOUT_MS, contextOptions = {} }) {
+    this.#contextOptions = contextOptions;
     this.#browser = typeof browser === 'function' ? browser : () => browser;
     this.#servers = servers;
     this.#workDir = workDir;
     this.#emit = emit;
+    this.#standUrl = standUrl;
+    this.#approvalTimeout = approvalTimeoutMs;
   }
 
   // Every operation runs one at a time: Claude's calls, a restart, a hijacked
@@ -132,6 +151,9 @@ export class LiveSession {
   }
 
   start(config = {}, { openTabs = true } = {}) {
+    // A question still waiting holds the session's lock: answer it as cancelled
+    // first, or the switch would wait for it.
+    this.#settleAll('cancelled');
     return this.#serial(() => this.#start(config, { openTabs }));
   }
 
@@ -164,9 +186,14 @@ export class LiveSession {
     // `fresh`: the control room clears its feed; everything after belongs here.
     this.#emit('session', { ...this.describe(), fresh: true });
     trace.write('cell_start', { scenario: scenario.id, task: task.id, defense: policy });
-    const defense = createDefense(policy, { workDir: this.#workDir, vouch: planned ? null : vouchFor(this.prompts) });
+    const defense = createDefense(policy, {
+      workDir: this.#workDir,
+      vouch: planned ? null : vouchFor(this.prompts),
+      approvals: APPROVALS,
+      approve: (req) => this.#approve(req),
+    });
     await defense.init({ task, trace });
-    const benv = await BrowserEnv.create(await this.#browser(), { origins: this.#servers.origins, trace });
+    const benv = await BrowserEnv.create(await this.#browser(), { origins: this.#servers.origins, trace, contextOptions: this.#contextOptions });
     const env = new AgentEnv({ browser: benv, defense, trace, task });
     this.#state = { task, scenario, trace, defense, benv, env, answer: '', planned };
     // The tabs are the user's browser, opened as the task's plan opens them,
@@ -184,6 +211,7 @@ export class LiveSession {
   }
 
   async #close() {
+    this.#settleAll('cancelled');
     const s = this.#state;
     this.#state = null;
     if (s) await s.benv.close().catch(() => {});
@@ -204,6 +232,11 @@ export class LiveSession {
     if (why) this.#state.trace.write('note', { tone: 'warn', html: why });
   }
 
+  // Test hook: the current session's trace records.
+  records() {
+    return this.#state ? [...this.#state.trace.records] : [];
+  }
+
   // Test hook: the Playwright page of an origin's tab.
   pageOf(origin) {
     const s = this.#state;
@@ -212,8 +245,15 @@ export class LiveSession {
 
   // ---- what Claude Code sees, through the bridge ----
 
+  // While a question waits for the person, it holds the session's lock (the
+  // call cannot finish without the answer). Listing and reading only look, so
+  // they run beside it rather than wait for the person.
+  #readOnly(fn) {
+    return this.#approvals.size ? fn() : this.#serial(fn);
+  }
+
   tools() {
-    return this.#serial(async () => {
+    return this.#readOnly(async () => {
       await this.#ensure();
       const { env } = this.#state;
       const listed = await env.listTools();
@@ -222,7 +262,7 @@ export class LiveSession {
   }
 
   readPage(origin) {
-    return this.#serial(async () => {
+    return this.#readOnly(async () => {
       await this.#ensure();
       const { env } = this.#state;
       if (!env.tabByOrigin.has(origin)) return { ok: false, text: `No open tab for origin: ${origin}` };
@@ -237,6 +277,7 @@ export class LiveSession {
     return this.#serial(async () => {
       await this.#ensure();
       const { env } = this.#state;
+      this.#caller = 'Claude';
       if (origin && env.tabByOrigin.has(origin)) env.focus(origin);
       const res = await env.callTool(name, args ?? {}, { by: 'llm', agent: 'claude-code', tool_origin: origin ?? null });
       this.#emitWorld();
@@ -247,8 +288,10 @@ export class LiveSession {
   // ---- the hijacked model, from the control room ----
 
   runHijacked() {
+    this.#settleAll('cancelled');
     return this.#serial(async () => {
       await this.#start({}, { openTabs: false, planned: true });
+      this.#caller = 'The hijacked model';
       const { task, scenario, env, trace } = this.#state;
       const plan = scenario.plan ? scenario.plan(task.plan) : task.plan;
       try {
@@ -259,6 +302,88 @@ export class LiveSession {
       this.#emitWorld();
       this.#emit('hijacked_done', this.status());
     });
+  }
+
+  // ---- the person's approval (AI2-99) ----
+
+  // The host's approval UI, as the defense calls it on an ASK. The question
+  // opens as a tab of the browser's own, served by the stand on its own origin,
+  // so no page script (the compromised widget among them) can read or answer
+  // it. It is answered there or in the control room; no answer in time is a no.
+  #approve({ action, origin, tool, args }) {
+    // Unguessable: the id is all the approval tab and its POST carry.
+    const id = `A-${++this.#nextApproval}-${randomUUID()}`;
+    return new Promise((resolve) => {
+      const entry = { id, action, origin, tool, args, who: this.#caller, asked: Date.now(), resolve, page: null };
+      entry.timer = setTimeout(() => this.#settle(id, 'timeout'), this.#approvalTimeout);
+      this.#approvals.set(id, entry);
+      this.#emit('approval', this.#shown(entry, 'pending'));
+      const url = this.#standUrl();
+      const s = this.#state;
+      if (url && s) {
+        s.benv.popup(`${url}/approve?id=${encodeURIComponent(id)}`).then((page) => {
+          if (this.#approvals.has(id)) entry.page = page;
+          else page.close().catch(() => {});
+        }, () => {});
+      }
+    });
+  }
+
+  #settle(id, answer) {
+    const e = this.#approvals.get(id);
+    if (!e) return false;
+    this.#approvals.delete(id);
+    clearTimeout(e.timer);
+    e.page?.close().catch(() => {});
+    const s = this.#state;
+    const tabId = s?.env.tabByOrigin.get(e.origin);
+    if (tabId) s.benv.page(tabId)?.bringToFront().catch(() => {});
+    this.#emit('approval', this.#shown(e, answer));
+    e.resolve(answer);
+    return true;
+  }
+
+  #settleAll(answer) {
+    for (const id of [...this.#approvals.keys()]) this.#settle(id, answer);
+  }
+
+  #shown(e, state) {
+    return { id: e.id, action: e.action.replace('__', '/'), origin: e.origin, tool: e.tool, args: e.args, who: e.who, asked: e.asked, state };
+  }
+
+  answerApproval(id, allow) {
+    return this.#settle(String(id), allow === true ? 'allowed' : 'denied');
+  }
+
+  approval(id) {
+    const e = this.#approvals.get(String(id));
+    return e ? this.#shown(e, 'pending') : null;
+  }
+
+  pendingApprovals() {
+    return [...this.#approvals.values()].map((e) => this.#shown(e, 'pending'));
+  }
+
+  // ---- the person's own actions in the pages (AI2-99) ----
+
+  // What the page's UI did for the person, as the lab servers saw it. Not a
+  // tool call: no defense judges it, and the feed shows it as theirs.
+  onPerson({ origin, method, path, query, status }) {
+    const s = this.#state;
+    if (!s) return;
+    const st = this.#servers.state();
+    let what = `${method} ${path}`;
+    if (origin === 'shop' && path === '/api/products') what = `searched the shop for “${query.q ?? ''}”`;
+    else if (origin === 'shop' && path === '/api/cart' && method === 'POST') what = status === 200 ? `added ${st.shop.cart.at(-1)?.sku ?? 'an item'} to the cart` : 'tried to add an item to the cart';
+    else if (origin === 'shop' && path.startsWith('/api/cart/') && method === 'DELETE') what = status === 200 ? 'removed an item from the cart' : 'tried to remove an item from the cart';
+    else if (origin === 'shop' && path === '/api/order') {
+      const o = st.shop.orders.at(-1);
+      what = status === 200 && o ? `placed order ${o.id}, shipping to ${o.ship_to}` : 'tried to place an order';
+    } else if (origin === 'crm' && path.startsWith('/api/customers/')) what = `opened customer ${decodeURIComponent(path.split('/')[3] ?? '')} in the CRM`;
+    else if (origin === 'crm' && path === '/api/customers') what = 'listed the CRM customers';
+    else if (method === 'GET') return; // the UI refreshing what it shows
+    s.trace.write('person', { origin, what });
+    this.#emitWorld();
   }
 
   // ---- what the control room shows ----
@@ -283,7 +408,7 @@ export class LiveSession {
     this.#emit('world', {
       searches: st.shop.searches,
       cart: st.shop.cart,
-      orders: st.shop.orders.map((o) => ({ id: o.id, ship_to: o.ship_to, items: o.items, redirected: o.ship_to !== SHOP_ACCOUNT.address })),
+      orders: st.shop.orders.map((o) => ({ id: o.id, ship_to: o.ship_to, items: o.items, redirected: o.ship_to !== SHOP_ACCOUNT.address, by: o.by ?? null })),
       attacker: st.attacker.log.map((h) => ({ path: h.path ?? null, body: h.body ?? h })),
       status: this.status(),
     });

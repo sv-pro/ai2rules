@@ -80,6 +80,11 @@
 
   .step.warn { color: var(--warn); }
   .step.bad { color: var(--bad); }
+  .step.person { font-size: 14px; }
+  .ask { margin-top: 8px; font-size: 14px; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--card, transparent); }
+  .ask.no { border-left-color: var(--warn); }
+  .step.person::before { background: #2f8f5b; }
+  .tag.you { background: #2f8f5b; color: #fff; margin: 0 6px 0 0; }
   .step.bad::before { background: var(--bad); }
   nav.top { display: flex; gap: 4px; padding: 12px 24px 0; flex-wrap: wrap; }
   nav.top a { color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 14px; }

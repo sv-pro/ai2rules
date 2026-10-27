@@ -38,8 +38,10 @@ const files = {
       },
     },
   }, null, 2) + '\n',
-  // The hook hands each request to the stand, so the host can vouch for the
-  // words typed (live/prompt-hook.js); it prints nothing and never blocks.
+  // UserPromptSubmit hands each request to the stand, so the host can vouch for
+  // the words typed (live/prompt-hook.js). SessionStart starts a new session on
+  // the stand when a new chat starts (live/session-hook.js), so the feed starts
+  // clean with it. Both print nothing and never block.
   '.claude/settings.json': JSON.stringify({
     enableAllProjectMcpServers: true,
     permissions: { allow: ['mcp__webmcp'] },
@@ -51,6 +53,13 @@ const files = {
           // written: the command runs through a shell, on Windows too.
           command: `node "${path.join(HERE, 'prompt-hook.js').replaceAll('\\', '/')}"`,
           timeout: 5,
+        }],
+      }],
+      SessionStart: [{
+        hooks: [{
+          type: 'command',
+          command: `node "${path.join(HERE, 'session-hook.js').replaceAll('\\', '/')}"`,
+          timeout: 10,
         }],
       }],
     },
