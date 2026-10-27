@@ -162,6 +162,21 @@ test('the prompt hook hands the request to the stand and prints nothing', async 
   assert.equal(live.session.prompts.length, before + 1);
 });
 
+test('a new chat in Claude Code starts a new session on the stand; resuming one does not', async () => {
+  const hook = (source) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(LAB_ROOT, 'live', 'session-hook.js')], { env: { ...process.env, WEBMCP_LIVE_URL: live.url } });
+    let stdout = '';
+    child.stdout.on('data', (c) => { stdout += c; });
+    child.on('close', (code) => resolve({ code, stdout }));
+    child.stdin.end(JSON.stringify({ hook_event_name: 'SessionStart', source }));
+  });
+  const n = live.session.number;
+  for (const source of ['clear', 'startup']) assert.deepEqual(await hook(source), { code: 0, stdout: '' });
+  assert.equal(live.session.number, n + 2);
+  for (const source of ['resume', 'compact']) await hook(source);
+  assert.equal(live.session.number, n + 2);
+});
+
 test('setup writes the bridge, the settings and the hook into a fresh folder', async () => {
   const dir = path.join(mkdtempSync(path.join(os.tmpdir(), 'webmcp-live-setup-')), 'demo');
   const code = await new Promise((resolve) => spawn(process.execPath, [path.join(LAB_ROOT, 'live', 'setup.js'), dir], { stdio: 'ignore' }).on('close', resolve));
@@ -171,6 +186,7 @@ test('setup writes the bridge, the settings and the hook into a fresh folder', a
   const settings = JSON.parse(readFileSync(path.join(dir, '.claude', 'settings.json'), 'utf8'));
   assert.ok(settings.permissions.allow.includes('mcp__webmcp'));
   assert.ok(settings.hooks.UserPromptSubmit[0].hooks[0].command.includes('prompt-hook.js'));
+  assert.ok(settings.hooks.SessionStart[0].hooks[0].command.includes('session-hook.js'));
 });
 
 test('closing the agent\'s window starts a new session in a new window on the next request', async () => {

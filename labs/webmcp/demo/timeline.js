@@ -52,7 +52,10 @@ const TRIGGER = {
 
 // `list` is the <ol> to draw into. Each record is queued and drawn in order;
 // with `paced()` true, a pause follows the records worth narrating.
-export function createTimeline({ list, canary, paced = () => false, onDrawn = () => {} }) {
+// The feed runs oldest first, newest last. It follows the newest step while
+// the reader is at the end of the page; once they scroll up to read, it stops
+// moving under them and calls `onBehind` (a page can offer "jump to newest").
+export function createTimeline({ list, canary, paced = () => false, onDrawn = () => {}, onBehind = () => {} }) {
   let current = null; // the latest call's card; its verdict and execution attach to it
   // A tool withdrawn and registered again under the same name in the same
   // document: the second is a different registration, though it looks the same.
@@ -70,11 +73,14 @@ export function createTimeline({ list, canary, paced = () => false, onDrawn = ()
 
   // A call card carries its time in its own title line.
   function addStep(cls, html, { ownStamp = false } = {}) {
+    // Measured before the step is added: was the reader at the end?
+    const atEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 120;
     const li = document.createElement('li');
     li.className = `step ${cls}`;
     li.innerHTML = (ownStamp ? '' : stamp(at)) + html;
     list.appendChild(li);
-    li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (atEnd) li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    else onBehind();
     return li;
   }
 

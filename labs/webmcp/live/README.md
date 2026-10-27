@@ -28,7 +28,9 @@ npm run live:setup                       # makes ~/webmcp-live for Claude Code (
 
 `live:setup` writes three files into a folder outside any repository: `.mcp.json`
 (the bridge as a project MCP server), `.claude/settings.json` (enables it, lets
-its tools run without prompting, and adds a `UserPromptSubmit` hook) and
+its tools run without prompting, and adds two hooks: `UserPromptSubmit` hands
+each request to the stand, `SessionStart` starts a new stand session when a new
+chat starts or you `/clear`) and
 `CLAUDE.md` (the assistant's role: use only the page tools). Claude Code needs no
 API key: it is your usual Claude.
 
@@ -183,6 +185,7 @@ Widget *Honest*, policy D3, the CRM private. `/clear` in Claude Code.
 | `session.js` | `runCell` taken apart: the lab's BrowserEnv, AgentEnv, defenses and oracle around one live session |
 | `mcp-bridge.js` | The stdio MCP server Claude Code starts; forwards every request to the stand |
 | `prompt-hook.js` | The `UserPromptSubmit` hook: hands each request to the stand; prints nothing, never blocks |
+| `session-hook.js` | The `SessionStart` hook: a new chat (or `/clear`) starts a new stand session, so the feed starts clean |
 | `setup.js` | Makes the Claude Code folder |
 | `overlay.js` | The banner in the agent's window, kept outside `<body>` so the agent never reads it |
 | `approve.html` | The approval prompt, a tab of the stand's own in the agent's window |

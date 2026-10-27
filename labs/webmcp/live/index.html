@@ -18,6 +18,9 @@
   .sites label { margin-right: 14px; }
   .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
   .agent p { margin: 0 0 8px; }
+  .feedhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .feedhead h2 { margin: 0; }
+  #newest { position: fixed; right: 24px; bottom: 24px; display: none; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
   .approval { margin-top: 12px; border: 2px solid var(--warn); border-radius: 10px; padding: 10px 12px; }
   .approval pre { margin: 6px 0 0; }
   .session { font-size: 13px; color: var(--muted); }
@@ -72,14 +75,16 @@
     </div>
     <div class="panel">
       <div class="session" id="sessionLine"></div>
-      <div class="buttons"><button id="restart" class="secondary">New session, same settings</button></div>
+
     </div>
   </section>
   <section>
     <div class="panel">
-      <h2>What the agent does</h2>
+      <div class="feedhead"><h2>What the agent does</h2><button id="restart" class="secondary" title="A new session with the same switches: the feed, the labels and the result start over">Clear and start over</button></div>
+      <p class="hint">Oldest first, newest at the bottom. A new chat in Claude Code (or <code>/clear</code>) starts a new session, and the feed starts clean.</p>
       <p id="empty" class="empty">Waiting for the agent. Ask Claude something, or run the hijacked model.</p>
       <ol id="steps"></ol>
+      <button id="newest">↓ Newest</button>
     </div>
   </section>
   <aside>
@@ -113,7 +118,18 @@ let ambient = null;
 let tainted = false;
 let hijackedRunning = false;
 
-const timeline = createTimeline({ list: $('steps'), canary: CANARY, paced: () => hijackedRunning && $('slow').checked, onDrawn: () => { $('empty').style.display = 'none'; } });
+const timeline = createTimeline({
+  list: $('steps'),
+  canary: CANARY,
+  paced: () => hijackedRunning && $('slow').checked,
+  onDrawn: () => { $('empty').style.display = 'none'; },
+  onBehind: () => { $('newest').style.display = 'block'; },
+});
+// "Jump to newest": shown when a step arrives while the reader is scrolled up.
+$('newest').onclick = () => { $('steps').lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' }); $('newest').style.display = 'none'; };
+window.addEventListener('scroll', () => {
+  if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 120) $('newest').style.display = 'none';
+});
 
 function radios(el, name, items, value) {
   el.innerHTML = items.map((it) => `<label class="choice"><input type="radio" name="${name}" value="${it.id}" ${it.id === value ? 'checked' : ''}>
