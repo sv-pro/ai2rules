@@ -48,6 +48,11 @@ harness demo                      # decision-only proof: 5 cases through the rea
 harness demo --story law-firm     # the same kind of proof as a story, for non-engineers; no init needed
 ```
 
+**Trying it on a clean machine, or reproducing it for us?** Follow
+[`docs/reproduction/QUICKSTART.md`](docs/reproduction/QUICKSTART.md): 15 minutes,
+pinned to 0.7.0, with the expected output of every step and a real Claude Code
+session refused by the kernel next to an ungoverned one that is not.
+
 Published as [`ai2rules-harness`](https://www.npmjs.com/package/ai2rules-harness) —
 **no install script.** The binary ships in a per-platform package that npm
 resolves by `os`/`cpu`. Downloading the npm packages requires network access;
