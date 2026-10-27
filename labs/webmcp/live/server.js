@@ -135,7 +135,8 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
     },
     'POST /api/approval': async (req, res) => {
       const { id, allow } = await body(req);
-      json(res, session.answerApproval(id, allow) ? 200 : 404, { answered: true });
+      const answered = session.answerApproval(id, allow);
+      json(res, answered ? 200 : 404, { answered });
     },
     'GET /replay': page(path.join(DEMO, 'index.html')),
     'GET /replay/api/info': async (_req, res) => json(res, 200, await replay.info()),
@@ -229,6 +230,10 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
   }
 
   const server = http.createServer(async (req, res) => {
+    // No page may frame the stand: an invisible frame of the approval tab over a
+    // shop button would turn the person's next click into "Allow".
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
     const refused = refuse(req);
     if (refused) return json(res, refused[0], { error: refused[1] });
     const url = new URL(req.url, `http://${req.headers.host}`);

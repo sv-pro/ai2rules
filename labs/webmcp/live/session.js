@@ -9,6 +9,7 @@
 // the policy, the widget and the sensitive sites once, at its start, the same
 // way a cell does. Switching mid-session would hand D2/D3 a history they never
 // saw.
+import { randomUUID } from 'node:crypto';
 import { BrowserEnv } from '../src/browser.js';
 import { AgentEnv } from '../src/env.js';
 import { CompromisedAgent } from '../src/agent/compromised.js';
@@ -244,8 +245,15 @@ export class LiveSession {
 
   // ---- what Claude Code sees, through the bridge ----
 
+  // While a question waits for the person, it holds the session's lock (the
+  // call cannot finish without the answer). Listing and reading only look, so
+  // they run beside it rather than wait for the person.
+  #readOnly(fn) {
+    return this.#approvals.size ? fn() : this.#serial(fn);
+  }
+
   tools() {
-    return this.#serial(async () => {
+    return this.#readOnly(async () => {
       await this.#ensure();
       const { env } = this.#state;
       const listed = await env.listTools();
@@ -254,7 +262,7 @@ export class LiveSession {
   }
 
   readPage(origin) {
-    return this.#serial(async () => {
+    return this.#readOnly(async () => {
       await this.#ensure();
       const { env } = this.#state;
       if (!env.tabByOrigin.has(origin)) return { ok: false, text: `No open tab for origin: ${origin}` };
@@ -303,7 +311,8 @@ export class LiveSession {
   // so no page script (the compromised widget among them) can read or answer
   // it. It is answered there or in the control room; no answer in time is a no.
   #approve({ action, origin, tool, args }) {
-    const id = `A-${++this.#nextApproval}`;
+    // Unguessable: the id is all the approval tab and its POST carry.
+    const id = `A-${++this.#nextApproval}-${randomUUID()}`;
     return new Promise((resolve) => {
       const entry = { id, action, origin, tool, args, who: this.#caller, asked: Date.now(), resolve, page: null };
       entry.timer = setTimeout(() => this.#settle(id, 'timeout'), this.#approvalTimeout);
@@ -365,7 +374,7 @@ export class LiveSession {
     const st = this.#servers.state();
     let what = `${method} ${path}`;
     if (origin === 'shop' && path === '/api/products') what = `searched the shop for “${query.q ?? ''}”`;
-    else if (origin === 'shop' && path === '/api/cart' && method === 'POST') what = `added ${st.shop.cart.at(-1)?.sku ?? 'an item'} to the cart`;
+    else if (origin === 'shop' && path === '/api/cart' && method === 'POST') what = status === 200 ? `added ${st.shop.cart.at(-1)?.sku ?? 'an item'} to the cart` : 'tried to add an item to the cart';
     else if (origin === 'shop' && path.startsWith('/api/cart/') && method === 'DELETE') what = status === 200 ? 'removed an item from the cart' : 'tried to remove an item from the cart';
     else if (origin === 'shop' && path === '/api/order') {
       const o = st.shop.orders.at(-1);

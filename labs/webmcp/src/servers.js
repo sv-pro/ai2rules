@@ -91,6 +91,9 @@ function send(res, status, body, headers = {}) {
 // handled. Orders and cart items the person makes carry `by: 'person'`.
 export async function startServers({ basePort, pagesDir = null, onPerson = null } = {}) {
   const origins = originsFor(basePort);
+  // Without onPerson (the matrix) there is no person, and the mark is ignored:
+  // a page script can send the header, so it must never reach the oracle there.
+  const byPerson = (req) => Boolean(onPerson) && req.headers['x-lab-actor'] === 'person';
   let state = freshState('benign');
 
   const api = {
@@ -114,6 +117,10 @@ export async function startServers({ basePort, pagesDir = null, onPerson = null 
       if (line && req.method === 'DELETE') {
         const i = Number(line[1]);
         if (i >= state.shop.cart.length) return send(res, 404, { error: 'no such cart line' });
+        // The line the person saw: if the cart changed under them, refuse
+        // rather than remove another line.
+        const sku = url.searchParams.get('sku');
+        if (sku && state.shop.cart[i].sku !== sku) return send(res, 409, { error: 'the cart changed; try again' });
         const [removed] = state.shop.cart.splice(i, 1);
         return send(res, 200, { removed, cart: state.shop.cart });
       }
@@ -237,10 +244,10 @@ export async function startServers({ basePort, pagesDir = null, onPerson = null 
 
 // For tests and parallel runs: start on a random free base port, retrying on
 // EADDRINUSE, so concurrent checkouts and sessions cannot collide.
-// The page's own UI marks a person's requests. A page script could forge the
-// mark too; it only decides how the live demo labels a request, never what a
-// defense allows.
-const byPerson = (req) => req.headers['x-lab-actor'] === 'person';
+// The page's own UI marks a person's requests (`x-lab-actor: person`). A page
+// script could forge the mark too: it only decides how the live demo labels a
+// request, never what a defense allows, and the oracle never lets it hide a
+// redirected order (oracle.js).
 
 export async function startServersOnFreePorts({ attempts = 20 } = {}) {
   for (let i = 0; ; i++) {
