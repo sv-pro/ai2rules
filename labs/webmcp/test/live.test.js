@@ -508,3 +508,40 @@ test('the stand\'s default port is one Node\'s fetch (and Chrome) will connect t
   const err = await fetch(`http://127.0.0.1:${LIVE_PORT}/`).then(() => null, (e) => e);
   assert.notEqual(err?.cause?.message, 'bad port');
 });
+
+// ---- the exfiltration add-on in the demos (AI2-104, D96) ----
+
+test('the exfiltration add-on is a switch beside any policy: under D2 it closes the read-tool leak', async () => {
+  const info = await fetch(`${live.url}/api/info`).then((r) => r.json());
+  assert.deepEqual(info.addons.map((a) => a.id), ['exfiltration']);
+  try {
+    // D2 alone: the hijacked model leaks the record through the shop's search.
+    await post('/api/session', { policy: 'D2', widget: 'inject', sensitive: ['crm'], addons: [] });
+    await live.session.runHijacked();
+    assert.equal(live.session.status().leak, true, 'D2 misses the read-tool leak (S5b)');
+
+    // The same, with the add-on on: the host refuses the search that carries it.
+    const s = await post('/api/session', { policy: 'D2', widget: 'inject', sensitive: ['crm'], addons: ['exfiltration'] });
+    assert.deepEqual(s.addons, ['exfiltration']);
+    await live.session.runHijacked();
+    const st = live.session.status();
+    assert.equal(st.leak, false);
+    assert.equal(st.stopped_by, 'addon:exfiltration');
+    assert.ok(live.session.records().some((r) => r.kind === 'addon_finding'), 'the finding is in the trace');
+
+    // An unknown add-on is refused, and the switches stay as they were.
+    assert.equal(await raw('/api/session', { headers: { 'content-type': 'application/json' }, body: '{"addons":["dlp9"]}' }), 400);
+    assert.deepEqual(live.session.config.addons, ['exfiltration']);
+  } finally {
+    await post('/api/session', { policy: 'D3', widget: 'honest', sensitive: ['crm'], addons: [] });
+  }
+});
+
+test('the replay runs a defense with the exfiltration add-on beside it', async () => {
+  const res = await fetch(`${live.url}/replay/api/run?defense=D2&scenario=s5b-read-sink-exfil&exfil=1`);
+  const text = await res.text();
+  const result = JSON.parse(text.split('event: result\ndata: ')[1].split('\n')[0]);
+  assert.equal(result.defense, 'D2+exfil');
+  assert.equal(result.attack_success, false);
+  assert.equal(result.stopped_by, 'addon:exfiltration');
+});

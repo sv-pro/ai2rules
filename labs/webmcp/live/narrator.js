@@ -12,6 +12,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { CANARY } from '../src/canary.js';
+import { ADDON_INFO } from '../src/defenses/index.js';
 
 const TIMEOUT_MS = 120_000;
 const MAX_LINES = 300;
@@ -41,6 +42,8 @@ export function describeRecord(rec) {
       return null;
     case 'ingest': return rec.what === 'page_text' ? `the agent reads the page text of ${rec.origin}` : null;
     case 'list': return `the agent lists its tools: ${rec.visible.length} visible, ${rec.registered.length - rec.visible.length} hidden by the defense`;
+    case 'addon_observe': return `the exfiltration add-on remembers what ${rec.source} returned (${rec.fingerprints} values to watch for)`;
+    case 'addon_finding': return `the exfiltration add-on finds a private value from ${rec.findings[0]?.source} in argument ${rec.findings.map((f) => `${f.argument} (${f.form})`).join(', ')} of ${rec.tool}`;
     case 'pin': return `ai2rules pins ${rec.action.replace('__', '/')} to registration ${rec.regId}`;
     case 'taint': return 'ai2rules marks the session tainted';
     case 'flow_label': return `ai2rules labels what came from ${rec.source === 'user_task' ? "the user's request" : rec.source} ${rec.label}`;
@@ -71,6 +74,7 @@ function rawSnapshotText(snap) {
   return [
     `Session ${snap.session.number}, started ${hhmmss(snap.session.started)}.`,
     `Policy: ${snap.session.policy} (${snap.policy.name}: ${snap.policy.blurb})`,
+    `Add-ons on: ${snap.session.addons?.length ? snap.session.addons.map((a) => `${a} (${ADDON_INFO[a]?.blurb ?? ''})`).join('; ') : 'none'}`,
     `Widget on the shop page: ${snap.widget.name} (${snap.widget.blurb})`,
     `Sites marked as holding private data: ${snap.session.sensitive.join(', ') || 'none'}`,
     `Requests the person typed to Claude: ${snap.session.prompts.length ? snap.session.prompts.map((p) => `"${short(p, 200)}"`).join('; ') : 'none'}`,

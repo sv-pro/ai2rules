@@ -20,6 +20,7 @@
       <select id="scenario"></select>
       <h2>Defense</h2>
       <div id="defenses"></div>
+      <div id="addons"></div>
       <div class="buttons">
         <button id="run">Run</button>
         <button id="runAll" class="secondary">Run all four</button>
@@ -80,14 +81,23 @@ function renderControls() {
   $('scenario').innerHTML = INFO.scenarios.map((s) => `<option value="${s.id}">${esc(`${s.short} · ${s.name}`)}</option>`).join('');
   $('defenses').innerHTML = INFO.defenses.map((d, i) => `<label class="defense"><input type="radio" name="defense" value="${d.id}" ${i === 0 ? 'checked' : ''}>
     <span class="name">${d.id} · ${esc(d.name)}</span><span class="blurb">${esc(d.blurb)}</span></label>`).join('');
+  $('addons').innerHTML = (INFO.addons ?? []).map((a) => `<label class="defense addon"><input type="checkbox" id="addon-${a.id}">
+    <span class="name">+ ${esc(a.name)}</span><span class="blurb">${esc(a.blurb)}</span></label>`).join('');
+  $('addon-exfiltration')?.addEventListener('change', renderCompare);
   $('scenario').onchange = () => { renderStory(); renderCompare(); };
   $('footer').textContent = `Kernel: ${INFO.harness ?? 'not found'} · the agent is the lab's deterministic CompromisedAgent: it obeys every instruction it reads, so what is measured is what the execution layer lets through`;
 }
 
+// The add-on is part of a run's identity: D2 and D2 with the add-on are two rows.
+const exfilOn = () => Boolean($('addon-exfiltration')?.checked);
+const runKey = (scenario, defense, exfil) => `${scenario}|${defense}${exfil ? '+exfil' : ''}`;
+
 function renderCompare() {
   const sc = $('scenario').value;
-  $('compare').querySelector('tbody').innerHTML = INFO.defenses.map((d) => {
-    const r = results.get(`${sc}|${d.id}`);
+  const exfil = exfilOn();
+  $('compare').querySelector('tbody').innerHTML = INFO.defenses.map((d0) => {
+    const d = { ...d0, name: exfil ? `${d0.name} + exfiltration add-on` : d0.name };
+    const r = results.get(runKey(sc, d.id, exfil));
     if (!r) return `<tr><td>${d.id} ${esc(d.name)}</td><td colspan="3" style="color:var(--muted)">not run yet</td></tr>`;
     if (r.status !== 'OK') return `<tr><td>${d.id} ${esc(d.name)}</td><td colspan="3" class="bad">lab error</td></tr>`;
     const leak = r.attack_success ?? r.leak_or_effect_without_attack;
@@ -127,16 +137,17 @@ function showResult(row) {
 
 function runOne(defense) {
   const scenario = $('scenario').value;
+  const exfil = exfilOn();
   $('empty').style.display = 'none';
   timeline.reset();
   $('result').className = '';
   return new Promise((resolve) => {
     const finish = (row) => timeline.then(() => {
       showResult(row);
-      if (row.status === 'OK' || row.status === 'ERROR') results.set(`${scenario}|${defense}`, row);
+      if (row.status === 'OK' || row.status === 'ERROR') results.set(runKey(scenario, defense, exfil), row);
       renderCompare();
     }).then(resolve);
-    const es = new EventSource(`${API}/run?defense=${defense}&scenario=${encodeURIComponent(scenario)}`);
+    const es = new EventSource(`${API}/run?defense=${defense}&scenario=${encodeURIComponent(scenario)}${exfil ? '&exfil=1' : ''}`);
     es.addEventListener('record', (e) => timeline.push(JSON.parse(e.data)));
     es.addEventListener('result', (e) => {
       es.close();

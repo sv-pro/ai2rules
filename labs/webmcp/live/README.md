@@ -66,6 +66,12 @@ build. `WEBMCP_LIVE_CHANNEL=chrome|msedge` picks one outright.
   CONTRACTS.md §8.2; closing it is browser-side work, outside these defenses).
 - **Policy:** D0 none, D1 rule-based guard, D2 ai2rules (projection, pinning,
   taint), D3 ai2rules with value labels instead of the taint.
+- **Add-ons:** the exfiltration add-on (`addons/exfiltration/`, AI2-101), on
+  beside any policy, never part of the kernel (D96). It remembers what a private
+  site returned and spots it in a call to another site, as is or lightly
+  disguised. Under D3 its finding becomes a private label the kernel judges; under
+  D0, D1 and D2 the host refuses the call (`addon:exfiltration`). The feed shows
+  what it remembered and what it found.
 - **Sites that hold private data:** what D2 taints on and D3 labels from. The
   labels panel shows the flow contracts D3 compiles from it, exactly as the kernel
   reads them.
@@ -168,6 +174,10 @@ Defaults: widget *Honest*, policy D3, the CRM private.
    shows the account code `ACCT-7Q4M-2291-ZK` inside a search query. Repeat with
    D2: it still leaks (a search is a read, and the taint stops only writes), and
    the gift is not ordered (the taint stops the order too).
+   **Then tick the exfiltration add-on**, still D2, and run again: the injected
+   search is refused by the add-on, not the kernel ("this call carries private
+   data the session read"), and nothing leaks. The gift is still not ordered: the
+   add-on closes the leak, not D2's lost utility. Untick it before act 5.
 5. **Labels.** Policy D3, run it again. The labels panel shows the CRM read
    labelled private and the session label turning private; the injected search
    is refused as `confidentiality_violation`; the gift is ordered.
