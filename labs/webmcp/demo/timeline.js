@@ -21,7 +21,14 @@ export const MECHANISM = {
 export const mech = (m) => !m ? '' : MECHANISM[m] ?? (m.startsWith('rule:') ? `guard rule ${m.slice(5)}` : m);
 
 // The wall-clock time a record was streamed (`at`), when the server sent one.
-export const clock = (at) => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '';
+// HH:MM:SS in local time, the same in every locale (the live narrator cites
+// steps by this text).
+const two = (n) => String(n).padStart(2, '0');
+export const clock = (at) => {
+  if (!at) return '';
+  const d = new Date(at);
+  return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+};
 const stamp = (at) => at ? `<time class="at" datetime="${new Date(at).toISOString()}">${clock(at)}</time>` : '';
 
 export function esc(s) {

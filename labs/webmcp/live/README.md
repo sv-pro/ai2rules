@@ -124,6 +124,27 @@ what the agent may do.
   compromised widget runs in the shop's document) can read the question or click
   *Allow*. A browser would draw it in its own UI for the same reason.
 
+## The narrator
+
+**Explain what happened**, on the feed, asks a model to read the current session
+and explain it to the audience: the setup, what the agent and you did, what the
+defense decided and why (by mechanism or kernel rule), what reached the outside
+world, and the bottom line. It cites moments as `[hh:mm:ss]`; click one to mark
+those steps in the feed. *EN* / *RU* picks the language. It runs only when you
+press it.
+
+- **Who answers.** The installed Claude Code first: `claude -p` with no tools, no
+  MCP servers and only your user settings, in an empty temporary folder, on your
+  own subscription (no key). Without it, the Claude API with `ANTHROPIC_API_KEY`
+  from the environment or the lab's `.env`. With neither, the box says what is
+  missing.
+- **What it reads.** A snapshot the stand builds: the switches, every step with
+  the time it reached the control room, what you typed, what the servers
+  received, waiting questions and the oracle's result. The model sees nothing
+  else and runs no tool.
+- **What it is not.** A summary, labelled as one. The verdicts in the feed are
+  the kernel's and the result is the oracle's; the narrator only describes them.
+
 ## The script (about 6 minutes)
 
 Defaults: widget *Honest*, policy D3, the CRM private.
@@ -194,6 +215,7 @@ request.
 | `session.js` | `runCell` taken apart: the lab's BrowserEnv, AgentEnv, defenses and oracle around one live session |
 | `mcp-bridge.js` | The stdio MCP server Claude Code starts; forwards every request to the stand |
 | `prompt-hook.js` | The `UserPromptSubmit` hook: hands each request to the stand; prints nothing, never blocks |
+| `narrator.js` | The narrator: the session snapshot as text, the prompt, and who answers (Claude Code, then the Claude API) |
 | `session-hook.js` | The `SessionStart` hook: a new chat (or `/clear`) starts a new stand session, so the feed starts clean |
 | `setup.js` | Makes the Claude Code folder |
 | `overlay.js` | The banner in the agent's window, kept outside `<body>` so the agent never reads it |
