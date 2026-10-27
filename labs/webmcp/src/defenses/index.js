@@ -17,7 +17,7 @@ export const DEFENSE_INFO = {
   D0: { name: 'No defense', blurb: 'Every tool call the agent makes runs.' },
   D1: { name: 'Rule-based guard', blurb: 'Per-call allow and deny rules, the kind many products ship today.' },
   D2: { name: 'ai2rules kernel', blurb: "The agent sees only its task's tools, and the broker remembers which registration each one is. After it reads CRM data the session is tainted, and writes and external actions are refused." },
-  D3: { name: 'ai2rules kernel + flow labels', blurb: 'The same, with flow labels instead of the taint: after the session reads the CRM, the kernel refuses any value it cannot vouch for from reaching another site, through any tool. The task\'s own inputs still go through.' },
+  D3: { name: 'ai2rules kernel + flow labels', blurb: 'The same, with flow labels instead of the taint: after the session reads the CRM, the kernel refuses any value it cannot vouch for from reaching another site, through any tool. The task\'s own inputs, and what the person typed, still go through.' },
 };
 
 export function createDefense(id, { workDir, vouch, approvals, approve }) {
