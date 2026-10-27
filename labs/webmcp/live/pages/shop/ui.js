@@ -19,7 +19,7 @@
     // Read without the mark: refreshing the view is not something the person did.
     const { cart } = await (await fetch('/api/cart')).json();
     $('cart').innerHTML = cart.length
-      ? cart.map((i) => `<li><span>${esc(i.sku)} × ${esc(i.qty)}</span><span>${i.by === 'person' ? 'you' : 'the agent'}</span></li>`).join('')
+      ? cart.map((i, n) => `<li><span>${esc(i.sku)} × ${esc(i.qty)}</span><span class="who">${i.by === 'person' ? 'you' : 'the agent'}<button class="remove" data-line="${n}" title="Remove from the cart" aria-label="Remove ${esc(i.sku)} from the cart">×</button></span></li>`).join('')
       : '<li>Empty.</li>';
   }
 
@@ -39,6 +39,16 @@
     try {
       await call('/api/cart', { method: 'POST', body: JSON.stringify({ sku, qty: 1 }) });
       say(`Added ${sku}.`);
+      showCart();
+    } catch (err) { say(String(err.message)); }
+  });
+
+  $('cart').addEventListener('click', async (e) => {
+    const line = e.target?.dataset?.line;
+    if (line === undefined) return;
+    try {
+      const { removed } = await call(`/api/cart/${line}`, { method: 'DELETE' });
+      say(`Removed ${removed.sku}.`);
       showCart();
     } catch (err) { say(String(err.message)); }
   });

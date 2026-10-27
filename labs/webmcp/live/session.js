@@ -366,6 +366,7 @@ export class LiveSession {
     let what = `${method} ${path}`;
     if (origin === 'shop' && path === '/api/products') what = `searched the shop for “${query.q ?? ''}”`;
     else if (origin === 'shop' && path === '/api/cart' && method === 'POST') what = `added ${st.shop.cart.at(-1)?.sku ?? 'an item'} to the cart`;
+    else if (origin === 'shop' && path.startsWith('/api/cart/') && method === 'DELETE') what = status === 200 ? 'removed an item from the cart' : 'tried to remove an item from the cart';
     else if (origin === 'shop' && path === '/api/order') {
       const o = st.shop.orders.at(-1);
       what = status === 200 && o ? `placed order ${o.id}, shipping to ${o.ship_to}` : 'tried to place an order';

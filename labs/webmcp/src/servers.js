@@ -108,6 +108,15 @@ export async function startServers({ basePort, pagesDir = null, onPerson = null 
         return send(res, 200, { cart: state.shop.cart });
       }
       if (url.pathname === '/api/cart' && req.method === 'GET') return send(res, 200, { cart: state.shop.cart });
+      // Remove one cart line by its position. Only the live demo's UI calls this
+      // (no shop tool does), so the matrix never reaches it.
+      const line = url.pathname.match(/^\/api\/cart\/(\d+)$/);
+      if (line && req.method === 'DELETE') {
+        const i = Number(line[1]);
+        if (i >= state.shop.cart.length) return send(res, 404, { error: 'no such cart line' });
+        const [removed] = state.shop.cart.splice(i, 1);
+        return send(res, 200, { removed, cart: state.shop.cart });
+      }
       if (url.pathname === '/api/order' && req.method === 'POST') {
         const b = (await readBody(req)) ?? {};
         if (state.shop.cart.length === 0) return send(res, 400, { error: 'cart is empty' });

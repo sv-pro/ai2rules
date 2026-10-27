@@ -347,9 +347,13 @@ test("the person's own actions in the pages are theirs: in the feed, not judged,
   const asPerson = (p, init = {}) => fetch(`${shop}${p}`, { ...init, headers: { 'x-lab-actor': 'person' } });
   await asPerson('/api/products?q=mug');
   await asPerson('/api/cart', { method: 'POST', body: JSON.stringify({ sku: 'BLUE-MUG', qty: 1 }) });
+  await asPerson('/api/cart', { method: 'POST', body: JSON.stringify({ sku: 'BLUE-MUG', qty: 1 }) });
+  await asPerson('/api/cart/1', { method: 'DELETE' }); // a line added twice by mistake
   await asPerson('/api/order', { method: 'POST', body: '{}' });
   const said = live.session.records().filter((r) => r.kind === 'person').map((r) => r.what);
-  assert.deepEqual(said, ['searched the shop for “mug”', 'added BLUE-MUG to the cart', 'placed order O-1, shipping to 12 Elm St, Springfield']);
+  assert.deepEqual(said, ['searched the shop for “mug”', 'added BLUE-MUG to the cart', 'added BLUE-MUG to the cart', 'removed an item from the cart', 'placed order O-1, shipping to 12 Elm St, Springfield']);
+  assert.equal(live.session.status().evidence.length, 0);
+  assert.equal((await (await fetch(`${shop}/api/cart`)).json()).cart.length, 0, 'the order took the one remaining line');
   assert.equal(live.session.records().filter((r) => r.kind === 'verdict').length, 0, 'no defense judged any of it');
   assert.deepEqual(live.session.status().evidence, [], "the person's own order is not an attack effect");
 });
