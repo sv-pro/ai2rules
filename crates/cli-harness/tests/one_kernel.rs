@@ -14,6 +14,8 @@
 //!   (f) `harness agy-hook` — the Antigravity CLI PreToolUse contract, fed the
 //!       host's real payload shape (camelCase envelope + PascalCase argument
 //!       keys), so the adapter's shape translation is inside the parity claim
+//!   (g) the WASM engine's `gate` export (`harness-wasm`, compiled for the
+//!       host) — full-response parity with (b), here and on the flow cases
 //!
 //! Plus the classifier-consistency test pinning the D36 `command_classes`
 //! pattern lists byte-identical across every shipped host manifest.
@@ -50,6 +52,16 @@ fn gate_in_process(world: &harness_types::CompiledWorld, request: &Value) -> Val
     let req: harness_preview::GateRequest =
         serde_json::from_value(request.clone()).expect("request deserializes");
     serde_json::to_value(harness_preview::gate(world, &req)).expect("response serializes")
+}
+
+/// (g) The WASM engine's `gate` export (`crates/harness-wasm`), compiled for the
+/// host: the world as manifest YAML, the request as JSON text, exactly what the
+/// browser build receives. The browser has no filesystem, so the engine never
+/// resolves `roots` paths; the pathless case sets are its parity scope.
+fn gate_wasm(world: &Path, request: &Value) -> Value {
+    let yaml = std::fs::read_to_string(world).expect("read world");
+    serde_json::from_str(&harness_wasm::gate(&yaml, &request.to_string()))
+        .expect("WASM gate response json")
 }
 
 /// (b)/(d) The `harness gate` CLI: one GateRequest on stdin → GateResponse on stdout.
@@ -274,6 +286,11 @@ fn every_entry_point_agrees_with_the_in_process_kernel() {
         assert_eq!(code, 0, "{name}: gate CLI evaluates");
         let b: Value = serde_json::from_str(&stdout).expect("gate CLI response json");
         assert_eq!(a, b, "{name}: CLI response must equal in-process response");
+
+        // (g) the WASM engine's `gate` export (the browser extension's kernel):
+        // full-response parity with the wire ABI.
+        let g = gate_wasm(&demo_world(), request);
+        assert_eq!(b, g, "{name}: WASM gate must equal the CLI response");
 
         // (d) OpenCode-shaped: the plugin's exact wire shape (nulls spelled out,
         // lowercase tool names 1:1). Same four fields must agree.
@@ -1070,6 +1087,10 @@ fn every_entry_point_agrees_on_flow_contracts() {
         assert_eq!(code, 0, "{name}: gate CLI evaluates");
         let b: Value = serde_json::from_str(&stdout).expect("gate CLI response json");
         assert_eq!(a, b, "{name}: CLI response must equal in-process response");
+
+        // (g) the WASM engine's `gate` export, flow sidecar included.
+        let g = gate_wasm(&world_path, request);
+        assert_eq!(b, g, "{name}: WASM gate must equal the CLI response");
     }
 }
 

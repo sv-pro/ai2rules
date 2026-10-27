@@ -38,17 +38,24 @@ fn project_filters_absent_and_returns_joinable_identities() {
         "description": "host registry schema",
         "parameters": {"type":"object","properties":{"path":{"type":"string"}}}
     });
-    let (code, stdout, stderr) = run(&json!({
+    let request = json!({
         "v": 1,
         "context": {"source_channel": "user_cli"},
         "tools": [read.clone(), {"name":"todo_write","parameters":{"type":"object"}}]
-    }));
+    });
+    let (code, stdout, stderr) = run(&request);
     assert_eq!(code, 0, "project evaluates: {stderr}");
     let response: Value = serde_json::from_str(&stdout).expect("projection response");
     assert_eq!(response["tools"], json!([read]));
     assert_eq!(response["absent"], json!(["todo_write"]));
     assert_eq!(response["manifest_hash"].as_str().unwrap().len(), 12);
     assert_eq!(response["schema_hash"].as_str().unwrap().len(), 64);
+
+    // The WASM engine's `project` export answers byte-for-byte the same.
+    let yaml = std::fs::read_to_string(world()).unwrap();
+    let wasm: Value = serde_json::from_str(&harness_wasm::project(&yaml, &request.to_string()))
+        .expect("WASM projection response");
+    assert_eq!(wasm, response, "WASM project must equal the CLI response");
 }
 
 #[test]
@@ -61,4 +68,15 @@ fn project_rejects_duplicate_schema_names() {
     assert_eq!(code, 2);
     assert!(stdout.trim().is_empty());
     assert!(stderr.contains("duplicate tool name"));
+
+    // Where the CLI exits non-zero, the WASM engine returns `{ok:false, error}`.
+    let yaml = std::fs::read_to_string(world()).unwrap();
+    let request = json!({"v": 1, "context": {"source_channel": "user_cli"}, "tools": [{"name":"read"},{"name":"read"}]});
+    let wasm: Value =
+        serde_json::from_str(&harness_wasm::project(&yaml, &request.to_string())).unwrap();
+    assert_eq!(wasm["ok"], json!(false));
+    assert!(wasm["error"]
+        .as_str()
+        .unwrap()
+        .contains("duplicate tool name"));
 }

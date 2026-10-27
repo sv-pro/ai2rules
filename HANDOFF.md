@@ -1,3 +1,17 @@
+# 2026-10-27 — AI2-96 WebMCP browser-extension spike (Claude)
+
+- Branch `claude/ai2-96-webmcp-extension` (worktree `.claude/worktrees/webmcp-extension`),
+  cut from origin/main @ 1829e54. Design: `labs/webmcp/extension/DESIGN.md`; decision D96.
+- `harness-wasm` exports `gate` / `project` (shims over harness_preview); parity entry (g)
+  in `tests/one_kernel.rs` + `tests/project.rs`; freshness check pins gate/project answers.
+  Artifact rebuilt and copied (790 KB).
+- MV3 spike: MAIN-world hook owns `document.modelContext`, service worker holds kernel +
+  D3 adapter state, side panel runs the lab's CompromisedAgent on S5b. `npm run
+  test:extension` (4 tests) green in Edge locally (`EXT_CHANNEL=msedge`; this machine's
+  Playwright Chromium fails with a side-by-side error); CI step added to `webmcp-lab`.
+- Lab `npm test` in a worktree needs `HARNESS_BIN` (no `target/` there): 35/35 with it.
+- Next: modes (b)/(c) = AI2-97; static export to demo subdomains; scenario picker.
+
 # 2026-10-26 — Codex re-review and PR #170 integration
 
 - Re-reviewed #169 at 9970b7a: ContextRef, unlisted arguments, inherited labels,

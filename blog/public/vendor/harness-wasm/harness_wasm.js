@@ -18,6 +18,34 @@ export function default_world() {
 }
 
 /**
+ * Govern one proposed call: the `harness gate` wire operation (gate ABI, D24).
+ *
+ * `request` is a `GateRequest` as JSON; the result is the `GateResponse` JSON
+ * the native `harness gate --world <world>` prints for the same input, or
+ * `{ok:false, error}` where the native command exits non-zero (a world that
+ * does not compile, a malformed request).
+ * @param {string} world_yaml
+ * @param {string} request
+ * @returns {string}
+ */
+export function gate(world_yaml, request) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(world_yaml, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(request, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.gate(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Compile a draft `WorldManifest` (YAML) and return, as a JSON string, the
  * projected tool surface plus a clean-vs-tainted decision matrix per action.
  *
@@ -38,6 +66,32 @@ export function preview(yaml) {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Shape one offered tool surface: the `harness project` wire operation (D72).
+ *
+ * `request` is the projection request as JSON; the result is the response the
+ * native `harness project --world <world>` prints, or `{ok:false, error}`.
+ * @param {string} world_yaml
+ * @param {string} request
+ * @returns {string}
+ */
+export function project(world_yaml, request) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(world_yaml, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(request, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.project(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
     }
 }
 

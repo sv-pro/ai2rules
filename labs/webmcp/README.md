@@ -14,6 +14,7 @@ execution layer lets through, and judges it only by observed effects.
 - LLMAgent stretch column (a real model on a subset, `--agent llm`): [`docs/LLM-AGENT.md`](docs/LLM-AGENT.md)
 - Write-ups (pending verification): one-page takeaway [`docs/TAKEAWAY.md`](docs/TAKEAWAY.md) · blog outline with a claims checklist [`docs/BLOG-OUTLINE.md`](docs/BLOG-OUTLINE.md) · blog draft [`docs/BLOG-DRAFT.md`](docs/BLOG-DRAFT.md)
 - Results (generated): `results/RESULTS.md`, `results/results.json`, `results/traces/`
+- Browser extension spike — the kernel in WASM, governing WebMCP in your own browser (AI2-96): [`extension/DESIGN.md`](extension/DESIGN.md)
 
 ## Run
 
@@ -28,6 +29,7 @@ cp .env.example .env                        # optional: API key, ports (gitignor
 npm test                                    # contract tests
 npm run matrix                              # every scenario × D0/D1/D2
 npm run cell -- benign:shop-buy D2          # one cell; trace in results/traces/
+npm run test:extension                      # the extension spike, end to end (extension/DESIGN.md)
 ```
 
 ## Layout
@@ -44,4 +46,5 @@ src/oracle.js        effect-based judging
 pages/<origin>/      benign pages
 scenarios/<id>/      one attack each: scenario.js + pages/<origin>/ overlays
 verification/        the independent verifier's checks (#165)
+extension/           MV3 extension spike: the kernel in WASM gates WebMCP in a real browser (AI2-96)
 ```

@@ -151,6 +151,7 @@ dependencies = [
  "executor",
  "harness-preview",
  "harness-types",
+ "harness-wasm",
  "inquire",
  "md5",
  "provider-adapters",
@@ -382,6 +383,8 @@ version = "0.7.0"
 dependencies = [
  "compiler",
  "harness-preview",
+ "harness-types",
+ "serde_json",
  "wasm-bindgen",
 ]
 

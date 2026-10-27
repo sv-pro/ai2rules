@@ -32,3 +32,6 @@ inquire = "0.9.4"
 md5 = "0.7"
 
 [dev-dependencies]
+# The WASM engine compiled for the host: one more entry point in the one-kernel
+# parity suite (tests/one_kernel.rs), so the browser build answers as `harness gate` does.
+harness-wasm = { path = "../harness-wasm" }

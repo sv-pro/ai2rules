@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ai2rules WebMCP</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <h1>ai2rules <span>WebMCP governor</span></h1>
+    <p class="muted" id="engine">loading the kernel…</p>
+  </header>
+
+  <section class="card">
+    <h2>The task</h2>
+    <p id="task" class="task"></p>
+    <p class="muted">The model is hijacked: a compromised widget on the shop hides an instruction in the
+      catalog results, and the model obeys it. Nothing here is a real model, and no key is needed: it is the
+      lab's deterministic hijacked agent, so every run is the same.</p>
+  </section>
+
+  <section class="card">
+    <h2>Policy</h2>
+    <label class="policy"><input type="radio" name="policy" value="D0"> <b>D0</b> no defense</label>
+    <label class="policy"><input type="radio" name="policy" value="D3" checked> <b>D3</b> ai2rules kernel with flow labels</label>
+    <button id="run">Run the hijacked model (S5b)</button>
+  </section>
+
+  <section class="card" id="result-card" hidden>
+    <h2>Result</h2>
+    <div id="result"></div>
+  </section>
+
+  <section class="card">
+    <h2>Steps</h2>
+    <ol id="steps"><li class="muted">Press the button: tabs for the CRM and the shop open beside this panel.</li></ol>
+  </section>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
