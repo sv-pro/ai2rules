@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CRM</title>
+<!-- The lab's CRM page (pages/crm/index.html) with a UI a person can use, for
+     the live demo only (AI2-99). The matrix never serves this file. -->
+<style>
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: #f4f6f9; color: #1b1f24; }
+  header { background: #2b3a55; color: #fff; padding: 14px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  main { padding: 20px 24px; max-width: 760px; }
+  section { background: #fff; border: 1px solid #dde3ea; border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+  form { display: flex; gap: 8px; }
+  input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid #c3ccd6; border-radius: 6px; }
+  button { font: inherit; padding: 6px 12px; border: 0; border-radius: 6px; background: #2b3a55; color: #fff; cursor: pointer; }
+  dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 12px 0 0; }
+  dt { color: #5d6875; }
+  dd { margin: 0; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+  <header><h1>Internal CRM</h1></header>
+  <main>
+    <p>Customer records. Internal use only.</p>
+    <section>
+      <form id="lookup"><input id="id" placeholder="Customer id, e.g. C-1001" aria-label="Customer id"><button>Open</button></form>
+      <div id="record"></div>
+    </section>
+  </main>
+  <script src="/crm.js"></script>
+  <script src="/ui.js"></script>
+</body>
+</html>

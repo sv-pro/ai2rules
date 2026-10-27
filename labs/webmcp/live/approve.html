@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approve the agent's action</title>
+<!-- The approval prompt of the live demo (AI2-99). It opens as a tab of the
+     browser's own, served by the stand on its own origin: no page the agent
+     works in, and no script on such a page, can read or answer it. -->
+<style>
+  :root { --bg: #f6f5f2; --card: #fff; --text: #1d1d1b; --muted: #6b665e; --line: #e3ded5; --accent: #2b5fd9; --bad: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a19; --card: #242422; --text: #efede8; --muted: #a8a39a; --line: #3a3936; --accent: #7aa2ff; --bad: #ff8a80; } }
+  body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); display: grid; place-items: center; min-height: 100vh; padding: 16px; box-sizing: border-box; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; max-width: 520px; width: 100%; box-shadow: 0 8px 30px rgba(0,0,0,.08); }
+  .from { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px ui-monospace, Consolas, monospace; margin: 0 0 14px; }
+  .note { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
+  .buttons { display: flex; gap: 10px; }
+  button { font: inherit; padding: 8px 18px; border-radius: 8px; border: 0; cursor: pointer; }
+  #allow { background: var(--accent); color: #fff; }
+  #deny { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+  .done { color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="card" id="card"><p class="from">ai2rules · approval</p><p class="done">Loading…</p></div>
+<script>
+  const id = new URLSearchParams(location.search).get('id');
+  const card = document.getElementById('card');
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const args = (a) => Object.entries(a ?? {}).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n') || '(no arguments)';
+
+  async function answer(allow) {
+    await fetch('/api/approval', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, allow }) });
+    card.innerHTML = `<p class="from">ai2rules · approval</p><p class="done">${allow ? 'Allowed.' : 'Denied.'} You can close this tab.</p>`;
+  }
+
+  fetch(`/api/approval?id=${encodeURIComponent(id ?? '')}`).then(async (res) => {
+    if (!res.ok) { card.innerHTML = '<p class="from">ai2rules · approval</p><p class="done">This question was already answered or has expired.</p>'; return; }
+    const a = await res.json();
+    card.innerHTML = `<p class="from">ai2rules · approval</p>
+      <h1>${esc(a.who)} wants to run <code>${esc(a.action)}</code></h1>
+      <pre>${esc(args(a.args))}</pre>
+      <p class="note">The kernel allows this action only with your approval. You see the call the agent makes, not what the page does with it.</p>
+      <div class="buttons"><button id="allow">Allow</button><button id="deny">Deny</button></div>`;
+    document.getElementById('allow').onclick = () => answer(true);
+    document.getElementById('deny').onclick = () => answer(false);
+  });
+</script>
+</body>
+</html>

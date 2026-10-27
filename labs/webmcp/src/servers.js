@@ -84,7 +84,12 @@ function send(res, status, body, headers = {}) {
   res.end(isText ? body : JSON.stringify(body));
 }
 
-export async function startServers({ basePort } = {}) {
+// Two options for the live demo only (AI2-99); the matrix passes neither:
+// `pagesDir` is a folder of pages served before the lab's own (the shop and
+// the CRM with a UI a person can use), and `onPerson` hears every request the
+// page's UI marks as the person's (header `x-lab-actor: person`), after it is
+// handled. Orders and cart items the person makes carry `by: 'person'`.
+export async function startServers({ basePort, pagesDir = null, onPerson = null } = {}) {
   const origins = originsFor(basePort);
   let state = freshState('benign');
 
@@ -99,7 +104,7 @@ export async function startServers({ basePort } = {}) {
         const b = (await readBody(req)) ?? {};
         const item = CATALOG.find((p) => p.sku === b.sku);
         if (!item) return send(res, 404, { error: `unknown sku ${b.sku}` });
-        state.shop.cart.push({ sku: item.sku, qty: Number(b.qty ?? 1) });
+        state.shop.cart.push({ sku: item.sku, qty: Number(b.qty ?? 1), ...(byPerson(req) ? { by: 'person' } : {}) });
         return send(res, 200, { cart: state.shop.cart });
       }
       if (url.pathname === '/api/cart' && req.method === 'GET') return send(res, 200, { cart: state.shop.cart });
@@ -111,6 +116,7 @@ export async function startServers({ basePort } = {}) {
           items: state.shop.cart,
           ship_to: b.ship_to ?? SHOP_ACCOUNT.address,
           note: b.note ?? '',
+          ...(byPerson(req) ? { by: 'person' } : {}),
         };
         state.shop.orders.push(order);
         state.shop.cart = [];
@@ -166,6 +172,7 @@ export async function startServers({ basePort } = {}) {
     if (rel.includes('..')) return send(res, 400, 'bad path');
     const candidates = [
       path.join(LAB_ROOT, 'scenarios', state.scenario, 'pages', origin, rel),
+      ...(pagesDir ? [path.join(pagesDir, origin, rel)] : []),
       path.join(LAB_ROOT, 'pages', origin, rel),
     ];
     const file = candidates.find((f) => existsSync(f));
@@ -195,6 +202,7 @@ export async function startServers({ basePort } = {}) {
         }
         const handled = await api[origin](req, url, res);
         if (handled === null) await serveStatic(origin, url, res);
+        else if (onPerson && byPerson(req)) onPerson({ origin, method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), status: res.statusCode });
       } catch (err) {
         send(res, 500, { error: String(err) });
       }
@@ -220,6 +228,11 @@ export async function startServers({ basePort } = {}) {
 
 // For tests and parallel runs: start on a random free base port, retrying on
 // EADDRINUSE, so concurrent checkouts and sessions cannot collide.
+// The page's own UI marks a person's requests. A page script could forge the
+// mark too; it only decides how the live demo labels a request, never what a
+// defense allows.
+const byPerson = (req) => req.headers['x-lab-actor'] === 'person';
+
 export async function startServersOnFreePorts({ attempts = 20 } = {}) {
   for (let i = 0; ; i++) {
     const basePort = 20000 + 10 * Math.floor(Math.random() * 4000);

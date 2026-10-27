@@ -50,7 +50,11 @@ const CLASS_MAP = {
 // origin is a SINK that admits only Public values. The task's `args` become the
 // action's schema, because a sink must name an argument the schema declares.
 // Without `labels` the world is byte-for-byte what D2 has always compiled.
-export function worldYaml(task, { labels = false } = {}) {
+//
+// `approvals` (live demo only, AI2-99; the matrix never passes it) names actions
+// the world marks `approval_required`: the kernel answers ASK for them, and the
+// host puts the call to the person (`approve` in createD2).
+export function worldYaml(task, { labels = false, approvals = [] } = {}) {
   const sensitive = new Set(task.sensitiveOrigins ?? []);
   const lines = [
     `world_id: webmcp-${task.id}`,
@@ -71,6 +75,7 @@ export function worldYaml(task, { labels = false } = {}) {
     lines.push(`  - name: ${actionName(cap.origin, cap.tool)}`);
     lines.push(`    action_type: ${m.action_type}`);
     lines.push(`    side_effect: ${m.side_effect}`);
+    if (approvals.includes(actionName(cap.origin, cap.tool))) lines.push('    approval_required: true');
     if (!labels) {
       // A sensitive origin's reads are declared as remote ingress, which is how
       // today's kernel marks an action's output as a taint source (gate.rs:
@@ -162,7 +167,11 @@ const FLOW_RULES = {
 // `vouch` (live demo only, AI2-95; the matrix never passes it): a host that has
 // seen what the person typed may vouch for an argument found in it. Such a value
 // is Trusted/Public by the host's word, exactly like the task's own inputs above.
-export function createD2({ workDir, labels = false, vouch = null }) {
+//
+// `approve` (live demo only, AI2-99): the host's approval UI. When the kernel
+// answers ASK, the call is put to the person and runs only if they allow it;
+// every other verdict is the kernel's alone, so a refusal is never put to anyone.
+export function createD2({ workDir, labels = false, vouch = null, approvals = [], approve = null }) {
   const bin = harnessBin();
   let worldPath = null;
   let task = null;
@@ -224,7 +233,7 @@ export function createD2({ workDir, labels = false, vouch = null }) {
       task = t;
       mkdirSync(workDir, { recursive: true });
       worldPath = path.join(workDir, `world-${task.id}.yaml`);
-      writeFileSync(worldPath, worldYaml(task, { labels }));
+      writeFileSync(worldPath, worldYaml(task, { labels, approvals }));
       taint = 'clean';
       pins.clear();
       ambient = TRUSTED_PUBLIC;
@@ -277,7 +286,7 @@ export function createD2({ workDir, labels = false, vouch = null }) {
       return out;
     },
 
-    async beforeCall({ tool, args }) {
+    async beforeCall({ tool, args }, { trace }) {
       const a = actionName(tool.origin, tool.name);
       // A manifest action called before it was ever listed is pinned here, on
       // the same trust-on-first-use terms as the listing.
@@ -292,18 +301,29 @@ export function createD2({ workDir, labels = false, vouch = null }) {
         v: 1,
         tool: a,
         arguments: args ?? {},
-        context: { session_id: 'webmcp-lab', mode: 'background', taint, source_channel: channel(), ...(flow ? { flow: { ambient: flow.ambient, args: flow.args } } : {}) },
+        // With an approval UI a person is present, so the session is interactive and
+        // the kernel may answer ASK; without one, background turns ASK into DENY.
+        context: { session_id: 'webmcp-lab', mode: approve ? 'interactive' : 'background', taint, source_channel: channel(), ...(flow ? { flow: { ambient: flow.ambient, args: flow.args } } : {}) },
       });
       // Persist the kernel's post-call taint (monotonic) only for a call that
       // will run; a refused call ingests nothing.
-      // The kernel's verdict is passed through as-is (ASK/REPLAN count as DENY:
-      // there is no human in the loop). Only the mechanism label is ours.
-      const decision = res.decision === 'ALLOW' ? 'ALLOW' : res.decision === 'ABSENT' ? 'ABSENT' : 'DENY';
+      // The kernel's verdict is passed through as-is. ASK/REPLAN count as DENY
+      // when there is no human in the loop (the matrix); with an approval UI an
+      // ASK is put to the person, and their answer decides. Only the mechanism
+      // label is ours.
+      let answer = null;
+      if (res.decision === 'ASK' && approve) {
+        trace.write('approval_asked', { action: a, args: args ?? {} });
+        answer = await approve({ action: a, origin: tool.origin, tool: tool.name, args: args ?? {} });
+        trace.write('approval', { action: a, answer });
+      }
+      const decision = res.decision === 'ALLOW' || answer === 'allowed' ? 'ALLOW' : res.decision === 'ABSENT' ? 'ABSENT' : 'DENY';
       const mechanism = decision === 'ALLOW' ? null
-        : ['unknown_to_ontology', 'absent'].includes(res.rule) ? 'projection'
-          : FLOW_RULES[res.rule] ?? (taint === 'tainted' ? 'taint' : `kernel:${res.rule}`);
+        : answer ? `approval:${answer}`
+          : ['unknown_to_ontology', 'absent'].includes(res.rule) ? 'projection'
+            : FLOW_RULES[res.rule] ?? (taint === 'tainted' ? 'taint' : `kernel:${res.rule}`);
       if (decision === 'ALLOW') this._pendingTaint = res.context.taint;
-      const verdict = { decision, mechanism, reason: res.reason ?? null, kernel: { decision: res.decision, rule: res.rule, manifest_hash: res.manifest_hash } };
+      const verdict = { decision, mechanism, reason: res.reason ?? null, kernel: { decision: res.decision, rule: res.rule, manifest_hash: res.manifest_hash }, ...(answer ? { approval: answer } : {}) };
       if (flow) {
         // ABI §6 step 5: the post-call ambient is persisted after every call,
         // joined, never lowered. The result floor is kept for `afterCall`,

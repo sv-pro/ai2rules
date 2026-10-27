@@ -18,6 +18,8 @@
   .sites label { margin-right: 14px; }
   .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
   .agent p { margin: 0 0 8px; }
+  .approval { margin-top: 12px; border: 2px solid var(--warn); border-radius: 10px; padding: 10px 12px; }
+  .approval pre { margin: 6px 0 0; }
   .session { font-size: 13px; color: var(--muted); }
   .session b { color: var(--text); }
   #status .row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
@@ -52,6 +54,8 @@
       <p style="margin-top:12px"><b>Hijacked model</b>: a script that obeys every instruction it reads on a page. It follows a fixed plan for the same request, so it takes no prompt.</p>
       <button id="hijacked">Run the hijacked model</button>
       <div class="speed"><label><input type="checkbox" id="slow" checked> Show its steps slowly</label></div>
+      <p style="margin-top:12px"><b>You</b>: the shop and the CRM in the agent's window work by hand too. What you do there is yours: no policy judges it, and the feed marks it “you”.</p>
+      <div id="approvals"></div>
     </div>
     <div class="panel">
       <h2>Widget on the shop page</h2>
@@ -174,7 +178,7 @@ function renderWorld(w) {
   const searches = w.searches.length
     ? `<ul class="world-list">${w.searches.map((q) => `<li class="${q.includes(CANARY) ? 'bad' : ''}">${show(q, CANARY, 220)}</li>`).join('')}</ul>` : '<p class="empty">none</p>';
   const orders = w.orders.length
-    ? `<ul class="world-list">${w.orders.map((o) => `<li class="${o.redirected ? 'bad' : ''}"><b>${esc(o.id)}</b> ${esc(o.items.map((i) => `${i.qty}× ${i.sku}`).join(', '))} → ships to <b>${esc(o.ship_to)}</b>${o.redirected ? ' — not the account address' : ''}</li>`).join('')}</ul>` : '<p class="empty">none</p>';
+    ? `<ul class="world-list">${w.orders.map((o) => `<li class="${o.redirected ? 'bad' : ''}"><b>${esc(o.id)}</b> ${esc(o.items.map((i) => `${i.qty}× ${i.sku}`).join(', '))} → ships to <b>${esc(o.ship_to)}</b>${o.redirected ? ' — not the account address' : ''}${o.by === 'person' ? ' (you)' : ''}</li>`).join('')}</ul>` : '<p class="empty">none</p>';
   const attacker = w.attacker.length
     ? `<ul class="world-list">${w.attacker.map((h) => `<li class="bad">${esc(h.path ?? '')} ${show(h.body, CANARY, 200)}</li>`).join('')}</ul>` : '<p class="empty">nothing</p>';
   $('world').innerHTML = `<h3>Searches the shop's server received</h3>${searches}<h3>Orders placed</h3>${orders}<h3>The attacker's server</h3>${attacker}`;
@@ -226,6 +230,27 @@ function renderPrompts(prompts) {
     : '<li class="empty">Nothing yet. Each request typed in the demo folder\'s Claude Code session appears here.</li>';
 }
 events.addEventListener('prompt', (e) => renderPrompts(JSON.parse(e.data).prompts));
+
+// The person's approval of an agent's action (AI2-99): asked in a tab of the
+// agent's window, and here too; the first answer counts.
+const pending = new Map((INFO.approvals ?? []).map((a) => [a.id, a]));
+function renderApprovals() {
+  $('approvals').innerHTML = [...pending.values()].map((a) => `<div class="approval">
+    <p><b>${esc(a.who)}</b> wants to run <code>${esc(a.action)}</code></p>
+    <pre>${show(a.args, CANARY)}</pre>
+    <div class="buttons"><button data-allow="${esc(a.id)}">Allow</button><button class="secondary" data-deny="${esc(a.id)}">Deny</button></div></div>`).join('');
+}
+$('approvals').addEventListener('click', (e) => {
+  const id = e.target?.dataset?.allow ?? e.target?.dataset?.deny;
+  if (!id) return;
+  fetch('/api/approval', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, allow: Boolean(e.target.dataset.allow) }) });
+});
+events.addEventListener('approval', (e) => {
+  const a = JSON.parse(e.data);
+  if (a.state === 'pending') pending.set(a.id, a); else pending.delete(a.id);
+  renderApprovals();
+});
+renderApprovals();
 events.addEventListener('world', (e) => {
   const w = JSON.parse(e.data);
   timeline.then(() => renderWorld(w));

@@ -14,6 +14,9 @@ export const MECHANISM = {
   'flow:integrity': 'value label: an untrusted value cannot reach this argument',
   not_registered: 'no such tool',
   not_triggered: 'the injected instruction never reached the agent',
+  'approval:denied': 'you said no',
+  'approval:timeout': 'nobody answered in time, so it counts as a no',
+  'approval:cancelled': 'the session ended before anyone answered',
 };
 export const mech = (m) => !m ? '' : MECHANISM[m] ?? (m.startsWith('rule:') ? `guard rule ${m.slice(5)}` : m);
 
@@ -126,7 +129,8 @@ export function createTimeline({ list, canary, paced = () => false, onDrawn = ()
         const d = rec.decision;
         const text = { ALLOW: 'allowed', MONITOR: 'allowed, flagged for monitoring', DENY: 'refused', ABSENT: 'the tool does not exist for the agent' }[d] ?? d;
         const kernel = rec.kernel?.rule ? `kernel rule <code>${esc(rec.kernel.rule)}</code>` : '';
-        const why = [esc(mech(rec.mechanism)), kernel].filter(Boolean).join(' · ');
+        const approved = rec.approval === 'allowed' ? 'you approved it' : '';
+        const why = [approved, esc(mech(rec.mechanism)), kernel].filter(Boolean).join(' · ');
         let flow = '';
         if (rec.flow?.vouched?.length) {
           flow += `<div class="reason">The host vouches for ${rec.flow.vouched.map((k) => `<code>${esc(k)}</code>`).join(', ')}: found in what you typed, so labelled public.</div>`;
@@ -159,6 +163,23 @@ export function createTimeline({ list, canary, paced = () => false, onDrawn = ()
         return 0;
       case 'answer': if (rec.text) addStep('minor', `Final answer to the user: “${show(rec.text, canary, 160)}”`); return 300;
       case 'note': addStep(`minor ${rec.tone ?? ''}`, rec.html); return 300;
+      // The person's approval of an agent's action (live demo, AI2-99).
+      // Inside the call's card, between the call and its verdict.
+      case 'approval_asked': {
+        const html = `${stamp(at)}<b>ai2rules asks you.</b> The world allows <code>${esc(rec.action.replace('__', '/'))}</code> only with your approval: answer in the agent's window, or here.`;
+        if (current) current.insertAdjacentHTML('beforeend', `<div class="ask">${html}</div>`);
+        else addStep('minor kernel', html, { ownStamp: true });
+        return 300;
+      }
+      case 'approval': {
+        const said = { allowed: 'You allowed it.', denied: 'You denied it.', timeout: 'No answer in time: that counts as a no.', cancelled: 'The session ended before an answer.' }[rec.answer] ?? rec.answer;
+        const html = `${stamp(at)}${esc(said)}`;
+        if (current) current.insertAdjacentHTML('beforeend', `<div class="ask ${rec.answer === 'allowed' ? '' : 'no'}">${html}</div>`);
+        else addStep('minor warn', html, { ownStamp: true });
+        return 300;
+      }
+      // What the person did in the pages by hand: not a tool call, judged by no one.
+      case 'person': addStep('person', `<span class="tag you">you</span> ${esc(where(rec.origin))}: ${esc(rec.what)}`); return 300;
       case 'error': addStep('call injected', `<div class="call-card"><div class="title">${stamp(at)}Lab error</div><pre>${esc(rec.message)}</pre></div>`, { ownStamp: true }); return 0;
       default: return 0;
     }

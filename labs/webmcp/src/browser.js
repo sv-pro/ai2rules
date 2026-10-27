@@ -139,6 +139,14 @@ export class BrowserEnv {
     return this.#tabs.get(tabId).page.evaluate(fn, arg);
   }
 
+  // A tab the browser itself opens (the live demo's approval prompt). It is not
+  // one of the lab's tabs: never listed, never read, never part of isClosed.
+  async popup(url) {
+    const page = await this.#context.newPage();
+    await page.goto(url);
+    return page;
+  }
+
   // The live demo's window can be closed by hand, a tab or the whole browser.
   isClosed() {
     return !this.#context.browser()?.isConnected() || [...this.#tabs.values()].some((t) => t.page.isClosed());

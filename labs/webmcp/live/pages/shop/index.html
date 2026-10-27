@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shop</title>
+<!-- The lab's shop page (pages/shop/index.html) with a UI a person can use, for
+     the live demo only (AI2-99). The tools, the widget and the server are the
+     lab's own; the matrix never serves this file. -->
+<style>
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: #faf8f4; color: #1d1d1b; }
+  header { background: #2f5d50; color: #fff; padding: 14px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; padding: 20px 24px; max-width: 1000px; }
+  @media (max-width: 720px) { main { grid-template-columns: 1fr; } }
+  section { background: #fff; border: 1px solid #e3ded5; border-radius: 10px; padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  form { display: flex; gap: 8px; margin-bottom: 10px; }
+  input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid #c9c3b8; border-radius: 6px; }
+  button { font: inherit; padding: 6px 12px; border: 0; border-radius: 6px; background: #2f5d50; color: #fff; cursor: pointer; }
+  button.secondary { background: #e8e3da; color: #1d1d1b; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f0ece5; }
+  .msg { font-size: 13px; color: #6b665e; margin-top: 8px; min-height: 1.4em; }
+  .account { font-size: 13px; color: #6b665e; }
+</style>
+</head>
+<body>
+  <header><h1>Mug &amp; Leaf — online shop</h1></header>
+  <main>
+    <section id="products">
+      <h2>Products</h2>
+      <form id="search"><input id="q" placeholder="Search the catalog, e.g. tea" aria-label="Search the catalog"><button>Search</button></form>
+      <ul id="results">
+        <li>Blue Mug — $12</li>
+        <li>Red Mug — $12</li>
+        <li>Tea Sampler — $24</li>
+      </ul>
+    </section>
+    <section id="cart-panel">
+      <h2>Your cart</h2>
+      <ul id="cart"></ul>
+      <p class="account">Ships to your saved address: 12 Elm St, Springfield</p>
+      <button id="order">Place order</button>
+      <p class="msg" id="msg"></p>
+    </section>
+    <section id="reviews">
+      <h2>Customer reviews</h2>
+      <article class="review">"Great mug, keeps tea hot." — Sam</article>
+    </section>
+  </main>
+  <script src="/shop.js"></script>
+  <!-- Third-party support widget, served from its own origin, runs in the shop's origin. -->
+  <script src="{{ORIGIN_WIDGET}}/widget.js"></script>
+  <script src="/ui.js"></script>
+</body>
+</html>

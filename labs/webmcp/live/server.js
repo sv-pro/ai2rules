@@ -58,8 +58,16 @@ async function launchVisible(headless) {
   throw last;
 }
 
-export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMCP_LIVE_HEADLESS === '1', basePort } = {}) {
-  const servers = await startServers(basePort ? { basePort } : {});
+export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMCP_LIVE_HEADLESS === '1', basePort, approvalTimeoutMs } = {}) {
+  // The pages in live/pages (the shop and the CRM with a UI a person can use)
+  // are served before the lab's own; what that UI does for the person reaches
+  // the session, which shows it in the feed as theirs.
+  let session = null;
+  const servers = await startServers({
+    ...(basePort ? { basePort } : {}),
+    pagesDir: path.join(HERE, 'pages'),
+    onPerson: (ev) => session?.onPerson(ev),
+  });
   // The agent's window, launched again if someone closed the whole browser.
   let browser = await launchVisible(headless);
   let relaunching = null;
@@ -87,7 +95,14 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
     const line = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const res of clients) res.write(line);
   };
-  const session = new LiveSession({ browser: currentBrowser, servers, workDir: path.join(os.tmpdir(), `webmcp-live-${process.pid}`), emit });
+  session = new LiveSession({
+    browser: currentBrowser,
+    servers,
+    workDir: path.join(os.tmpdir(), `webmcp-live-${process.pid}`),
+    emit,
+    standUrl: () => (server.listening ? `http://127.0.0.1:${server.address().port}` : null),
+    ...(approvalTimeoutMs ? { approvalTimeoutMs } : {}),
+  });
 
   // A request body: JSON, at most BODY_LIMIT bytes. Anything else is the
   // caller's error (400/413), not the stand's.
@@ -110,6 +125,16 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
     // The three parts: how it works, the replay (AI2-94's page), the live room.
     'GET /': page(path.join(HERE, 'index.html')),
     'GET /how': page(path.join(HERE, 'how.html')),
+    // The approval prompt, a tab of the browser's own (AI2-99).
+    'GET /approve': page(path.join(HERE, 'approve.html')),
+    'GET /api/approval': (req, res) => {
+      const a = session.approval(new URL(req.url, 'http://x').searchParams.get('id'));
+      return a ? json(res, 200, a) : json(res, 404, { error: 'no such question, or it was already answered' });
+    },
+    'POST /api/approval': async (req, res) => {
+      const { id, allow } = await body(req);
+      json(res, session.answerApproval(id, allow) ? 200 : 404, { answered: true });
+    },
     'GET /replay': page(path.join(DEMO, 'index.html')),
     'GET /replay/api/info': async (_req, res) => json(res, 200, await replay.info()),
     'GET /replay/api/run': (req, res) => replay.run(new URL(req.url, 'http://x'), res),
@@ -124,6 +149,7 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
       canary: CANARY,
       harness: harnessVersion(),
       session: session.describe(),
+      approvals: session.pendingApprovals(),
     }),
     'GET /api/events': (req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -216,6 +242,7 @@ export async function startLive({ port = LIVE_PORT, headless = process.env.WEBMC
 
   return {
     url: `http://127.0.0.1:${server.address().port}`,
+    origins: servers.origins,
     session,
     async close() {
       for (const res of clients) res.end();
