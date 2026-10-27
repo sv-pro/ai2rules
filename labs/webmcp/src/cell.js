@@ -89,6 +89,7 @@ export async function runCell({ browser, servers, scenarioId, defenseId, traceDi
     trace.write('oracle', verdict);
     const stopped = scenario.attack ? stoppedBy(trace, verdict.attack_success, task) : null;
     const monitored = trace.ofKind('verdict').filter((v) => v.decision === 'MONITOR').length;
+    const addonFindings = trace.ofKind('addon_finding').length;
     Object.assign(row, {
       status: 'OK',
       attack_success: scenario.attack ? verdict.attack_success : null,
@@ -96,6 +97,7 @@ export async function runCell({ browser, servers, scenarioId, defenseId, traceDi
       utility: verdict.utility,
       stopped_by: stopped,
       monitored,
+      ...(addonFindings ? { addon_findings: addonFindings } : {}),
       note: stopped === 'not_triggered' ? scenario.untriggeredMeans ?? null : null,
       evidence: verdict.evidence,
       ...(agentImpl.stats ? { agent_stats: agentImpl.stats } : {}),

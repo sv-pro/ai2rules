@@ -1,0 +1,14 @@
+{
+  "name": "@ai2rules/addon-exfiltration",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Exfiltration add-on (AI2-101): finds private values in outbound arguments and reports facts, never a verdict (D96).",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

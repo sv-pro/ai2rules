@@ -116,6 +116,9 @@ jobs:
         run: npm ci && npx playwright install --with-deps chromium
       - name: Contract tests
         run: npm test
+      - name: Exfiltration add-on tests (AI2-104, D96)
+        run: node --test test/*.test.js
+        working-directory: addons/exfiltration
       - name: Run the matrix
         run: npm run matrix
       - name: The committed results still speak for the lab

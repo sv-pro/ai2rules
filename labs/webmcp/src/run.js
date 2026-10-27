@@ -11,7 +11,8 @@ import { pathToFileURL } from 'node:url';
 import { launchBrowser } from './browser.js';
 import { startServers } from './servers.js';
 import { runCell, LAB_ROOT, AGENT_IDS } from './cell.js';
-import { DEFENSE_IDS } from './defenses/index.js';
+import { DEFENSE_IDS, EXPERIMENT_DEFENSE_IDS } from './defenses/index.js';
+import { renderExperiment } from './report-experiment.js';
 import { TASKS } from './tasks.js';
 import { renderResults, renderResultsSvg } from './report.js';
 import { renderLlmResults, LLM_TASKS } from './report-llm.js';
@@ -80,7 +81,13 @@ async function llmOptions() {
 }
 
 async function main(rawArgv) {
-  const { agent, argv } = takeAgent(rawArgv);
+  const { agent, argv: rest } = takeAgent(rawArgv);
+  // `--experiment exfil` (AI2-104): every scenario under D0/D2/D3 and the same
+  // three with the exfiltration add-on, written to results/experiments/
+  // exfiltration/, never over the canonical matrix.
+  const experiment = rest[0] === '--experiment' ? rest[1] : null;
+  if (experiment && experiment !== 'exfil') throw new Error('--experiment must be exfil');
+  const argv = experiment ? rest.slice(2) : rest;
   let agentOptions = () => undefined;
   if (agent === 'llm') {
     agentOptions = await llmOptions();
@@ -90,7 +97,7 @@ async function main(rawArgv) {
     }
   }
   const llm = agent === 'llm';
-  const outDir = path.join(LAB_ROOT, 'results');
+  const outDir = experiment ? path.join(LAB_ROOT, 'results', 'experiments', 'exfiltration') : path.join(LAB_ROOT, 'results');
   const traceDir = path.join(outDir, llm ? 'traces-llm' : 'traces');
   const workDir = path.join(os.tmpdir(), `webmcp-lab-${process.pid}`);
   mkdirSync(traceDir, { recursive: true });
@@ -107,7 +114,8 @@ async function main(rawArgv) {
     const tasks = llm ? LLM_TASKS : Object.keys(TASKS);
     const scenarios = [...tasks.map((t) => `benign:${t}`), ...attackScenarios()]
       .filter((s) => !only || only.includes(s));
-    cells = scenarios.flatMap((s) => DEFENSE_IDS.map((d) => [s, d]));
+    const defenses = experiment ? ['D0', 'D2', 'D3', ...EXPERIMENT_DEFENSE_IDS] : DEFENSE_IDS;
+    cells = scenarios.flatMap((s) => defenses.map((d) => [s, d]));
     const missing = only ? [] : REQUIRED_ATTACKS.filter((s) => !scenarios.includes(s));
     if (missing.length) throw new Error(`matrix is missing required attacks: ${missing.join(', ')}`);
   }
@@ -133,6 +141,10 @@ async function main(rawArgv) {
     // A `--scenarios` subset ran; leave the committed results.json / RESULTS.md
     // untouched so a partial run can never overwrite the canonical table.
     console.log('(partial run: canonical results not rewritten)');
+  } else if (experiment) {
+    const meta = { harness: harnessVersion() };
+    writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ lab: 'webmcp-attack-lab', experiment: 'AI2-104 exfiltration add-on', agent: 'CompromisedAgent', ...meta, rows }, null, 2) + '\n');
+    writeFileSync(path.join(outDir, 'RESULTS.md'), renderExperiment(rows, meta));
   } else if (argv[0] !== '--cell' && llm) {
     writeFileSync(path.join(outDir, 'results-llm.json'), JSON.stringify({ lab: 'webmcp-attack-lab', agent: 'LLMAgent', rows }, null, 2) + '\n');
     writeFileSync(path.join(outDir, 'RESULTS-LLM.md'), renderLlmResults(rows));

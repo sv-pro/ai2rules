@@ -476,6 +476,7 @@ docs/                 architecture (harness-architecture.md is canonical; one-ke
 scripts/              runnable demos (demo-one-kernel-many-hosts.sh, run-governance-bench.sh)
 blog/                 Astro blog — Discover-optimized advocacy site (E12; Node sub-project)
 labs/webmcp/          WebMCP attack lab: 5 attacks × D0/D1/D2, CompromisedAgent, Playwright (#160 / AI2-83; Node sub-project)
+addons/               Add-ons around the kernel, never inside it (D96): exfiltration/ (AI2-101), experiment 1 of AI2-104
 PLAN.md               epic-level execution plan
 AGENTS.md             repo conventions (canonical; shared across AI assistants)
 CLAUDE.md             Claude Code pointer → AGENTS.md

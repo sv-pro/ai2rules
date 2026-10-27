@@ -29,6 +29,7 @@ npm test                                    # contract tests
 npm run matrix                              # every scenario × D0/D1/D2
 npm run cell -- benign:shop-buy D2          # one cell; trace in results/traces/
 npm run demo                                # replay page on http://127.0.0.1:4180
+npm run experiment:exfil                    # AI2-104: the exfiltration add-on beside D0/D2/D3 → results/experiments/
 npm run live:setup && npm run live          # the live stand: see live/README.md
 ```
 
