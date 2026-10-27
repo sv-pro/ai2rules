@@ -12,7 +12,7 @@ execution layer lets through, and judges it only by observed effects.
 - Contracts — what the lab promises, and what the tests pin: [`CONTRACTS.md`](CONTRACTS.md)
 - D1 rules and why an admin would write them: [`docs/D1-RULES.md`](docs/D1-RULES.md)
 - LLMAgent stretch column (a real model on a subset, `--agent llm`): [`docs/LLM-AGENT.md`](docs/LLM-AGENT.md)
-- Write-ups (pending verification): one-page takeaway [`docs/TAKEAWAY.md`](docs/TAKEAWAY.md) · blog outline with a claims checklist [`docs/BLOG-OUTLINE.md`](docs/BLOG-OUTLINE.md) · blog draft [`docs/BLOG-DRAFT.md`](docs/BLOG-DRAFT.md)
+- Write-ups (claims audited against the evidence in checkpoints 4 and 5; the kernel-backed D3 column and S3c verified in [checkpoint 6](verification/CHECKPOINT-6.md)): one-page takeaway [`docs/TAKEAWAY.md`](docs/TAKEAWAY.md) · blog outline with a claims checklist [`docs/BLOG-OUTLINE.md`](docs/BLOG-OUTLINE.md) · blog draft [`docs/BLOG-DRAFT.md`](docs/BLOG-DRAFT.md)
 - Results (generated): `results/RESULTS.md`, `results/results.json`, `results/traces/`
 
 ## Run

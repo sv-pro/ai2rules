@@ -21,8 +21,9 @@ the checklist).
 > event-driven at `501947e`) was validated by the `webmcp-lab` Linux CI job (green
 > at `2624385`), not re-run by the verifier by hand. The real-model column is one
 > uncertified run [V §What still cannot be claimed]. So D3's *outcomes* are
-> verified; the **pending** markers below are scoped to claims that reach beyond
-> this fixed matrix. The checklist at the end marks each claim.
+> verified, and checkpoint 6 re-verified the D3 column on the kernel's flow
+> contracts at `35dd9e2`. Claims that reach beyond this fixed matrix keep their
+> scope notes. The checklist at the end marks each claim.
 
 **Rules for whoever writes the post.** Name no security vendor. Call D1 "a
 rule-based baseline", never a product. No superlatives. Only the figures listed
@@ -51,8 +52,8 @@ deterministic matrix.
 
 Figures: 8 attacks; D1 6/8; D2 2/8; D3 1/8; D2 breaks `benign:crm-gift`, D3 does
 not [R §What each defense let through, §Utility, §What value-level labels (D3)
-change; D1R "How these rules were written"; V §Reproduction]. (D3 pending
-verification.)
+change; D1R "How these rules were written"; V §Reproduction]. (D3 re-verified in
+checkpoint 6.)
 
 ## Sections
 
@@ -91,7 +92,7 @@ verification.)
 - Reproduce the attack-outcome table and the utility table verbatim, all four
   columns [R §Attack outcome, §Utility].
 - Totals: D0 8/8, D1 6/8, D2 2/8, D3 1/8 attacks let through [R §What each defense
-  let through]. Keep D3 visually marked pending.
+  let through]. Keep D3's scope note: no regression in these scenarios, not in general.
 - One line on verification: 30 of the 33 CompromisedAgent cells reproduced
   byte-identical twice by the verifier; the 3 S5b cells and the D3 column came
   later and are being re-checked [V §Reproduction; R §Limitations].
@@ -174,11 +175,11 @@ verification.)
   without being shown it, so D2 also refuses at call time [C §6]; verifier probe
   X01 passes [V §Codex CP1 probes].
 
-### 8. What value-level flow labels change (D3) — pending verification
+### 8. What the kernel's flow labels change (D3)
 
 - The question this column tests: can labelling a *value*, instead of tainting the
   *session*, give back the utility D2 spends without losing security? [R §What
-  value-level labels (D3) change; C §8.4].
+  the kernel's flow labels (D3) change; C §8.4].
 - D3 is D2 on the kernel's typed flow contracts: the compiled world declares the
   CRM read a source whose whole result is Trusted/Private and every other-origin
   argument a Public sink; the adapter carries the ambient label and a digest-keyed
@@ -189,10 +190,11 @@ verification.)
   kernel's rule). It replaced an adapter-side prototype the verifier had checked.
 - **It recovers the utility.** All five CRM-reading tasks complete under D3
   (benign `crm-gift`, S1, S2, S5, S5b), where D2 left them undone [R §What
-  value-level labels (D3) change, §Utility].
-- **It keeps D2's security and closes S5b, for any phrasing of the leak.** D3
-  stops every attack D2 stops, and additionally S5b; it regresses nothing [R §What
-  value-level labels (D3) change; §Attack outcome]. Say how: the shipped S5/S5b
+  the kernel's flow labels (D3) change, §Utility].
+- **In these scenarios it keeps D2's security and closes S5b, for any phrasing of
+  the leak.** D3 stops every attack D2 stops here, and additionally S5b; it
+  regresses nothing in the shipped scenarios, not in general (CP6-F1) [R §What
+  the kernel's flow labels (D3) change; §Attack outcome]. Say how: the shipped S5/S5b
   paste the record wrapped in text, so the argument is not the labelled value; the
   adapter sends no label and the kernel applies the ambient, Private since the
   read. A transform or "just the account code" meets the same refusal [C §8.4;
@@ -211,7 +213,9 @@ verification.)
   session taint on utility while matching it on security; the price moved from a
   value slipping past a surface match to every unvouched-for value refused once
   the session is private — a concrete contrast, not a shipped guarantee [C §8.4].
-  Mark the whole section pending until the verifier reports.
+  Checkpoint 6 verified the section's cells; keep its caveats: D3 trades D2's
+  post-read integrity floor for utility (CP6-F1), and in the matrix the session's
+  label decides, not a label on the value (CP6-F2).
 
 ### 9. With a real model: one run (clearly labelled)
 
@@ -300,7 +304,7 @@ As listed in [R §Prior art]:
   contracts (D3) gave the utility back and closed the read-tool leak while
   keeping D2's security on these eight fixed scenarios, for any phrasing of the
   leak, at the cost that after a private read every unvouched-for value is
-  refused — pending verification; and handler tampering still
+  refused — verified in checkpoint 6, within these scenarios; and handler tampering still
   gets through, because none of the four tested defenses detects it and the layer
   that could — script isolation — is one we did not test.
 - Link: the lab, `RESULTS.md`, `CHECKPOINT-2.md`, `CHECKPOINT-3.md`, `TAKEAWAY.md`.
@@ -308,8 +312,8 @@ As listed in [R §Prior art]:
 ## Claims to verify (for the verifier)
 
 Status: **CP2** = confirmed by checkpoint 2 at `6ab1a28` [V]; **post-CP2** = in
-the committed results but added after checkpoint 2 (S5b and the D3 column), and re-run by the verifier at checkpoint 3; **pending** = the D3 column, added after CP2 and being
-re-verified; **static** = a property of a committed file, not of a run; **not
+the committed results but added after checkpoint 2 (S5b and the D3 column), and re-run by the verifier at checkpoint 3; **CP6** = confirmed by checkpoint 6 at
+`35dd9e2` (the D3 column on the kernel's flow contracts, and S3c); **static** = a property of a committed file, not of a run; **not
 certified** = the verifier says it cannot be claimed or did not check it.
 
 | # | Claim | Evidence | Status |
@@ -356,8 +360,8 @@ certified** = the verifier says it cannot be claimed or did not check it.
 | 40 | ERROR after a leak keeps `partial_evidence` at runtime | V §What still cannot be claimed (probe P01, no ERROR cell) | not certified as a cell |
 | 41 | Reproduction commands rewrite `results/`, and CI fails on drift | R §Reproduce | CP2 for the rerun; CI job on Linux not yet observed [V §What still cannot be claimed] |
 | 42 | Prior-art naming map | `PRIOR-ART.md` (verifier, #165) | static (interpretation, per that file) |
-| 43 | D3 (value-level labels) stops every attack D2 stops, plus S5b; lets through only S3b (1/8) | R §What value-level labels (D3) change, §Attack outcome; J `*/D3` | pending |
-| 44 | D3 completes all five CRM-reading tasks D2 breaks (benign `crm-gift`, S1, S2, S5, S5b); on these eight fixed scenarios (whose S5/S5b payloads carry the whole labelled field) it regresses no utility and no attack outcome vs D2 | R §What value-level labels (D3) change, §Utility; J `*/D3`; CHECKPOINT-3 §Confirmed | CP3 |
+| 43 | D3 (flow labels) stops every attack D2 stops, plus S5b; lets through only S3b (1/8) | R §What the kernel's flow labels (D3) change, §Attack outcome; J `*/D3` | CP6 |
+| 44 | D3 completes all five CRM-reading tasks D2 breaks (benign `crm-gift`, S1, S2, S5, S5b); on these eight fixed scenarios (whose S5/S5b payloads carry the whole labelled field) it regresses no utility and no attack outcome vs D2 | R §What the kernel's flow labels (D3) change, §Utility; J `*/D3`; CHECKPOINT-3 §Confirmed | CP3 |
 | 45 | D3's confidentiality stop is causal: the Private value is in the **proposed** args and is DENIED before the handler is entered (not executed) | S5/D3 and S5b/D3 traces (flow_label, then call with data, then DENY·flow:confidentiality, no exec); CHECKPOINT-3 §Confirmed | CP3 |
-| 46 | After a private read, a value the adapter cannot vouch for is refused by the kernel whatever its phrasing (transform, partial quote, wrapped record, fresh benign input); the S5/S5b stops do not depend on the paste | C §8.4; test `D3 unbound values fall back to the ambient`; S5/D3 and S5b/D3 traces (`flow.args` empty on the DENY, ambient `trusted/private`) | static (test); NOT yet verifier-checked (CP3 checked the superseded prototype) |
-| 47 | D3 runs on the kernel's flow contracts; the adapter decides nothing (every D3 refusal carries the kernel's rule), and asserts one label itself: an unbound declared argument is Public | C §8.4; src/defenses/d2-ai2rules.js `labels:true`; test `D3 closes S5b … by the kernel's rule` | static (test); NOT yet verifier-checked |
+| 46 | After a private read, a value the adapter cannot vouch for is refused by the kernel whatever its phrasing (transform, partial quote, wrapped record, fresh benign input); the S5/S5b stops do not depend on the paste | C §8.4; test `D3 unbound values fall back to the ambient`; S5/D3 and S5b/D3 traces (`flow.args` empty on the DENY, ambient `trusted/private`) | static (test); CP6 |
+| 47 | D3 runs on the kernel's flow contracts; the adapter decides nothing (every D3 refusal carries the kernel's rule), and asserts one label itself: an unbound declared argument is Public | C §8.4; src/defenses/d2-ai2rules.js `labels:true`; test `D3 closes S5b … by the kernel's rule` | static (test); CP6 |

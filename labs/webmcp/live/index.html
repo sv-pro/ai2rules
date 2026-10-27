@@ -235,7 +235,7 @@ function renderDeclared() {
         s.contracts.map((c) => `<div class="contract"><b>${esc(c.action)}</b>\n${esc(c.lines.join('\n'))}</div>`).join('')
       : '<p class="hint">No site is marked private, so no contract is declared and nothing is labelled private.</p>';
   } else if (s.policy === 'D2') {
-    html = `<p class="hint">D2 has no value labels. After a read from ${esc(s.sensitive.map(where).join(', ') || 'a private site')} the whole session is tainted, and writes are refused.</p>`;
+    html = `<p class="hint">D2 has no flow labels. After a read from ${esc(s.sensitive.map(where).join(', ') || 'a private site')} the whole session is tainted, and writes are refused.</p>`;
   } else {
     html = `<p class="hint">${s.policy} has no labels and no taint.</p>`;
   }
