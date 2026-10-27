@@ -159,7 +159,10 @@ const FLOW_RULES = {
 // actually returned. It decides nothing: every DENY here is the kernel's rule.
 // Projection, pinning and the integrity taint from untrusted page text are
 // unchanged.
-export function createD2({ workDir, labels = false }) {
+// `vouch` (live demo only, AI2-95; the matrix never passes it): a host that has
+// seen what the person typed may vouch for an argument found in it. Such a value
+// is Trusted/Public by the host's word, exactly like the task's own inputs above.
+export function createD2({ workDir, labels = false, vouch = null }) {
   const bin = harnessBin();
   let worldPath = null;
   let task = null;
@@ -198,15 +201,17 @@ export function createD2({ workDir, labels = false }) {
   function flowFor(action, args) {
     const labelled = {};
     const absent = [];
+    const vouched = [];
     for (const [name, value] of Object.entries(args ?? {})) {
       const label = valueLabels.get(digest(value));
       if (label) labelled[name] = label;
+      else if (vouch?.(value)) { labelled[name] = TRUSTED_PUBLIC; vouched.push(name); }
     }
     const declared = task.capabilities.find((c) => actionName(c.origin, c.tool) === action)?.args ?? {};
     for (const name of Object.keys(declared)) {
       if (!(name in (args ?? {}))) { labelled[name] = TRUSTED_PUBLIC; absent.push(name); }
     }
-    return { ambient, args: labelled, absent };
+    return { ambient, args: labelled, absent, vouched };
   }
 
   return {
@@ -310,6 +315,7 @@ export function createD2({ workDir, labels = false }) {
           ambient: showLabel(flow.ambient),
           args: Object.fromEntries(Object.entries(flow.args).map(([k, l]) => [k, showLabel(l)])),
           ...(flow.absent.length ? { absent: flow.absent } : {}),
+          ...(flow.vouched.length ? { vouched: flow.vouched } : {}),
           result: this._pendingResult ? showLabel(this._pendingResult) : null,
         };
       }

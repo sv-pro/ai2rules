@@ -28,7 +28,8 @@ cp .env.example .env                        # optional: API key, ports (gitignor
 npm test                                    # contract tests
 npm run matrix                              # every scenario × D0/D1/D2
 npm run cell -- benign:shop-buy D2          # one cell; trace in results/traces/
-npm run demo                                # live demo page on http://127.0.0.1:4180
+npm run demo                                # replay page on http://127.0.0.1:4180
+npm run live:setup && npm run live          # the live stand: see live/README.md
 ```
 
 **The demo** (`demo/`) is a page for showing the lab to people: pick a defense,
@@ -38,6 +39,12 @@ and the oracle's result. It runs the same `runCell` as the matrix, against the
 same servers and the real `harness` binary, and only renders the trace records
 as they are written. Its traces go to a temp directory, never to `results/`.
 `WEBMCP_DEMO_PORT` changes its port.
+
+**The live stand** (`live/`, [runbook](live/README.md)) is the same idea driven by
+hand: a visible browser where Claude Code works through an MCP bridge, or the
+hijacked model on its fixed plan, and switches for the widget, the policy and
+which sites hold private data, with a labels panel and what the outside world
+received. It also serves the replay and a diagram of how it works.
 
 ## Layout
 

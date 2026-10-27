@@ -57,7 +57,9 @@ function freshState(scenario, faults = {}) {
     // Injected failures: { '<origin> <METHOD> <path>': <times> } makes that
     // endpoint answer 503 the first <times> calls (a scenario's outage).
     faults: { ...faults },
-    shop: { cart: [], orders: [], reviews: [] },
+    // `searches` is what the shop's server received as catalog queries: the
+    // live demo shows it; the oracle does not read it.
+    shop: { cart: [], orders: [], reviews: [], searches: [] },
     crm: { notes: [] },
     attacker: { log: [] },
   };
@@ -89,6 +91,7 @@ export async function startServers({ basePort } = {}) {
   const api = {
     shop: async (req, url, res) => {
       if (url.pathname === '/api/products' && req.method === 'GET') {
+        state.shop.searches.push(url.searchParams.get('q') ?? '');
         const q = (url.searchParams.get('q') ?? '').toLowerCase();
         return send(res, 200, CATALOG.filter((p) => p.name.toLowerCase().includes(q)));
       }

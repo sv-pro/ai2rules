@@ -11,8 +11,10 @@ import { fileURLToPath } from 'node:url';
 
 const SHIM = path.join(path.dirname(fileURLToPath(import.meta.url)), 'shim', 'model-context-shim.js');
 
-export function launchBrowser() {
-  return chromium.launch({ headless: true });
+// Headless for the matrix and tests; the live demo shows the window (AI2-95),
+// optionally in an installed Chrome or Edge (`channel`).
+export function launchBrowser({ headless = true, channel } = {}) {
+  return chromium.launch({ headless, ...(channel ? { channel } : {}) });
 }
 
 export function canonicalJson(v) {
@@ -127,9 +129,19 @@ export class BrowserEnv {
     return JSON.parse(out);
   }
 
+  // The live demo draws its overlay on a tab; nothing in the lab reads this.
+  page(tabId) {
+    return this.#tabs.get(tabId)?.page ?? null;
+  }
+
   // Test hook: run a function in a tab's page, as a page script would.
   async evaluateInPage(tabId, fn, arg) {
     return this.#tabs.get(tabId).page.evaluate(fn, arg);
+  }
+
+  // The live demo's window can be closed by hand, a tab or the whole browser.
+  isClosed() {
+    return !this.#context.browser()?.isConnected() || [...this.#tabs.values()].some((t) => t.page.isClosed());
   }
 
   async close() {
