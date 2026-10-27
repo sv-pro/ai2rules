@@ -11,27 +11,21 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { launchBrowser } from '../src/browser.js';
 import { startServers } from '../src/servers.js';
-import { runCell, loadScenario, LAB_ROOT } from '../src/cell.js';
-import { DEFENSE_IDS } from '../src/defenses/index.js';
+import { runCell, loadScenario } from '../src/cell.js';
+import { DEFENSE_IDS, DEFENSE_INFO } from '../src/defenses/index.js';
 import { harnessBin } from '../src/defenses/d2-ai2rules.js';
 import { CANARY } from '../src/canary.js';
 import { TASKS } from '../src/tasks.js';
+import { loadLabEnv, harnessVersion } from '../src/local.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-// Same local settings file as the runner (HARNESS_BIN, ports); blank means unset.
-const DOTENV = path.join(LAB_ROOT, '.env');
-if (process.env.WEBMCP_NO_DOTENV !== '1' && existsSync(DOTENV)) {
-  const before = new Set(Object.keys(process.env));
-  process.loadEnvFile(DOTENV);
-  for (const [k, v] of Object.entries(process.env)) if (v === '' && !before.has(k)) delete process.env[k];
-}
+// Same local settings file as the runner (HARNESS_BIN, ports).
+loadLabEnv();
 
 const PORT = Number(process.env.WEBMCP_DEMO_PORT ?? 4180);
 
@@ -39,16 +33,9 @@ const PORT = Number(process.env.WEBMCP_DEMO_PORT ?? 4180);
 // are there for a follow-up question, not for the main path.
 const SCENARIOS = ['s5b-read-sink-exfil', 's5-cross-tab-exfil', 'benign:crm-gift'];
 
-const DEFENSES = {
-  D0: { name: 'No defense', blurb: 'Every tool call the agent makes runs.' },
-  D1: { name: 'Rule-based guard', blurb: 'Per-call allow and deny rules, the kind many products ship today.' },
-  D2: { name: 'ai2rules kernel', blurb: 'The agent sees only its task\'s tools. After it reads CRM data the session is tainted, and writes and external actions are refused.' },
-  D3: { name: 'ai2rules kernel + value labels', blurb: 'Values read from the CRM are labelled private. A private value cannot be sent to another site, through any tool.' },
-};
-
-function harnessVersion() {
-  try { return execFileSync(harnessBin(), ['--version']).toString().trim(); } catch { return null; }
-}
+// The kernel's version, asked once: a synchronous spawn per page load would
+// stall a run being streamed.
+const HARNESS = harnessVersion();
 
 let browser = null;
 let servers = null;
@@ -66,7 +53,7 @@ async function info() {
     scenarios.push({ id, short: s.short, name: s.name, task: s.task, attack: s.attack });
   }
   const tasks = Object.fromEntries(Object.values(TASKS).map((t) => [t.id, { prompt: t.prompt }]));
-  return { scenarios, tasks, defenses: DEFENSE_IDS.map((id) => ({ id, ...DEFENSES[id] })), canary: CANARY, harness: harnessVersion() };
+  return { scenarios, tasks, defenses: DEFENSE_IDS.map((id) => ({ id, ...DEFENSE_INFO[id] })), canary: CANARY, harness: HARNESS };
 }
 
 function sse(res) {
@@ -81,12 +68,14 @@ async function run(url, res) {
     res.writeHead(400, { 'content-type': 'text/plain' });
     return res.end('unknown defense or scenario');
   }
+  const send = sse(res);
+  // Said as an event, not a 409: EventSource cannot read a status code, so a
+  // refusal would reach the page as a lost connection.
   if (busy) {
-    res.writeHead(409, { 'content-type': 'text/plain' });
-    return res.end('a run is already in progress');
+    send('busy', { message: 'Another run is still going (in another tab, or one started before a reload). Try again when it ends.' });
+    return res.end();
   }
   busy = true;
-  const send = sse(res);
   try {
     await ensureLab();
     const row = await runCell({
@@ -94,7 +83,7 @@ async function run(url, res) {
       servers,
       scenarioId,
       defenseId,
-      traceDir: path.join(os.tmpdir(), 'webmcp-demo-traces'),
+      traceDir: path.join(os.tmpdir(), `webmcp-demo-traces-${process.pid}`),
       workDir: path.join(os.tmpdir(), `webmcp-demo-${process.pid}`),
       onRecord: (rec) => send('record', rec),
     });
@@ -137,5 +126,5 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`WebMCP lab demo: http://127.0.0.1:${PORT}  (kernel: ${harnessVersion() ?? `not found at ${harnessBin()}`})`);
+  console.log(`WebMCP lab demo: http://127.0.0.1:${PORT}  (kernel: ${HARNESS ?? `not found at ${harnessBin()}`})`);
 });

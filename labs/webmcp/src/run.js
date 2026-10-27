@@ -16,26 +16,12 @@ import { TASKS } from './tasks.js';
 import { renderResults, renderResultsSvg } from './report.js';
 import { renderLlmResults, LLM_TASKS } from './report-llm.js';
 import { harnessBin } from './defenses/d2-ai2rules.js';
+import { loadLabEnv, harnessVersion } from './local.js';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-// Local settings (API key, ports, binary path) from `labs/webmcp/.env`, which is
-// gitignored; `.env.example` lists the names. A variable already set in the
-// environment wins over the file. WEBMCP_NO_DOTENV=1 skips the file, so tests
-// stay hermetic on a machine that has a real key in it.
-const DOTENV = path.join(LAB_ROOT, '.env');
-if (process.env.WEBMCP_NO_DOTENV !== '1' && existsSync(DOTENV)) {
-  const before = new Set(Object.keys(process.env));
-  process.loadEnvFile(DOTENV);
-  // A name left blank in the template (`WEBMCP_BASE_PORT=`) means "not set",
-  // not "the empty string": drop it so the default applies.
-  for (const [k, v] of Object.entries(process.env)) if (v === '' && !before.has(k)) delete process.env[k];
-}
-
-function harnessVersion() {
-  try { return execFileSync(harnessBin(), ['--version']).toString().trim(); } catch { return null; }
-}
+loadLabEnv();
 
 // The attacks the epic requires. A matrix run that is missing one is not the
 // matrix (verifier finding E04/E05): it fails instead of silently shrinking.

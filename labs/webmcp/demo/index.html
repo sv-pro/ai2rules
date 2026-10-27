@@ -239,7 +239,7 @@ function render(rec) {
       const text = { ALLOW: 'allowed', MONITOR: 'allowed, flagged for monitoring', DENY: 'refused', ABSENT: 'the tool does not exist for the agent' }[d] ?? d;
       const kernel = rec.kernel?.rule ? `kernel rule <code>${esc(rec.kernel.rule)}</code>` : '';
       const why = [esc(mech(rec.mechanism)), kernel].filter(Boolean).join(' · ');
-      current.insertAdjacentHTML('beforeend', `<div class="verdict"><span class="chip ${esc(d)}">${esc(d)}</span>${text}${why ? ` <span class="reason">— ${why}</span>` : ''}</div>`);
+      current.insertAdjacentHTML('beforeend', `<div class="verdict"><span class="chip ${esc(d)}">${esc(d)}</span>${esc(text)}${why ? ` <span class="reason">— ${why}</span>` : ''}</div>`);
       return 700;
     }
     case 'exec': {
@@ -285,6 +285,11 @@ async function drain() {
 
 function showResult(row) {
   const el = $('result');
+  if (row.status === 'BUSY' || row.status === 'LOST') {
+    el.className = '';
+    el.innerHTML = `<p class="big">${row.status === 'BUSY' ? 'Not run' : 'No result'}</p><p>${esc(row.error ?? '')}</p>`;
+    return;
+  }
   if (row.status !== 'OK') {
     el.className = 'bad';
     el.innerHTML = `<p class="big">The lab failed</p><p>${esc(row.error ?? '')}</p><p class="reason">An error is never counted as a defense holding.</p>`;
@@ -310,12 +315,20 @@ function runOne(defense) {
   $('result').className = '';
   current = null;
   return new Promise((resolve) => {
-    const finish = (row) => enqueue(() => { showResult(row); results.set(`${scenario}|${defense}`, row); renderCompare(); return 0; }).then(resolve);
+    const finish = (row) => enqueue(() => {
+      showResult(row);
+      if (row.status === 'OK' || row.status === 'ERROR') results.set(`${scenario}|${defense}`, row);
+      renderCompare();
+      return 0;
+    }).then(resolve);
     const es = new EventSource(`/api/run?defense=${defense}&scenario=${encodeURIComponent(scenario)}`);
     es.addEventListener('record', (e) => { const rec = JSON.parse(e.data); enqueue(() => render(rec)); });
     es.addEventListener('result', (e) => { es.close(); finish(JSON.parse(e.data)); });
     es.addEventListener('failure', (e) => { es.close(); finish({ status: 'ERROR', error: JSON.parse(e.data).message }); });
-    es.onerror = () => { es.close(); finish({ status: 'ERROR', error: 'lost the connection to the demo server' }); };
+    // Neither of these is a result of the defense: say so, and keep it out of
+    // the comparison table.
+    es.addEventListener('busy', (e) => { es.close(); finish({ status: 'BUSY', error: JSON.parse(e.data).message }); });
+    es.onerror = () => { es.close(); finish({ status: 'LOST', error: 'Lost the connection to the demo server.' }); };
   });
 }
 
