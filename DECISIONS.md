@@ -4321,3 +4321,14 @@ mark where the vocabulary has to grow, and each such growth is a kernel decision
 own. Experiment 1 (AI2-104) wires the first-party exfiltration add-on (AI2-101) through
 the existing carriers in the WebMCP lab and measures it with the lab's oracle. It shows
 whether D96 holds as written or needs amending.
+
+*Update (2026-10-27, experiment 1):* D96 holds, with one refinement
+(`labs/webmcp/results/experiments/exfiltration/`). The exfiltration add-on opened no
+attack and cost no utility in any pair. In the D3 world its finding rode the existing
+`context.flow.args` label and the kernel decided. In worlds that declare no flow sink
+(D0, D2) the fact had no rule to meet, so the host refused beside the kernel; that is
+how `D2+exfil` closed S5b. So a fact reaches the kernel only where the world declares
+the rule it meets. Where it does not, the missing piece is the world's vocabulary
+(sinks), not an ABI field, and the host's refusal is the fallback. That refusal has
+to be recorded by the host, because the kernel never saw it. `context.signals` is not
+needed for this add-on.

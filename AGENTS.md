@@ -21,6 +21,7 @@ ai2rules/
 ├── blog/                     # Astro website (Node sub-project, separate from Rust workspace)
 ├── docker/                   # Containerisation: Dockerfile, compose, egress proxy
 ├── labs/webmcp/              # WebMCP attack lab (Node sub-project, separate from Rust workspace; #160 / AI2-83)
+├── addons/                   # Add-ons around the kernel (D96): separate packages, no kernel crate depends on one
 ├── .claude/                  # Claude Code integration (hooks, agents, commands, config)
 ├── .uh/                      # Workspace manifest (project.yaml, hand-edited) and the brief generated from it (brief.md)
 ├── .mcp.json                 # Project MCP servers for Claude Code (Linear); entries added by universal-harness
@@ -93,7 +94,9 @@ tests, run via wasm-pack). The Unix-only doctor fixture suite includes
 - Only `ExecutionSpec` crosses the kernel→executor boundary.
 - The `executor` never imports `world-kernel` — decisions and execution are separate.
 - Add-ons stay outside the kernel (D96): no kernel crate depends on one, and an add-on
-  supplies facts the kernel judges (labels, taint), never a verdict. It can only tighten.
+  supplies facts the kernel judges (labels, taint), never a verdict. Where the world
+  declares no rule for a fact to meet, the host may refuse beside the kernel instead.
+  Either way an add-on can only tighten.
 - `harness-preview` and `harness-wasm` expose the same logic: no drift between
   native and WASM gate/preview/project functions. Discovery projection lives in
   `harness-preview` beside `gate` (D75); `cli-harness/src/project.rs` is the wire

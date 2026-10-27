@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createExfiltrationGuard, findingsFor, observePrivate } from './addon-exfiltration.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
@@ -124,6 +125,9 @@ function run(bin, args, input) {
 // ---- D3: the host side of the kernel's flow labels (gate ABI §6) ----
 
 const TRUSTED_PUBLIC = { integrity: 'trusted', confidentiality: 'public' };
+// What the exfiltration add-on's finding raises an argument to (AI2-104): its
+// confidentiality, joined with whatever label the value already has.
+const RAISE_TO_PRIVATE = { integrity: 'trusted', confidentiality: 'private' };
 
 // Labels only ever go up: joining is the only operation a host has.
 const joinLabel = (a, b) => ({
@@ -171,8 +175,17 @@ const FLOW_RULES = {
 // `approve` (live demo only, AI2-99): the host's approval UI. When the kernel
 // answers ASK, the call is put to the person and runs only if they allow it;
 // every other verdict is the kernel's alone, so a refusal is never put to anyone.
-export function createD2({ workDir, labels = false, vouch = null, approvals = [], approve = null }) {
+//
+// `exfiltration` (experiment 1 of AI2-104; never in the matrix's own columns):
+// with `labels`, the exfiltration add-on's findings ride the existing label
+// carrier. A finding raises that argument's label to Private before the gate
+// request is built, and the kernel's flow contract decides (D96). The add-on
+// sees what the task's sensitive origins return, and only calls to other
+// origins are inspected (`addon-exfiltration.js`).
+export function createD2({ workDir, labels = false, vouch = null, approvals = [], approve = null, exfiltration = false }) {
+  if (exfiltration && !labels) throw new Error('the exfiltration label carrier needs the D3 world (labels: true)');
   const bin = harnessBin();
+  const guard = exfiltration ? createExfiltrationGuard() : null;
   let worldPath = null;
   let task = null;
   let taint = 'clean';
@@ -224,8 +237,10 @@ export function createD2({ workDir, labels = false, vouch = null, approvals = []
   }
 
   return {
-    id: labels ? 'D3' : 'D2',
-    label: labels
+    id: guard ? 'D3+exfil' : labels ? 'D3' : 'D2',
+    label: guard
+      ? 'ai2rules + flow contracts + exfiltration add-on (labels)'
+      : labels
       ? 'ai2rules + flow contracts (kernel flow labels, D95)'
       : 'ai2rules (compiled world + pinning + taint)',
 
@@ -238,6 +253,7 @@ export function createD2({ workDir, labels = false, vouch = null, approvals = []
       pins.clear();
       ambient = TRUSTED_PUBLIC;
       valueLabels.clear();
+      guard?.reset();
       trace.write('defense_init', { defense: labels ? 'D3' : 'D2', world: path.basename(worldPath), capabilities: task.capabilities.length, labels });
       if (labels) {
         // The user's own input, labelled explicitly: every value the task's
@@ -296,6 +312,9 @@ export function createD2({ workDir, labels = false, vouch = null, approvals = []
       if (pins.has(a) && !pinned(tool)) {
         return { decision: 'ABSENT', mechanism: 'pinning', reason: `${a}: live registration ${tool.regId} is not the pinned identity ${pins.get(a).regId}` };
       }
+      // The add-on's facts, raised onto the labels before the request is built.
+      const addonFindings = guard ? findingsFor(guard, task, { tool, args }, trace) : [];
+      for (const f of addonFindings) bind(args[f.argument], RAISE_TO_PRIVATE);
       const flow = labels ? flowFor(a, args) : undefined;
       const res = await run(bin, ['gate', '--world', worldPath], {
         v: 1,
@@ -323,7 +342,7 @@ export function createD2({ workDir, labels = false, vouch = null, approvals = []
           : ['unknown_to_ontology', 'absent'].includes(res.rule) ? 'projection'
             : FLOW_RULES[res.rule] ?? (taint === 'tainted' ? 'taint' : `kernel:${res.rule}`);
       if (decision === 'ALLOW') this._pendingTaint = res.context.taint;
-      const verdict = { decision, mechanism, reason: res.reason ?? null, kernel: { decision: res.decision, rule: res.rule, manifest_hash: res.manifest_hash }, ...(answer ? { approval: answer } : {}) };
+      const verdict = { decision, mechanism, reason: res.reason ?? null, kernel: { decision: res.decision, rule: res.rule, manifest_hash: res.manifest_hash }, ...(answer ? { approval: answer } : {}), ...(addonFindings.length ? { addon: addonFindings } : {}) };
       if (flow) {
         // ABI §6 step 5: the post-call ambient is persisted after every call,
         // joined, never lowered. The result floor is kept for `afterCall`,
@@ -350,6 +369,7 @@ export function createD2({ workDir, labels = false, vouch = null, approvals = []
     // too), as the whole value, by digest. A sink-only action returns no floor
     // and binds nothing.
     async afterCall(call, _res, { trace }) {
+      if (guard) observePrivate(guard, task, call, _res, trace);
       if (labels && this._pendingResult) {
         const value = _res?.ok ? _res.result : _res?.error;
         if (value !== undefined) {

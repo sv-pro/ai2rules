@@ -10,9 +10,9 @@ const MECHANISMS = {
   not_triggered: 'Nothing was refused: the injected instruction never reached the agent. The scenario note says why.',
 };
 
-const yes = (b) => (b ? 'yes' : '**no**');
+export const yes = (b) => (b ? 'yes' : '**no**');
 
-function attackCell(r) {
+export function attackCell(r) {
   if (!r) return '';
   if (r.status !== 'OK') return '**ERROR**';
   if (r.attack_success) return '**succeeded**';
