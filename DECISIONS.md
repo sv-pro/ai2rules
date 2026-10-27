@@ -4244,3 +4244,80 @@ inference the kernel pretends to make. The default world is unchanged (no rollou
 governance benchmark and every demo marker are byte-identical, and the WASM artifact is
 rebuilt because `deny_unknown_fields` means a pre-D95 engine cannot even parse a
 contracted manifest.
+
+
+## D96 — Add-ons stay outside the kernel and supply facts it judges, never a verdict
+
+**Date:** 2026-10-27. **Task:** AI2-104. **Scope:** design; no code yet. The add-ons it
+governs are AI2-101 (exfiltration prevention), AI2-102 (tool-substitution tracking) and
+AI2-103 (model-based attack detection).
+
+**Context.** The kernel is one layer: deterministic governance at the intent/action
+boundary. Its limits are measured, not guessed. S3c beats first-use pinning under every
+defense. Flow labels are whole-result and bound by the host (D95), so a value the model
+transforms is the host's to re-label. An injection whose effect stays inside the world is
+in-world by definition (CP6-F1). And PreToolUse sees a Bash line, not each subprocess's
+egress. Closing these needs content inspection, browser-side provenance or a model. Each
+would bring I/O or non-determinism into a kernel whose value is that it has neither, and
+would change the project's direction. So on 2026-10-27 they were made separate add-ons:
+each installs on its own and combines with the others in any mix. Some are first-party,
+in this repository, and some are third-party. What was left open is how the kernel and an
+add-on meet.
+
+**Decision.**
+
+- **The kernel never calls an add-on.** It stays pure: no I/O, no model, no mutable shared
+  state. Add-ons run around it, at the host, in an adapter, in an egress proxy or in a
+  browser broker.
+- **An add-on supplies a fact, never a verdict.** The host, or our adapter, turns an
+  add-on's finding into an input the kernel already judges. That input can be a flow label
+  on an argument (D95), taint on the session or on an argument, or a pin or projection
+  fact. The world declares the rule that turns the input into a decision, and the kernel
+  applies it. A probabilistic finding (AI2-103) becomes an input only through a threshold
+  the world declares, not one the add-on picks.
+- **Composition only tightens.** An add-on can raise a label, add taint, or turn an ALLOW
+  into an ASK or a DENY. Nothing an add-on says can turn a DENY or an ABSENT into an
+  ALLOW, or lower a label. This is the same one-way rule as `with_flow` and the host's
+  result floor (D95). Where several hooks run side by side, as Claude Code's PreToolUse
+  hooks do, the most restrictive answer already wins.
+- **Signals are evidence.** Each signal is recorded with its source in the decision log,
+  and replay uses the recorded signal instead of asking the add-on again. Decisions stay
+  replayable when an add-on is a model.
+- **Failure is declared, not incidental.** What a timeout, crash or missing answer means
+  (refuse, or proceed without the fact) is declared per add-on. It is never decided by
+  whichever code path happened to break.
+- **First-party and third-party add-ons use the same public path.** A first-party add-on
+  lives in this repository as a separate package that no kernel crate depends on. It
+  reaches the kernel only through the host and the gate ABI, the way a third-party add-on
+  does. That makes our own add-ons the test that the extension point is real. No kernel
+  crate may import one, by the same kind of rule that keeps `executor` from importing
+  `world-kernel` (`AGENTS.md`, architecture invariants), and a test can pin it.
+- **No new mechanism up front.** The first experiment uses the carriers that exist: the
+  gate ABI's `context.flow` labels and the taint context, and a second hook beside
+  `world-gate.sh`. A generic `context.signals` field (source plus finding, additive in ABI
+  v1), and an adapter pipeline with an `addons:` block in the manifest, come only when an
+  experiment shows those carriers fall short.
+
+**Alternatives rejected, for now.**
+
+- *Build each defense into the kernel.* Content inspection and model calls bring I/O and
+  non-determinism into the kernel. Its decisions would stop being replayable from their
+  inputs, and the project would change direction.
+- *Add-ons only beside the kernel, as parallel hooks or proxies, with no shared
+  vocabulary.* This works today and stays allowed. But the kernel never learns the fact,
+  the decision log has no record of it, and a finding cannot meet a declared rule such
+  as "private data may not reach this sink".
+- *An adapter pipeline with registration from day one.* It puts orchestration, timeouts
+  and partial failure into the adapter before there is a second add-on to justify them.
+- *In-process plugins (dynamic libraries, WASM components).* They give the strongest
+  isolation for third-party code and are the heaviest to build. Deferred until a
+  third-party add-on exists.
+- *Let a model's verdict decide.* No model takes part in the decision. A probability
+  becomes an input only through a threshold the world declares.
+
+**Consequences.** A finding counts only if it can be said in the kernel's vocabulary. Some
+cannot yet: "this tool was registered by a different script" (AI2-102) is one. Those
+mark where the vocabulary has to grow, and each such growth is a kernel decision of its
+own. Experiment 1 (AI2-104) wires the first-party exfiltration add-on (AI2-101) through
+the existing carriers in the WebMCP lab and measures it with the lab's oracle. It shows
+whether D96 holds as written or needs amending.

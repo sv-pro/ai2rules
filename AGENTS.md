@@ -30,7 +30,7 @@ ai2rules/
 │   ├── safe-mcp-proxy/
 │   └── mcp-tool-projection/
 ├── PLAN.md                   # Epic-level execution plan — the task source of truth
-├── DECISIONS.md              # ADR-lite decision log (D1–D95)
+├── DECISIONS.md              # ADR-lite decision log (D1–D96)
 ├── README.md                 # Project overview, milestone status, build instructions
 ├── rustfmt.toml              # max_width 100, edition 2021
 └── rust-toolchain.toml       # the pinned compiler — same one locally and in CI
@@ -92,6 +92,8 @@ tests, run via wasm-pack). The Unix-only doctor fixture suite includes
 - Taint is monotonic; `CompiledWorld` is immutable after construction.
 - Only `ExecutionSpec` crosses the kernel→executor boundary.
 - The `executor` never imports `world-kernel` — decisions and execution are separate.
+- Add-ons stay outside the kernel (D96): no kernel crate depends on one, and an add-on
+  supplies facts the kernel judges (labels, taint), never a verdict. It can only tighten.
 - `harness-preview` and `harness-wasm` expose the same logic: no drift between
   native and WASM gate/preview/project functions. Discovery projection lives in
   `harness-preview` beside `gate` (D75); `cli-harness/src/project.rs` is the wire
@@ -159,7 +161,7 @@ See `PLAN.md` for epic detail, acceptance invariants, and the dependency DAG.
   harness paths explicitly.
 - **Record architectural decisions in `DECISIONS.md`.** When a choice closes off
   a real alternative, append a `D<n>` entry (decision + alternatives + why) so it
-  can be revisited later. Currently D1–D95.
+  can be revisited later. Currently D1–D96.
 - **No new workspace members without updating the crate map above** and
   `README.md`.
 - **Default world lives in `crates/compiler/assets/default_world.yaml`.** It
@@ -264,7 +266,7 @@ blog/public/demo/law-firm.html`.
 | `README.md` | Project overview, milestone table, build/run instructions |
 | `docs/TUTORIAL.md` | Nine-stop guided tour of what works today (offline); the honest "what is *not* done" list |
 | `PLAN.md` | Epic definitions, acceptance invariants, dependency DAG, task source of truth |
-| `DECISIONS.md` | ADR-lite log D1–D95; consult before choosing alternatives |
+| `DECISIONS.md` | ADR-lite log D1–D96; consult before choosing alternatives |
 | `docs/harness-architecture.md` | Canonical runtime design (5 sections) |
 | `docs/THESIS.md` | Positioning: five layers, stochastic/deterministic border |
 | `docs/GLOSSARY.md` | Normalised vocabulary — use these terms, not synonyms |
