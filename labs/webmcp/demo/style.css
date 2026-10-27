@@ -1,0 +1,87 @@
+/* Shared by demo/index.html, live/index.html and live/how.html. */
+
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd;
+    --accent: #2f5fd0; --good: #1f7a44; --good-bg: #e6f3ea; --bad: #b3261e; --bad-bg: #fbe9e7;
+    --warn: #8a5a00; --warn-bg: #fdf2dc; --grey-bg: #efeeea; --code: #f1f0ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #a09f98; --line: #34332f;
+      --accent: #7ea2ff; --good: #6fcf97; --good-bg: #183224; --bad: #ff8a80; --bad-bg: #3a1c1a;
+      --warn: #f2c36b; --warn-bg: #3a2e14; --grey-bg: #2a2a27; --code: #2a2a27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 20px 24px 8px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { color: var(--muted); margin: 0; max-width: 900px; }
+  main { display: grid; grid-template-columns: 360px 1fr; gap: 20px; padding: 16px 24px 32px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 16px 16px 4px; } }
+  main > section { min-width: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .panel + .panel { margin-top: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .story p { margin: 0 0 8px; }
+  .story b { font-weight: 600; }
+  select { width: 100%; padding: 6px 8px; font: inherit; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 12px; }
+  .defense { display: block; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
+  .defense:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .defense input { margin-right: 8px; }
+  .defense .name { font-weight: 600; }
+  .defense .blurb { display: block; color: var(--muted); font-size: 13px; margin: 2px 0 0 24px; }
+  .buttons { display: flex; gap: 8px; margin-top: 12px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .speed { margin-top: 10px; color: var(--muted); font-size: 13px; }
+  #steps { list-style: none; margin: 0; padding: 0; }
+  .step { padding: 6px 0 6px 16px; border-left: 2px solid var(--line); margin-left: 6px; position: relative; }
+  .step::before { content: ""; position: absolute; left: -6px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+  .step.minor { color: var(--muted); font-size: 13px; padding-top: 2px; padding-bottom: 2px; }
+  .step.minor::before { width: 6px; height: 6px; left: -4px; top: 10px; }
+  .step.kernel { color: var(--accent); }
+  .step.kernel::before { background: var(--accent); }
+  .step.call::before { background: var(--accent); }
+  .step.call.injected::before { background: var(--bad); }
+  .call-card { background: var(--grey-bg); border-radius: 8px; padding: 10px 12px; }
+  .injected .call-card { background: var(--bad-bg); }
+  .title { font-weight: 600; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
+  .tag.inj { background: var(--bad); border-color: var(--bad); color: #fff; }
+  code, pre { font: 13px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  pre { background: var(--code); padding: 6px 8px; border-radius: 6px; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
+  .injected pre { background: var(--panel); }
+  mark.secret { background: var(--bad); color: #fff; padding: 0 3px; border-radius: 3px; }
+  .verdict, .exec { margin-top: 8px; font-size: 14px; }
+  time.at { font: 11px ui-monospace, Consolas, monospace; color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
+  .chip { display: inline-block; font-weight: 700; font-size: 12px; letter-spacing: .04em; padding: 2px 8px; border-radius: 4px; margin-right: 6px; }
+  .chip.ALLOW { background: var(--good-bg); color: var(--good); }
+  .chip.MONITOR { background: var(--warn-bg); color: var(--warn); }
+  .chip.DENY { background: var(--bad); color: #fff; }
+  .chip.ABSENT { background: var(--panel); color: var(--muted); border: 1px solid var(--line); }
+  .reason { color: var(--muted); font-size: 13px; }
+  .leaknote { color: var(--bad); font-weight: 600; margin-top: 4px; }
+  #empty { color: var(--muted); }
+  #result { display: none; margin-top: 16px; border-radius: 10px; padding: 16px; }
+  #result.bad { display: block; background: var(--bad-bg); border: 1px solid var(--bad); }
+  #result.good { display: block; background: var(--good-bg); border: 1px solid var(--good); }
+  #result .big { font-size: 20px; font-weight: 700; margin: 0 0 6px; }
+  #result.bad .big { color: var(--bad); }
+  #result.good .big { color: var(--good); }
+  #result p { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  td.bad { color: var(--bad); font-weight: 600; }
+  td.good { color: var(--good); font-weight: 600; }
+  footer { color: var(--muted); font-size: 12px; padding: 0 24px 24px; }
+
+  .step.warn { color: var(--warn); }
+  .step.bad { color: var(--bad); }
+  .step.bad::before { background: var(--bad); }
+  nav.top { display: flex; gap: 4px; padding: 12px 24px 0; flex-wrap: wrap; }
+  nav.top a { color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 14px; }
+  nav.top a.on { background: var(--panel); color: var(--text); border: 1px solid var(--line); font-weight: 600; }
+  @media (max-width: 900px) { nav.top { padding: 10px 16px 0; } }

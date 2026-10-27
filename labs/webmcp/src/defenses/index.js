@@ -12,10 +12,10 @@ export const DEFENSE_INFO = {
   D3: { name: 'ai2rules kernel + value labels', blurb: 'The same, with labels instead of the taint: values read from the CRM are labelled private, and a private value cannot be sent to another site, through any tool.' },
 };
 
-export function createDefense(id, { workDir }) {
+export function createDefense(id, { workDir, vouch }) {
   if (id === 'D0') return createD0();
   if (id === 'D1') return createD1();
   if (id === 'D2') return createD2({ workDir });
-  if (id === 'D3') return createD2({ workDir, labels: true });
+  if (id === 'D3') return createD2({ workDir, labels: true, vouch });
   throw new Error(`unknown defense ${id}`);
 }

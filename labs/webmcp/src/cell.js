@@ -33,7 +33,7 @@ export async function loadScenario(id) {
 // registration than the first one the browser ever listed under that name (a
 // substitution or a squat). An LLM does not tag its own calls, so for it a call
 // to anything outside the task's capabilities also counts.
-function stoppedBy(trace, attackSucceeded, task) {
+export function stoppedBy(trace, attackSucceeded, task) {
   if (attackSucceeded) return null;
   const firstReg = new Map();
   for (const l of trace.ofKind('list')) {

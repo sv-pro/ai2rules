@@ -225,9 +225,15 @@ registration.
 - From then on, a registration of that action that is not the pinned one is
   hidden from the listing, and a call to it is `ABSENT`. Mechanism `pinning`.
   This holds even when the descriptor is byte-identical (tested).
-- Limitation: TOFU pins whatever registration is first seen. The kernel's
-  operator trust pins (D29) would pin descriptor hashes ahead of time. This lab
-  does not use them, because that needs knowledge from before the task.
+- Limitation: TOFU pins whatever registration is first seen. Scenario S3c
+  measures it: a replacement registered while the page loads, before the first
+  listing, is pinned as the original under D2 and D3. The kernel's operator trust
+  pins (D29) would pin descriptor hashes ahead of time, which catches a
+  first-seen replacement with a different descriptor but not S3c's, which is the
+  shop's own. This lab does not use them, because that needs knowledge from before
+  the task. The broker's event stream shows the withdrawal and the re-registration;
+  acting on it, or on which script registered a tool, is browser-side work outside
+  what these defenses govern.
 
 ### 8.3 Taint
 

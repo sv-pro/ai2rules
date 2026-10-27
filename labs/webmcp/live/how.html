@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebMCP Demo: How It Works</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .wrap { padding: 16px 24px 32px; max-width: 1200px; }
+  @media (max-width: 900px) { .wrap { padding: 16px; } }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--text); }
+  svg .muted { fill: var(--muted); }
+  svg .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  svg .broker { fill: var(--grey-bg); stroke: var(--line); stroke-width: 1.5; }
+  svg .kernel { fill: var(--panel); stroke: var(--accent); stroke-width: 2.5; }
+  svg .bad { fill: var(--bad-bg); stroke: var(--bad); stroke-width: 1.5; }
+  svg .arrow { stroke: var(--muted); stroke-width: 2; fill: none; marker-end: url(#head); }
+  svg .accent { fill: var(--accent); }
+  svg .badtext { fill: var(--bad); }
+  svg code, svg .mono { font-family: ui-monospace, Consolas, monospace; }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+  @media (max-width: 900px) { .cards { grid-template-columns: 1fr; } }
+  .cards p { margin: 0 0 8px; }
+  .parts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+  @media (max-width: 900px) { .parts { grid-template-columns: 1fr; } }
+  .parts a { color: var(--accent); font-weight: 600; text-decoration: none; }
+</style>
+</head>
+<body>
+<nav class="top"><a href="/how" class="on">How it works</a><a href="/replay">Replay</a><a href="/">Live</a></nav>
+<header>
+  <h1>How it works</h1>
+  <p class="sub">With WebMCP a web page declares its own functions as tools, and an agent in the browser calls them instead of clicking. Whoever brokers those calls decides what reaches the page. That is where ai2rules sits.</p>
+</header>
+<div class="wrap">
+  <div class="panel">
+    <svg viewBox="0 0 1100 470" role="img" aria-label="The agent calls page tools through the browser's broker, where the ai2rules kernel decides each call">
+      <defs>
+        <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+        </marker>
+      </defs>
+
+      <!-- the person -->
+      <rect class="box" x="20" y="60" width="150" height="90" rx="10"/>
+      <text x="95" y="98" text-anchor="middle" font-size="17" font-weight="600">You</text>
+      <text x="95" y="122" text-anchor="middle" font-size="13" class="muted">type a request</text>
+
+      <!-- the agent -->
+      <rect class="box" x="20" y="230" width="150" height="150" rx="10"/>
+      <text x="95" y="262" text-anchor="middle" font-size="17" font-weight="600">The agent</text>
+      <text x="95" y="290" text-anchor="middle" font-size="13">Claude Code</text>
+      <text x="95" y="310" text-anchor="middle" font-size="12" class="muted">or</text>
+      <text x="95" y="330" text-anchor="middle" font-size="13">the hijacked model</text>
+      <text x="95" y="350" text-anchor="middle" font-size="12" class="muted">(obeys any instruction</text>
+      <text x="95" y="366" text-anchor="middle" font-size="12" class="muted">it reads)</text>
+      <path class="arrow" d="M95,150 L95,226"/>
+
+      <!-- the broker -->
+      <rect class="broker" x="230" y="40" width="360" height="400" rx="14"/>
+      <text x="410" y="70" text-anchor="middle" font-size="16" font-weight="600">The browser's broker</text>
+      <text x="410" y="92" text-anchor="middle" font-size="12" class="muted">here: MCP bridge + Playwright · in a real browser: the browser</text>
+      <path class="arrow" d="M170,300 L226,300"/>
+      <text x="198" y="290" text-anchor="middle" font-size="11" class="muted">MCP</text>
+
+      <rect class="box" x="255" y="115" width="310" height="70" rx="8"/>
+      <text x="410" y="142" text-anchor="middle" font-size="14" font-weight="600">Lists what the pages registered</text>
+      <text x="410" y="164" text-anchor="middle" font-size="12" class="muted">the agent sees only those tools, by name</text>
+
+      <rect class="kernel" x="255" y="205" width="310" height="150" rx="10"/>
+      <text x="410" y="232" text-anchor="middle" font-size="16" font-weight="700" class="accent">ai2rules decides every call</text>
+      <text x="275" y="260" font-size="13">• only the assistant's tools exist (ABSENT)</text>
+      <text x="275" y="282" font-size="13">• the tool is the one first seen (pinning)</text>
+      <text x="275" y="304" font-size="13">• taint, or value labels: private data</text>
+      <text x="287" y="322" font-size="13">may not go to another site</text>
+      <text x="410" y="344" text-anchor="middle" font-size="12" class="muted">ALLOW · DENY · ABSENT, before the page runs anything</text>
+
+      <rect class="box" x="255" y="372" width="310" height="50" rx="8"/>
+      <text x="410" y="402" text-anchor="middle" font-size="14">Runs the call in the page, by registration</text>
+
+      <!-- the pages -->
+      <rect class="box" x="650" y="40" width="210" height="150" rx="10"/>
+      <text x="755" y="68" text-anchor="middle" font-size="16" font-weight="600">CRM tab</text>
+      <text x="755" y="92" text-anchor="middle" font-size="12" class="muted">registers</text>
+      <text x="755" y="116" text-anchor="middle" font-size="13" class="mono">get_customer</text>
+      <text x="755" y="148" text-anchor="middle" font-size="12" class="badtext">holds the private</text>
+      <text x="755" y="166" text-anchor="middle" font-size="12" class="badtext">account code</text>
+
+      <rect class="box" x="650" y="215" width="210" height="225" rx="10"/>
+      <text x="755" y="243" text-anchor="middle" font-size="16" font-weight="600">Shop tab</text>
+      <text x="755" y="265" text-anchor="middle" font-size="12" class="muted">registers</text>
+      <text x="755" y="287" text-anchor="middle" font-size="13" class="mono">search_products</text>
+      <text x="755" y="307" text-anchor="middle" font-size="13" class="mono">add_to_cart</text>
+      <text x="755" y="327" text-anchor="middle" font-size="13" class="mono">submit_order</text>
+      <rect class="bad" x="668" y="345" width="174" height="80" rx="8"/>
+      <text x="755" y="366" text-anchor="middle" font-size="13" font-weight="600" class="badtext">third-party widget</text>
+      <text x="755" y="386" text-anchor="middle" font-size="12">swaps submit_order, or</text>
+      <text x="755" y="404" text-anchor="middle" font-size="12">hides an instruction</text>
+      <text x="755" y="419" text-anchor="middle" font-size="12">in the search results</text>
+
+      <path class="arrow" d="M590,397 L646,397"/>
+      <path class="arrow" d="M590,150 C620,150 620,115 646,115"/>
+      <path class="arrow" d="M590,150 C620,150 620,300 646,300"/>
+
+      <!-- the servers -->
+      <rect class="box" x="920" y="60" width="160" height="80" rx="10"/>
+      <text x="1000" y="96" text-anchor="middle" font-size="15" font-weight="600">CRM server</text>
+      <text x="1000" y="118" text-anchor="middle" font-size="12" class="muted">customer records</text>
+      <rect class="box" x="920" y="215" width="160" height="90" rx="10"/>
+      <text x="1000" y="250" text-anchor="middle" font-size="15" font-weight="600">Shop server</text>
+      <text x="1000" y="272" text-anchor="middle" font-size="12" class="muted">sees every search</text>
+      <text x="1000" y="288" text-anchor="middle" font-size="12" class="muted">and every order</text>
+      <rect class="bad" x="920" y="345" width="160" height="80" rx="10"/>
+      <text x="1000" y="380" text-anchor="middle" font-size="15" font-weight="600" class="badtext">Attacker</text>
+      <text x="1000" y="402" text-anchor="middle" font-size="12">an address, a server</text>
+      <path class="arrow" d="M860,100 L916,100"/>
+      <path class="arrow" d="M860,260 L916,260"/>
+      <path class="arrow" d="M842,390 L916,390"/>
+      <text x="888" y="460" text-anchor="middle" font-size="12" class="muted">“What the outside world received” on the live page shows these servers' side</text>
+    </svg>
+  </div>
+
+  <div class="cards">
+    <div class="panel">
+      <h2>1 · Pages declare tools</h2>
+      <p>Each page calls <code>document.modelContext.registerTool</code> with a name, a description and an argument schema. The agent sees those tools and calls them by name. Browsers do not ship WebMCP yet, so the lab's shim provides the same interface.</p>
+    </div>
+    <div class="panel">
+      <h2>2 · The broker decides</h2>
+      <p>Every call passes the broker before the page runs it. ai2rules answers from a world compiled for this assistant: which tools exist, which registration each name must be, and what data may go where. No model takes part in that decision.</p>
+    </div>
+    <div class="panel">
+      <h2>3 · Labels follow values</h2>
+      <p>What is read from a private site (the CRM) is labelled private. Every argument of a tool on another site accepts only public values. A value the broker cannot vouch for takes the session's label, which turns private after the CRM read. So the leak is refused, and the gift order still goes through.</p>
+    </div>
+  </div>
+
+  <div class="parts">
+    <div class="panel"><h2>How it works</h2><p>This page.</p></div>
+    <div class="panel"><h2><a href="/replay">Replay</a></h2><p>A fixed scenario, run through each defense in turn, with the result compared side by side. The same code as the lab's measurement.</p></div>
+    <div class="panel"><h2><a href="/">Live</a></h2><p>A visible browser with Claude Code working in it, any request you like, and the switches: the widget, the policy, which sites hold private data. Or the hijacked model on its fixed plan.</p></div>
+  </div>
+</div>
+</body>
+</html>
