@@ -4409,3 +4409,39 @@ an injected instruction through an allowlisted host. The environment's network
 allowlist bounds where it could go; AI2-108 is where the kernel takes this over, and it
 should check whether D95 confidentiality labels ("Linear content may not reach a web
 sink") say it better than taint alone.
+
+## D98 — Committed outputs are regenerated in CI on demand and handed back, never pushed
+
+**Date:** 2026-10-28. **Task:** AI2-109. **Scope:** CI only (`.github/workflows/regenerate.yml`,
+`scripts/collect-changed.sh`); no kernel change.
+
+**Context.** Four build outputs live in git and CI fails when they drift from what the
+current code produces: the WASM engine (D60), the governance benchmark results (D76), the
+law-firm story page and the WebMCP lab results. Regenerating them took a Linux machine:
+the scripts are Bash, and a Windows checkout under `core.autocrlf=true` is a poor place
+to write files CI compares byte for byte. On the maintainer's Windows machine that meant
+keeping a WSL distribution around for this alone.
+
+**Decision.** A `workflow_dispatch` workflow regenerates any or all four on Linux, from
+the same commands the CI checks use, and uploads only the files that differ from the
+commit, at their repository paths, as one artifact (`regenerated-outputs`). The
+maintainer downloads it into the branch's checkout, reviews the diff and commits. A
+generator that fails, or a file the generator stopped writing, fails the run and hands
+back nothing.
+
+**Alternatives.**
+
+- *Commit and push from the workflow.* It needs `contents: write`, which no CI job has
+  today. And a push made with `GITHUB_TOKEN` does not trigger workflows, so the
+  regenerated commit would reach the PR with none of the drift checks run against it,
+  the very checks it is meant to satisfy. A personal token would fix that and add a
+  long-lived secret to a public repository.
+- *A patch file instead of the files.* `git apply` on a CRLF working tree fails on
+  context lines, and the WASM binary needs `--binary`. Whole files are simpler, and git
+  normalises their line endings on `add`.
+- *Keep WSL.* It still has a use (running hosts on Linux by hand), but not as the only
+  place a red drift check can be fixed.
+
+**Consequences.** Fixing drift costs one CI round trip instead of a local run. The
+workflow repeats the generator steps of the `wasm`, `governance-bench`, `demos` and
+`webmcp-lab` jobs; a change to how one of them builds has to change both places.

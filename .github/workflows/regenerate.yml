@@ -1,0 +1,188 @@
+name: Regenerate committed outputs
+
+# Rebuild, on Linux, the build outputs that live in git and that CI diffs against
+# what the current code produces (D98):
+#
+#   blog/public/vendor/harness-wasm/      the WASM engine          (CI job `wasm`)
+#   docs/benchmarks/mcp-governance/results the governance benchmark (`governance-bench`)
+#   blog/public/demo/law-firm.html         the published story page (`demos`)
+#   labs/webmcp/results/                   the WebMCP attack lab    (`webmcp-lab`)
+#
+# When one of those jobs goes red for drift, the fix is to regenerate and commit.
+# That used to need a Linux machine (WSL here): the scripts are Bash, and a Windows
+# checkout under `core.autocrlf=true` is a poor place to produce files CI compares
+# byte for byte. Run this from the Actions tab (or `gh workflow run regenerate.yml
+# --ref <branch>`) on the branch that needs it.
+#
+# It hands the files back instead of pushing them. Only what changed is uploaded,
+# at its repository path, as one artifact; from the checkout of that branch:
+#
+#   gh run download <run-id> -n regenerated-outputs
+#
+# then review `git diff` and commit as usual. Pushing from here would need
+# `contents: write`, and a push made with GITHUB_TOKEN does not trigger CI, so the
+# regenerated commit would reach the PR with no checks run against it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: Which outputs to regenerate
+        type: choice
+        default: all
+        options: [all, wasm, governance-bench, law-firm, webmcp-lab]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    if: inputs.only == 'all' || inputs.only == 'wasm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Build the engine
+        run: wasm-pack build --target web --release
+        working-directory: crates/harness-wasm
+      - name: Copy it over the committed one
+        run: cp crates/harness-wasm/pkg/harness_wasm{_bg.wasm,.js} blog/public/vendor/harness-wasm/
+      # The same check the `wasm` job runs, so a copy that would still fail CI
+      # fails here instead.
+      - name: The copy answers for the kernel
+        run: node scripts/check-wasm-freshness.mjs
+      - name: Collect what changed
+        run: bash scripts/collect-changed.sh "$RUNNER_TEMP/out" blog/public/vendor/harness-wasm
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: part-wasm
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore
+
+  governance-bench:
+    if: inputs.only == 'all' || inputs.only == 'governance-bench'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+      # Fails on its own if the contrast stops holding (D76); then there is
+      # nothing to commit, there is a scenario to look at.
+      - name: Run the pack over both transports
+        run: bash scripts/run-governance-bench.sh
+      - name: Collect what changed
+        run: bash scripts/collect-changed.sh "$RUNNER_TEMP/out" docs/benchmarks/mcp-governance/results
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: part-governance-bench
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore
+
+  law-firm:
+    if: inputs.only == 'all' || inputs.only == 'law-firm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+      - name: Write the story page
+        run: cargo run -q -p cli-harness -- demo --story law-firm --html blog/public/demo/law-firm.html
+      - name: Collect what changed
+        run: bash scripts/collect-changed.sh "$RUNNER_TEMP/out" blog/public/demo/law-firm.html
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: part-law-firm
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore
+
+  webmcp-lab:
+    if: inputs.only == 'all' || inputs.only == 'webmcp-lab'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: labs/webmcp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Build the kernel binary D2 calls
+        run: cargo build --release -p cli-harness
+        working-directory: .
+      - name: Install the lab and Chromium
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Run the matrix
+        run: npm run matrix
+      - name: Run experiment 1, the exfiltration add-on
+        run: npm run experiment:exfil
+      - name: Collect what changed
+        run: bash scripts/collect-changed.sh "$RUNNER_TEMP/out" labs/webmcp/results
+        working-directory: .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: part-webmcp-lab
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore
+
+  # One artifact, rooted at the repository, so a single `gh run download -n`
+  # lands every file at its own path. Downloading several artifacts at once would
+  # put each in a folder named after it instead. Skipped when a generator failed:
+  # half a regeneration is not something to commit.
+  collect:
+    needs: [wasm, governance-bench, law-firm, webmcp-lab]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # list this run's artifacts
+    steps:
+      # A run where nothing changed uploads no parts, and a download that finds
+      # none may fail; that case is told apart below rather than failing the run.
+      - id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { pattern: part-*, merge-multiple: true, path: out }
+      - name: Summarise
+        env:
+          DOWNLOAD: ${{ steps.download.outcome }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          parts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '[.artifacts[].name | select(startswith("part-"))] | length')
+          if [ "$DOWNLOAD" != success ] && [ "$parts" -gt 0 ]; then
+            echo "::error::$parts part artifact(s) exist but could not be downloaded"
+            exit 1
+          fi
+          mkdir -p out
+          files=$(cd out && find . -type f | sed 's|^\./||' | sort)
+          {
+            if [ -z "$files" ]; then
+              echo "Nothing changed: the committed outputs already match this commit."
+            else
+              echo "Regenerated files that differ from the commit:"
+              echo
+              echo '```'
+              echo "$files"
+              echo '```'
+              echo
+              echo "From a checkout of \`${GITHUB_REF_NAME}\`:"
+              echo
+              echo '```'
+              echo "gh run download ${GITHUB_RUN_ID} -n regenerated-outputs"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: regenerated-outputs
+          path: out
+          if-no-files-found: ignore
