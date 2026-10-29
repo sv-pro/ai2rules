@@ -1,0 +1,118 @@
+{
+  "profile": {
+    "sensitive_systems": [
+      "crm"
+    ],
+    "approvals": [
+      "shop/submit_order"
+    ],
+    "forbidden": [
+      "crm/add_note",
+      "shop/post_review"
+    ],
+    "private_stays_home": {
+      "crm/get_customer": true,
+      "crm/list_customers": true,
+      "shop/add_to_cart": true,
+      "shop/search_products": true,
+      "shop/submit_order": true
+    }
+  },
+  "cedar_enumerated": {
+    "derived": {
+      "sensitive_systems": [
+        "crm"
+      ],
+      "approvals": [
+        "shop/submit_order"
+      ],
+      "forbidden": [
+        "crm/add_note",
+        "shop/post_review"
+      ],
+      "private_stays_home": {
+        "crm/get_customer": true,
+        "crm/list_customers": true,
+        "shop/add_to_cart": true,
+        "shop/search_products": true,
+        "shop/submit_order": true
+      }
+    },
+    "requests": 56
+  },
+  "cedar_symbolic": {
+    "derived": {
+      "sensitive_systems": [
+        "crm"
+      ],
+      "approvals": [
+        "shop/submit_order"
+      ],
+      "forbidden": [
+        "crm/add_note",
+        "shop/post_review"
+      ],
+      "private_stays_home": {
+        "crm/get_customer": true,
+        "crm/list_customers": true,
+        "shop/add_to_cart": true,
+        "shop/search_products": true,
+        "shop/submit_order": true
+      }
+    },
+    "derive_ms": 76,
+    "properties": [
+      {
+        "action": "search_products",
+        "property": "permit (principal, action, resource) when { [resource].containsAll(context.private_from) };",
+        "holds": true,
+        "vacuous": false,
+        "counterexample": null,
+        "ms": 7
+      },
+      {
+        "action": "search_products",
+        "property": "permit (principal, action, resource) when { [resource].containsAll(context.private_from) };",
+        "holds": false,
+        "vacuous": false,
+        "counterexample": "request with principal Northwind::Agent::\"\", action Northwind::Action::\"search_products\", resource Northwind::System::\"shop\", and context {approved: true, private_from: [Northwind::System::\"\"]} | context {\"approved\":true,\"private_from\":[{\"__entity\":{\"type\":\"Northwind::System\",\"id\":\"\"}}]} | entities [{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"submit_order\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"post_review\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"get_customer\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"search_products\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"add_note\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"list_customers\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::System\",\"id\":\"\"},\"attrs\":{\"confidential\":false},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"add_to_cart\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Agent\",\"id\":\"\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::System\",\"id\":\"shop\"},\"attrs\":{\"confidential\":false},\"parents\":[]}]",
+        "ms": 9
+      },
+      {
+        "action": "pay_invoice",
+        "property": "permit (principal, action, resource) when { resource.amount <= 10000 || context.cfo_approved };",
+        "holds": true,
+        "vacuous": false,
+        "counterexample": null,
+        "ms": 9
+      },
+      {
+        "action": "email_vendor",
+        "property": "permit (principal, action, resource) when { [resource].containsAll(context.carries_invoice_of) };",
+        "holds": true,
+        "vacuous": false,
+        "counterexample": null,
+        "ms": 2
+      },
+      {
+        "action": "pay_invoice",
+        "property": "permit (principal, action, resource) when { resource.amount <= 10000 || context.cfo_approved };",
+        "holds": false,
+        "vacuous": false,
+        "counterexample": "request with principal Books::Agent::\"\", action Books::Action::\"pay_invoice\", resource Books::Invoice::\"\", and context {cfo_approved: false} | context {\"cfo_approved\":false} | entities [{\"uid\":{\"type\":\"Books::Action\",\"id\":\"pay_invoice\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Action\",\"id\":\"read_invoice\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Agent\",\"id\":\"\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Action\",\"id\":\"email_vendor\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Vendor\",\"id\":\"\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Invoice\",\"id\":\"\"},\"attrs\":{\"amount\":34465,\"vendor\":{\"__entity\":{\"type\":\"Books::Vendor\",\"id\":\"\"}}},\"parents\":[]}]",
+        "ms": 10
+      }
+    ],
+    "regressions": {
+      "northwind-loosened.cedar vs northwind.cedar": [
+        "request with principal Northwind::Agent::\"\", action Northwind::Action::\"search_products\", resource Northwind::System::\"shop\", and context {approved: true, private_from: [Northwind::System::\"\"]} | context {\"approved\":true,\"private_from\":[{\"__entity\":{\"type\":\"Northwind::System\",\"id\":\"\"}}]} | entities [{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"add_to_cart\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"get_customer\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::System\",\"id\":\"\"},\"attrs\":{\"confidential\":false},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"add_note\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Agent\",\"id\":\"\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"submit_order\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"list_customers\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"search_products\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::Action\",\"id\":\"post_review\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Northwind::System\",\"id\":\"shop\"},\"attrs\":{\"confidential\":false},\"parents\":[]}]"
+      ],
+      "northwind.cedar vs itself": [],
+      "books-loosened.cedar vs books.cedar": [
+        "request with principal Books::Agent::\"\", action Books::Action::\"pay_invoice\", resource Books::Invoice::\"\", and context {cfo_approved: false} | context {\"cfo_approved\":false} | entities [{\"uid\":{\"type\":\"Books::Action\",\"id\":\"read_invoice\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Vendor\",\"id\":\"\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Action\",\"id\":\"pay_invoice\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Invoice\",\"id\":\"\"},\"attrs\":{\"vendor\":{\"__entity\":{\"type\":\"Books::Vendor\",\"id\":\"\"}},\"amount\":34465},\"parents\":[]},{\"uid\":{\"type\":\"Books::Action\",\"id\":\"email_vendor\"},\"attrs\":{},\"parents\":[]},{\"uid\":{\"type\":\"Books::Agent\",\"id\":\"\"},\"attrs\":{},\"parents\":[]}]"
+      ]
+    }
+  },
+  "profile_equals_cedar": true,
+  "enumeration_equals_symbolic": true
+}

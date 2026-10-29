@@ -1,0 +1,19 @@
+// The WebMCP stand's business layer as a Cedar schema (AI2-111 spike).
+//
+// A request is "the agent calls tool X on system S". The context carries what
+// the host knows about the call's arguments: from which confidential systems
+// they carry data (the value labels D3 already tracks) and whether a person
+// approved the call.
+namespace Northwind {
+  entity Agent;
+  entity System = { confidential: Bool };
+
+  type CallContext = {
+    private_from: Set<System>,
+    approved: Bool,
+  };
+
+  action get_customer, list_customers, add_note,
+         search_products, add_to_cart, submit_order, post_review
+    appliesTo { principal: [Agent], resource: [System], context: CallContext };
+}

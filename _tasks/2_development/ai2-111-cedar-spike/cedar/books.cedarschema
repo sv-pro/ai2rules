@@ -1,0 +1,16 @@
+// Accounts payable, the docs/action-layers.md example (AI2-111 spike): an agent
+// that reads invoices, pays them and writes to vendors. Rules the kernel cannot
+// express today: a value threshold routed to a person, and "invoice data goes
+// only to its own vendor".
+namespace Books {
+  entity Agent;
+  entity Vendor;
+  entity Invoice = { vendor: Vendor, amount: Long };
+
+  action read_invoice
+    appliesTo { principal: [Agent], resource: [Invoice], context: {} };
+  action pay_invoice
+    appliesTo { principal: [Agent], resource: [Invoice], context: { cfo_approved: Bool } };
+  action email_vendor
+    appliesTo { principal: [Agent], resource: [Vendor], context: { carries_invoice_of: Set<Vendor> } };
+}

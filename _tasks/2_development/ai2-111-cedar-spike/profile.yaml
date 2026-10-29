@@ -1,0 +1,30 @@
+# Business profile v0 for the WebMCP stand (AI2-111 spike).
+#
+# This is the business layer only: what the team's process says about the
+# entities and effects that pass through the agent. The tool layer (which tools
+# a task needs, their arguments and side-effect class) stays in the task, as in
+# labs/webmcp/src/tasks.js. compile-world.mjs joins the two into one D3 world.
+#
+# The owner answers in fixed classes, never in free text:
+#   confidentiality: public | internal | private | regulated
+#   effect:          read | reversible_write | internal_write | irreversible | money | public
+profile: northwind-sales
+
+systems:
+  crm:
+    holds: [customer_record]
+  shop:
+    external: true
+
+entities:
+  customer_record:
+    confidentiality: private   # may not leave the CRM, by any tool, read or write
+
+actions:
+  crm/get_customer:     { effect: read }
+  crm/list_customers:   { effect: read }
+  crm/add_note:         { effect: internal_write, allowed: false }  # the agent does not write to records
+  shop/search_products: { effect: read }
+  shop/add_to_cart:     { effect: reversible_write }
+  shop/submit_order:    { effect: money, approval: employee }
+  shop/post_review:     { effect: public, allowed: false }          # no publishing in the company's name
