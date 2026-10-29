@@ -1,0 +1,5 @@
+[
+  { "uid": { "type": "Northwind::System", "id": "crm" }, "attrs": { "confidential": true }, "parents": [] },
+  { "uid": { "type": "Northwind::System", "id": "shop" }, "attrs": { "confidential": false }, "parents": [] },
+  { "uid": { "type": "Northwind::Agent", "id": "assistant" }, "attrs": {}, "parents": [] }
+]
