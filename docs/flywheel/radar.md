@@ -1,15 +1,17 @@
 # Radar: the scheduled discovery pass
 
 This file **is** the prompt of the Radar routine (a Claude Code cloud routine, Monday and
-Thursday morning, Asia/Jerusalem; see [Cadence](../FLYWHEEL.md#cadence-the-clock)). The
-routine itself only says "follow `docs/flywheel/radar.md`", so changing the Radar means
-changing this file in a PR.
+Thursday morning, Asia/Jerusalem). The routine itself only says "follow
+`docs/flywheel/radar.md`", so changing the Radar means changing this file in a PR. It is
+kept public on purpose: it shows how a narrowed agent that reads untrusted web content is
+set up and checked (the canary in step 0, D97).
 
-You run on a fresh clone of `sv-pro/ai2rules` with no other context. You have web access
+You run on a fresh clone of `sv-pro/ai2rules` (the product) with no other context. The
+flywheel's own files (process, task files) are private and not in your clone. You have web access
 (WebFetch, WebSearch), read-only file tools (Read, Glob, Grep) and the Linear connector
 (team **AI2**, five tools: list, get and save issues, save comments, list labels). You
 have no shell and cannot write files: the routine does not allow Bash, Write or Edit
-([D97](../../DECISIONS.md)). Your job: find what is new
+(D97 in `DECISIONS.md`). Your job: find what is new
 in AI-agent security since the last run, keep at most **three** findings that matter to
 this project, and put them where the maintainer will triage them: Linear.
 
@@ -46,8 +48,8 @@ Write или Edit, проверь disallowed_tools (D97)`, and end by naming the
 
 ## 1. Know the project (5 minutes, not more)
 
-Skim `README.md` (Status), `docs/THESIS.md` (first screen), `docs/FLYWHEEL.md` and
-`docs/GLOSSARY.md`. You need to know: a deterministic kernel decides ALLOW / ASK / DENY /
+Skim `README.md` (Status), `docs/THESIS.md` (first screen and section 6, the method)
+and `docs/GLOSSARY.md`. You need to know: a deterministic kernel decides ALLOW / ASK / DENY /
 ABSENT for each tool call of a coding agent (Claude Code, Codex, Antigravity, MCP
 clients); taint is monotonic; tool surfaces are projected (absent tools are not
 offered); trust pins, roots (path scope), approvals, flow contracts, a signed audit log.
@@ -56,7 +58,6 @@ offered); trust pins, roots (path scope), approvals, flow contracts, a signed au
 
 So nothing comes back twice:
 
-- file names and first headings in `_tasks/*/*.md` (Glob, then Read);
 - topic names in `docs/RESEARCH-BACKLOG.md` and `docs/research/`;
 - **all** Linear issues in team AI2 with label `radar`, in every state, Canceled
   included (a declined finding must not resurface unless something materially new
@@ -145,7 +146,7 @@ landscape: что изменить в позиционировании или и
 принесёт). Не решено к воскресенью → Pulse напомнит.
 
 ---
-### Discovery file draft (`_tasks/1_discovery/<slug>.md`)
+### Discovery file draft (becomes a task file on the maintainer's private board)
 
 # Discovery: <one-line claim>
 

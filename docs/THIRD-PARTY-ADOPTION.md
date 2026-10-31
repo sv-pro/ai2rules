@@ -81,7 +81,7 @@ provenanced taint, no handler callables in the policy layer). Actions:
 2. **THESIS §8** states the contrast in paper-grade prose (done).
 3. **Flywheel:** ingest AGT's OWASP-Agentic-Top-10 mapping + PromptDefense 12-vector
    + `agt red-team scan` as a *discovery* corpus — each becomes a failing test then a
-   manifest/taint patch (`FLYWHEEL.md` §Discovery).
+   manifest/taint patch (the Discovery phase, [`THESIS.md`](THESIS.md) §6).
 4. **Blog candidate:** "Why a deny-rule isn't a boundary — ontology + taint vs
    policy-middleware," AGT as the foil. Add to `docs/BLOG_PLAN.md`.
 - *Caveat:* AGT ships a package literally named **Agent Hypervisor** — collides by
@@ -218,4 +218,4 @@ integrate), `deer-flow` (LangGraph super-harness — architecture reference),
   (the five-layer thesis), D24 (host-neutral ABI — why we don't adopt a generator).
 - [`THESIS.md`](THESIS.md) §8 (related work), §4 (the five layers), §5 (shared
   primitives).
-- [`FLYWHEEL.md`](FLYWHEEL.md) (Discovery → Development → Advocacy), [`BLOG_PLAN.md`](BLOG_PLAN.md).
+- [`THESIS.md`](THESIS.md) §6 (the flywheel: Discovery → Development → Advocacy), [`BLOG_PLAN.md`](BLOG_PLAN.md).

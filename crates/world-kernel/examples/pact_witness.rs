@@ -7,7 +7,7 @@
 //! cargo run -p world-kernel --example pact_witness --offline
 //! ```
 //!
-//! Discovery artifact for `_tasks/1_discovery/pact-granularity-mismatch.md`
+//! Discovery artifact for the PACT granularity-mismatch finding
 //! (arXiv:2605.11039, "The Granularity Mismatch in Agent Security").
 //!
 //! # What this shows

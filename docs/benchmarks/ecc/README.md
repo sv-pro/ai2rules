@@ -95,9 +95,9 @@ it shaped the probe matrix:
   `.claude/settings.json` and to hookify rule files passed.
 - ai2rules sent every one of those spellings to ASK, or to DENY under taint. Unmatched
   commands go to `default_to` (D62). The same pass also found two gaps in ai2rules:
-  [a network word anywhere turns ASK into silent ALLOW](../../../_tasks/4_done/network-word-downgrades-ask.md)
+  a network word anywhere turned ASK into silent ALLOW
   (this includes `curl … | sh`; fixed by D90, AI2-79), and
-  [the dogfood world did not hold D57](../../../_tasks/4_done/dogfood-world-without-d57.md) (fixed by D91, AI2-80).
+  the dogfood world did not hold D57 (fixed by D91, AI2-80).
   A host-hook pack has to carry both as probes, or it will flatter its own author.
 
 ## Acceptance boundary

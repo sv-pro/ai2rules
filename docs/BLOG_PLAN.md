@@ -84,9 +84,8 @@ Google Discover picks up articles that already have a heartbeat. You must seed t
 *   **Reddit:** Share specific security insights in `r/LocalLLaMA`, `r/MachineLearning`, and `r/rust`.
 *   **X (Twitter):** Thread out the architecture diagram and the core philosophy ("Absence over denial").
 
-Per-post promotion copy (threads + standalone posts + HN/Reddit titles) lives under
-[`blog/social/`](../blog/social/) — one file per post slug. See
-[`blog/social/README.md`](../blog/social/README.md) for the convention.
+Per-post promotion copy (threads, standalone posts, HN/Reddit titles) is drafted
+outside this repository and posted by hand.
 
 ## 6. Catchy Article Ideas (From Research Repos)
 

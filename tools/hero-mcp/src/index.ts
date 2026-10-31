@@ -8,7 +8,6 @@
  * Backend: shells out to the already-authenticated `agy` (Antigravity) CLI —
  * `agy -p "<task>"` generates the image with the user's own Google auth, so this
  * server needs NO API key of its own. Pure helpers live in ./lib.ts (tested).
- * See _tasks/2_development/hero-mcp-server.md.
  */
 import { readFileSync, mkdirSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
