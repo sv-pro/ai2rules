@@ -79,7 +79,7 @@ resources:
   - id: feeds
     kind: feed
     provider: hacker-news-api, arxiv-cs.CR, rss
-    locator: Radar cloud routine (Mon + Thu); cadence and prompt kept in the maintainer's private repo (sv-pro/hq, flywheel/)
+    locator: Radar cloud routine (Mon + Thu), prompt docs/flywheel/radar.md
     access: [{ via: web }]
 
 # ---------------------------------------------------------------- §2 knowledge

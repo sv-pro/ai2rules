@@ -146,7 +146,7 @@ landscape: что изменить в позиционировании или и
 принесёт). Не решено к воскресенью → Pulse напомнит.
 
 ---
-### Discovery file draft (for `tasks/1_discovery/<slug>.md` in the private hq repo)
+### Discovery file draft (becomes a task file on the maintainer's private board)
 
 # Discovery: <one-line claim>
 
