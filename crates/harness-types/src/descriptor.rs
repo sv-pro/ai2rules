@@ -14,8 +14,7 @@ use crate::ids::ActionName;
 /// separates arguments which *bind authority* (a destination, an executed
 /// command, a secret) from arguments that primarily *carry content*. It is the
 /// design-time input the L2 taint check needs to be precise instead of blocking
-/// on ambient taint (the granularity mismatch — see
-/// `_tasks/1_discovery/pact-granularity-mismatch.md`).
+/// on ambient taint (the granularity mismatch, arXiv:2605.11039).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ArgRole {
     /// Authority-bearing destination: recipient, URL, endpoint.

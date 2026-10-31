@@ -6,7 +6,7 @@ description: >-
   deliverable is finished — a branch/PR, a doc, or blog content — to check code
   for correctness, regressions, and repo conventions, and content for technical
   accuracy (does it match the real kernel/CLI/manifest?) plus Discover/SEO
-  hygiene. Implements the Flywheel "Correcting Reviewer" role (docs/FLYWHEEL.md §3).
+  hygiene. Implements the Flywheel "Correcting Reviewer" role.
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: inherit
 ---

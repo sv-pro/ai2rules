@@ -3,8 +3,7 @@
 A focused, governable MCP capability: **generate one house-style blog hero image.** The
 caller supplies only the *scene* (`concept` + `name`); the blog's asset dir, palette,
 1376×768 dimensions, JPG output, and the no-body-text rule are baked in from
-[`hero-profile.json`](hero-profile.json). Spec:
-[`_tasks/2_development/hero-mcp-server.md`](../../_tasks/2_development/hero-mcp-server.md).
+[`hero-profile.json`](hero-profile.json).
 
 Backed by the already-authenticated **`agy` (Antigravity) CLI** — the server shells out to
 `agy -p "<task>"`, which renders the image with *your* Google auth. **No API key, no Vertex,

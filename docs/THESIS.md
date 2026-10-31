@@ -166,7 +166,7 @@ capabilities, knowledge, and intent.** That's what makes five fragments one proj
 
 ## 6. The Flywheel (the method)
 
-The project is produced by a self-feeding loop (`docs/FLYWHEEL.md`):
+The project is produced by a self-feeding loop:
 
 - **Discovery (radar)** — an agent (dogfooding the harness) scans arXiv `cs.CR`,
   HN, and security RSS for new injection / sandbox / capability attacks.
@@ -243,7 +243,7 @@ second consumer exists (`DECISIONS.md` D28).
 trial/proof/reject program), [`GLOSSARY.md`](GLOSSARY.md) (normalized vocabulary),
 [`harness-architecture.md`](harness-architecture.md) (action layer, canonical),
 [`papers/hipporag2-vs-context-engine.md`](papers/hipporag2-vs-context-engine.md)
-(knowledge layer), [`FLYWHEEL.md`](FLYWHEEL.md) (method),
+(knowledge layer), §6 above (method),
 [`THIRD-PARTY-ADOPTION.md`](THIRD-PARTY-ADOPTION.md) (what to do with `repos/3p`),
 `repos/*/` (the fragments).
 Cross-layer proof: `agent-core/examples/poisoned_knowledge_demo`.*

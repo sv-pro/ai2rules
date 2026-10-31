@@ -74,12 +74,12 @@ resources:
   - id: social
     kind: channel
     provider: hacker-news, reddit, x
-    locator: copy in blog/social/<slug>.md
+    locator: copy kept in the maintainer's private repo (sv-pro/hq, outbound/social/<slug>.md)
     access: [{ via: web, actor: human }]
   - id: feeds
     kind: feed
     provider: hacker-news-api, arxiv-cs.CR, rss
-    locator: docs/FLYWHEEL.md Cadence; prompt docs/flywheel/radar.md (cloud routine, Mon + Thu)
+    locator: Radar cloud routine (Mon + Thu); cadence and prompt kept in the maintainer's private repo (sv-pro/hq, flywheel/)
     access: [{ via: web }]
 
 # ---------------------------------------------------------------- §2 knowledge
@@ -88,15 +88,12 @@ knowledge:
   - { ref: PLAN.md, role: epic-level execution plan, authority: normative, truth_for: [scope, epics, acceptance invariants] }
   - { ref: DECISIONS.md, role: decision log D1–D80 (append-only); consult before choosing alternatives, authority: normative, truth_for: [architecture decisions] }
   - { ref: docs/GLOSSARY.md, role: vocabulary; use these terms, authority: normative }
-  - { ref: docs/FLYWHEEL.md, role: the process (flows and roles) in prose, authority: normative }
   - { ref: docs/BLOG_PLAN.md, role: blog plan and seeding, authority: normative }
   - { ref: docs/harness-architecture.md, role: canonical runtime design, authority: descriptive }
   - { ref: docs/THESIS.md, role: positioning (five layers), authority: descriptive }
   - { ref: README.md, role: "public overview, status, test counts", authority: descriptive }
   - { ref: CHANGELOG.md, role: release notes; Unreleased section is the next release, authority: descriptive, lifetime: release }
   - { ref: blog/DEPLOY.md, role: "deploy runbook (Cloudflare, Namecheap, Search Console)", authority: descriptive }
-  - { ref: HANDOFF.md, role: note from the last session, authority: ephemeral, lifetime: session }
-  - { ref: _tasks, role: one file per flywheel item, authority: ephemeral, lifetime: item }
 
 # ------------------------------------------------------- §5 procedures & checks
 procedures:
@@ -151,7 +148,7 @@ procedures:
     kind: recipe
     summary: Audit a handed-off artifact and fix defects in place (technical accuracy, SEO), then note what changed
     entry: { claude-code: /review-blog }
-    defined_in: "docs/FLYWHEEL.md §3, .claude/agents/correcting-reviewer.md (the role), .claude/commands/review-blog.md (the steps)"
+    defined_in: ".claude/agents/correcting-reviewer.md (the role), .claude/commands/review-blog.md (the steps)"
   - id: readme-sync
     kind: obligation
     summary: Update README status, layout, build and test counts, and PLAN checkboxes in the same commit
@@ -188,7 +185,7 @@ procedures:
 
 # ------------------------------------------------------------ §3 carriers
 carriers:
-  - { id: tasks-folder, kind: folder, locator: "_tasks/<phase>/<slug>.md", key: slug }
+  - { id: tasks-folder, kind: folder, locator: "sv-pro/hq (private): tasks/<phase>/<slug>.md", key: slug }
   - { id: linear-status, kind: status, locator: Linear issue status, resource: linear, key: linear }
   - { id: gh-issue, kind: issue-state, locator: GitHub issue state, resource: gh-issues, key: github }
   - { id: gh-pr, kind: pr-state, locator: GitHub PR state, resource: gh-issues, key: branch }
@@ -208,24 +205,24 @@ flows:
   - id: flywheel
     summary: A threat found in the wild becomes a defense, then a post, then feedback
     items: [finding]
-    defined_in: docs/FLYWHEEL.md
+    defined_in: sv-pro/hq (private), flywheel/FLYWHEEL.md
     carriers:
       primary: tasks-folder
       # A GitHub issue only when the finding is public-facing (AGENTS.md, 2026-10-22).
       mirrors: [{ carrier: linear-status, sync: manual }, { carrier: gh-issue, sync: manual }]
-    # A Radar finding starts in Linear (triage) and gets its _tasks file only when accepted,
-    # so declined findings never touch the repo (docs/FLYWHEEL.md, Cadence). Findings filed
-    # by hand still start at discovery, as a file.
+    # A Radar finding starts in Linear (triage) and gets its task file (in the private hq
+    # repo) only when accepted, so declined findings are never written down. Findings filed
+    # by hand still start at discovery, as a file. Open findings stay private until fixed.
     states:
       - { id: triage, values: { linear-status: "Backlog, label radar" } }
       - { id: declined, terminal: true, values: { linear-status: Canceled } }
-      - { id: discovery, values: { tasks-folder: _tasks/1_discovery } }
-      - { id: development, values: { tasks-folder: _tasks/2_development } }
-      - { id: advocacy, values: { tasks-folder: _tasks/3_advocacy } }
-      - { id: done, terminal: true, values: { tasks-folder: _tasks/4_done } }
+      - { id: discovery, values: { tasks-folder: hq tasks/1_discovery } }
+      - { id: development, values: { tasks-folder: hq tasks/2_development } }
+      - { id: advocacy, values: { tasks-folder: hq tasks/3_advocacy } }
+      - { id: done, terminal: true, values: { tasks-folder: hq tasks/4_done } }
     transitions:
-      - { from: triage, to: discovery, by: maintainer, effects: [Linear issue to Todo, commit its discovery-file draft to _tasks/1_discovery] }
-      - { from: triage, to: development, by: maintainer, effects: [Linear issue to Todo, commit its discovery-file draft to _tasks/2_development] }
+      - { from: triage, to: discovery, by: maintainer, effects: [Linear issue to Todo, commit its discovery-file draft to hq tasks/1_discovery] }
+      - { from: triage, to: development, by: maintainer, effects: [Linear issue to Todo, commit its discovery-file draft to hq tasks/2_development] }
       - { from: triage, to: declined, by: maintainer, effects: [Linear issue to Canceled] }
       - { from: discovery, to: development, by: maintainer, effects: [triage, mv the file] }
       - { from: development, to: advocacy, by: engine, checks: [rust-checks], effects: [append a technical summary to the item, mv the file] }
@@ -280,7 +277,7 @@ flows:
   - id: post
     summary: A blog post goes from draft to deployed and seeded
     items: [post]
-    defined_in: docs/BLOG_PLAN.md, blog/DEPLOY.md, blog/social/README.md
+    defined_in: docs/BLOG_PLAN.md, blog/DEPLOY.md
     carriers:
       primary: post-file
     states:
@@ -288,12 +285,12 @@ flows:
       - { id: illustrated, summary: "hero image in blog/src/assets, 1376×768 JPG" }
       - { id: reviewed }
       - { id: published, summary: "draft: false, on the production branch", values: { post-file: "false" } }
-      - { id: seeded, terminal: true, summary: copy in blog/social/<slug>.md posted }
+      - { id: seeded, terminal: true, summary: "copy (kept in hq outbound/social) posted" }
     transitions:
       - { from: draft, to: illustrated, by: illustrator, effects: [hero in house style] }
       - { from: illustrated, to: reviewed, by: critic, checks: [correcting-review, blog-checks] }
       - { from: reviewed, to: published, by: maintainer, effects: [merge to the production branch; Cloudflare deploys] }
-      - { from: published, to: seeded, by: maintainer, effects: [post HN / Reddit / X from blog/social/<slug>.md] }
+      - { from: published, to: seeded, by: maintainer, effects: [post HN / Reddit / X from the copy in hq outbound/social] }
 
 # --------------------------------------------------------------- §4 roles
 roles:
@@ -302,26 +299,26 @@ roles:
     summary: Triage, approvals, merges, tags, dashboards, social seeding
     inbox: [flywheel.discovery, change.in-review, release.bump-pr, post.reviewed]
   - id: radar
-    summary: Find new threats and write one discovery file per finding
-    writes: [_tasks/1_discovery/**, scripts/**]
+    summary: Find new threats; each finding goes to Linear triage (task files live in the private hq repo)
+    writes: [scripts/**]
     uses: [feeds]
     agents: [codex, claude-code]
-    defined_in: docs/FLYWHEEL.md
+    defined_in: sv-pro/hq (private), flywheel/FLYWHEEL.md
   - id: engine
     summary: Write the failing test, implement the defense, keep the suite green
     inbox: [flywheel.development, change.open, release.unreleased]
-    writes: [crates/**, tests/**, _tasks/2_development/**]
+    writes: [crates/**, tests/**]
     uses: [code, gh-issues, linear, ci]
     agents: [claude-code, codex, grok-bot]
   - id: megaphone
     summary: Turn a shipped defense into a demo (.tape) and a post
     inbox: [flywheel.advocacy, post.draft]
-    writes: [docs/**, blog/**, _tasks/3_advocacy/**]
+    writes: [docs/**, blog/**]
     uses: [code]
-    # Rebound 2026-10-02 (maintainer): Antigravity is rarely used. docs/FLYWHEEL.md updated in PR #96.
+    # Rebound 2026-10-02 (maintainer): Antigravity is rarely used (PR #96).
     agents: [claude-code, codex, antigravity]
   - id: illustrator
-    summary: Generate hero images in the house style (see _tasks/3_advocacy/hero-illustrations.md)
+    summary: Generate hero images in the house style
     writes: [blog/src/assets/**]
     requires: [image-generation]
     agents: [antigravity]
@@ -354,14 +351,8 @@ identity:
 continuity:
   records:
     - level: session
-      location: HANDOFF.md on the working branch
-      path: HANDOFF.md
+      location: commits and the PR description on the working branch
       cadence: after every meaningful step, not only at the end of a session
-      reachable_by: [local]
-    - level: item
-      location: the item's _tasks file (appended summary)
-      path: "_tasks/*/{slug}.md"
-      cadence: on each flywheel transition
       reachable_by: [local, cloud]
     - level: item
       location: PR description and comments
